@@ -20,8 +20,8 @@ subtracted and a hard privacy boundary added around the rest.**
 2. **No outbound network by default.** Only the model layer *may* touch the network, and only when
    the user explicitly configures a remote provider. Local (e.g. Ollama) is the default path.
 3. **Never echo the password.** `--password`/`-p` reads from stdin with no echo; never logged/stored.
-4. **Sessions encrypted at rest.** AES-256-GCM bulk cipher, sealed by post-quantum KEM. Plaintext
-   never sits on disk.
+4. **Sessions encrypted at rest.** AES-256-GCM bulk cipher, keyed via scrypt over the password.
+   Plaintext never sits on disk. (No post-quantum KEM — see §2 below for why one doesn't apply here.)
 5. **Default-deny permissions.** No capability touches fs/network without explicit opt-in.
 6. **Everything local.** No cloud sessions, no remote control, no background agents.
 
@@ -37,9 +37,16 @@ build it.
   embed **no models** and make **no outbound calls by default**.
 - **Mascot:** Noah, African Grey. Personality is **data** (persona file), never behavior injection.
   Persona files must never be allowed to instruct the agent to skip permissions/encryption/network.
-- **PQC encryption:** hybrid AES-256-GCM + ML-KEM-768 (Kyber), optional ML-DSA-67 (Dilithium). Use
-  a **vetted library** (`pqcrypto`/liboqs bindings), never hand-rolled crypto. The exact KEM/DSA
-  variant is a runtime strategy choice, not hardcoded.
+- **Session encryption:** AES-256-GCM keyed via scrypt (RFC 7914 interactive parameters, random
+  salt per encryption) over the password. Use a **vetted library** (`cryptography`), never
+  hand-rolled crypto. **Decided against a PQ-KEM seal** (originally ML-KEM-768/Kyber): a KEM
+  protects a shared secret exchanged over a public key between two parties, which defends against
+  a future quantum computer breaking today's RSA/ECC key exchange. A password-protected local
+  session file has no such exchange — one user, one password, no counterparty — so AES-256 (already
+  quantum-resistant here; Grover only halves its effective strength) is the right tool, and a KEM
+  derived from the same password wouldn't raise the cost of a password-guessing attack. Don't
+  resurrect this without a real asymmetric use case (e.g. encrypting to a device's public key for
+  multi-device sync) to justify it.
 - **Tone:** friendly + playful, **not** saccharine. Light puns, no excessive sparkle.
 
 ## 3. Docs & where things live
@@ -81,6 +88,6 @@ build it.
 
 ## 7. Unresolved questions (to resolve before/while scaffolding)
 
-- Exact KEM/DSA variant at runtime (default ML-KEM-768; DILITHIUM seal optional).
+- ~~Exact KEM/DSA variant at runtime~~ — resolved: no PQ-KEM seal (see §2, "Session encryption").
 - UI: `rich`-based TUI for interactive; subprocess-style CLI for `-p`. (Chosen; revisit if needed.)
 - Whether to add a `py.typed` marker and package `pyproject.toml` for distribution.

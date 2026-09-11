@@ -8,8 +8,9 @@ Three modes:
   encrypted session on disk.
 
 The CLI wires the thin core together: config -> plugin discovery -> tool
-registry -> model provider -> policy -> orchestrator (optionally with PQ-gated
-session crypto). It renders results and reads input; the core drives the loop.
+registry -> model provider -> policy -> orchestrator (optionally with
+encrypted session storage). It renders results and reads input; the core
+drives the loop.
 
 Privacy by construction: no telemetry, no outbound network by default, sessions
 encrypted at rest, and a hard default-deny permission boundary.
@@ -30,7 +31,7 @@ from .typing import spi as cobirb_typing
 # Core plugins are always available; third-party plugins are discovered lazily
 # and fail-closed. Core plugins are imported directly (never via entry points).
 from .plugins.core import (  # noqa: E402
-    HybridPQCSessionCrypto,
+    AesGcmScryptSessionCrypto,
     LocalModelProvider,
     TerminalIO,
     ToolRegistry,
@@ -164,7 +165,7 @@ def _build_orchestrator(
 ) -> tuple[Orchestrator, ToolRegistry, cobirb_typing.ModelProvider]:
     """Wire the core: registry -> provider -> policy -> orchestrator.
 
-    Session crypto (AES-256-GCM + PQ seal) is only instantiated when a session
+    Session crypto (AES-256-GCM + scrypt) is only instantiated when a session
     path is supplied; otherwise the core runs with no crypto (nothing persisted).
     """
     registry = ToolRegistry(cwd)
@@ -176,7 +177,7 @@ def _build_orchestrator(
 
     crypto = None
     if session_path is not None:
-        crypto = HybridPQCSessionCrypto()
+        crypto = AesGcmScryptSessionCrypto()
         if os.path.isfile(session_path):
             manager = SessionManager.load(session_path, crypto, password, cwd, persona.name)
         else:

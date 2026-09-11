@@ -5,7 +5,7 @@ without touching this module. See PLUGIN_SPEC.md §5.2.
 """
 from __future__ import annotations
 
-from .crypto import HybridPQCSessionCrypto
+from .crypto import AesGcmScryptSessionCrypto
 from .io import TerminalIO
 from .model import LocalModelProvider
 from .persona import build_default_persona, persona_to_json
@@ -15,7 +15,7 @@ __all__ = [
     "ToolRegistry",
     "LocalModelProvider",
     "TerminalIO",
-    "HybridPQCSessionCrypto",
+    "AesGcmScryptSessionCrypto",
     "build_default_persona",
     "persona_to_json",
 ]

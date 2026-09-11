@@ -11,8 +11,9 @@ opt a capability in.**
 
 - 🔒 No telemetry. No analytics. No pings.
 - 🔒 No outbound network by default. Models are yours to configure.
-- 🔒 Sessions are encrypted at rest (AES-256-GCM, keyed via scrypt). A
-  post-quantum KEM seal is a design goal, not yet implemented.
+- 🔒 Sessions are encrypted at rest (AES-256-GCM, keyed via scrypt — already
+  quantum-resistant for a password-protected local file; see `crypto.py` for
+  why a KEM seal wouldn't add anything here).
 - 🦜 Friendly parrot persona — playful, never saccharine.
 
 ## Status

@@ -15,20 +15,20 @@ def test_interfaces_cover_all_spi_contracts():
 
 
 def test_is_subclass_true_for_concrete():
-    from cobirb.plugins.core.crypto import HybridPQCSessionCrypto
+    from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 
-    assert _is_subclass(HybridPQCSessionCrypto, object)
+    assert _is_subclass(AesGcmScryptSessionCrypto, object)
 
 
 def test_is_subclass_false_for_identical_class():
-    from cobirb.plugins.core.crypto import HybridPQCSessionCrypto
+    from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 
-    assert not _is_subclass(HybridPQCSessionCrypto, HybridPQCSessionCrypto)
+    assert not _is_subclass(AesGcmScryptSessionCrypto, AesGcmScryptSessionCrypto)
 
 
 def test_is_subclass_false_for_instances():
-    from cobirb.plugins.core.crypto import HybridPQCSessionCrypto
-    assert not _is_subclass(HybridPQCSessionCrypto(), object)
+    from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
+    assert not _is_subclass(AesGcmScryptSessionCrypto(), object)
 
 
 def test_load_plugins_returns_tuple(monkeypatch, tmp_path):

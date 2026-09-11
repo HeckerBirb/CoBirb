@@ -5,14 +5,14 @@ import json
 
 import pytest
 
-from cobirb.plugins.core.crypto import HybridPQCSessionCrypto
+from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 from cobirb.session import SessionManager, Turn
 
 
 @pytest.fixture
 def manager(tmp_path):
     path = str(tmp_path / "session.json")
-    return SessionManager.create(path, HybridPQCSessionCrypto(), persona="noah", password="pw")
+    return SessionManager.create(path, AesGcmScryptSessionCrypto(), persona="noah", password="pw")
 
 
 def test_create_adds_opening_turn(manager):
@@ -37,7 +37,7 @@ def test_save_load_round_trip(manager):
     manager.session.add_text("assistant", "world")
     blob = manager.save("pw")
 
-    manager2 = SessionManager.load(manager.path, HybridPQCSessionCrypto(), "pw")
+    manager2 = SessionManager.load(manager.path, AesGcmScryptSessionCrypto(), "pw")
     assert [t.content for t in manager2.session.turns] == ["hello", "world"]
     # The hash is preserved for tamper detection.
     assert manager2.session.turns[0].hash == manager.session.turns[0].hash
@@ -45,16 +45,16 @@ def test_save_load_round_trip(manager):
 
 def test_wrong_password_rejected(tmp_path):
     path = str(tmp_path / "session.json")
-    m = SessionManager.create(path, HybridPQCSessionCrypto(), password="correct")
+    m = SessionManager.create(path, AesGcmScryptSessionCrypto(), password="correct")
     m.session.add_text("user", "hello")
     m.save("correct")
     with pytest.raises(Exception):
-        SessionManager.load(path, HybridPQCSessionCrypto(), "wrong")
+        SessionManager.load(path, AesGcmScryptSessionCrypto(), "wrong")
 
 
 def test_tamper_detected_on_load(tmp_path):
     path = str(tmp_path / "session.json")
-    crypto = HybridPQCSessionCrypto()
+    crypto = AesGcmScryptSessionCrypto()
     m = SessionManager.create(path, crypto, password="pw")
     turn = Turn(role="user", content="hello")
     m.session.add(turn)
@@ -74,7 +74,7 @@ def test_tamper_detected_on_load(tmp_path):
 
 def test_save_returns_none_when_no_session(tmp_path):
     path = str(tmp_path / "session.json")
-    m = SessionManager(path, HybridPQCSessionCrypto(), password="pw")
+    m = SessionManager(path, AesGcmScryptSessionCrypto(), password="pw")
     assert m.session is None
     assert m.save("pw") is None
 

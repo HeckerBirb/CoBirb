@@ -14,10 +14,18 @@ The scheme:
 The password is used exactly once to derive the session key; it is never stored.
 The salt and nonce are not secret and travel with the ciphertext.
 
-Note: this is a vetted, standard implementation — not the post-quantum hybrid
-seal (ML-KEM-768) described in the original design notes. That remains a
-swappable plugin behind the same ``SessionCrypto`` interface once a vetted
-PQC library is chosen; we never hand-roll crypto in the meantime.
+Note on post-quantum crypto: earlier design notes called for wrapping the key
+in an ML-KEM-768 (Kyber) seal. That's a key *encapsulation* mechanism for two
+parties exchanging a shared secret over a public key — it defends against a
+future quantum computer breaking today's RSA/ECC key exchange ("harvest now,
+decrypt later"). A session file has no such exchange: it's one user
+encrypting to themselves with a password, no counterparty, no public key.
+AES-256 is already considered quantum-resistant for that case (Grover's
+algorithm only halves its effective strength, leaving 128 bits), and a
+KEM derived from the same password wouldn't raise the cost of a password-
+guessing attack — it would just add ceremony around the same weak point.
+So there's no KEM here; this is a vetted, standard AES-256-GCM + scrypt
+implementation, deliberately not the PQ seal the original design imagined.
 """
 from __future__ import annotations
 
@@ -40,7 +48,7 @@ _SCRYPT_R = 8
 _SCRYPT_P = 1
 
 
-class HybridPQCSessionCrypto(SessionCrypto):
+class AesGcmScryptSessionCrypto(SessionCrypto):
     """Default session crypto. AES-256-GCM bulk cipher over a scrypt-derived key.
 
     The crypto library is imported lazily so the core has no hard dependency on

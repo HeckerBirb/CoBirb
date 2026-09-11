@@ -1,17 +1,17 @@
-"""Tests for the core AES-256-GCM + HKDF-SHA-256 session crypto backend."""
+"""Tests for the core AES-256-GCM + scrypt session crypto backend."""
 from __future__ import annotations
 
 import pytest
 
 from cobirb.plugins.core import crypto as crypto_module
-from cobirb.plugins.core.crypto import HybridPQCSessionCrypto
+from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 
 
 # --------------------------------------------------------------------------- #
 # Encryption round-trip (genuine AES-256-GCM via the cryptography library)
 # --------------------------------------------------------------------------- #
 def test_encrypt_decrypt_round_trip():
-    crypto = HybridPQCSessionCrypto()
+    crypto = AesGcmScryptSessionCrypto()
     plaintext = '{"role": "user", "content": "hello"}'
     blob = crypto.encrypt(plaintext, "s3cret")
     assert isinstance(blob, bytes)
@@ -22,7 +22,7 @@ def test_encrypt_decrypt_round_trip():
 
 
 def test_wrong_password_rejected():
-    crypto = HybridPQCSessionCrypto()
+    crypto = AesGcmScryptSessionCrypto()
     blob = crypto.encrypt('{"content": "data"}', "correct")
     # A wrong password must fail GCM authentication (not silently corrupt).
     with pytest.raises(Exception):
@@ -30,7 +30,7 @@ def test_wrong_password_rejected():
 
 
 def test_different_blob_per_encrypt_random_nonce():
-    crypto = HybridPQCSessionCrypto()
+    crypto = AesGcmScryptSessionCrypto()
     plaintext = '{"content": "same"}'
     blob1 = crypto.encrypt(plaintext, "pw")
     blob2 = crypto.encrypt(plaintext, "pw")
@@ -39,14 +39,14 @@ def test_different_blob_per_encrypt_random_nonce():
 
 
 def test_name_is_aes256gcm_scrypt():
-    crypto = HybridPQCSessionCrypto()
+    crypto = AesGcmScryptSessionCrypto()
     assert crypto.name() == "aes256gcm-scrypt"
 
 
 def test_same_password_derives_different_keys_per_encryption():
     """Each encryption must use a fresh random salt, so brute-forcing one
     session's password doesn't help against another with the same password."""
-    crypto = HybridPQCSessionCrypto()
+    crypto = AesGcmScryptSessionCrypto()
     blob1 = crypto.encrypt('{"content": "same"}', "shared-password")
     blob2 = crypto.encrypt('{"content": "same"}', "shared-password")
     salt1 = crypto_module.base64.b64decode(blob1)[:16]
@@ -63,7 +63,7 @@ def test_uses_cryptography_library():
 # Backend-unavailable path (core must not hard-depend on cryptography)
 # --------------------------------------------------------------------------- #
 def test_backend_unavailable_raises_runtime_error(monkeypatch):
-    crypto = HybridPQCSessionCrypto()
+    crypto = AesGcmScryptSessionCrypto()
     # Simulate the cryptography library being unavailable.
     crypto._backend = None
     with pytest.raises(RuntimeError):

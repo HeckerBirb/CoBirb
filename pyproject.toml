@@ -21,7 +21,7 @@ classifiers = [
 
 # Runtime dependencies are intentionally minimal so the core stays thin and local-only.
 # `cryptography` backs the default (core) SessionCrypto plugin; it is vetted, not
-# hand-rolled crypto, and is required because HybridPQCSessionCrypto ships as a
+# hand-rolled crypto, and is required because AesGcmScryptSessionCrypto ships as a
 # built-in core plugin rather than an opt-in extra.
 dependencies = [
     "rich>=13.7",
@@ -47,7 +47,7 @@ cobirb = "cobirb.cli:main"
 core-tools = "cobirb.plugins.core.tools:ToolRegistry"
 core-model = "cobirb.plugins.core.model:LocalModelProvider"
 core-io = "cobirb.plugins.core.io:TerminalIO"
-core-crypto = "cobirb.plugins.core.crypto:HybridPQCSessionCrypto"
+core-crypto = "cobirb.plugins.core.crypto:AesGcmScryptSessionCrypto"
 
 [tool.setuptools.packages.find]
 where = ["src"]
