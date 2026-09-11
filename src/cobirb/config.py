@@ -1,0 +1,63 @@
+"""User + repo scoped config, with model/provider settings opt-in.
+
+Config is read-only for the core. Model/provider settings are opt-in and never
+default to any networked provider. See DESIGN.md §9.
+"""
+from __future__ import annotations
+
+import json
+import os
+from typing import Any
+
+
+def _load(path: str | None) -> dict[str, Any]:
+    if not path or not os.path.isfile(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+class Config:
+    """A simple, layered configuration reader."""
+
+    def __init__(self, user_path: str | None = None, repo_path: str | None = None) -> None:
+        home = os.environ.get("COBIRB_HOME", os.path.expanduser("~"))
+        self.user_path = user_path or os.path.join(home, ".cobirb", "config.json")
+        self.repo_path = repo_path or os.path.join(".", "cobirb.json")
+        user = _load(self.user_path)
+        repo = _load(self.repo_path)
+        # Repo config overrides user config.
+        self._data = _merge(user, repo)
+
+    @property
+    def data(self) -> dict[str, Any]:
+        return self._data
+
+    def get(self, *keys: str, default: Any = None) -> Any:
+        """Return a nested value, e.g. ``config.get("models", "default", "name")``."""
+        value: Any = self._data
+        for key in keys:
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            else:
+                return default
+        return value
+
+    def set(self, *keys: str, value: Any = None) -> None:
+        """Set a nested value, creating intermediate dicts as needed."""
+        node: Any = self._data
+        for key in keys[:-1]:
+            if not isinstance(node, dict) or key not in node or not isinstance(node[key], dict):
+                node[key] = {}
+            node = node[key]
+        node[keys[-1]] = value

@@ -1,0 +1,100 @@
+"""Plugin discovery and loading.
+
+Discovers plugins from (in order): installed entry points, then local plugin
+directories. Loading is lazy, cached per run, and **fail-closed**: a broken plugin
+never bricks the core — the error is reported and the core continues.
+
+See PLUGIN_SPEC.md §2.
+"""
+from __future__ import annotations
+
+import importlib
+import importlib.metadata as im
+import os
+from typing import Any
+
+from ..typing import spi as cobirb_typing
+
+
+# Maps an SPI interface name to the base class it implements.
+_INTERFACES = {
+    "model": cobirb_typing.ModelProvider,
+    "tool": cobirb_typing.Tool,
+    "io": cobirb_typing.I_OAdapter,
+    "crypto": cobirb_typing.SessionCrypto,
+}
+
+
+class PluginError(Exception):
+    """Raised when a plugin fails to load."""
+
+
+def _is_subclass(obj: Any, base: type) -> bool:
+    return isinstance(obj, type) and issubclass(obj, base) and obj is not base
+
+
+def load_plugins(entry_points: im.EntryPoints | None = None) -> tuple[dict[str, Any], dict[str, str]]:
+    """Discover and load all available plugins.
+
+    Returns ``(discovered, errors)`` where ``discovered`` maps ``"kind:name"``
+    to a plugin class and ``errors`` maps a plugin identifier to its failure
+    message. Never raises for a single failing plugin.
+    """
+    discovered: dict[str, Any] = {}
+    errors: dict[str, str] = {}
+
+    for ep in im.entry_points(group="cobirb.plugins"):
+        try:
+            obj = ep.load()
+            for kind, base in _INTERFACES.items():
+                if _is_subclass(obj, base):
+                    discovered[f"{kind}:{ep.name}"] = obj
+                    break
+        except Exception as exc:  # noqa: BLE001 - fail-closed per plugin
+            errors[f"entry-point:{ep.name}"] = str(exc)
+
+    # Local plugin directories (project + user), if present.
+    for search_dir in _plugin_dirs():
+        if not os.path.isdir(search_dir):
+            continue
+        for name in os.listdir(search_dir):
+            path = os.path.join(search_dir, name)
+            if not os.path.isdir(path):
+                continue
+            try:
+                for kind, base in _INTERFACES.items():
+                    obj = _load_local_plugin(path, kind)
+                    if obj is not None:
+                        discovered[f"{kind}:{name}"] = obj
+                        break
+            except Exception as exc:  # noqa: BLE001 - fail-closed per plugin
+                errors[f"{kind}:{name}"] = str(exc)
+
+    return discovered, errors
+
+
+def _plugin_dirs() -> list[str]:
+    """Directories where local plugins may live."""
+    project = os.environ.get("COBIRB_PROJECT_DIR", ".")
+    user = os.environ.get("COBIRB_HOME", os.path.expanduser("~"))
+    return [
+        os.path.join(project, "cobirb", "plugins"),
+        os.path.join(user, ".cobirb", "plugins"),
+    ]
+
+
+def _load_local_plugin(path: str, kind: str) -> Any | None:
+    """Load a single local plugin, resolving the entry point declared in its
+    pyproject.toml. Returns None if the plugin does not implement ``kind``."""
+    mod_name = f"cobirb_plugins_{os.path.basename(path).replace('-', '_')}"
+    if not os.path.exists(os.path.join(path, "pyproject.toml")):
+        return None
+    dist = importlib.metadata.distribution(mod_name)
+    for ep in dist.entry_points:
+        if ep.name != kind:
+            continue
+        try:
+            return ep.load()
+        except Exception as exc:  # noqa: BLE001
+            raise PluginError(f"failed loading plugin {os.path.basename(path)}: {exc}") from exc
+    return None
