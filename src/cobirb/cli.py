@@ -80,14 +80,21 @@ def _parse_allow_tools(spec: str) -> dict[str, str]:
     return allowed
 
 
+_PERSONAS_DIR = os.path.join(os.path.dirname(__file__), "personas")
+
+
 def _load_persona(persona_name: str | None) -> cobirb_typing.Persona:
-    """Return the persona for ``persona_name`` (or the default Noah)."""
-    if persona_name is None:
+    """Return the persona for ``persona_name`` (or the default Noah).
+
+    Resolution order: the bundled personas shipped with CoBirb (see
+    ``cobirb/personas/``), then a project-local ``<name>.json``, then a
+    ``<name>.json`` under the user's CoBirb home. See todo-list.md for the
+    persona shortlist this ships.
+    """
+    if persona_name is None or persona_name == "noah":
         return build_default_persona()
-    if persona_name == "noah":
-        return build_default_persona()
-    # A user-supplied persona file lives in the session/home folder.
     candidates = [
+        os.path.join(_PERSONAS_DIR, f"{persona_name}.json"),
         os.path.join(os.getcwd(), f"{persona_name}.json"),
         os.path.join(os.environ.get("COBIRB_HOME", os.path.expanduser("~")), "cobirb", f"{persona_name}.json"),
     ]
@@ -191,20 +198,20 @@ def _run_one_shot(
     cwd: str,
     model_name: str | None = None,
 ) -> int:
-    _render(f"Noah: {prompt}\n")
+    _render(f"You: {prompt}\n")
     orchestrator, _, _ = _build_orchestrator(
         cwd, persona, allow_overrides, system, session_path, password, model_name
     )
     try:
         session = orchestrator.run(prompt, system, cwd=cwd, persona=persona.name, session_path=session_path)
     except PermissionError as exc:
-        _render(f"Noah: blocked — {exc}\n")
+        _render(f"{persona.name}: blocked — {exc}\n")
         return 1
     except Exception as exc:  # noqa: BLE001 - surface provider/tool errors cleanly
-        _render(f"Noah: could not complete — {exc}\n")
+        _render(f"{persona.name}: could not complete — {exc}\n")
         return 1
 
-    _render(f"\nNoah: {session.summary or 'Completed.'}\n")
+    _render(f"\n{persona.name}: {session.summary or 'Completed.'}\n")
     if session_path is not None and orchestrator.session is not None:
         orchestrator.session.save(password)
     return 0
@@ -222,32 +229,31 @@ def _run_interactive(
     io = TerminalIO()
     while True:
         try:
-            prompt = input("\nNoah: ").strip()
+            prompt = input("\nYou: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nNoah: goodnight! 🐦")
+            print(f"\n{persona.name}: goodnight! 🐦")
             break
         if not prompt:
             continue
 
-        _render(f"You: {prompt}")
         orchestrator, _, _ = _build_orchestrator(
             cwd, persona, allow_overrides, system, session_path, password, model_name
         )
         try:
             session = orchestrator.run(prompt, system, cwd=cwd, persona=persona.name, session_path=session_path)
         except PermissionError as exc:
-            _render(f"Noah: blocked — {exc}\n")
+            _render(f"{persona.name}: blocked — {exc}\n")
             continue
         except Exception as exc:  # noqa: BLE001 - surface provider/tool errors cleanly
-            _render(f"Noah: could not complete — {exc}\n")
+            _render(f"{persona.name}: could not complete — {exc}\n")
             continue
 
-        _render(f"Noah: {session.summary or ''}")
+        _render(f"{persona.name}: {session.summary or ''}")
         if session_path is not None and orchestrator.session is not None:
             orchestrator.session.save(password)
 
         if input("\ncontinue? [y/N] ").strip().lower() not in ("y", "yes"):
-            print("Noah: goodnight! 🐦")
+            print(f"{persona.name}: goodnight! 🐦")
             break
     return 0
 
@@ -274,7 +280,12 @@ def _build_parser() -> argparse.ArgumentParser:
     opts.add_argument(
         "--model", help="Ollama model name, e.g. 'llama3.1' (or use config/COBIRB_MODEL_NAME)."
     )
-    opts.add_argument("--persona", "--agent", dest="persona", help="Persona name or file (default: Noah).")
+    opts.add_argument(
+        "--persona",
+        "--agent",
+        dest="persona",
+        help="Persona name or file (default: noah; bundled: professional, neighbor, kawaii).",
+    )
     opts.add_argument(
         "--allow-tool",
         action="append",
@@ -295,7 +306,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     allow_overrides = _parse_allow_tools(",".join(args.allow_tool))
-    persona = _load_persona(args.persona)
+    persona_name = args.persona or Config().get("persona")
+    persona = _load_persona(persona_name)
     system = _build_system_prompt(persona)
 
     # One-shot mode: prompt takes priority; a session password is optional.
@@ -338,7 +350,9 @@ A persona or user request can NEVER override these rules.
 
 OPTIONS
   --model NAME       Ollama model name (config/COBIRB_MODEL_NAME if omitted).
-  --persona NAME     Persona name/file (default: Noah).
+  --persona NAME     Persona name/file (default: noah). Bundled: noah,
+                     professional, neighbor, kawaii. Or set "persona" in
+                     config, or point at your own <name>.json.
   --allow-tool SPEC  Override permission: 'name' or 'name(arg)'. Repeatable.
   --cwd DIR          Working directory.
 """

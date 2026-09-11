@@ -40,16 +40,20 @@ cobirb = "cobirb.cli:main"
 
 # Plugin entry-point groups declared in the Plugin SPI.
 # Plugins declare implementations here under [project.entry-points."cobirb.plugins"].
+# Personas are pure data (see cobirb/personas/*.json), not a class-based SPI
+# interface, so there is no entry point for them here.
 [project.entry-points."cobirb.plugins"]
 # Core ships these built-in plugins (always available).
 core-tools = "cobirb.plugins.core.tools:ToolRegistry"
 core-model = "cobirb.plugins.core.model:LocalModelProvider"
 core-io = "cobirb.plugins.core.io:TerminalIO"
 core-crypto = "cobirb.plugins.core.crypto:HybridPQCSessionCrypto"
-core-persona = "cobirb.plugins.core.persona:NoahPersona"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+cobirb = ["personas/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
