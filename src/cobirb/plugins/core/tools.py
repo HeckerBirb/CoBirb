@@ -23,6 +23,19 @@ class CobirbTool(Tool):
     def __init__(self, cwd: str | None = None) -> None:
         self._cwd = cwd
 
+    def _resolve(self, path: str) -> str:
+        """Resolve ``path`` against this tool's configured working
+        directory when it's relative. Without this, a relative path (which
+        is what a model normally produces — "src/foo.py", not an absolute
+        path) resolves against the *process's* actual working directory
+        instead of whatever --cwd/session cwd the tool was configured
+        with, silently reading/writing the wrong location whenever the two
+        differ.
+        """
+        if os.path.isabs(path):
+            return path
+        return os.path.join(self._cwd or ".", path)
+
 
 # --------------------------------------------------------------------------- #
 # Built-in tools
@@ -43,7 +56,7 @@ class ReadFileTool(CobirbTool):
         }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        path = arguments["path"]
+        path = self._resolve(arguments["path"])
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 return ToolResult(ok=True, content=fh.read())
@@ -68,7 +81,7 @@ class WriteFileTool(CobirbTool):
         }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        path, content = arguments["path"], arguments["content"]
+        path, content = self._resolve(arguments["path"]), arguments["content"]
         try:
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
             with open(path, "w", encoding="utf-8") as fh:
@@ -96,7 +109,8 @@ class EditFileTool(CobirbTool):
         }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        path, old_str, new_str = arguments["path"], arguments["old_str"], arguments["new_str"]
+        path = self._resolve(arguments["path"])
+        old_str, new_str = arguments["old_str"], arguments["new_str"]
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 content = fh.read()
@@ -198,7 +212,7 @@ class ApplyPatchTool(CobirbTool):
         }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        path, patch = arguments["path"], arguments["patch"]
+        path, patch = self._resolve(arguments["path"]), arguments["patch"]
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 original = fh.read()
@@ -270,7 +284,7 @@ class GlobTool(CobirbTool):
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
         import glob as glob_module
 
-        pattern = arguments["pattern"]
+        pattern = self._resolve(arguments["pattern"])
         include_ignored = arguments.get("include_ignored", False)
         try:
             results = glob_module.glob(pattern, recursive=True)
@@ -309,7 +323,7 @@ class GrepTool(CobirbTool):
         pattern = arguments["pattern"]
         include_ignored = arguments.get("include_ignored", False)
         try:
-            root = arguments.get("path", ".")
+            root = self._resolve(arguments.get("path", "."))
             paths = [p for p in glob_module.glob(root + "/**/*", recursive=True)]
             if not include_ignored:
                 paths = [p for p in paths if not _is_ignored_path(p)]
@@ -345,7 +359,7 @@ class ListDirTool(CobirbTool):
         }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        path = arguments["path"]
+        path = self._resolve(arguments["path"])
         try:
             entries = sorted(os.listdir(path))
             return ToolResult(ok=True, content="\n".join(entries))

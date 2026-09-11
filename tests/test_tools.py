@@ -250,3 +250,73 @@ def test_first_word():
     assert _first_word("git status") == "git"
     assert _first_word("bash -n") == "bash"
     assert _first_word("a; b") == "a"
+
+
+# --------------------------------------------------------------------------- #
+# Relative-path resolution against each tool's configured cwd.
+#
+# Every test above this point passes an *absolute* path, which is exactly
+# why this was broken for so long without any test catching it: self._cwd
+# was stored on every tool but only ShellTool ever actually used it. A
+# model normally emits relative paths ("note.txt", not the full absolute
+# path), which used to resolve against the real OS process's cwd instead
+# of whatever --cwd the tool was configured with — silently reading/
+# writing the wrong location whenever the two differed. Found via a live
+# integration test (see test_integration_ollama.py) that runs the
+# orchestrator from a different directory than the target cwd, the way a
+# real `cobirb --cwd <other dir>` invocation does.
+# --------------------------------------------------------------------------- #
+def test_read_file_relative_path_resolves_against_configured_cwd(tmp_path):
+    (tmp_path / "a.txt").write_text("hello")
+    result = ReadFileTool(cwd=str(tmp_path)).execute({"path": "a.txt"})
+    assert result.ok
+    assert result.content == "hello"
+
+
+def test_write_file_relative_path_resolves_against_configured_cwd(tmp_path):
+    result = WriteFileTool(cwd=str(tmp_path)).execute({"path": "new.txt", "content": "data"})
+    assert result.ok
+    assert (tmp_path / "new.txt").read_text() == "data"
+
+
+def test_edit_file_relative_path_resolves_against_configured_cwd(tmp_path):
+    (tmp_path / "a.txt").write_text("old")
+    result = EditFileTool(cwd=str(tmp_path)).execute({"path": "a.txt", "old_str": "old", "new_str": "new"})
+    assert result.ok
+    assert (tmp_path / "a.txt").read_text() == "new"
+
+
+def test_apply_patch_relative_path_resolves_against_configured_cwd(tmp_path):
+    (tmp_path / "a.txt").write_text("alpha\nbeta\n")
+    patch = _make_patch("alpha\nbeta\n", "alpha\ngamma\n")
+    result = ApplyPatchTool(cwd=str(tmp_path)).execute({"path": "a.txt", "patch": patch})
+    assert result.ok
+    assert (tmp_path / "a.txt").read_text() == "alpha\ngamma\n"
+
+
+def test_list_dir_relative_path_resolves_against_configured_cwd(tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    result = ListDirTool(cwd=str(tmp_path)).execute({"path": "."})
+    assert result.ok
+    assert "a.txt" in result.content
+
+
+def test_glob_relative_pattern_resolves_against_configured_cwd(tmp_path):
+    (tmp_path / "a.py").write_text("x")
+    result = GlobTool(cwd=str(tmp_path)).execute({"pattern": "*.py"})
+    assert result.ok
+    assert "a.py" in result.content
+
+
+def test_grep_relative_path_resolves_against_configured_cwd(tmp_path):
+    (tmp_path / "a.txt").write_text("needle")
+    result = GrepTool(cwd=str(tmp_path)).execute({"pattern": "needle", "path": "."})
+    assert result.ok
+    assert "a.txt" in result.content
+
+
+def test_grep_defaults_to_configured_cwd_when_no_path_given(tmp_path):
+    (tmp_path / "a.txt").write_text("needle")
+    result = GrepTool(cwd=str(tmp_path)).execute({"pattern": "needle"})
+    assert result.ok
+    assert "a.txt" in result.content

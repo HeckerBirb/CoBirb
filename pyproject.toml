@@ -58,3 +58,6 @@ cobirb = ["personas/*.json"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "integration: hits a real local Ollama server; skipped unless COBIRB_TEST_MODEL is set (see tests/test_integration_ollama.py)",
+]
