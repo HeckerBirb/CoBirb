@@ -114,6 +114,73 @@ class EditFileTool(CobirbTool):
             return ToolResult(ok=False, content=f"Could not edit {path}: {exc}", error=str(exc))
 
 
+_HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@")
+
+
+def _parse_patch_hunks(patch_text: str) -> list[tuple[int, list[tuple[str, str]]]]:
+    """Parse unified-diff hunks into ``(old_start, [(marker, line), ...])``.
+
+    ``old_start`` is the 1-indexed starting line from the hunk header
+    (``@@ -old_start,old_len +new_start,new_len @@``). ``marker`` is one of
+    ``' '`` (context), ``'-'`` (removed), or ``'+'`` (added). File header
+    lines (``---``/``+++``) and "\\ No newline at end of file" markers are
+    skipped.
+    """
+    hunks: list[tuple[int, list[tuple[str, str]]]] = []
+    lines = patch_text.splitlines()
+    i = 0
+    while i < len(lines):
+        if lines[i].startswith(("---", "+++")):
+            i += 1
+            continue
+        match = _HUNK_HEADER_RE.match(lines[i])
+        if not match:
+            i += 1
+            continue
+        old_start = int(match.group(1))
+        i += 1
+        body: list[tuple[str, str]] = []
+        while i < len(lines) and not lines[i].startswith("@@"):
+            hunk_line = lines[i]
+            if hunk_line.startswith(("+", "-", " ")):
+                body.append((hunk_line[0], hunk_line[1:]))
+            elif hunk_line != "\\ No newline at end of file":
+                # Some diff generators emit a bare empty line for a blank
+                # context line, dropping the leading space marker.
+                body.append((" ", hunk_line))
+            i += 1
+        hunks.append((old_start, body))
+    return hunks
+
+
+def _apply_patch_hunks(original_lines: list[str], hunks: list[tuple[int, list[tuple[str, str]]]]) -> list[str]:
+    """Apply parsed hunks (in order) to ``original_lines`` and return the
+    patched lines. Raises ``ValueError`` if a hunk's context/removed lines
+    don't match the file at the position its header claims, rather than
+    guessing and silently corrupting the file.
+    """
+    result: list[str] = []
+    cursor = 0
+    for old_start, body in hunks:
+        start_idx = old_start - 1
+        if start_idx < cursor:
+            raise ValueError(f"hunk at line {old_start} overlaps a previous hunk")
+        result.extend(original_lines[cursor:start_idx])
+        cursor = start_idx
+        for marker, text in body:
+            if marker in (" ", "-"):
+                if cursor >= len(original_lines) or original_lines[cursor] != text:
+                    found = original_lines[cursor] if cursor < len(original_lines) else "<end of file>"
+                    raise ValueError(f"patch does not apply at line {cursor + 1}: expected {text!r}, found {found!r}")
+                if marker == " ":
+                    result.append(text)
+                cursor += 1
+            else:  # "+"
+                result.append(text)
+    result.extend(original_lines[cursor:])
+    return result
+
+
 class ApplyPatchTool(CobirbTool):
     name = "apply_patch"
 
@@ -131,25 +198,53 @@ class ApplyPatchTool(CobirbTool):
         }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        import difflib
-
         path, patch = arguments["path"], arguments["patch"]
         try:
             with open(path, "r", encoding="utf-8") as fh:
-                lines = fh.readlines()
-            for line in patch.splitlines():
-                if not line.startswith(("+", "-")) or line in ("", "\\"):
-                    continue
-                if line.startswith("-"):
-                    if line[1:] in lines:
-                        lines.remove(line[1:])
-                elif line.startswith("+"):
-                    lines.append(line[1:])
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.writelines(lines)
-            return ToolResult(ok=True, content=f"Applied patch to {path}")
+                original = fh.read()
         except OSError as exc:
             return ToolResult(ok=False, content=f"Could not patch {path}: {exc}", error=str(exc))
+
+        hunks = _parse_patch_hunks(patch)
+        if not hunks:
+            return ToolResult(ok=False, content="No valid hunks found in patch.", error="no_hunks")
+
+        original_lines = original.splitlines()
+        try:
+            new_lines = _apply_patch_hunks(original_lines, hunks)
+        except ValueError as exc:
+            return ToolResult(ok=False, content=f"Could not apply patch to {path}: {exc}", error=str(exc))
+
+        content = "\n".join(new_lines)
+        if new_lines and original.endswith("\n"):
+            content += "\n"
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(content)
+        except OSError as exc:
+            return ToolResult(ok=False, content=f"Could not patch {path}: {exc}", error=str(exc))
+        return ToolResult(ok=True, content=f"Applied patch to {path}")
+
+
+_DEFAULT_IGNORED_DIR_NAMES = {
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "node_modules",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+}
+
+
+def _is_ignored_path(path: str) -> bool:
+    """True if any path component is a vendor/build/cache directory glob and
+    grep skip by default, so they don't crawl e.g. .venv/ or .git/ on every
+    call. Not full .gitignore parsing — just the common, expensive offenders.
+    """
+    parts = os.path.normpath(path).split(os.sep)
+    return any(part in _DEFAULT_IGNORED_DIR_NAMES or part.endswith(".egg-info") for part in parts)
 
 
 class GlobTool(CobirbTool):
@@ -176,8 +271,11 @@ class GlobTool(CobirbTool):
         import glob as glob_module
 
         pattern = arguments["pattern"]
+        include_ignored = arguments.get("include_ignored", False)
         try:
             results = glob_module.glob(pattern, recursive=True)
+            if not include_ignored:
+                results = [r for r in results if not _is_ignored_path(r)]
             return ToolResult(ok=True, content="\n".join(sorted(results)) if results else "(no matches)")
         except OSError as exc:
             return ToolResult(ok=False, content=f"glob failed: {exc}", error=str(exc))
@@ -209,9 +307,12 @@ class GrepTool(CobirbTool):
         import os
 
         pattern = arguments["pattern"]
+        include_ignored = arguments.get("include_ignored", False)
         try:
             root = arguments.get("path", ".")
             paths = [p for p in glob_module.glob(root + "/**/*", recursive=True)]
+            if not include_ignored:
+                paths = [p for p in paths if not _is_ignored_path(p)]
             matches = []
             for p in paths:
                 if not os.path.isfile(p):

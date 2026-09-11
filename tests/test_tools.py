@@ -1,6 +1,8 @@
 """Tests for the built-in tools and tool registry."""
 from __future__ import annotations
 
+import difflib
+
 import pytest
 
 from cobirb.plugins.core.tools import (
@@ -63,13 +65,82 @@ def test_edit_file_no_match(tmp_path):
     assert "not found" in result.content
 
 
-def test_apply_patch(tmp_path):
+def _make_patch(old_text: str, new_text: str) -> str:
+    """A real unified diff, generated the way a model actually would."""
+    return "".join(
+        difflib.unified_diff(old_text.splitlines(keepends=True), new_text.splitlines(keepends=True))
+    )
+
+
+def test_apply_patch_replaces_line_in_place(tmp_path):
+    """Regression test: the old implementation ignored hunk position
+    entirely, appending added lines to the end of the file instead of
+    replacing the removed line in place."""
     f = tmp_path / "a.txt"
-    f.write_text("alpha\nbeta\n")
-    patch = "-beta\n+gamma\n"
+    f.write_text("alpha\nbeta\ngamma\n")
+    patch = _make_patch("alpha\nbeta\ngamma\n", "alpha\ndelta\ngamma\n")
     result = _mk_tool(ApplyPatchTool).execute({"path": str(f), "patch": patch})
     assert result.ok
-    assert f.read_text() == "alpha\nbeta\ngamma"
+    assert f.read_text() == "alpha\ndelta\ngamma\n"
+
+
+def test_apply_patch_multiple_hunks(tmp_path):
+    original = "\n".join(f"line{i}" for i in range(1, 21)) + "\n"
+    f = tmp_path / "a.txt"
+    f.write_text(original)
+
+    lines = original.splitlines()
+    lines[1] = "CHANGED-2"
+    lines[17] = "CHANGED-18"
+    updated = "\n".join(lines) + "\n"
+
+    patch = _make_patch(original, updated)
+    result = _mk_tool(ApplyPatchTool).execute({"path": str(f), "patch": patch})
+    assert result.ok
+    assert f.read_text() == updated
+
+
+def test_apply_patch_pure_insertion(tmp_path):
+    f = tmp_path / "a.txt"
+    f.write_text("alpha\nbeta\n")
+    patch = _make_patch("alpha\nbeta\n", "alpha\nnew\nbeta\n")
+    result = _mk_tool(ApplyPatchTool).execute({"path": str(f), "patch": patch})
+    assert result.ok
+    assert f.read_text() == "alpha\nnew\nbeta\n"
+
+
+def test_apply_patch_context_mismatch_fails_without_corrupting_file(tmp_path):
+    f = tmp_path / "a.txt"
+    f.write_text("alpha\nbeta\ngamma\n")
+    # Patch generated against a different original -> context won't match.
+    patch = _make_patch("alpha\nWRONG\ngamma\n", "alpha\ndelta\ngamma\n")
+    result = _mk_tool(ApplyPatchTool).execute({"path": str(f), "patch": patch})
+    assert not result.ok
+    assert "does not apply" in result.content
+    assert f.read_text() == "alpha\nbeta\ngamma\n"  # untouched
+
+
+def test_apply_patch_preserves_missing_trailing_newline(tmp_path):
+    # Hand-written rather than difflib-generated: when neither the old nor
+    # new last line ends in "\n", difflib.unified_diff runs the "-"/"+"
+    # lines together with no separator (a difflib quirk, not a patch-format
+    # one — real diff tools mark this with "\ No newline at end of file"
+    # and still newline-terminate each diff line in the patch text itself).
+    f = tmp_path / "a.txt"
+    f.write_text("alpha\nbeta")  # no trailing newline
+    patch = "@@ -1,2 +1,2 @@\n alpha\n-beta\n+gamma\n"
+    result = _mk_tool(ApplyPatchTool).execute({"path": str(f), "patch": patch})
+    assert result.ok
+    assert f.read_text() == "alpha\ngamma"
+
+
+def test_apply_patch_no_valid_hunks(tmp_path):
+    f = tmp_path / "a.txt"
+    f.write_text("alpha\n")
+    result = _mk_tool(ApplyPatchTool).execute({"path": str(f), "patch": "not a real patch"})
+    assert not result.ok
+    assert result.error == "no_hunks"
+    assert f.read_text() == "alpha\n"  # untouched
 
 
 def test_glob(tmp_path):
@@ -86,6 +157,52 @@ def test_grep(tmp_path):
     result = _mk_tool(GrepTool).execute({"pattern": "foo", "path": str(tmp_path)})
     assert result.ok
     assert "a.txt" in result.content
+
+
+def test_glob_excludes_ignored_dirs_by_default(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "real.py").write_text("x")
+    (tmp_path / "node_modules" / "lib").mkdir(parents=True)
+    (tmp_path / "node_modules" / "lib" / "vendored.py").write_text("x")
+
+    result = _mk_tool(GlobTool).execute({"pattern": str(tmp_path / "**" / "*.py")})
+    assert result.ok
+    assert "real.py" in result.content
+    assert "vendored.py" not in result.content
+
+
+def test_glob_include_ignored_opts_back_in(tmp_path):
+    (tmp_path / "node_modules" / "lib").mkdir(parents=True)
+    (tmp_path / "node_modules" / "lib" / "vendored.py").write_text("x")
+
+    result = _mk_tool(GlobTool).execute(
+        {"pattern": str(tmp_path / "**" / "*.py"), "include_ignored": True}
+    )
+    assert result.ok
+    assert "vendored.py" in result.content
+
+
+def test_grep_excludes_ignored_dirs_by_default(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "real.txt").write_text("needle")
+    (tmp_path / "node_modules" / "lib").mkdir(parents=True)
+    (tmp_path / "node_modules" / "lib" / "vendored.txt").write_text("needle")
+
+    result = _mk_tool(GrepTool).execute({"pattern": "needle", "path": str(tmp_path)})
+    assert result.ok
+    assert "real.txt" in result.content
+    assert "vendored.txt" not in result.content
+
+
+def test_grep_include_ignored_opts_back_in(tmp_path):
+    (tmp_path / "node_modules" / "lib").mkdir(parents=True)
+    (tmp_path / "node_modules" / "lib" / "vendored.txt").write_text("needle")
+
+    result = _mk_tool(GrepTool).execute(
+        {"pattern": "needle", "path": str(tmp_path), "include_ignored": True}
+    )
+    assert result.ok
+    assert "vendored.txt" in result.content
 
 
 def test_list_dir(tmp_path):
