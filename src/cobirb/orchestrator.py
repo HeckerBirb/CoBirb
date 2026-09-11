@@ -124,16 +124,14 @@ class Orchestrator:
     def _open_session(
         self, prompt: str, system: str, cwd: str, persona: str, session_path: str | None = None
     ) -> Session:
-        # Reuse the supplied session manager when one was injected, so the
-        # session path/cipher is honored across the whole run.
-        if self.session is not None:
-            return self.session.session
-
-        # Fresh session: the user's prompt is the opening turn.
-        manager = SessionManager.create(session_path or ".", self.crypto, cwd, persona)
-        manager.session.add(Turn(role="user", content=prompt))
-        self.session = manager
-        return manager.session
+        # Reuse the supplied session manager when one was injected (e.g. a
+        # resumed --session), so prior history and the session path/cipher
+        # are preserved. Either way, this prompt is always recorded as the
+        # opening turn of *this* run.
+        if self.session is None:
+            self.session = SessionManager.create(session_path or ".", self.crypto, cwd, persona)
+        self.session.session.add(Turn(role="user", content=prompt))
+        return self.session.session
 
     def _build_context(self, session: Session, cwd: str) -> str:
         parts = [f"Working directory: {cwd}", ""]

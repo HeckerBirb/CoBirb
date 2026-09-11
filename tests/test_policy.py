@@ -32,11 +32,17 @@ def test_shell_narrowed_by_first_word():
     assert not policy.is_allowed("shell", {"command": "python script.py"})
 
 
-def test_allow_narrows_shell_by_first_word():
+def test_allow_narrows_shell_to_exact_prefix_not_bare_binary():
+    """Allowing a multi-word command must not implicitly trust the bare
+    binary for any other arguments — that would defeat the point of
+    narrowing (see todo-list.md's python/bash motivation)."""
     policy = Policy()
     policy.allow("shell", "python -m cobirb")
     assert policy.is_allowed("shell", {"command": "python -m cobirb"})
     assert not policy.is_allowed("shell", {"command": "rm -rf /"})
+    # The bare binary, or a different narrow use of it, must stay denied.
+    assert not policy.is_allowed("shell", {"command": "python -c 'import os; os.system(\"evil\")'"})
+    assert not policy.is_allowed("shell", {"command": "python"})
 
 
 def test_allow_without_command_adds_full_name():
@@ -80,4 +86,17 @@ def test_allow_all_core_tools(tmp_path):
     # 'shell' is allowed, but its scope is narrowed to the safe default set.
     assert policy.is_allowed("shell", {"command": "git status"})
     assert policy.is_allowed("shell", {"command": "python --version"})
+    assert policy.is_allowed("shell", {"command": "python -m pytest tests/"})
     assert not policy.is_allowed("shell", {"command": "rm -rf /"})
+
+
+def test_allow_all_core_tools_does_not_trust_bare_python(tmp_path):
+    """Regression test: bare `python` must never be globally allowed by the
+    default policy, since `python -c '...'`/`python -m pip install ...` can
+    run or fetch arbitrary code — only specific narrow invocations are
+    trusted by default (see todo-list.md)."""
+    policy = Policy(audit=AuditLog(str(tmp_path / "audit.jsonl")))
+    policy.allow_all_core_tools()
+    assert not policy.is_allowed("shell", {"command": "python"})
+    assert not policy.is_allowed("shell", {"command": "python -c 'print(1)'"})
+    assert not policy.is_allowed("shell", {"command": "python -m pip install anything"})

@@ -38,9 +38,20 @@ def test_different_blob_per_encrypt_random_nonce():
     assert blob1 != blob2
 
 
-def test_name_is_aes256gcm():
+def test_name_is_aes256gcm_scrypt():
     crypto = HybridPQCSessionCrypto()
-    assert crypto.name() == "aes256gcm"
+    assert crypto.name() == "aes256gcm-scrypt"
+
+
+def test_same_password_derives_different_keys_per_encryption():
+    """Each encryption must use a fresh random salt, so brute-forcing one
+    session's password doesn't help against another with the same password."""
+    crypto = HybridPQCSessionCrypto()
+    blob1 = crypto.encrypt('{"content": "same"}', "shared-password")
+    blob2 = crypto.encrypt('{"content": "same"}', "shared-password")
+    salt1 = crypto_module.base64.b64decode(blob1)[:16]
+    salt2 = crypto_module.base64.b64decode(blob2)[:16]
+    assert salt1 != salt2
 
 
 def test_uses_cryptography_library():

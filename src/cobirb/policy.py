@@ -46,8 +46,27 @@ def _first_word(command: str) -> str:
     return parts[0].split()[0] if parts and parts[0] else ""
 
 
+def _words(command: str) -> list[str]:
+    """Split the first ``;``/``|``/``&&``/``&``-separated chunk into words."""
+    parts = re.split(r";|\||&&|&|\n", command.strip())
+    return parts[0].split() if parts else []
+
+
 class Policy:
-    """Default-deny permission policy with a local audit trail."""
+    """Default-deny permission policy with a local audit trail.
+
+    Two kinds of ``shell`` allow rules exist:
+
+    - **first-word** (``_allowed``): the bare binary is trusted with *any*
+      arguments, e.g. allowing ``git`` also allows ``git push --force``.
+      Only use this for tools that are safe regardless of arguments.
+    - **prefix** (``_allowed_prefixes``): a specific multi-word invocation is
+      trusted, e.g. allowing ``python -m pytest`` does **not** allow
+      ``python -c '...'``. This is what ``allow(tool, command)`` produces
+      when ``command`` has more than one word — narrowing to just the first
+      word (e.g. bare ``python``) would defeat the point of narrowing at all,
+      since ``python`` alone can run arbitrary code via ``-c``.
+    """
 
     def __init__(
         self,
@@ -58,6 +77,7 @@ class Policy:
     ) -> None:
         self.cwd = cwd or os.getcwd()
         self._allowed = set(allowed or set())
+        self._allowed_prefixes: set[tuple[str, ...]] = set()
         self._denied = set(denied or set())
         self.audit = audit or AuditLog()
 
@@ -68,20 +88,20 @@ class Policy:
     def is_allowed(self, tool_name: str, arguments: dict[str, Any] | None = None) -> bool:
         """Return True only if the tool is explicitly allowed and not denied.
 
-        For the ``shell`` tool, scope is narrowed by the first word of the
-        command when one is provided.
+        For the ``shell`` tool, a command is allowed if its first word is
+        unrestricted-allowed, or if it matches an allowed narrow prefix.
         """
         if self.is_denied(tool_name):
             return False
 
-        # Narrow ``shell`` scope to a first-word scope when a command is
-        # provided. If no command is given, the tool is allowed as-is.
         if tool_name == "shell" and arguments is not None:
             command = arguments.get("command", "")
-            first = _first_word(command)
-            if first:
-                return first in self._allowed
-            return True
+            words = _words(command)
+            if not words:
+                return True
+            if words[0] in self._allowed:
+                return True
+            return any(words[: len(prefix)] == list(prefix) for prefix in self._allowed_prefixes)
 
         if tool_name not in self._allowed:
             return False
@@ -89,11 +109,20 @@ class Policy:
         return True
 
     def allow(self, tool_name: str, command: str | None = None) -> None:
-        """Allow a tool, optionally narrowing the shell scope by first word."""
+        """Allow a tool.
+
+        With no ``command``, allows the tool outright. With a single-word
+        ``command`` (just a binary name), that binary is trusted with any
+        arguments. With a multi-word ``command``, only that exact invocation
+        prefix is trusted — narrower than allowing the binary outright.
+        """
         if command is not None:
-            first = _first_word(command)
-            if first:
-                self._allowed.add(first)
+            words = _words(command)
+            if len(words) > 1:
+                self._allowed_prefixes.add(tuple(words))
+                return
+            if words:
+                self._allowed.add(words[0])
                 return
         self._allowed.add(tool_name)
 
@@ -112,14 +141,16 @@ class Policy:
     def allow_all_core_tools(self) -> None:
         """Convenience: allow the built-in core tools.
 
-        The ``shell`` scope is narrowed to a safe default set of first words
-        (git, python, pytest, ls, cat, grep, mkdir) — not unrestricted.
+        The ``shell`` scope is narrowed to a safe default: binaries that are
+        safe regardless of arguments (git, ls, cat, grep, mkdir, find,
+        pytest) are allowed outright. ``python`` is deliberately *not*
+        allowed outright — ``python -c '...'`` runs arbitrary code — so only
+        specific narrow invocations are allowed instead.
         """
         for name in ("read_file", "write_file", "edit_file", "apply_patch", "glob", "grep", "list_dir"):
             self._allowed.add(name)
-        # The ``shell`` tool is enabled, but its scope is narrowed to a safe
-        # default set of first words (git, python, pytest, ls, cat, grep,
-        # mkdir, find) — not unrestricted shell.
         self._allowed.add("shell")
-        for first in ("git", "python", "pytest", "ls", "cat", "grep", "mkdir", "find"):
+        for first in ("git", "ls", "cat", "grep", "mkdir", "find", "pytest"):
             self._allowed.add(first)
+        for prefix in ("python --version", "python -m pytest", "python -m cobirb"):
+            self.allow("shell", prefix)

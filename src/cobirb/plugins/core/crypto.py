@@ -1,19 +1,23 @@
-"""Core crypto backend: an AES-256-GCM + HKDF-SHA-256 session cipher.
+"""Core crypto backend: an AES-256-GCM + scrypt session cipher.
 
 CoBirb ships **no hard crypto dependency** and keeps the core free of any crypto
 implementation. This backend is the *default* ``SessionCrypto``, but it lives in
 the plugin registry so a stronger/available scheme can be dropped in later.
 
-The design (see DESIGN.md §7.2):
+The scheme:
 
-    bulk  : AES-256-GCM (authenticated encryption)
-    kdf   : HKDF-SHA-256 over the password
+    kdf   : scrypt (RFC 7914 interactive parameters: N=2**14, r=8, p=1), with a
+            fresh random salt per encryption, stretching the password into a
+            32-byte key.
+    bulk  : AES-256-GCM (authenticated encryption) over that key.
 
 The password is used exactly once to derive the session key; it is never stored.
+The salt and nonce are not secret and travel with the ciphertext.
 
-Note: this is a vetted, standard implementation. A post-quantum seal (e.g.
-ML-KEM-768 via pqcrypto/liboqs) is the production path described in AGENTS.md §6
-and remains a swappable plugin — we never hand-roll crypto.
+Note: this is a vetted, standard implementation — not the post-quantum hybrid
+seal (ML-KEM-768) described in the original design notes. That remains a
+swappable plugin behind the same ``SessionCrypto`` interface once a vetted
+PQC library is chosen; we never hand-roll crypto in the meantime.
 """
 from __future__ import annotations
 
@@ -21,15 +25,23 @@ import base64
 import json
 import os
 
-from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
 from ...typing.spi import SessionCrypto
 
+_SALT_LEN = 16
+_NONCE_LEN = 12
+# RFC 7914 "interactive" parameters: costs roughly tens of milliseconds and
+# ~16 MiB of memory per derivation, deliberately slow to brute-force offline
+# without being noticeable for a CLI unlocking a session.
+_SCRYPT_N = 2**14
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+
 
 class HybridPQCSessionCrypto(SessionCrypto):
-    """Default hybrid session crypto. AES-256-GCM bulk cipher over HKDF-derived key.
+    """Default session crypto. AES-256-GCM bulk cipher over a scrypt-derived key.
 
     The crypto library is imported lazily so the core has no hard dependency on
     ``cryptography``. If it is unavailable the core still loads — the crypto plugin
@@ -47,7 +59,7 @@ class HybridPQCSessionCrypto(SessionCrypto):
             return None
 
     def name(self) -> str:
-        return "aes256gcm"
+        return "aes256gcm-scrypt"
 
     def encrypt(self, plaintext_json: str, password: str) -> bytes:
         backend = self._backend
@@ -56,12 +68,13 @@ class HybridPQCSessionCrypto(SessionCrypto):
                 "Crypto backend unavailable. Install the 'cryptography' library "
                 "before encrypting a session."
             )
-        # KDF the password into an ephemeral key (used exactly once).
-        key = backend.hkdf_sha256(password.encode(), info=b"cobirb-kdf")
-        # Encrypt the JSON payload; base64 the blob so it is safe in a session file.
+        salt = os.urandom(_SALT_LEN)
+        key = backend.scrypt_derive(password.encode(), salt)
         nonce, ciphertext = backend.aes256_gcm_encrypt(plaintext_json.encode(), key)
-        # Serialize: base64 of nonce || ciphertext (ciphertext has tag prepended).
-        return base64.b64encode(nonce + ciphertext)
+        # Serialize: base64 of salt || nonce || ciphertext (tag prepended to
+        # ciphertext). Salt and nonce are not secret; they must travel with
+        # the blob so decrypt() can reproduce the same key and cipher state.
+        return base64.b64encode(salt + nonce + ciphertext)
 
     def decrypt(self, blob: bytes, password: str) -> str:
         backend = self._backend
@@ -70,28 +83,24 @@ class HybridPQCSessionCrypto(SessionCrypto):
                 "Crypto backend unavailable. Install the 'cryptography' library "
                 "before decrypting a session."
             )
-        key = backend.hkdf_sha256(password.encode(), info=b"cobirb-kdf")
-        b64 = base64.b64decode(blob)
-        nonce, ciphertext = b64[:12], b64[12:]
+        raw = base64.b64decode(blob)
+        salt, nonce, ciphertext = raw[:_SALT_LEN], raw[_SALT_LEN : _SALT_LEN + _NONCE_LEN], raw[_SALT_LEN + _NONCE_LEN :]
+        key = backend.scrypt_derive(password.encode(), salt)
         return backend.aes256_gcm_decrypt(ciphertext, key, nonce).decode()
 
 
 class _Backend:
     """Concrete crypto backend built on the vetted ``cryptography`` library.
 
-    Flow: HKDF-SHA-256(password, info) -> 32-byte session key;
+    Flow: scrypt(password, salt) -> 32-byte session key;
     AES-256-GCM(session_key, plaintext, nonce) -> ciphertext with tag prepended.
-    A fresh random nonce is generated per operation.
+    A fresh random salt and nonce are generated per encryption.
     """
 
-    def hkdf_sha256(self, ikm: bytes, info: bytes | None = None) -> bytes:
-        """HKDF-SHA-256 (RFC-5869)."""
-        return HKDF(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=None,
-            info=info or b"cobirb-kdf",
-        ).derive(ikm)
+    def scrypt_derive(self, password: bytes, salt: bytes) -> bytes:
+        """Stretch a password into a 32-byte key via scrypt (RFC 7914)."""
+        kdf = Scrypt(salt=salt, length=32, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P)
+        return kdf.derive(password)
 
     def aes256_gcm_encrypt(self, plaintext: bytes, key: bytes) -> tuple[bytes, bytes]:
         """Encrypt with AES-256-GCM. ``key`` is the ephemeral KDF-derived key.
@@ -99,7 +108,7 @@ class _Backend:
         Returns ``(nonce, ciphertext)`` where ``ciphertext`` has the tag
         prepended (the form ``cryptography`` 50.0+ returns).
         """
-        nonce = os.urandom(12)
+        nonce = os.urandom(_NONCE_LEN)
         return nonce, AESGCM(key).encrypt(nonce, plaintext, b"cobirb")
 
     def aes256_gcm_decrypt(self, ciphertext: bytes, key: bytes, nonce: bytes) -> bytes:
