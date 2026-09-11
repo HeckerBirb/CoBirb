@@ -111,6 +111,17 @@ def _load_persona(persona_name: str | None) -> cobirb_typing.Persona:
     return Persona.from_dict(data)
 
 
+def _available_personas() -> list[str]:
+    """Names of every persona CoBirb can resolve out of the box: the
+    built-in Noah plus every ``*.json`` bundled under ``cobirb/personas/``."""
+    names = {"noah"}
+    if os.path.isdir(_PERSONAS_DIR):
+        for fname in os.listdir(_PERSONAS_DIR):
+            if fname.endswith(".json"):
+                names.add(fname[: -len(".json")])
+    return sorted(names)
+
+
 def _load_json(path: str) -> dict[str, Any]:
     import json
 
@@ -211,7 +222,10 @@ def _run_one_shot(
         _render(f"{persona.name}: could not complete — {exc}\n")
         return 1
 
-    _render(f"\n{persona.name}: {session.summary or 'Completed.'}\n")
+    # If the final answer already streamed live via the I/O adapter, printing
+    # session.summary again here would just show it a second time.
+    if not orchestrator.last_turn_streamed:
+        _render(f"\n{persona.name}: {session.summary or 'Completed.'}\n")
     if session_path is not None and orchestrator.session is not None:
         orchestrator.session.save(password)
     return 0
@@ -227,6 +241,8 @@ def _run_interactive(
     model_name: str | None = None,
 ) -> int:
     io = TerminalIO()
+    print(f"{persona.name}: {persona.greeting}" if persona.greeting else f"{persona.name} is here.")
+    print("(type /persona <name> to switch personas, /persona to list them)")
     while True:
         try:
             prompt = input("\nYou: ").strip()
@@ -234,6 +250,16 @@ def _run_interactive(
             print(f"\n{persona.name}: goodnight! 🐦")
             break
         if not prompt:
+            continue
+
+        if prompt.startswith("/persona"):
+            arg = prompt[len("/persona"):].strip()
+            if not arg:
+                print(f"Available personas: {', '.join(_available_personas())}")
+            else:
+                persona = _load_persona(arg)
+                system = _build_system_prompt(persona)
+                print(f"{persona.name}: {persona.greeting or 'switched personas.'}")
             continue
 
         orchestrator, _, _ = _build_orchestrator(
@@ -248,11 +274,16 @@ def _run_interactive(
             _render(f"{persona.name}: could not complete — {exc}\n")
             continue
 
-        _render(f"{persona.name}: {session.summary or ''}")
+        if not orchestrator.last_turn_streamed:
+            _render(f"{persona.name}: {session.summary or ''}")
         if session_path is not None and orchestrator.session is not None:
             orchestrator.session.save(password)
 
-        if input("\ncontinue? [y/N] ").strip().lower() not in ("y", "yes"):
+        try:
+            keep_going = input("\ncontinue? [y/N] ").strip().lower() in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            keep_going = False
+        if not keep_going:
             print(f"{persona.name}: goodnight! 🐦")
             break
     return 0
@@ -337,14 +368,15 @@ _HELP_TEXT = """\
 CoBirb — a privacy-first, local agentic CLI.
 
 MODES
-  Interactive (default): chat with Noah in the terminal.
+  Interactive (default): chat with CoBirb in the terminal.
   One-shot:              cobirb -p "your task" --allow-tool='shell(git)'
   Session:               cobirb --session <path> --password <pw>
 
 PRIVACY BY CONSTRUCTION
   • Zero telemetry. • No outbound network by default. • Sessions encrypted
-    at rest (AES-256-GCM + post-quantum seal). • Permissions default to
-    denied; no tool runs without approval. • Everything stays on this machine.
+    at rest (AES-256-GCM, keyed via scrypt; a post-quantum seal is a design
+    goal, not yet implemented). • Permissions default to denied; no tool
+    runs without approval. • Everything stays on this machine.
 
 A persona or user request can NEVER override these rules.
 
@@ -355,6 +387,10 @@ OPTIONS
                      config, or point at your own <name>.json.
   --allow-tool SPEC  Override permission: 'name' or 'name(arg)'. Repeatable.
   --cwd DIR          Working directory.
+
+INTERACTIVE COMMANDS
+  /persona <name>    Switch personas mid-conversation.
+  /persona           List available personas.
 """
 
 

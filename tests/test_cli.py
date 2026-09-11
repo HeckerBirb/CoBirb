@@ -10,8 +10,23 @@ from __future__ import annotations
 
 import pytest
 
-from cobirb.cli import _build_orchestrator, _load_persona
+from cobirb import cli
+from cobirb.cli import _available_personas, _build_orchestrator, _load_persona
 from cobirb.typing.spi import Persona
+
+
+def _scripted_input(responses):
+    """Return a fake ``input()`` that yields ``responses`` in order, then
+    raises EOFError (like a closed stdin/Ctrl-D) once exhausted."""
+    it = iter(responses)
+
+    def fake_input(prompt: str = "") -> str:
+        try:
+            return next(it)
+        except StopIteration:
+            raise EOFError()
+
+    return fake_input
 
 
 class _DummyModel:
@@ -135,3 +150,95 @@ def test_load_persona_falls_back_to_noah_when_unknown(capsys):
     persona = _load_persona("does-not-exist")
     assert persona.name == "Noah"
     assert "unknown persona" in capsys.readouterr().err
+
+
+def test_available_personas_includes_bundled_and_noah():
+    names = _available_personas()
+    assert names == sorted({"noah", "professional", "neighbor", "kawaii"})
+
+
+class _StubSession:
+    summary = "ok"
+    turns = ()
+
+
+class _StubOrchestrator:
+    session = None
+    last_turn_streamed = False
+
+    def run(self, prompt, system, *, cwd, persona, session_path=None):
+        return _StubSession()
+
+
+def test_interactive_persona_list_command(monkeypatch, capsys):
+    """`/persona` with no argument lists the available personas and never
+    reaches the model (no orchestrator should be built)."""
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("orchestrator should not be built for /persona")
+
+    monkeypatch.setattr(cli, "_build_orchestrator", fail_if_called)
+    monkeypatch.setattr("builtins.input", _scripted_input(["/persona"]))
+
+    persona = cli._load_persona(None)
+    system = cli._build_system_prompt(persona)
+    cli._run_interactive(persona, system, {}, None, None, "/tmp")
+
+    out = capsys.readouterr().out
+    assert "Available personas:" in out
+    for name in ("noah", "professional", "neighbor", "kawaii"):
+        assert name in out
+
+
+def test_interactive_persona_switch_prints_confirmation(monkeypatch, capsys):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("orchestrator should not be built for /persona")
+
+    monkeypatch.setattr(cli, "_build_orchestrator", fail_if_called)
+    monkeypatch.setattr("builtins.input", _scripted_input(["/persona professional"]))
+
+    persona = cli._load_persona(None)
+    system = cli._build_system_prompt(persona)
+    cli._run_interactive(persona, system, {}, None, None, "/tmp")
+
+    out = capsys.readouterr().out
+    assert "Professional:" in out
+
+
+def test_interactive_persona_switch_affects_subsequent_turns(monkeypatch):
+    """Switching persona mid-conversation must change the system prompt (and
+    therefore the persona name) used for every turn afterward."""
+    captured = []
+
+    def fake_build_orchestrator(cwd, persona, allow_overrides, system, session_path, password, model_name=None):
+        captured.append((persona.name, system))
+        return _StubOrchestrator(), None, None
+
+    monkeypatch.setattr(cli, "_build_orchestrator", fake_build_orchestrator)
+    monkeypatch.setattr("builtins.input", _scripted_input(["/persona professional", "hello", "n"]))
+
+    persona = cli._load_persona(None)
+    system = cli._build_system_prompt(persona)
+    cli._run_interactive(persona, system, {}, None, None, "/tmp")
+
+    # /persona itself never builds an orchestrator; only the "hello" turn does.
+    assert len(captured) == 1
+    used_name, used_system = captured[0]
+    assert used_name == "Professional"
+    assert "Professional" in used_system
+
+
+def test_interactive_exits_gracefully_on_eof_at_continue_prompt(monkeypatch, capsys):
+    """Regression test: closed stdin right at the "continue?" prompt used to
+    propagate an unhandled EOFError instead of exiting like Ctrl-D does
+    everywhere else in the loop."""
+    monkeypatch.setattr(cli, "_build_orchestrator", lambda *a, **k: (_StubOrchestrator(), None, None))
+    # No third scripted response for "continue?" -> the fake input raises EOFError there.
+    monkeypatch.setattr("builtins.input", _scripted_input(["hello"]))
+
+    persona = cli._load_persona(None)
+    system = cli._build_system_prompt(persona)
+    result = cli._run_interactive(persona, system, {}, None, None, "/tmp")
+
+    assert result == 0
+    assert "goodnight" in capsys.readouterr().out

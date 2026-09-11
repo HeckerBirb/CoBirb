@@ -73,6 +73,11 @@ class Orchestrator:
         self.io = io
         self.crypto = crypto
         self.session = session
+        # Whether the most recent run()'s final answer was already streamed
+        # live to `io` (see run()'s docstring) — false until a run happens.
+        self.last_turn_streamed = False
+        # Overwritten by run() with the active persona name for this call.
+        self._stream_label = "assistant"
 
     # ------------------------------------------------------------------ #
     # Public run
@@ -93,14 +98,22 @@ class Orchestrator:
         tool calls (that reply becomes ``session.summary``), or after
         ``max_turns`` iterations if the model keeps calling tools without
         ever producing a final answer.
+
+        When the model and I/O adapter both support it, the model's reply is
+        streamed live to ``io`` as it arrives. ``self.last_turn_streamed`` is
+        set to whether the *final* answer specifically was already shown
+        this way, so a caller (e.g. the CLI) knows whether it still needs to
+        print ``session.summary`` itself or would just be duplicating output.
         """
         session = self._open_session(prompt, system, cwd, persona, session_path)
 
         context = self._build_context(session, cwd)
         logger.info("starting run; turns=%d", len(session.turns))
+        self.last_turn_streamed = False
+        self._stream_label = persona
 
         for _ in range(max_turns):
-            reply = self.model.chat(system, context, list(self.tools.values()))
+            reply, streamed = self._chat(system, context)
 
             # If the model wants to act, allow it (policy-gated) and keep going.
             tool_calls = self.model.parse_tool_calls(reply) if self.model.supports_tool_calling() else []
@@ -113,10 +126,43 @@ class Orchestrator:
             content = _materialize(reply)
             session.add(Turn(role="assistant", content=content))
             session.summary = content
+            self.last_turn_streamed = streamed and bool(content)
             return session
 
         session.summary = f"Stopped after {max_turns} turns without a final answer."
         return session
+
+    def _chat(self, system: str, context: str) -> tuple[str, bool]:
+        """Get the model's reply for this turn, streaming it live to ``io``
+        when the model supports streaming and an I/O adapter is attached.
+
+        A label (the active persona's name, set by ``run()``) is rendered
+        once, right before the first non-empty chunk of *this* turn — we
+        can't know in advance whether a turn will end up being a tool call
+        or the final answer, so any turn that produces visible content gets
+        labeled the same way a non-streaming reply would be.
+
+        Returns ``(content, streamed)``. Falls back to a single
+        non-streaming call otherwise (including for duck-typed test doubles
+        that don't implement ``supports_streaming``).
+        """
+        tools = list(self.tools.values())
+        supports_streaming = getattr(self.model, "supports_streaming", lambda: False)()
+        if self.io is None or not supports_streaming:
+            return _materialize(self.model.chat(system, context, tools)), False
+
+        chunks = []
+        label_shown = False
+        for chunk in self.model.chat(system, context, tools, stream=True):
+            if chunk:
+                if not label_shown:
+                    self.io.render(f"{self._stream_label}: ")
+                    label_shown = True
+                self.io.render(chunk)
+                chunks.append(chunk)
+        if chunks:
+            self.io.render("\n")
+        return "".join(chunks), True
 
     # ------------------------------------------------------------------ #
     # Session plumbing

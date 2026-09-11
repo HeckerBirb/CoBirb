@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source .venv/bin/activate)",
+      "Bash(curl -s --max-time 2 http://localhost:11434/api/tags)"
+    ]
+  }
+}

@@ -29,6 +29,22 @@ class _FakeResponse:
         return False
 
 
+class _FakeStreamResponse:
+    """Mimics an http.client.HTTPResponse's line-iteration for NDJSON bodies."""
+
+    def __init__(self, chunks: list[dict]):
+        self._lines = [json.dumps(c).encode("utf-8") + b"\n" for c in chunks]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def __iter__(self):
+        return iter(self._lines)
+
+
 class _StubTool:
     name = "read_file"
 
@@ -95,3 +111,56 @@ def test_name_reflects_configured_model():
 def test_supports_tool_calling_requires_model():
     assert LocalModelProvider(model="llama3.1").supports_tool_calling() is True
     assert LocalModelProvider().supports_tool_calling() is False
+
+
+def test_supports_streaming_is_true():
+    assert LocalModelProvider(model="llama3.1").supports_streaming() is True
+
+
+def test_stream_chat_yields_content_incrementally(monkeypatch):
+    chunks = [
+        {"message": {"role": "assistant", "content": "Hel"}, "done": False},
+        {"message": {"role": "assistant", "content": "lo"}, "done": False},
+        {"message": {"role": "assistant", "content": ""}, "done": True},
+    ]
+
+    def fake_urlopen(request, timeout=None):
+        return _FakeStreamResponse(chunks)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    provider = LocalModelProvider(model="llama3.1")
+    pieces = list(provider.chat("system", "context", stream=True))
+    assert pieces == ["Hel", "lo"]
+
+
+def test_stream_chat_captures_tool_calls_from_final_chunk(monkeypatch):
+    chunks = [
+        {"message": {"role": "assistant", "content": ""}, "done": False},
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"function": {"name": "read_file", "arguments": {"path": "a.txt"}}}],
+            },
+            "done": True,
+        },
+    ]
+
+    def fake_urlopen(request, timeout=None):
+        return _FakeStreamResponse(chunks)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    provider = LocalModelProvider(model="llama3.1")
+    reply = provider.chat("system", "context", [_StubTool()], stream=True)
+    list(reply)  # fully consume the generator so tool calls are captured
+    assert provider.parse_tool_calls("") == [ToolCall(name="read_file", arguments={"path": "a.txt"})]
+
+
+def test_stream_chat_wraps_connection_errors(monkeypatch):
+    def fake_urlopen(request, timeout=None):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    provider = LocalModelProvider(model="llama3.1")
+    with pytest.raises(RuntimeError, match="Could not reach the model provider"):
+        list(provider.chat("system", "context", stream=True))

@@ -177,3 +177,121 @@ def test_loader_registers_core_plugins():
 
     discovered, errors = load_plugins()
     assert discovered  # core plugins are present
+
+
+class _StreamingModel(_DummyModel):
+    """A stub model that streams its reply as separate chunks."""
+
+    def __init__(self, chunks):
+        super().__init__(reply="".join(chunks))
+        self._chunks = chunks
+
+    def chat(self, system, context, tools=None, *, stream=False):
+        if stream:
+            return iter(self._chunks)
+        return self.reply
+
+    def supports_streaming(self):
+        return True
+
+
+class _RecordingIO:
+    def __init__(self):
+        self.rendered = []
+
+    def render(self, text):
+        self.rendered.append(text)
+
+
+def test_run_streams_live_through_io_when_supported():
+    io = _RecordingIO()
+    orchestrator = Orchestrator(
+        model=_StreamingModel(["Hel", "lo", " there"]),
+        tools={},
+        policy=Policy(),
+        io=io,
+    )
+    session = orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
+
+    # A persona label is rendered once, before the first chunk, then each
+    # chunk is rendered live in order as it arrives, then a trailing newline.
+    assert io.rendered == ["noah: ", "Hel", "lo", " there", "\n"]
+    # The final turn still gets the fully assembled content.
+    assert session.turns[-1].content == "Hello there"
+    assert session.summary == "Hello there"
+
+
+def test_run_does_not_stream_when_io_is_missing():
+    """No io adapter attached: falls back to a single non-streaming call,
+    even though the model advertises streaming support."""
+    orchestrator = Orchestrator(
+        model=_StreamingModel(["Hel", "lo"]),
+        tools={},
+        policy=Policy(),
+    )
+    session = orchestrator.run("hi", "sys", cwd="/tmp")
+    assert session.turns[-1].content == "Hello"
+
+
+def test_run_does_not_stream_for_duck_typed_model_without_supports_streaming():
+    """A model double that doesn't implement supports_streaming() at all
+    (like the plain _DummyModel stubs elsewhere in this suite) must not
+    crash the orchestrator with an AttributeError."""
+    io = _RecordingIO()
+    orchestrator = Orchestrator(
+        model=_DummyModel(reply="plain reply"),
+        tools={},
+        policy=Policy(),
+        io=io,
+    )
+    session = orchestrator.run("hi", "sys", cwd="/tmp")
+    assert session.turns[-1].content == "plain reply"
+    assert io.rendered == []
+
+
+def test_last_turn_streamed_flag_true_when_final_answer_was_streamed():
+    """A caller (the CLI) needs to know whether the final answer was already
+    shown live, so it doesn't print session.summary a second time."""
+    io = _RecordingIO()
+    orchestrator = Orchestrator(
+        model=_StreamingModel(["Hello"]),
+        tools={},
+        policy=Policy(),
+        io=io,
+    )
+    orchestrator.run("hi", "sys", cwd="/tmp")
+    assert orchestrator.last_turn_streamed is True
+
+
+def test_last_turn_streamed_flag_false_without_io():
+    orchestrator = Orchestrator(
+        model=_StreamingModel(["Hello"]),
+        tools={},
+        policy=Policy(),
+    )
+    orchestrator.run("hi", "sys", cwd="/tmp")
+    assert orchestrator.last_turn_streamed is False
+
+
+def test_last_turn_streamed_flag_false_when_max_turns_exhausted():
+    """The synthetic "stopped after N turns" message is never streamed (it's
+    set directly, not via a model reply), so the flag must be false even
+    though earlier tool-calling turns in the same run may have streamed."""
+    io = _RecordingIO()
+
+    class _AlwaysToolCallingStreamingModel(_StreamingModel):
+        def supports_tool_calling(self):
+            return True
+
+        def parse_tool_calls(self, reply):
+            return [ToolCall(name="nonexistent_tool", arguments={})]
+
+    orchestrator = Orchestrator(
+        model=_AlwaysToolCallingStreamingModel([""]),
+        tools={},
+        policy=Policy(),
+        io=io,
+    )
+    session = orchestrator.run("loop", "sys", cwd="/tmp", max_turns=2)
+    assert session.summary == "Stopped after 2 turns without a final answer."
+    assert orchestrator.last_turn_streamed is False

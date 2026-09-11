@@ -17,7 +17,10 @@ class TerminalIO(I_OAdapter):
         return "terminal"
 
     def render(self, text: str) -> None:
-        print(text)
+        # No trailing newline: the orchestrator calls this once per streamed
+        # token, so a forced newline here would put every token on its own
+        # line. Callers that want a line break include it in ``text``.
+        print(text, end="", flush=True)
 
     def listen(self) -> str | None:
         """v0.1.0 input path is the terminal itself; no extra channel to listen on."""
