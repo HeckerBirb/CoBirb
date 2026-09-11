@@ -39,6 +39,58 @@ def _extract_tool_calls(message: dict[str, Any]) -> list[ToolCall]:
     ]
 
 
+def _build_messages(system: str, context: str) -> list[dict[str, Any]]:
+    """Turn the orchestrator's JSON-encoded turn history into a proper
+    multi-turn Ollama ``messages`` array, instead of flattening the whole
+    conversation into a single opaque "user" message.
+
+    That flattening was the root cause of the tool-calling loop never
+    converging: a "tool" result appeared out of nowhere, with no preceding
+    assistant message announcing the tool call it answers, so the model had
+    no signal a prior call was already satisfied and would just repeat it.
+    ``context`` is documented (PLUGIN_SPEC.md §3.1) as "a compact string...
+    the provider is responsible for how it packs it" — here that packing is
+    JSON, parsed back into role-tagged messages.
+    """
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    try:
+        turns = json.loads(context) if context else []
+    except (json.JSONDecodeError, TypeError):
+        turns = None
+
+    if not isinstance(turns, list):
+        # Not the JSON shape this provider expects (e.g. a hand-built plain
+        # string context) — fall back to a single opaque user message rather
+        # than dropping it, so the provider still works with any string.
+        if context:
+            messages.append({"role": "user", "content": context})
+        return messages
+
+    for turn in turns:
+        role = turn.get("role", "user")
+        content = turn.get("content", "")
+        tool_use = turn.get("tool_use")
+        if role == "assistant" and tool_use:
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": [
+                        {"function": {"name": tu["name"], "arguments": tu.get("arguments", {})}}
+                        for tu in tool_use
+                    ],
+                }
+            )
+        elif role == "tool":
+            message: dict[str, Any] = {"role": "tool", "content": content}
+            if tool_use:
+                message["tool_name"] = tool_use[0].get("name", "")
+            messages.append(message)
+        else:
+            messages.append({"role": role if role == "assistant" else "user", "content": content})
+    return messages
+
+
 class LocalModelProvider(ModelProvider):
     """Chats with a local Ollama server.
 
@@ -91,10 +143,7 @@ class LocalModelProvider(ModelProvider):
             )
         payload: dict[str, Any] = {
             "model": self._model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": context},
-            ],
+            "messages": _build_messages(system, context),
             "stream": stream,
         }
         if tools:

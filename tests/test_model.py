@@ -11,7 +11,7 @@ import urllib.error
 
 import pytest
 
-from cobirb.plugins.core.model import LocalModelProvider
+from cobirb.plugins.core.model import LocalModelProvider, _build_messages
 from cobirb.typing.spi import ToolCall
 
 
@@ -164,3 +164,62 @@ def test_stream_chat_wraps_connection_errors(monkeypatch):
     provider = LocalModelProvider(model="llama3.1")
     with pytest.raises(RuntimeError, match="Could not reach the model provider"):
         list(provider.chat("system", "context", stream=True))
+
+
+# --------------------------------------------------------------------------- #
+# _build_messages: turns the orchestrator's JSON turn history into a proper
+# multi-turn Ollama messages array (the fix for the tool-calling loop that
+# never converged — a tool result with no preceding assistant tool-call
+# message gave the model no signal a call was already satisfied).
+# --------------------------------------------------------------------------- #
+def test_build_messages_empty_context_is_just_system():
+    assert _build_messages("sys", "") == [{"role": "system", "content": "sys"}]
+    assert _build_messages("sys", "[]") == [{"role": "system", "content": "sys"}]
+
+
+def test_build_messages_plain_user_turn():
+    context = json.dumps([{"role": "user", "content": "hello", "tool_use": None}])
+    messages = _build_messages("sys", context)
+    assert messages == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hello"},
+    ]
+
+
+def test_build_messages_reconstructs_tool_call_and_result():
+    context = json.dumps(
+        [
+            {"role": "user", "content": "read a.txt", "tool_use": None},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_use": [{"name": "read_file", "arguments": {"path": "a.txt"}}],
+            },
+            {
+                "role": "tool",
+                "content": "file contents",
+                "tool_use": [{"name": "read_file", "arguments": {"path": "a.txt"}}],
+            },
+        ]
+    )
+    messages = _build_messages("sys", context)
+    assert messages == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "read a.txt"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"function": {"name": "read_file", "arguments": {"path": "a.txt"}}}],
+        },
+        {"role": "tool", "content": "file contents", "tool_name": "read_file"},
+    ]
+
+
+def test_build_messages_falls_back_for_non_json_context():
+    """A plain (non-JSON) string context must still work as an opaque user
+    message, rather than crashing or silently dropping it."""
+    messages = _build_messages("sys", "just a plain string, not JSON")
+    assert messages == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "just a plain string, not JSON"},
+    ]

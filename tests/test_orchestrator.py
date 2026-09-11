@@ -1,6 +1,8 @@
 """Tests for the orchestrator and the agent loop."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from cobirb.orchestrator import Orchestrator, _materialize, build_default_policy
@@ -99,8 +101,13 @@ def test_run_stops_after_max_turns_when_model_never_finishes():
         policy=Policy(),
     )
     session = orchestrator.run("loop", "sys", cwd="/tmp", max_turns=3)
-    # 1 user turn + 3 tool-dispatch turns (each denied: unknown tool) = 4.
-    assert len(session.turns) == 4
+    # 1 user turn + 3 x (assistant turn announcing the call, tool turn with
+    # the denied result) = 1 + 3*2 = 7. The assistant turn is recorded so a
+    # provider can see the model's own tool-call decision, not just its
+    # result — see the orchestrator.run() docstring.
+    assert len(session.turns) == 7
+    roles = [t.role for t in session.turns]
+    assert roles == ["user", "assistant", "tool", "assistant", "tool", "assistant", "tool"]
     assert session.summary == "Stopped after 3 turns without a final answer."
 
 
@@ -116,6 +123,63 @@ def test_run_tool_dispatch(tmp_path):
     )
     session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
     assert any(turn.role == "tool" for turn in session.turns)
+
+
+def test_tool_call_and_result_both_recorded_with_matching_tool_use(tmp_path):
+    """Regression test for the tool-calling loop that never converged: the
+    model's *decision* to call a tool must be recorded as its own assistant
+    turn (with tool_use), immediately before the tool's result turn — not
+    just the result appearing with nothing announcing it."""
+    (tmp_path / "a.txt").write_text("hello")
+    policy = Policy()
+    policy.allow("read_file")
+    registry = ToolRegistry(str(tmp_path))
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
+        tools={t.name: t for t in registry.values()},
+        policy=policy,
+    )
+    session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
+
+    roles = [t.role for t in session.turns]
+    assert roles == ["user", "assistant", "tool", "assistant"]
+    call_turn, tool_turn = session.turns[1], session.turns[2]
+    expected_tool_use = [{"name": "read_file", "arguments": {"path": str(tmp_path / "a.txt")}}]
+    assert call_turn.tool_use == expected_tool_use
+    assert tool_turn.tool_use == expected_tool_use
+
+
+def test_context_passed_to_model_encodes_full_turn_structure(tmp_path):
+    """The context string handed to the model on the turn *after* a tool
+    call must be JSON that a provider can turn into a proper multi-turn
+    messages array (see LocalModelProvider._build_messages) — not a
+    flattened blob where a tool result appears with no assistant turn
+    announcing it."""
+    (tmp_path / "a.txt").write_text("hello")
+    policy = Policy()
+    policy.allow("read_file")
+    registry = ToolRegistry(str(tmp_path))
+
+    captured_contexts = []
+
+    class _CapturingToolCallModel(_ToolCallModel):
+        def chat(self, system, context, tools=None, *, stream=False):
+            captured_contexts.append(context)
+            return super().chat(system, context, tools, stream=stream)
+
+    orchestrator = Orchestrator(
+        model=_CapturingToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
+        tools={t.name: t for t in registry.values()},
+        policy=policy,
+    )
+    orchestrator.run("read file", "sys", cwd=str(tmp_path))
+
+    assert len(captured_contexts) == 2
+    turns = json.loads(captured_contexts[1])
+    assert [t["role"] for t in turns] == ["user", "assistant", "tool"]
+    expected_tool_use = [{"name": "read_file", "arguments": {"path": str(tmp_path / "a.txt")}}]
+    assert turns[1]["tool_use"] == expected_tool_use
+    assert turns[2]["tool_use"] == expected_tool_use
 
 
 def test_run_tool_dispatch_denied(tmp_path):

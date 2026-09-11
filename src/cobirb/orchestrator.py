@@ -107,19 +107,35 @@ class Orchestrator:
         """
         session = self._open_session(prompt, system, cwd, persona, session_path)
 
-        context = self._build_context(session, cwd)
+        # cwd is per-run metadata, not conversation history, so it rides on
+        # the system prompt rather than being spliced into the turn history.
+        system_with_cwd = f"{system}\n\nWorking directory: {cwd}"
+        context = self._build_context(session)
         logger.info("starting run; turns=%d", len(session.turns))
         self.last_turn_streamed = False
         self._stream_label = persona
 
         for _ in range(max_turns):
-            reply, streamed = self._chat(system, context)
+            reply, streamed = self._chat(system_with_cwd, context)
 
             # If the model wants to act, allow it (policy-gated) and keep going.
             tool_calls = self.model.parse_tool_calls(reply) if self.model.supports_tool_calling() else []
             if tool_calls:
+                # Record the model's own decision to call these tools *before*
+                # executing them, as its own assistant turn. Without this, a
+                # "tool" result turn appears in the history with no assistant
+                # turn requesting it — from the model's perspective on the next
+                # call, no tool call ever happened, so it has no signal that
+                # this one was already satisfied and may just repeat it.
+                session.add(
+                    Turn(
+                        role="assistant",
+                        content=_materialize(reply),
+                        tool_use=[{"name": c.name, "arguments": c.arguments} for c in tool_calls],
+                    )
+                )
                 self._execute_tool_calls(tool_calls)
-                context = self._build_context(session, cwd)
+                context = self._build_context(session)
                 continue
 
             # No tool calls: this is the model's final answer for this turn.
@@ -179,11 +195,16 @@ class Orchestrator:
         self.session.session.add(Turn(role="user", content=prompt))
         return self.session.session
 
-    def _build_context(self, session: Session, cwd: str) -> str:
-        parts = [f"Working directory: {cwd}", ""]
-        for turn in session.turns:
-            parts.append(f"{turn.role}: {turn.content}")
-        return "\n".join(parts)
+    def _build_context(self, session: Session) -> str:
+        """Serialize the turn history as JSON (role, content, tool_use per
+        turn) so a provider can reconstruct a proper multi-turn messages
+        array — see ``LocalModelProvider._build_messages`` — instead of
+        every turn being flattened into a single opaque blob, which gave
+        tool-calling models no reliable signal that a prior tool call was
+        already satisfied.
+        """
+        turns = [{"role": t.role, "content": t.content, "tool_use": t.tool_use} for t in session.turns]
+        return json.dumps(turns)
 
     # ------------------------------------------------------------------ #
     # Tool dispatch (policy-gated)
@@ -196,21 +217,30 @@ class Orchestrator:
         tool_name = call.name
         arguments = call.arguments
         session = self.session.session
+        # Tags this result with the call it answers, so a provider building
+        # a proper messages array can label the "tool" message accordingly.
+        tool_use = [{"name": tool_name, "arguments": arguments}]
 
         # Fail-closed: a denied or unknown tool is recorded in the transcript
         # and audited, never allowed to crash the run.
         if not self.policy.is_allowed(tool_name, arguments):
-            session.add(Turn(role="tool", content=f"Permission denied: tool '{tool_name}' is not permitted."))
+            session.add(
+                Turn(
+                    role="tool",
+                    content=f"Permission denied: tool '{tool_name}' is not permitted.",
+                    tool_use=tool_use,
+                )
+            )
             return
 
         tool = self.tools.get(tool_name)
         if tool is None:
-            session.add(Turn(role="tool", content=f"Unknown tool '{tool_name}'."))
+            session.add(Turn(role="tool", content=f"Unknown tool '{tool_name}'.", tool_use=tool_use))
             return
 
         self.policy.log(tool_name, arguments, cwd=self.session.working_dir)
         result = tool.execute(arguments)
-        session.add(Turn(role="tool", content=result.content))
+        session.add(Turn(role="tool", content=result.content, tool_use=tool_use))
 
     # ------------------------------------------------------------------ #
     # Convenience: register a fresh session path
