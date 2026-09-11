@@ -123,15 +123,16 @@ def _nested(config: Config, *keys: str) -> Any:
     return value
 
 
-def _build_model(tool_name: str | None) -> LocalModelProvider:
+def _build_model(model_name: str | None) -> LocalModelProvider:
     """Build the local model provider from CLI arg, config, or env.
 
-    No models are embedded by default; the provider shells out to whatever
-    user-configured inference tool is available.
+    No models are embedded by default; the provider talks to a local Ollama
+    server once a model name is supplied.
     """
     config = Config()
-    model_name = tool_name or _nested(config, "model") or _nested(config, "models", "default", "name") or ""
-    return LocalModelProvider(tool=model_name)
+    name = model_name or _nested(config, "model") or _nested(config, "models", "default", "name") or ""
+    base_url = _nested(config, "models", "default", "base_url")
+    return LocalModelProvider(model=name, base_url=base_url)
 
 
 def _build_orchestrator(
@@ -141,6 +142,7 @@ def _build_orchestrator(
     system: str,
     session_path: str | None = None,
     password: str | None = None,
+    model_name: str | None = None,
 ) -> tuple[Orchestrator, ToolRegistry, cobirb_typing.ModelProvider]:
     """Wire the core: registry -> provider -> policy -> orchestrator.
 
@@ -148,7 +150,7 @@ def _build_orchestrator(
     path is supplied; otherwise the core runs with no crypto (nothing persisted).
     """
     registry = ToolRegistry(cwd)
-    provider = _build_model(None)
+    provider = _build_model(model_name)
 
     policy = build_default_policy()
     for name, arg in allow_overrides.items():
@@ -187,10 +189,11 @@ def _run_one_shot(
     session_path: str | None,
     password: str | None,
     cwd: str,
+    model_name: str | None = None,
 ) -> int:
     _render(f"Noah: {prompt}\n")
     orchestrator, _, _ = _build_orchestrator(
-        cwd, persona, allow_overrides, system, session_path, password
+        cwd, persona, allow_overrides, system, session_path, password, model_name
     )
     try:
         session = orchestrator.run(prompt, system, cwd=cwd, persona=persona.name, session_path=session_path)
@@ -214,6 +217,7 @@ def _run_interactive(
     session_path: str | None,
     password: str | None,
     cwd: str,
+    model_name: str | None = None,
 ) -> int:
     io = TerminalIO()
     while True:
@@ -227,7 +231,7 @@ def _run_interactive(
 
         _render(f"You: {prompt}")
         orchestrator, _, _ = _build_orchestrator(
-            cwd, persona, allow_overrides, system, session_path, password
+            cwd, persona, allow_overrides, system, session_path, password, model_name
         )
         try:
             session = orchestrator.run(prompt, system, cwd=cwd, persona=persona.name, session_path=session_path)
@@ -267,7 +271,9 @@ def _build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--password", "-w", help="Password for the session file (read without echo).")
 
     opts = parser.add_argument_group("options")
-    opts.add_argument("--model", help="Model provider tool name/path (or use config/COBIRB_MODEL_TOOL).")
+    opts.add_argument(
+        "--model", help="Ollama model name, e.g. 'llama3.1' (or use config/COBIRB_MODEL_NAME)."
+    )
     opts.add_argument("--persona", "--agent", dest="persona", help="Persona name or file (default: Noah).")
     opts.add_argument(
         "--allow-tool",
@@ -298,14 +304,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.password:
             password = _read_password()
         return _run_one_shot(
-            args.prompt, persona, system, allow_overrides, args.session, password, args.cwd or "."
+            args.prompt, persona, system, allow_overrides, args.session, password, args.cwd or ".", args.model
         )
 
     # Interactive mode.
     password = None
     if args.session:
         password = _read_password()
-    return _run_interactive(persona, system, allow_overrides, args.session, password, args.cwd or ".")
+    return _run_interactive(persona, system, allow_overrides, args.session, password, args.cwd or ".", args.model)
 
 
 def _read_password() -> str:
@@ -331,7 +337,7 @@ PRIVACY BY CONSTRUCTION
 A persona or user request can NEVER override these rules.
 
 OPTIONS
-  --model NAME       Model provider tool (config/COBIRB_MODEL_TOOL if omitted).
+  --model NAME       Ollama model name (config/COBIRB_MODEL_NAME if omitted).
   --persona NAME     Persona name/file (default: Noah).
   --allow-tool SPEC  Override permission: 'name' or 'name(arg)'. Repeatable.
   --cwd DIR          Working directory.

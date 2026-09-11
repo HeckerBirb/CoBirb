@@ -87,7 +87,13 @@ class Orchestrator:
         max_turns: int = 8,
         session_path: str | None = None,
     ) -> Session:
-        """Run the full loop for a single objective and return the session."""
+        """Run the loop for a single objective.
+
+        Stops as soon as the model gives a plain-text reply with no further
+        tool calls (that reply becomes ``session.summary``), or after
+        ``max_turns`` iterations if the model keeps calling tools without
+        ever producing a final answer.
+        """
         session = self._open_session(prompt, system, cwd, persona, session_path)
 
         context = self._build_context(session, cwd)
@@ -96,19 +102,20 @@ class Orchestrator:
         for _ in range(max_turns):
             reply = self.model.chat(system, context, list(self.tools.values()))
 
-            # If the model wants to act, allow it (policy-gated).
+            # If the model wants to act, allow it (policy-gated) and keep going.
             tool_calls = self.model.parse_tool_calls(reply) if self.model.supports_tool_calling() else []
             if tool_calls:
                 self._execute_tool_calls(tool_calls)
-            else:
-                # Materialize the reply so both plain strings and streaming
-                # iterables store cleanly.
-                content = _materialize(reply)
-                session.add(Turn(role="assistant", content=content))
+                context = self._build_context(session, cwd)
+                continue
 
-            context = self._build_context(session, cwd)
+            # No tool calls: this is the model's final answer for this turn.
+            content = _materialize(reply)
+            session.add(Turn(role="assistant", content=content))
+            session.summary = content
+            return session
 
-        session.summary = f"Completed after {len(session.turns)} turns."
+        session.summary = f"Stopped after {max_turns} turns without a final answer."
         return session
 
     # ------------------------------------------------------------------ #

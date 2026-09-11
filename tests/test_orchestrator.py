@@ -67,24 +67,41 @@ def test_run_returns_session_with_turns():
     assert session.turns[-1].role == "assistant"
 
 
-def test_run_stops_after_max_turns():
+def test_run_returns_immediately_on_first_plain_reply():
+    """A model that never calls tools should stop after one assistant turn,
+    not burn through the whole max_turns budget."""
+    orchestrator = Orchestrator(
+        model=_DummyModel(reply="the final answer"),
+        tools={},
+        policy=Policy(),
+    )
+    session = orchestrator.run("do something", "sys", cwd="/tmp", max_turns=8)
+    # 1 user turn + 1 assistant turn = 2, even though max_turns is much higher.
+    assert len(session.turns) == 2
+    assert session.summary == "the final answer"
+
+
+def test_run_stops_after_max_turns_when_model_never_finishes():
+    """A model that always calls tools (and never gives a plain answer) must
+    not loop forever; max_turns is the safety cap."""
     from cobirb.orchestrator import Orchestrator
 
-    class LoopingModel(_DummyModel):
-        def parse_tool_calls(self, reply):
-            return []
+    class AlwaysCallingModel(_DummyModel):
+        def supports_tool_calling(self):
+            return True
 
-        def chat(self, *args, **kwargs):
-            return "no final reply here"
+        def parse_tool_calls(self, reply):
+            return [ToolCall(name="nonexistent_tool", arguments={})]
 
     orchestrator = Orchestrator(
-        model=LoopingModel(),
+        model=AlwaysCallingModel(),
         tools={},
         policy=Policy(),
     )
     session = orchestrator.run("loop", "sys", cwd="/tmp", max_turns=3)
-    # 1 user turn + 3 assistant turns = 4
+    # 1 user turn + 3 tool-dispatch turns (each denied: unknown tool) = 4.
     assert len(session.turns) == 4
+    assert session.summary == "Stopped after 3 turns without a final answer."
 
 
 def test_run_tool_dispatch(tmp_path):

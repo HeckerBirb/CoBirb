@@ -1,46 +1,71 @@
-"""Core model provider adapter.
+"""Core model provider: a local Ollama-compatible chat backend.
 
-CoBirb ships **no models** and makes **no outbound calls by default**. This
-provider simply shells out to whatever provider the user configured (Ollama,
-an OpenAI-compatible endpoint, etc.). It is therefore a *local adapter* that
-delegates inference to a tool the user has opted into. See DESIGN.md §6.3.
+CoBirb ships **no models** and makes **no outbound network calls by default**.
+This provider only ever talks to a *local* Ollama server (default
+``http://localhost:11434``, or wherever the user points it) and only once the
+user has explicitly named a model — via ``--model``, ``COBIRB_MODEL_NAME``, or
+``models.default.name`` in config. See DESIGN.md §6.3.
 """
 from __future__ import annotations
 
+import json
 import os
+import urllib.error
+import urllib.request
 from typing import Any, Iterable, Optional
 
-from ...typing.spi import ModelProvider, ToolCall, ToolResult
-from .tools import ToolRegistry, _first_word
+from ...typing.spi import ModelProvider, Tool, ToolCall
+
+DEFAULT_BASE_URL = "http://localhost:11434"
+
+
+def _tool_schema(tool: Tool) -> dict[str, Any]:
+    """Convert a CoBirb Tool into the function-calling schema Ollama expects."""
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description(),
+            "parameters": tool.parameters(),
+        },
+    }
 
 
 class LocalModelProvider(ModelProvider):
-    """A model provider that delegates to a user-configured inference tool.
+    """Chats with a local Ollama server.
 
-    The tool name/path is configured by the user (e.g. an Ollama chat endpoint,
-    or an OpenAI-compatible API). No models are embedded here.
+    No inference happens unless a model name is supplied; there is no
+    embedded model and no default remote endpoint.
     """
 
-    def __init__(self, tool: str = "", cwd: str | None = None) -> None:
-        self._tool = tool or os.environ.get("COBIRB_MODEL_TOOL", "")
+    def __init__(self, model: str = "", base_url: str | None = None, cwd: str | None = None) -> None:
+        self._model = model or os.environ.get("COBIRB_MODEL_NAME", "")
+        self._base_url = (base_url or os.environ.get("COBIRB_OLLAMA_URL") or DEFAULT_BASE_URL).rstrip("/")
         self.cwd = cwd or os.getcwd()
-        self._registry = ToolRegistry(self.cwd)
+        # Ollama returns structured tool calls alongside the assistant message
+        # in the same response; stash them here so parse_tool_calls() doesn't
+        # need to re-parse text or make a second round trip.
+        self._last_tool_calls: list[ToolCall] = []
 
     def name(self) -> str:
-        return self._tool or "(unconfigured)"
+        return f"ollama/{self._model}" if self._model else "(unconfigured)"
 
-    def _invoke(self, system: str, context: str, tools: Optional[list[Tool]]) -> str:
-        if not self._tool:
+    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        data = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self._base_url}{path}",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
             raise RuntimeError(
-                "No model provider configured. Set COBIRB_MODEL_TOOL or configure a model "
-                "in your CoBirb config (see DESIGN.md §6.3). No models are embedded by default."
-            )
-        # The actual inference call is performed by the configured tool. The exact
-        # payload is provider-specific; this is where a concrete provider plugin
-        # would inject its request/response logic.
-        return self._registry.get(self._tool.split()[0]).execute(
-            {"prompt": system + "\n" + context, "tools": [t.name for t in (tools or [])]}
-        ).content
+                f"Could not reach the model provider at {self._base_url}: {exc}. "
+                "Is Ollama running? (see DESIGN.md §6.3)"
+            ) from exc
 
     def chat(
         self,
@@ -50,23 +75,45 @@ class LocalModelProvider(ModelProvider):
         *,
         stream: bool = False,
     ) -> "Iterable[str] | str":
+        if not self._model:
+            raise RuntimeError(
+                "No model configured. Set --model, COBIRB_MODEL_NAME, or "
+                "models.default.name in your CoBirb config. No models are "
+                "embedded by default (see DESIGN.md §6.3)."
+            )
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": context},
+            ],
+            "stream": False,
+        }
+        if tools:
+            payload["tools"] = [_tool_schema(t) for t in tools]
+
+        response = self._post("/api/chat", payload)
+        message = response.get("message", {})
+        self._last_tool_calls = [
+            ToolCall(name=call["function"]["name"], arguments=call["function"].get("arguments", {}) or {})
+            for call in (message.get("tool_calls") or [])
+        ]
+        content = message.get("content", "")
         if stream:
-            # Streaming is delegated to the provider tool; yield tokens as it returns.
-            content = self._invoke(system, context, tools)
-            for token in content.splitlines():
-                yield token
-        else:
-            yield self._invoke(system, context, tools)
+            return iter([content])
+        return content
 
     def parse_tool_calls(self, raw: str) -> list[ToolCall]:
-        # Concrete providers parse tool-call JSON into ToolCall objects.
-        return []
+        return self._last_tool_calls
 
     def supports_tool_calling(self) -> bool:
-        return bool(self._tool)
+        return bool(self._model)
 
     def supports_streaming(self) -> bool:
-        return True
+        # Ollama supports true incremental streaming, but this provider does
+        # not implement it yet (see todo-list.md); chat(stream=True) still
+        # works, it just returns the full response as a single chunk.
+        return False
 
     def supports_vision(self) -> bool:
         return False
