@@ -1,0 +1,106 @@
+"""Tests for the layered user/repo config reader.
+
+Tests go through Config's public interface (construction + get/set/data)
+with real temp JSON files, not the private _load/_merge helpers directly —
+those are implementation details Config could refactor away without its
+observable behavior (what a caller actually sees) changing at all.
+"""
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from cobirb.config import Config
+
+
+def _write_json(path, data):
+    path.write_text(json.dumps(data))
+
+
+def test_missing_files_yield_an_empty_config(tmp_path):
+    config = Config(user_path=str(tmp_path / "no-user.json"), repo_path=str(tmp_path / "no-repo.json"))
+    assert config.data == {}
+    assert config.get("anything") is None
+    assert config.get("anything", default="fallback") == "fallback"
+
+
+def test_user_config_is_loaded_when_repo_config_is_absent(tmp_path):
+    user_path = tmp_path / "user.json"
+    _write_json(user_path, {"model": "llama3.1"})
+    config = Config(user_path=str(user_path), repo_path=str(tmp_path / "no-repo.json"))
+    assert config.get("model") == "llama3.1"
+
+
+def test_repo_config_overrides_user_config_for_the_same_key(tmp_path):
+    user_path, repo_path = tmp_path / "user.json", tmp_path / "repo.json"
+    _write_json(user_path, {"model": "llama3.1", "persona": "noah"})
+    _write_json(repo_path, {"model": "qwen2.5"})
+
+    config = Config(user_path=str(user_path), repo_path=str(repo_path))
+
+    assert config.get("model") == "qwen2.5"  # repo wins on conflict
+    assert config.get("persona") == "noah"  # untouched sibling key survives
+
+
+def test_nested_config_merges_rather_than_replacing_whole_subtree(tmp_path):
+    """A repo config narrowly overriding one nested key must not wipe out
+    sibling keys the user set at the same nesting level — a naive
+    dict.update() at the top level would silently drop them."""
+    user_path, repo_path = tmp_path / "user.json", tmp_path / "repo.json"
+    _write_json(user_path, {"models": {"default": {"name": "llama3.1", "base_url": "http://x"}}})
+    _write_json(repo_path, {"models": {"default": {"name": "qwen2.5"}}})
+
+    config = Config(user_path=str(user_path), repo_path=str(repo_path))
+
+    assert config.get("models", "default", "name") == "qwen2.5"
+    assert config.get("models", "default", "base_url") == "http://x"
+
+
+def test_get_returns_default_for_a_path_that_does_not_exist(tmp_path):
+    user_path = tmp_path / "user.json"
+    _write_json(user_path, {"model": "llama3.1"})
+    config = Config(user_path=str(user_path), repo_path=str(tmp_path / "no-repo.json"))
+
+    assert config.get("does", "not", "exist") is None
+    assert config.get("does", "not", "exist", default="x") == "x"
+
+
+def test_get_stops_cleanly_when_descending_through_a_non_dict_value(tmp_path):
+    """"model" is a plain string; asking for a key underneath it must
+    return the default, not raise."""
+    user_path = tmp_path / "user.json"
+    _write_json(user_path, {"model": "llama3.1"})
+    config = Config(user_path=str(user_path), repo_path=str(tmp_path / "no-repo.json"))
+
+    assert config.get("model", "nested", "deeper") is None
+
+
+def test_set_creates_intermediate_dicts_as_needed():
+    config = Config(user_path="/no/such/file.json", repo_path="/no/such/other.json")
+    config.set("models", "default", "name", value="llama3.1")
+    assert config.get("models", "default", "name") == "llama3.1"
+
+
+def test_set_then_get_round_trips_a_top_level_value():
+    config = Config(user_path="/no/such/file.json", repo_path="/no/such/other.json")
+    config.set("persona", value="professional")
+    assert config.get("persona") == "professional"
+
+
+def test_set_overwrites_a_non_dict_value_that_is_in_the_way():
+    config = Config(user_path="/no/such/file.json", repo_path="/no/such/other.json")
+    config.set("a", value="just a string")
+    config.set("a", "b", value="x")
+    assert config.get("a", "b") == "x"
+
+
+def test_malformed_json_config_file_raises_rather_than_being_silently_ignored(tmp_path):
+    """A config file that exists but fails to parse should fail loudly
+    (surfacing the user's typo), not silently behave like an empty/missing
+    config — that would hide a real mistake from them."""
+    user_path = tmp_path / "user.json"
+    user_path.write_text("{not valid json")
+
+    with pytest.raises(json.JSONDecodeError):
+        Config(user_path=str(user_path), repo_path=str(tmp_path / "no-repo.json"))

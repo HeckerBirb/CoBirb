@@ -75,7 +75,7 @@ def _parse_allow_tools(spec: str) -> dict[str, str]:
             continue
         if "(" in entry:
             name, _, arg = entry.partition("(")
-            allowed[name.strip()] = arg.strip()
+            allowed[name.strip()] = arg.strip().rstrip(")").strip()
         else:
             allowed[entry] = ""
     return allowed
@@ -349,10 +349,13 @@ def main(argv: list[str] | None = None) -> int:
     persona = _load_persona(persona_name)
     system = _build_system_prompt(persona)
 
-    # One-shot mode: prompt takes priority; a session password is optional.
+    # One-shot mode: prompt takes priority. A session path always needs a
+    # password to encrypt to (matching interactive mode below) — without
+    # this, --session without --password would run the whole task and only
+    # then crash trying to encrypt with a None password when saving.
     if args.prompt is not None:
         password = None
-        if args.password:
+        if args.session or args.password:
             password = _read_password()
         return _run_one_shot(
             args.prompt, persona, system, allow_overrides, args.session, password, args.cwd or ".", args.model

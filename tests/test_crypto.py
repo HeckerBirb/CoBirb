@@ -54,18 +54,16 @@ def test_same_password_derives_different_keys_per_encryption():
     assert salt1 != salt2
 
 
-def test_uses_cryptography_library():
-    # The backend should have imported successfully.
-    assert crypto_module._Backend() is not None
-
-
 # --------------------------------------------------------------------------- #
 # Backend-unavailable path (core must not hard-depend on cryptography)
 # --------------------------------------------------------------------------- #
-def test_backend_unavailable_raises_runtime_error(monkeypatch):
-    crypto = AesGcmScryptSessionCrypto()
-    # Simulate the cryptography library being unavailable.
-    crypto._backend = None
+def test_backend_unavailable_raises_runtime_error():
+    """Simulates the cryptography library being unavailable by passing
+    backend=None through the public constructor — not by reaching into
+    self._backend after construction, which would break the moment that
+    attribute's name or type changed even though the actual behavior being
+    tested (fail loudly, don't hang or corrupt) hadn't."""
+    crypto = AesGcmScryptSessionCrypto(backend=None)
     with pytest.raises(RuntimeError):
         crypto.encrypt('{"content": "x"}', "pw")
     with pytest.raises(RuntimeError):

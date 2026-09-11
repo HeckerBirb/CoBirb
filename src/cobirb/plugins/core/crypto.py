@@ -56,8 +56,13 @@ class AesGcmScryptSessionCrypto(SessionCrypto):
     just fails when a session is actually encrypted.
     """
 
-    def __init__(self) -> None:
-        self._backend = self._try_load_backend()
+    _AUTO = object()  # sentinel: "detect the backend" vs. an explicit (possibly None) override
+
+    def __init__(self, backend: "_Backend | None | object" = _AUTO) -> None:
+        # `backend` is normally left to auto-detect; tests can pass `backend=None`
+        # to exercise the "cryptography isn't available" path through the public
+        # constructor instead of reaching into a private attribute after the fact.
+        self._backend = self._try_load_backend() if backend is self._AUTO else backend
 
     def _try_load_backend(self) -> _Backend | None:
         """Import the ``cryptography`` backend if available. Returns None if unavailable."""

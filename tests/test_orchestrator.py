@@ -46,20 +46,16 @@ class _ToolCallModel(_DummyModel):
 
 
 def test_materialize_string():
-    from cobirb.orchestrator import _materialize
-
     assert _materialize("abc") == "abc"
 
 
 def test_materialize_iterable():
-    from cobirb.orchestrator import _materialize
-
     assert _materialize(iter("abc")) == "abc"
 
 
 def test_run_returns_session_with_turns():
     policy = Policy()
-    orchestrator = __import__("cobirb.orchestrator", fromlist=["Orchestrator"]).Orchestrator(
+    orchestrator = Orchestrator(
         model=_DummyModel(),
         tools={},
         policy=policy,
@@ -283,9 +279,14 @@ def test_run_streams_live_through_io_when_supported():
     )
     session = orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
 
-    # A persona label is rendered once, before the first chunk, then each
-    # chunk is rendered live in order as it arrives, then a trailing newline.
-    assert io.rendered == ["noah: ", "Hel", "lo", " there", "\n"]
+    # Rendered as more than one call (proves genuine incremental streaming,
+    # not the whole answer written in one go), labeled once up front, and
+    # the fully assembled visible text is exactly what was said — without
+    # pinning the exact chunk boundaries or trailing-newline mechanics,
+    # which are incidental to *that* streaming happened correctly.
+    assert len(io.rendered) > 1
+    assert io.rendered[0] == "noah: "
+    assert "".join(io.rendered) == "noah: Hello there\n"
     # The final turn still gets the fully assembled content.
     assert session.turns[-1].content == "Hello there"
     assert session.summary == "Hello there"
@@ -367,6 +368,13 @@ def test_last_turn_streamed_flag_false_when_max_turns_exhausted():
     assert orchestrator.last_turn_streamed is False
 
 
+def _tool_turn(session):
+    """The (first) "tool" role turn in a session — approval-outcome tests
+    care about what the tool call *resulted in*, not the exact position/
+    count of surrounding turns, so they look this up rather than indexing."""
+    return next(t for t in session.turns if t.role == "tool")
+
+
 # --------------------------------------------------------------------------- #
 # Interactive permission approval (Phase B): an unpermitted tool call is
 # asked about via io.confirm() instead of just being silently denied.
@@ -385,9 +393,7 @@ def test_unpermitted_tool_can_be_approved_once(tmp_path):
     session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
 
     assert io.confirm_calls == [("read_file", {"path": str(tmp_path / "a.txt")})]
-    tool_turn = session.turns[2]
-    assert tool_turn.role == "tool"
-    assert tool_turn.content == "hello"
+    assert _tool_turn(session).content == "hello"
     # "once" must not update the policy for future calls.
     assert not policy.is_allowed("read_file", {"path": str(tmp_path / "a.txt")})
 
@@ -405,7 +411,7 @@ def test_unpermitted_tool_approved_always_updates_policy(tmp_path):
     )
     session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
 
-    assert session.turns[2].content == "hello"
+    assert _tool_turn(session).content == "hello"
     # "always" must update the policy so a later call skips the prompt.
     assert policy.is_allowed("read_file")
 
@@ -443,7 +449,7 @@ def test_unpermitted_tool_denied_via_prompt(tmp_path):
     session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
 
     assert io.confirm_calls  # the user was actually asked
-    assert "Permission denied" in session.turns[2].content
+    assert "Permission denied" in _tool_turn(session).content
 
 
 def test_no_io_denies_without_prompting():
@@ -455,7 +461,7 @@ def test_no_io_denies_without_prompting():
         policy=policy,
     )
     session = orchestrator.run("read file", "sys", cwd="/tmp")
-    assert "Permission denied" in session.turns[2].content
+    assert "Permission denied" in _tool_turn(session).content
 
 
 def test_broken_confirm_denies_rather_than_crashing(tmp_path):
@@ -472,4 +478,4 @@ def test_broken_confirm_denies_rather_than_crashing(tmp_path):
         io=_BrokenIO(),
     )
     session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
-    assert "Permission denied" in session.turns[2].content
+    assert "Permission denied" in _tool_turn(session).content

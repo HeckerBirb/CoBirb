@@ -85,7 +85,12 @@ def _plugin_dirs() -> list[str]:
 
 def _load_local_plugin(path: str, kind: str) -> Any | None:
     """Load a single local plugin, resolving the entry point declared in its
-    pyproject.toml. Returns None if the plugin does not implement ``kind``."""
+    pyproject.toml. Returns None if the plugin does not implement ``kind``,
+    or its entry point resolves to something that doesn't actually subclass
+    the SPI interface ``kind`` names — matching the same check the
+    installed-entry-points path already applies, so a mismatched entry
+    point name can't be trusted just because it happens to match.
+    """
     mod_name = f"cobirb_plugins_{os.path.basename(path).replace('-', '_')}"
     if not os.path.exists(os.path.join(path, "pyproject.toml")):
         return None
@@ -94,7 +99,8 @@ def _load_local_plugin(path: str, kind: str) -> Any | None:
         if ep.name != kind:
             continue
         try:
-            return ep.load()
+            obj = ep.load()
         except Exception as exc:  # noqa: BLE001
             raise PluginError(f"failed loading plugin {os.path.basename(path)}: {exc}") from exc
+        return obj if _is_subclass(obj, _INTERFACES[kind]) else None
     return None
