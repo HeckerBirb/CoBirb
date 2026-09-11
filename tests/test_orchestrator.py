@@ -260,11 +260,17 @@ class _StreamingModel(_DummyModel):
 
 
 class _RecordingIO:
-    def __init__(self):
+    def __init__(self, confirm_decision="deny"):
         self.rendered = []
+        self.confirm_calls = []
+        self._confirm_decision = confirm_decision
 
     def render(self, text):
         self.rendered.append(text)
+
+    def confirm(self, tool_name, arguments):
+        self.confirm_calls.append((tool_name, arguments))
+        return self._confirm_decision
 
 
 def test_run_streams_live_through_io_when_supported():
@@ -359,3 +365,111 @@ def test_last_turn_streamed_flag_false_when_max_turns_exhausted():
     session = orchestrator.run("loop", "sys", cwd="/tmp", max_turns=2)
     assert session.summary == "Stopped after 2 turns without a final answer."
     assert orchestrator.last_turn_streamed is False
+
+
+# --------------------------------------------------------------------------- #
+# Interactive permission approval (Phase B): an unpermitted tool call is
+# asked about via io.confirm() instead of just being silently denied.
+# --------------------------------------------------------------------------- #
+def test_unpermitted_tool_can_be_approved_once(tmp_path):
+    (tmp_path / "a.txt").write_text("hello")
+    io = _RecordingIO(confirm_decision="once")
+    policy = Policy()  # nothing pre-allowed
+    registry = ToolRegistry(str(tmp_path))
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
+        tools={t.name: t for t in registry.values()},
+        policy=policy,
+        io=io,
+    )
+    session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
+
+    assert io.confirm_calls == [("read_file", {"path": str(tmp_path / "a.txt")})]
+    tool_turn = session.turns[2]
+    assert tool_turn.role == "tool"
+    assert tool_turn.content == "hello"
+    # "once" must not update the policy for future calls.
+    assert not policy.is_allowed("read_file", {"path": str(tmp_path / "a.txt")})
+
+
+def test_unpermitted_tool_approved_always_updates_policy(tmp_path):
+    (tmp_path / "a.txt").write_text("hello")
+    io = _RecordingIO(confirm_decision="always")
+    policy = Policy()
+    registry = ToolRegistry(str(tmp_path))
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
+        tools={t.name: t for t in registry.values()},
+        policy=policy,
+        io=io,
+    )
+    session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
+
+    assert session.turns[2].content == "hello"
+    # "always" must update the policy so a later call skips the prompt.
+    assert policy.is_allowed("read_file")
+
+
+def test_unpermitted_shell_approved_always_narrows_to_exact_command(tmp_path):
+    """Approving "always" for a shell call must narrow to that exact
+    invocation (like policy.allow("shell", command) already does), not
+    blanket-trust the bare binary — same reasoning as the default policy's
+    python/pytest narrowing."""
+    io = _RecordingIO(confirm_decision="always")
+    policy = Policy()
+    registry = ToolRegistry(str(tmp_path))
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("shell", {"command": "python -m pytest"}),
+        tools={t.name: t for t in registry.values()},
+        policy=policy,
+        io=io,
+    )
+    orchestrator.run("run tests", "sys", cwd=str(tmp_path))
+
+    assert policy.is_allowed("shell", {"command": "python -m pytest"})
+    assert not policy.is_allowed("shell", {"command": "python -c 'evil'"})
+
+
+def test_unpermitted_tool_denied_via_prompt(tmp_path):
+    io = _RecordingIO(confirm_decision="deny")
+    policy = Policy()
+    registry = ToolRegistry(str(tmp_path))
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
+        tools={t.name: t for t in registry.values()},
+        policy=policy,
+        io=io,
+    )
+    session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
+
+    assert io.confirm_calls  # the user was actually asked
+    assert "Permission denied" in session.turns[2].content
+
+
+def test_no_io_denies_without_prompting():
+    """No adapter attached -> fail closed immediately; there's no one to ask."""
+    policy = Policy()
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("read_file", {"path": "x"}),
+        tools={},
+        policy=policy,
+    )
+    session = orchestrator.run("read file", "sys", cwd="/tmp")
+    assert "Permission denied" in session.turns[2].content
+
+
+def test_broken_confirm_denies_rather_than_crashing(tmp_path):
+    class _BrokenIO(_RecordingIO):
+        def confirm(self, tool_name, arguments):
+            raise RuntimeError("adapter exploded")
+
+    policy = Policy()
+    registry = ToolRegistry(str(tmp_path))
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
+        tools={t.name: t for t in registry.values()},
+        policy=policy,
+        io=_BrokenIO(),
+    )
+    session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
+    assert "Permission denied" in session.turns[2].content

@@ -213,6 +213,21 @@ class Orchestrator:
         for call in tool_calls:
             self._execute_tool(call)
 
+    def _request_approval(self, tool_name: str, arguments: dict[str, Any]) -> str:
+        """Ask ``io`` whether to allow a not-yet-permitted tool call.
+
+        Fails closed (denies) when there's no interactive adapter attached,
+        it doesn't implement ``confirm`` (duck-typed test doubles), or it
+        raises — there's no one to ask, so the safe answer is no.
+        """
+        if self.io is None or not hasattr(self.io, "confirm"):
+            return "deny"
+        try:
+            decision = self.io.confirm(tool_name, arguments)
+        except Exception:  # noqa: BLE001 - a broken adapter must not open access
+            return "deny"
+        return decision if decision in ("once", "always", "deny") else "deny"
+
     def _execute_tool(self, call: cobirb_typing.ToolCall) -> None:
         tool_name = call.name
         arguments = call.arguments
@@ -221,17 +236,24 @@ class Orchestrator:
         # a proper messages array can label the "tool" message accordingly.
         tool_use = [{"name": tool_name, "arguments": arguments}]
 
-        # Fail-closed: a denied or unknown tool is recorded in the transcript
-        # and audited, never allowed to crash the run.
+        # Not already permitted: ask the user rather than silently denying,
+        # so "default-deny" means "asks first," not "the model never finds
+        # out it could have worked." Fails closed (denies) with no adapter,
+        # or one that can't ask (see I_OAdapter.confirm's contract).
         if not self.policy.is_allowed(tool_name, arguments):
-            session.add(
-                Turn(
-                    role="tool",
-                    content=f"Permission denied: tool '{tool_name}' is not permitted.",
-                    tool_use=tool_use,
+            decision = self._request_approval(tool_name, arguments)
+            if decision == "deny":
+                session.add(
+                    Turn(
+                        role="tool",
+                        content=f"Permission denied: tool '{tool_name}' is not permitted.",
+                        tool_use=tool_use,
+                    )
                 )
-            )
-            return
+                return
+            if decision == "always":
+                shell_command = arguments.get("command") if tool_name == "shell" else None
+                self.policy.allow(tool_name, shell_command)
 
         tool = self.tools.get(tool_name)
         if tool is None:

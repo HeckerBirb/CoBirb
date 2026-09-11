@@ -244,6 +244,12 @@ def _run_interactive(
     io = TerminalIO()
     print(f"{persona.name}: {persona.greeting}" if persona.greeting else f"{persona.name} is here.")
     print("(type /persona <name> to switch personas, /persona to list them)")
+    # Built lazily on the first real turn (not for a slash-command-only
+    # session) and reused across turns after that: reusing the same Policy
+    # is what lets "always allow this" approvals persist for the rest of
+    # the interactive session, instead of every turn silently forgetting
+    # anything approved during a previous one.
+    orchestrator: Orchestrator | None = None
     while True:
         try:
             prompt = input("\nYou: ").strip()
@@ -263,9 +269,10 @@ def _run_interactive(
                 print(f"{persona.name}: {persona.greeting or 'switched personas.'}")
             continue
 
-        orchestrator, _, _ = _build_orchestrator(
-            cwd, persona, allow_overrides, system, session_path, password, model_name
-        )
+        if orchestrator is None:
+            orchestrator, _, _ = _build_orchestrator(
+                cwd, persona, allow_overrides, system, session_path, password, model_name
+            )
         try:
             session = orchestrator.run(prompt, system, cwd=cwd, persona=persona.name, session_path=session_path)
         except PermissionError as exc:

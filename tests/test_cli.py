@@ -242,3 +242,25 @@ def test_interactive_exits_gracefully_on_eof_at_continue_prompt(monkeypatch, cap
 
     assert result == 0
     assert "goodnight" in capsys.readouterr().out
+
+
+def test_run_interactive_builds_orchestrator_once_and_reuses_it(monkeypatch):
+    """Regression test: _build_orchestrator used to be called fresh on
+    every turn, discarding its Policy object each time — so an "always
+    allow this" approval from one turn would silently stop applying on the
+    next. It must now be built once (lazily, on the first real turn) and
+    reused for the rest of the interactive session."""
+    build_calls = []
+
+    def fake_build_orchestrator(cwd, persona, allow_overrides, system, session_path, password, model_name=None):
+        build_calls.append(1)
+        return _StubOrchestrator(), None, None
+
+    monkeypatch.setattr(cli, "_build_orchestrator", fake_build_orchestrator)
+    monkeypatch.setattr("builtins.input", _scripted_input(["first", "y", "second", "n"]))
+
+    persona = cli._load_persona(None)
+    system = cli._build_system_prompt(persona)
+    cli._run_interactive(persona, system, {}, None, None, "/tmp")
+
+    assert len(build_calls) == 1

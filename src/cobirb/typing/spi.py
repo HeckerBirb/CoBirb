@@ -136,19 +136,34 @@ class I_OAdapter(abc.ABC):
     def view(self, data: bytes, mime: str | None = None) -> None:
         """Present binary data (e.g. an image)."""
 
+    @abc.abstractmethod
+    def confirm(self, tool_name: str, arguments: dict[str, Any]) -> str:
+        """Ask the user whether to allow a tool call the policy hasn't
+        already permitted. Must return one of:
+
+        - ``"once"``: allow this one call, don't change the policy.
+        - ``"always"``: allow this call and update the policy so matching
+          calls skip the prompt for the rest of this run.
+        - ``"deny"``: refuse the call.
+
+        Adapters with no way to ask (e.g. a future non-interactive one)
+        should return ``"deny"`` — permission is fail-closed, not fail-open.
+        """
+
 
 # --------------------------------------------------------------------------- #
 # Crypto backend (future: swapable encryption)
 # --------------------------------------------------------------------------- #
 class SessionCrypto(abc.ABC):
-    """Encrypts/decrypts session files. Default backend is a post-quantum hybrid.
+    """Encrypts/decrypts session files. Default backend: AES-256-GCM + scrypt.
 
-    The core ships no hard crypto dependency. See DESIGN.md §7.2.
+    The core ships no hard crypto dependency. See DESIGN.md §7.2 (including
+    why this deliberately has no post-quantum KEM).
     """
 
     @abc.abstractmethod
     def name(self) -> str:
-        """Identifier of the scheme, e.g. ``aes256gcm-pq-hybrid``."""
+        """Identifier of the scheme, e.g. ``aes256gcm-scrypt``."""
 
     @abc.abstractmethod
     def encrypt(self, plaintext_json: str, password: str) -> bytes:
