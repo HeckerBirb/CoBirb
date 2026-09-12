@@ -1,6 +1,8 @@
 """Tests for the default-deny permission layer and audit log."""
 from __future__ import annotations
 
+import os
+
 from cobirb.policy import AuditLog, Policy, _segments
 
 
@@ -58,13 +60,34 @@ def test_is_denied_explicit():
 
 def test_audit_log_append_only(tmp_path):
     log_path = str(tmp_path / "audit.jsonl")
-    audit = AuditLog(log_path)
+    audit = AuditLog(log_path, enabled=True)
     policy = Policy(audit=audit)
     policy.log("read_file", {"path": "x.py"}, cwd="/tmp")
     with open(log_path, "r", encoding="utf-8") as fh:
         line = fh.read().strip()
     assert '"tool": "read_file"' in line
     assert '"cwd": "/tmp"' in line
+
+
+def test_audit_log_disabled_by_default_writes_nothing(tmp_path):
+    """The audit log is opt-in: an "always-on" trail would silently keep a
+    second, unencrypted, plaintext copy of every file write_file/edit_file/
+    apply_patch touches and every shell command run — directly at odds
+    with sessions being encrypted at rest. Nothing is written, and no file
+    is even created, unless a caller explicitly turns it on."""
+    log_path = str(tmp_path / "audit.jsonl")
+    audit = AuditLog(log_path)
+    policy = Policy(audit=audit)
+    policy.log("write_file", {"path": "secrets.env", "content": "API_KEY=sk-live-abc123"}, cwd="/tmp")
+    assert not os.path.exists(log_path)
+
+
+def test_audit_log_can_be_turned_on_explicitly(tmp_path):
+    log_path = str(tmp_path / "audit.jsonl")
+    audit = AuditLog(log_path, enabled=True)
+    policy = Policy(audit=audit)
+    policy.log("read_file", {"path": "x.py"}, cwd="/tmp")
+    assert os.path.exists(log_path)
 
 
 def test_segments_splits_every_chained_command():

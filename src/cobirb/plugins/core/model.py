@@ -5,6 +5,15 @@ This provider only ever talks to a *local* Ollama server (default
 ``http://localhost:11434``, or wherever the user points it) and only once the
 user has explicitly named a model — via ``--model``, ``COBIRB_MODEL_NAME``, or
 ``models.default.name`` in config. See DESIGN.md §6.3.
+
+**The model's own prompt wins.** Ollama takes one system message per request,
+and sending one *replaces* the ``SYSTEM`` directive the model was built with.
+A model created with ``ollama create`` around a custom ``SYSTEM`` is a
+configuration its user made deliberately, so CoBirb defaults to sending no
+system message at all and letting that directive apply untouched. When CoBirb
+does have something to add — a persona, plan-mode phase instructions — the
+model's own prompt is read back via ``/api/show`` and placed first, so the
+addition supplements it instead of discarding it. See ``compose_system``.
 """
 from __future__ import annotations
 
@@ -51,8 +60,16 @@ def _build_messages(system: str, context: str) -> list[dict[str, Any]]:
     ``context`` is documented (PLUGIN_SPEC.md §3.1) as "a compact string...
     the provider is responsible for how it packs it" — here that packing is
     JSON, parsed back into role-tagged messages.
+
+    An empty ``system`` produces **no system message at all**, rather than an
+    empty one. That distinction is the whole of ``respect_model_system``: an
+    explicit ``{"role": "system"}`` entry — even a blank one — replaces the
+    ``SYSTEM`` directive from the model's own Modelfile for that request,
+    while omitting the entry lets Ollama apply the model's own.
     """
-    messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    messages: list[dict[str, Any]] = []
+    if system:
+        messages.append({"role": "system", "content": system})
     try:
         turns = json.loads(context) if context else []
     except (json.JSONDecodeError, TypeError):
@@ -106,6 +123,12 @@ class LocalModelProvider(ModelProvider):
         # in the same response; stash them here so parse_tool_calls() doesn't
         # need to re-parse text or make a second round trip.
         self._last_tool_calls: list[ToolCall] = []
+        # Modelfile SYSTEM directives, keyed by model name. A model's own
+        # prompt doesn't change between requests, so this is fetched once per
+        # model rather than on every turn. Only successes are cached: a
+        # failed lookup returns "" without being remembered, so a transient
+        # blip doesn't permanently drop the user's own prompt.
+        self._model_system_cache: dict[str, str] = {}
 
     def name(self) -> str:
         return f"ollama/{self._model}" if self._model else "(unconfigured)"
@@ -150,6 +173,63 @@ class LocalModelProvider(ModelProvider):
         entries = payload.get("data") or []
         return sorted({entry["id"] for entry in entries if entry.get("id")})
 
+    def model_system_prompt(self) -> str:
+        """The ``SYSTEM`` directive baked into this model's own Modelfile.
+
+        Returns ``""`` for a model that declares none — which is most of
+        them — and for any lookup that fails. This is best-effort context,
+        never a precondition for chatting: if the endpoint can't answer,
+        the turn still runs, it just can't prepend a prompt it couldn't
+        read. The real error surfaces from ``chat`` a moment later anyway,
+        with a message about the thing the user actually asked for.
+        """
+        if not self._model:
+            return ""
+        if self._model in self._model_system_cache:
+            return self._model_system_cache[self._model]
+        try:
+            payload = self._post("/api/show", {"model": self._model})
+            system = payload.get("system") or ""
+        except Exception:  # noqa: BLE001 - best-effort context, never fatal
+            # Covers an unreachable endpoint, a model the endpoint doesn't
+            # know, and a payload that isn't the shape documented. None of
+            # those should stop the turn the user actually asked for: they
+            # only mean this request can't carry a prompt it couldn't read.
+            return ""
+        if not isinstance(system, str):
+            return ""
+        self._model_system_cache[self._model] = system
+        return system
+
+    def compose_system(self, system: str) -> str:
+        """Combine CoBirb's own system prompt with the model's, if any.
+
+        The rule, in order:
+
+        - CoBirb has nothing to say (``system`` empty — the default, with no
+          persona and no harness block): return ``""``, which sends **no**
+          system message and leaves the model's own Modelfile ``SYSTEM``
+          doing exactly what it does outside CoBirb. This is the case that
+          matters: a client that injects its own prompt on every request
+          silently overrides the model its user configured, and a model
+          built with ``ollama create`` around a custom ``SYSTEM`` is that
+          configuration.
+        - CoBirb has something to say and the model declares no ``SYSTEM``:
+          send CoBirb's, since there is nothing to displace.
+        - Both: the model's own goes **first**, CoBirb's after it. Ollama
+          accepts one system message per request, so "respecting" the
+          model's prompt when something must be added means carrying it
+          into the message rather than dropping it — and putting it first
+          means CoBirb's additions read as a supplement to it rather than a
+          replacement of it.
+        """
+        if not system.strip():
+            return ""
+        own = self.model_system_prompt().strip()
+        if not own:
+            return system
+        return f"{own}\n\n{system}"
+
     def chat(
         self,
         system: str,
@@ -167,7 +247,7 @@ class LocalModelProvider(ModelProvider):
             )
         payload: dict[str, Any] = {
             "model": self._model,
-            "messages": _build_messages(system, context),
+            "messages": _build_messages(self.compose_system(system), context),
             "stream": stream,
         }
         if tools:

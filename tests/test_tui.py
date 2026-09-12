@@ -17,16 +17,32 @@ from __future__ import annotations
 
 import os
 import threading
+from types import SimpleNamespace
 
 import pytest
+from rich.text import Text
+from textual.geometry import Offset
+from textual.selection import Selection
 from textual.widgets import Footer, Input, OptionList, RichLog, TabbedContent
 from textual.widgets.option_list import Option
 
 from cobirb import cli, session
 from cobirb.tui.app import CoBirbApp
 from cobirb.tui.panes import PluginsPane, SessionsPane
-from cobirb.tui.screens import ApprovalModal, HelpModal, ModelPickerModal, TextPromptModal
-from cobirb.tui.widgets import StatusBar
+from cobirb.tui.screens import (
+    ApprovalModal,
+    HelpModal,
+    ModelPickerModal,
+    PersonaPickerModal,
+    TextPromptModal,
+)
+from cobirb.tui.widgets import (
+    PromptHistory,
+    PromptInput,
+    StatusBar,
+    StreamPreview,
+    TranscriptLog,
+)
 
 # Captured at import time, before the autouse fixture below ever patches the
 # class — tests that want the *real* startup/`/model` behavior restore this.
@@ -78,11 +94,12 @@ class _StubOrchestrator:
     """Stands in for a real Orchestrator: records the run() it was given and
     can be told to raise, stream, or make a tool call along the way."""
 
-    def __init__(self, *, run_raises=None, with_session_manager=False, on_run=None, io=None):
+    def __init__(self, *, run_raises=None, with_session_manager=False, on_run=None, io=None, tools=None):
         self.session = _StubSessionManager() if with_session_manager else None
         self.io = io
         self.last_turn_streamed = False
         self.calls = []
+        self.tools = tools if tools is not None else {}
         self._run_raises = run_raises
         self._on_run = on_run
 
@@ -119,9 +136,12 @@ def _stub_build(orchestrator=None, record=None):
 
 def _make_app(**overrides) -> CoBirbApp:
     persona = cli._load_persona(overrides.pop("persona_name", None))
+    # Built here rather than taken as a plain string so `system` and
+    # `harness` can't disagree — the real CLI derives one from the other.
+    harness = overrides.get("harness", False)
     kwargs = dict(
         persona=persona,
-        system=cli._build_system_prompt(persona),
+        system=cli._build_system_prompt(persona, harness=harness),
         allow_overrides={},
         session_path=None,
         password=None,
@@ -177,7 +197,7 @@ async def test_status_bar_shows_persona_model_plan_mode_and_cwd():
     async with app.run_test() as pilot:
         await pilot.pause()
         line = str(app.query_one(StatusBar).render())
-        assert "Noah" in line
+        assert "CoBirb" in line  # no persona by default
         assert "plan: on" in line
         assert "/some/where" in line
 
@@ -211,7 +231,7 @@ async def test_the_greeting_and_header_are_in_the_transcript_at_startup():
     async with app.run_test() as pilot:
         await pilot.pause()
         text = _transcript_text(app)
-        assert "Noah" in text
+        assert "CoBirb ready." in text  # a plain line, not a persona greeting
         assert "/persona" in text  # the hint line
 
 
@@ -253,7 +273,7 @@ async def test_submitting_a_prompt_disables_the_input_runs_the_turn_and_re_enabl
         prompt_input = app.query_one("#prompt-input", Input)
         await _until(pilot, lambda: not prompt_input.disabled)
 
-        assert orchestrator.calls == [{"prompt": "hello there", "persona": "Noah", "plan_mode": False}]
+        assert orchestrator.calls == [{"prompt": "hello there", "persona": "CoBirb", "plan_mode": False}]
         text = _transcript_text(app)
         assert "hello there" in text  # the echoed user line
         assert "ok" in text  # the stub session's summary, via render_answer
@@ -384,9 +404,138 @@ async def test_nothing_is_saved_when_no_session_path_was_given(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# Cancelling a turn (Ctrl+C) and quitting mid-turn (Ctrl+Q).
+#
+# Regression coverage for a real bug: a `shell` call that hangs (a command
+# that doesn't produce output until you interact with it, a game loop, a
+# server — anything that doesn't exit on its own) used to leave the input
+# disabled with no way out short of waiting up to its 5-minute timeout, and
+# even quitting the app blocked for that same span, because Textual/
+# asyncio's shutdown waits for the worker thread to actually return. See
+# ShellTool.cancel_running() (tools.py) for the other half of the fix.
+# --------------------------------------------------------------------------- #
+class _CancellableOrchestrator(_StubOrchestrator):
+    """An orchestrator whose run() blocks until something calls
+    cancel_running() on its fake ``shell`` tool — simulating a hung shell
+    command exactly the way the real bug looked from the TUI's side."""
+
+    def __init__(self, *, shell_present=True):
+        super().__init__()
+        self._release = threading.Event()
+        self.cancel_calls = 0
+        if shell_present:
+            self.tools = {"shell": SimpleNamespace(cancel_running=self._cancel_running)}
+
+    def _cancel_running(self) -> bool:
+        self.cancel_calls += 1
+        self._release.set()
+        return True
+
+    def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False):
+        self.calls.append({"prompt": prompt, "persona": persona, "plan_mode": plan_mode})
+        self._release.wait(timeout=5)
+        return _StubSession()
+
+
+async def test_ctrl_c_cancels_a_stuck_turn_and_the_input_comes_back(monkeypatch):
+    orchestrator = _CancellableOrchestrator()
+    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "run the game")
+        await _until(pilot, lambda: app._turn_in_progress)
+
+        await pilot.press("ctrl+c")
+        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+
+        assert orchestrator.cancel_calls == 1
+
+
+async def test_ctrl_c_with_nothing_cancellable_does_not_touch_the_turn(monkeypatch):
+    """No `shell` tool in play (e.g. still waiting on the model itself) —
+    there's nothing this can interrupt, so it must say so and leave the
+    turn running rather than pretending to have stopped anything."""
+    orchestrator = _CancellableOrchestrator(shell_present=False)
+    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "hello")
+        await _until(pilot, lambda: app._turn_in_progress)
+
+        await pilot.press("ctrl+c")
+        await pilot.pause()
+
+        assert app.query_one("#prompt-input", Input).disabled  # still running
+        orchestrator._release.set()  # let it finish so the test cleans up promptly
+        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+
+
+async def test_ctrl_c_with_no_turn_running_falls_back_to_the_quit_hint(monkeypatch):
+    """Idle Ctrl+C keeps Textual's own default behavior (a "press ctrl+q to
+    quit" toast) — this only takes over when there's actually a turn to
+    interrupt."""
+    calls = []
+    monkeypatch.setattr(CoBirbApp, "action_help_quit", lambda self: calls.append(1))
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+c")
+        await pilot.pause()
+        assert calls == [1]
+
+
+async def test_quitting_mid_turn_attempts_to_cancel_first(monkeypatch):
+    calls = []
+    monkeypatch.setattr(CoBirbApp, "_attempt_cancel", lambda self: calls.append(1) or True)
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._turn_in_progress = True
+        await app.action_quit()
+
+    assert calls == [1]
+
+
+async def test_quitting_while_idle_does_not_attempt_to_cancel(monkeypatch):
+    calls = []
+    monkeypatch.setattr(CoBirbApp, "_attempt_cancel", lambda self: calls.append(1) or True)
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await app.action_quit()
+
+    assert calls == []
+
+
+async def test_attempt_cancel_is_false_with_no_orchestrator_yet():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.orchestrator is None
+        assert app._attempt_cancel() is False
+
+
+async def test_attempt_cancel_is_false_when_the_active_tool_has_no_cancel_hook():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.orchestrator = _StubOrchestrator(tools={"shell": object()})
+        assert app._attempt_cancel() is False
+
+
+# --------------------------------------------------------------------------- #
 # Slash commands
 # --------------------------------------------------------------------------- #
-async def test_persona_with_no_argument_lists_personas_without_building_anything(monkeypatch):
+async def test_persona_with_no_argument_opens_the_picker_without_building_anything(monkeypatch):
+    """Bare /persona is a menu, exactly like bare /model — you shouldn't have
+    to already know how a persona is spelled to switch to it."""
     def fail_if_called(*args, **kwargs):
         raise AssertionError("orchestrator should not be built for /persona")
 
@@ -396,11 +545,13 @@ async def test_persona_with_no_argument_lists_personas_without_building_anything
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "/persona")
+        await _until(pilot, lambda: isinstance(app.screen, PersonaPickerModal))
 
-        text = _transcript_text(app)
-        assert "Available personas:" in text
+        options = app.screen.query_one("#model-options", OptionList)
+        listed = [options.get_option_at_index(i).id for i in range(options.option_count)]
+        assert listed[0] == "none"  # the way back out of a persona comes first
         for name in ("noah", "professional", "neighbor", "kawaii"):
-            assert name in text
+            assert name in listed
 
 
 async def test_persona_switch_updates_the_status_bar_and_later_turns(monkeypatch):
@@ -1215,7 +1366,7 @@ async def test_resuming_discards_an_already_built_orchestrator(monkeypatch):
         await _submit(pilot, app, "hello")
         await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
         assert app.orchestrator is orchestrator
-        assert orchestrator.calls == [{"prompt": "hello", "persona": "Noah", "plan_mode": False}]
+        assert orchestrator.calls == [{"prompt": "hello", "persona": "CoBirb", "plan_mode": False}]
 
         await _switch_tab(pilot, app)
         await pilot.click("#sessions-new")
@@ -1228,7 +1379,7 @@ async def test_resuming_discards_an_already_built_orchestrator(monkeypatch):
         await _until(pilot, lambda: app.orchestrator is None)
 
         # Neither prompt was run as a chat turn against the old orchestrator.
-        assert orchestrator.calls == [{"prompt": "hello", "persona": "Noah", "plan_mode": False}]
+        assert orchestrator.calls == [{"prompt": "hello", "persona": "CoBirb", "plan_mode": False}]
 
 
 async def test_new_session_prompts_for_a_name_then_a_password():
@@ -1380,3 +1531,605 @@ async def test_activating_the_sessions_tab_refreshes_its_listing(tmp_path, monke
         await _switch_tab(pilot, app)
         options = app.query_one("#sessions-list", OptionList)
         assert options.get_option_at_index(0).id == os.path.join(sessions_dir, "late.json")
+
+
+# --------------------------------------------------------------------------- #
+# Prompt history (up/down recall)
+# --------------------------------------------------------------------------- #
+def test_history_keeps_the_most_recent_entries_and_drops_the_oldest():
+    history = PromptHistory(max_entries=3)
+    for text in ("one", "two", "three", "four"):
+        history.add(text)
+    assert history.entries == ["two", "three", "four"]
+
+
+def test_history_evicts_on_the_byte_budget_even_when_under_the_entry_count():
+    """The two ceilings are independent: a handful of large prompts has to be
+    trimmed by size long before it reaches the entry limit."""
+    history = PromptHistory(max_entries=100, max_bytes=10)
+    history.add("aaaaa")
+    history.add("bbbbb")
+    history.add("ccccc")
+    assert history.entries == ["bbbbb", "ccccc"]
+    assert history.size_bytes == 10
+
+
+def test_history_measures_bytes_not_characters():
+    history = PromptHistory()
+    history.add("é")  # two bytes in UTF-8, one character
+    assert history.size_bytes == 2
+
+
+def test_history_ignores_blank_submissions_and_immediate_repeats():
+    history = PromptHistory()
+    history.add("  ")
+    history.add("")
+    history.add("ls")
+    history.add("ls")
+    history.add("pwd")
+    history.add("ls")
+    assert history.entries == ["ls", "pwd", "ls"]
+
+
+def test_history_entries_cannot_be_mutated_by_a_caller():
+    history = PromptHistory()
+    history.add("keep me")
+    history.entries.clear()
+    assert history.entries == ["keep me"]
+
+
+async def test_up_and_down_walk_the_prompt_history(monkeypatch):
+    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build())
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        prompt_input = app.query_one("#prompt-input", PromptInput)
+
+        await _submit(pilot, app, "/plan on")
+        await _until(pilot, lambda: not prompt_input.disabled)
+        await _submit(pilot, app, "first task")
+        await _until(pilot, lambda: not prompt_input.disabled)
+
+        await pilot.press("up")
+        assert prompt_input.value == "first task"
+        await pilot.press("up")
+        assert prompt_input.value == "/plan on"  # slash commands are recalled too
+        await pilot.press("up")
+        assert prompt_input.value == "/plan on"  # already at the oldest; stays put
+        await pilot.press("down")
+        assert prompt_input.value == "first task"
+
+
+async def test_arrowing_back_down_past_the_newest_entry_restores_the_draft(monkeypatch):
+    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build())
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        prompt_input = app.query_one("#prompt-input", PromptInput)
+
+        await _submit(pilot, app, "sent earlier")
+        await _until(pilot, lambda: not prompt_input.disabled)
+
+        prompt_input.value = "half-typed"
+        await pilot.press("up")
+        assert prompt_input.value == "sent earlier"
+        await pilot.press("down")
+        assert prompt_input.value == "half-typed"
+
+
+async def test_down_does_nothing_when_not_walking_the_history():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        prompt_input = app.query_one("#prompt-input", PromptInput)
+        prompt_input.value = "typing"
+        await pilot.press("down")
+        assert prompt_input.value == "typing"
+
+
+async def test_up_does_nothing_with_an_empty_history():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        prompt_input = app.query_one("#prompt-input", PromptInput)
+        prompt_input.value = "typing"
+        await pilot.press("up")
+        assert prompt_input.value == "typing"
+
+
+# --------------------------------------------------------------------------- #
+# Copying out of the transcript
+# --------------------------------------------------------------------------- #
+async def test_ctrl_c_copies_the_transcript_selection_instead_of_cancelling():
+    """Ctrl+C is bound at priority for cancellation, which took the key away
+    from Textual's own ``screen.copy_text`` — so the app has to hand it back
+    when there is actually something selected."""
+    copied: list[str] = []
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.copy_to_clipboard = copied.append
+        transcript = app.query_one("#transcript", RichLog)
+        # Selection(None, None) is Textual's "everything in this widget" —
+        # the same shape a mouse drag across the whole transcript produces.
+        app.screen.selections = {transcript: Selection(None, None)}
+
+        await pilot.press("ctrl+c")
+        await pilot.pause()
+
+        assert copied and "CoBirb ready." in copied[0]
+        assert not app.screen.selections  # cleared, so the next ctrl+c cancels
+
+
+async def test_ctrl_c_still_cancels_a_turn_when_nothing_is_selected(monkeypatch):
+    cancelled: list[bool] = []
+    monkeypatch.setattr(CoBirbApp, "_attempt_cancel", lambda self: bool(cancelled.append(True)) or True)
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._turn_in_progress = True
+        await pilot.press("ctrl+c")
+        await pilot.pause()
+
+        assert cancelled == [True]
+
+
+async def test_the_transcript_allows_text_selection():
+    """``RichLog`` opts into Textual's selection support by default; this
+    pins that the transcript is never switched to a non-selectable widget."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.query_one("#transcript", RichLog).allow_select is True
+
+
+# --------------------------------------------------------------------------- #
+# Telling "you" and the assistant apart
+# --------------------------------------------------------------------------- #
+async def test_a_submitted_prompt_is_marked_and_fenced_by_blank_lines(monkeypatch):
+    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build())
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "hello there")
+        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+
+        lines = _transcript_text(app).splitlines()
+        marked = next(i for i, line in enumerate(lines) if line.startswith("> hello there"))
+        assert lines[marked - 1].strip() == ""
+        assert lines[marked + 1].strip() == ""
+        assert "You:" not in _transcript_text(app)
+
+
+async def test_the_transcript_extracts_a_partial_selection_precisely():
+    """The whole point of the ``TranscriptLog`` subclass: a stock ``RichLog``
+    returns ``None`` here, so any selection copied as nothing."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        transcript = app.query_one("#transcript", TranscriptLog)
+        transcript.clear()
+        transcript.write(Text("hello world"))
+        transcript.write(Text("second line"))
+        await pilot.pause()
+
+        extracted, ending = transcript.get_selection(
+            Selection.from_offsets(Offset(6, 0), Offset(6, 1))
+        )
+        assert extracted == "world\nsecond"
+        assert ending == "\n"
+
+
+async def test_the_transcript_does_not_copy_richlogs_line_padding():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        transcript = app.query_one("#transcript", TranscriptLog)
+        transcript.clear()
+        transcript.write(Text("short"))
+        transcript.write(Text("also short"))
+        await pilot.pause()
+
+        extracted, _ = transcript.get_selection(Selection(None, None))
+        assert extracted == "short\nalso short"
+
+
+async def test_rendered_transcript_lines_carry_the_offset_metadata():
+    """Without this metadata the compositor can't map a mouse position to a
+    character offset, and every drag collapses to a whole-widget selection."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        transcript = app.query_one("#transcript", TranscriptLog)
+        transcript.clear()
+        transcript.write(Text("abcdef"))
+        await pilot.pause()
+
+        strip = transcript.render_line(0)
+        offsets = [
+            segment.style.meta.get("offset")
+            for segment in strip
+            if segment.style is not None and segment.style._meta is not None
+        ]
+        assert offsets and offsets[0] == (0, 0)
+
+
+async def test_a_selected_span_is_highlighted_in_the_transcript():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        transcript = app.query_one("#transcript", TranscriptLog)
+        transcript.clear()
+        transcript.write(Text("abcdef"))
+        await pilot.pause()
+
+        plain = transcript.render_line(0)
+        app.screen.selections = {
+            transcript: Selection.from_offsets(Offset(2, 0), Offset(4, 0))
+        }
+        await pilot.pause()
+        highlighted = transcript.render_line(0)
+
+        assert highlighted.text == plain.text  # same characters...
+        assert highlighted != plain  # ...differently styled
+        selection_style = app.screen.get_component_rich_style("screen--selection")
+        styled = "".join(
+            segment.text
+            for segment in highlighted
+            if segment.style is not None and segment.style.bgcolor == selection_style.bgcolor
+        )
+        assert styled == "cd"
+
+
+# --------------------------------------------------------------------------- #
+# /persona as a picker (the same shape as /model)
+# --------------------------------------------------------------------------- #
+async def test_choosing_a_persona_from_the_picker_applies_it(monkeypatch):
+    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build())
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/persona")
+        await _until(pilot, lambda: isinstance(app.screen, PersonaPickerModal))
+
+        options = app.screen.query_one("#model-options", OptionList)
+        options.focus()
+        options.highlighted = [
+            options.get_option_at_index(i).id for i in range(options.option_count)
+        ].index("noah")
+        await pilot.press("enter")
+        await _until(pilot, lambda: not isinstance(app.screen, PersonaPickerModal))
+
+        assert app.persona.name == "Noah"
+        assert "African Grey Parrot" in app.system
+        assert app.query_one(StatusBar).persona_name == "Noah"
+
+
+async def test_the_persona_picker_marks_none_as_current_by_default():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/persona")
+        await _until(pilot, lambda: isinstance(app.screen, PersonaPickerModal))
+
+        options = app.screen.query_one("#model-options", OptionList)
+        marked = [
+            str(options.get_option_at_index(i).prompt)
+            for i in range(options.option_count)
+            if str(options.get_option_at_index(i).prompt).startswith("> ")
+        ]
+        assert marked == ["> none"]
+
+
+async def test_the_persona_picker_marks_the_active_persona_by_its_key():
+    """kawaii.json calls itself "Imouto" — the picker lists keys, so the
+    marker has to be resolved through the key, not the display name."""
+    app = _make_app(persona_name="kawaii")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/persona")
+        await _until(pilot, lambda: isinstance(app.screen, PersonaPickerModal))
+
+        options = app.screen.query_one("#model-options", OptionList)
+        marked = [
+            str(options.get_option_at_index(i).prompt)
+            for i in range(options.option_count)
+            if str(options.get_option_at_index(i).prompt).startswith("> ")
+        ]
+        assert marked == ["> kawaii"]
+
+
+async def test_cancelling_the_persona_picker_changes_nothing():
+    app = _make_app(persona_name="noah")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/persona")
+        await _until(pilot, lambda: isinstance(app.screen, PersonaPickerModal))
+
+        await pilot.press("escape")
+        await _until(pilot, lambda: not isinstance(app.screen, PersonaPickerModal))
+
+        assert app.persona.name == "Noah"
+
+
+async def test_persona_with_a_name_still_switches_directly_without_the_picker():
+    """History recall replays "/persona kawaii" verbatim, so the named form
+    has to keep working rather than always opening a menu."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/persona kawaii")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, PersonaPickerModal)
+        assert app.persona.name == "Imouto"
+
+
+async def test_switching_to_none_strips_the_voice_from_the_system_prompt():
+    app = _make_app(persona_name="noah")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert "African Grey Parrot" in app.system
+
+        await _submit(pilot, app, "/persona none")
+        await pilot.pause()
+
+        assert app.system == ""  # nothing left for CoBirb to send at all
+        assert "own voice" in _transcript_text(app)
+
+
+async def test_a_persona_switch_keeps_the_harness_choice_the_run_started_with():
+    """--system-prompt harness has to survive a mid-session /persona change;
+    rebuilding the prompt without it would silently drop the setting."""
+    app = _make_app(harness=True)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.system == cli._HARNESS_PROMPT
+
+        await _submit(pilot, app, "/persona noah")
+        await pilot.pause()
+
+        assert app.system.startswith(cli._HARNESS_PROMPT)
+        assert "African Grey Parrot" in app.system
+
+
+# --------------------------------------------------------------------------- #
+# The transcript as one marked column
+# --------------------------------------------------------------------------- #
+def _marker_colours(app: CoBirbApp) -> list[tuple[str, str]]:
+    """(marker colour, rest of the line) for every marked line, in order."""
+    out = []
+    for line in app.query_one("#transcript", TranscriptLog).lines:
+        segments = list(line)
+        if segments and segments[0].text == "> ":
+            body = "".join(s.text for s in segments[1:]).rstrip()
+            out.append((segments[0].style.color.name, body))
+    return out
+
+
+async def test_prompts_and_replies_share_a_marker_in_different_colours(monkeypatch):
+    """The requested shape: no "CoBirb:" label and no panel around replies —
+    one column of `>` lines, told apart by the marker's colour."""
+    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build())
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "Hi")
+        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+
+        marked = _marker_colours(app)
+        assert [body for _, body in marked] == ["Hi", "ok"]  # prompt, then the reply
+        assert marked[0][0] != marked[1][0]  # different colours
+        assert "CoBirb: ok" not in _transcript_text(app)
+
+
+async def test_a_streamed_reply_is_marked_like_any_other(monkeypatch):
+    """A streamed reply is flushed straight into the transcript rather than
+    going through render_answer, so it needs marking on its own path."""
+    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build())
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.io_bridge.render("streamed reply")
+        await pilot.pause()
+        app._flush_stream()
+        await pilot.pause()
+
+        assert ("magenta", "streamed reply") in _marker_colours(app)
+
+
+async def test_the_streaming_preview_is_marked_so_the_reply_does_not_shift(monkeypatch):
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.io_bridge.render("partial")
+        await pilot.pause()
+
+        preview = app.query_one("#streaming-preview", StreamPreview)
+        assert preview.display is True
+        assert preview.buffered == "partial"
+
+
+# --------------------------------------------------------------------------- #
+# Selection highlighting
+# --------------------------------------------------------------------------- #
+async def test_selected_text_keeps_its_own_colour_and_only_the_background_changes():
+    """The theme defines screen--selection with a *transparent* foreground,
+    which flattens to the same colour as its background — applying the whole
+    style painted selected text as an unreadable solid block."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        transcript = app.query_one("#transcript", TranscriptLog)
+        transcript.clear()
+        transcript.write(Text("abcdef"))
+        await pilot.pause()
+
+        plain = {seg.text: seg.style for seg in transcript.render_line(0)}
+        app.screen.selections = {
+            transcript: Selection.from_offsets(Offset(0, 0), Offset(6, 0))
+        }
+        await pilot.pause()
+        selected = [seg for seg in transcript.render_line(0) if seg.text == "abcdef"][0]
+
+        assert selected.style.color == plain["abcdef"].color  # text still readable
+        assert selected.style.bgcolor != plain["abcdef"].bgcolor  # but marked
+        assert selected.style.color != selected.style.bgcolor  # not a solid block
+
+
+async def test_a_streamed_reply_carries_no_persona_label(monkeypatch):
+    """The bug this fixes: the orchestrator wrote "CoBirb: " into the stream
+    itself, so the marked transcript read "> CoBirb: hello"."""
+    class _StreamingOrchestrator(_StubOrchestrator):
+        def run(self, prompt, system, **kwargs):
+            begin = getattr(self.io, "begin_stream", None)
+            if callable(begin):
+                begin("CoBirb")
+            self.io.render("Hello, how are you today?")
+            self.io.render("\n")
+            self.last_turn_streamed = True
+            return SimpleNamespace(summary="Hello, how are you today?")
+
+    orchestrator = _StreamingOrchestrator()
+    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "Hi")
+        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+
+        text = _transcript_text(app)
+        assert "CoBirb:" not in text
+        assert ("magenta", "Hello, how are you today?") in _marker_colours(app)
+
+
+async def test_the_tui_draws_nothing_for_begin_stream(monkeypatch):
+    """Its streaming preview re-renders the whole buffer with the marker on
+    every token, so a marker drawn here would end up inside the text."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.io_bridge.begin_stream("CoBirb")
+        app.io_bridge.render("hello")
+        await pilot.pause()
+
+        assert app.query_one("#streaming-preview", StreamPreview).buffered == "hello"
+
+
+# --------------------------------------------------------------------------- #
+# Resuming a session shows the conversation you are rejoining.
+#
+# It used to leave the transcript blank: the turns were loaded and fed to the
+# model, so it knew what had been said, but none of it was on screen.
+# --------------------------------------------------------------------------- #
+def _session_with_turns(*turns) -> SimpleNamespace:
+    return SimpleNamespace(session=SimpleNamespace(turns=list(turns), persona="none"))
+
+
+def _turn(role, content, tool_use=None, phase=None) -> SimpleNamespace:
+    return SimpleNamespace(role=role, content=content, tool_use=tool_use, phase=phase)
+
+
+def _resumed_app(*turns, **overrides) -> CoBirbApp:
+    """An app handed an already-open session, the way ``cli._run_tui`` hands
+    one over after unlocking the file before the app is allowed to start."""
+    app = _make_app(session_path=overrides.pop("path", "/tmp/s.json"), password="pw", **overrides)
+    orchestrator = _StubOrchestrator()
+    orchestrator.session = _session_with_turns(*turns)
+    app.orchestrator = orchestrator
+    return app
+
+
+async def test_resuming_replays_the_conversation_into_the_transcript():
+    app = _resumed_app(
+        _turn("user", "What is two plus two?"),
+        _turn("assistant", "Four."),
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        text = _transcript_text(app)
+        assert "Four." in text
+        assert "What is two plus two?" in text
+        assert "earlier turn(s)" in text
+        assert "end of restored history" in text
+
+
+async def test_replayed_prompts_and_replies_keep_their_markers():
+    app = _resumed_app(_turn("user", "Hi"), _turn("assistant", "Hello."))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert _marker_colours(app) == [("cyan", "Hi"), ("magenta", "Hello.")]
+
+
+async def test_a_replayed_tool_call_shows_the_call_and_its_output():
+    call = [{"name": "read_file", "arguments": {"path": "a.txt"}}]
+    app = _resumed_app(
+        _turn("user", "read it"),
+        # The assistant turn that only announces a call carries no prose.
+        _turn("assistant", "", tool_use=call),
+        _turn("tool", "file contents", tool_use=call),
+        _turn("assistant", "It says hello."),
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        text = _transcript_text(app)
+        assert "tool: read_file" in text
+        assert "file contents" in text
+        # The empty announce-the-call turn must not leave a bare marker
+        # floating between the prompt and the tool panel.
+        assert [body for _, body in _marker_colours(app)] == ["read it", "It says hello."]
+
+
+async def test_a_brand_new_session_is_not_announced_as_restored(tmp_path):
+    """--session pointing at a path that doesn't exist yet is a *new*
+    session: nothing was opened, so there is no history and no rule to draw."""
+    app = _make_app(session_path=str(tmp_path / "not-yet.json"), password="pw")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.orchestrator is None  # nothing was handed over
+        assert "restored history" not in _transcript_text(app)
+
+
+async def test_resuming_from_the_sessions_tab_replays_and_returns_to_the_conversation(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    manager = _session_with_turns(_turn("user", "earlier question"), _turn("assistant", "earlier answer"))
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._apply_resumed_session(str(tmp_path / "s.json"), "pw", manager)
+        await pilot.pause()
+
+        text = _transcript_text(app)
+        assert "earlier question" in text and "earlier answer" in text
+        # Switching conversations clears the old one rather than stacking them.
+        assert "CoBirb ready." not in text
+        assert app.query_one(TabbedContent).active == "current"
+
+
+async def test_resuming_an_empty_session_says_so_instead_of_drawing_rules(tmp_path, monkeypatch):
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._apply_resumed_session(str(tmp_path / "s.json"), "pw", _session_with_turns())
+        await pilot.pause()
+
+        text = _transcript_text(app)
+        assert "no turns yet" in text
+        assert "end of restored history" not in text

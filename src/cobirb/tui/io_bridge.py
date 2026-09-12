@@ -126,15 +126,37 @@ class TuiIO(I_OAdapter):
         finally:
             self._call(self._app.set_busy, "")
 
+    def begin_stream(self, persona_name: str) -> None:
+        """Deliberately draws nothing.
+
+        The scrolling renderer writes a ``>`` marker here because it can only
+        append. This one doesn't need to: ``StreamPreview`` re-renders its
+        whole buffer on every token through ``render.build_streamed_message``,
+        which already carries the marker — drawing one here would put a second
+        marker *inside* the streamed text.
+
+        It exists so that the hook is answered rather than skipped, which is
+        what keeps the persona label out of the stream (see
+        ``Orchestrator._chat``).
+        """
+        return None
+
     def render_header(
         self, persona_name: str, model_name: str, cwd: str, session_path: str | None = None
     ) -> None:
         self._write(render.build_header_panel(persona_name, model_name, cwd, session_path))
 
     def render_answer(self, persona_name: str, text: str) -> None:
+        """The finished reply, as a marked message rather than a titled panel.
+
+        ``persona_name`` is accepted (the hook's signature is shared with
+        ``TerminalIO`` and the orchestrator calls it positionally) but not
+        shown: who is speaking is carried by the marker's colour and by the
+        status bar, not by a label on every single reply.
+        """
         if not text:
             return
-        self._write(render.build_answer_panel(persona_name, text))
+        self._write(render.build_assistant_message(text))
 
     def render_plan(self, persona_name: str, text: str) -> None:
         if not text:

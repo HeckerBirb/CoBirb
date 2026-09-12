@@ -43,14 +43,31 @@ class PermissionError(Exception):
 
 
 class AuditLog:
-    """Append-only local audit log of what ran. Never leaves the machine."""
+    """Append-only local record of what ran (tool name, arguments, cwd,
+    timestamp) — off by default.
 
-    def __init__(self, path: str | None = None) -> None:
+    Opt-in, not opt-out: the arguments logged are whatever a tool call
+    actually carried, unfiltered — for ``write_file`` that's the full file
+    content, for ``edit_file`` the full old/new text, for ``apply_patch``
+    the full diff, for ``shell`` the full command. That makes this a
+    genuinely useful "what did the agent do" trail once turned on, but it
+    also means an *always-on* audit log would silently keep a second,
+    plaintext, unencrypted, never-rotated copy of everything written or
+    run — directly at odds with sessions being encrypted at rest. So
+    ``enabled`` defaults to ``False`` here and stays false unless
+    ``"audit_log": true`` is set in config (see ``cobirb help config``);
+    nothing is ever written, and no file is even created, until then.
+    """
+
+    def __init__(self, path: str | None = None, enabled: bool = False) -> None:
         self.path = path or os.path.join(
             os.environ.get("COBIRB_HOME", os.path.expanduser("~")), ".cobirb", "audit.jsonl"
         )
+        self.enabled = enabled
 
     def append(self, entry: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         with open(self.path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry) + "\n")

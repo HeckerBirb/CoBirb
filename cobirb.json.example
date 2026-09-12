@@ -6,11 +6,13 @@
       "base_url": "http://localhost:11434"
     }
   },
-  "persona": "noah",
+  "persona": "none",
+  "system_prompt": "off",
   "plugins": {
     "model": "core-model",
     "io": "core-io",
     "crypto": "core-crypto"
   },
-  "plan_mode": false
+  "plan_mode": false,
+  "audit_log": false
 }

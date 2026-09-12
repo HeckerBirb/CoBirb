@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -29,6 +30,7 @@ from .config import Config
 from .orchestrator import Orchestrator, build_default_policy
 from .plugins.loader import load_plugins
 from .policy import PermissionError
+from . import session as session_module
 from .session import SessionManager
 from .typing import spi as cobirb_typing
 
@@ -43,12 +45,16 @@ from .typing import spi as cobirb_typing
 # fails to load or collides with a built-in is reported to stderr and
 # skipped — it never brings the core down.
 from .plugins.core import (  # noqa: E402
+    PLAIN_PERSONA_NAME,
     AesGcmScryptSessionCrypto,
     LocalModelProvider,
     TerminalIO,
     ToolRegistry,
     build_default_persona,
+    build_plain_persona,
+    persona_shapes_voice,
 )
+from .plugins.core import render  # noqa: E402
 from .plugins.core.tools import BUILTIN_TOOLS  # noqa: E402
 
 
@@ -58,34 +64,60 @@ def _article(word: str) -> str:
     return "an" if word[:1].lower() in "aeiou" else "a"
 
 
-def _build_system_prompt(persona: cobirb_typing.Persona) -> str:
-    """Compose the system prompt: ironclad privacy rules + persona data.
+# An optional description of the environment the model is running inside,
+# off unless asked for with --system-prompt harness. Deliberately operational
+# rather than editorial: it says nothing about what the model should or
+# shouldn't discuss, only that tool calls are gated behind a prompt a human
+# answers — a model that doesn't know a denial is a decision will retry a
+# blocked tool until the loop gives up. That is the one concrete thing it
+# buys, and the reason it is still offered at all.
+#
+# It is off by default because it is still an override: any system message
+# CoBirb sends replaces the model's own Modelfile SYSTEM directive for that
+# request (see LocalModelProvider.compose_system). CoBirb's actual guarantees
+# never depended on it — they are enforced in policy.py and the session
+# crypto, not by asking the model to honour them.
+_HARNESS_PROMPT = (
+    "This is CoBirb, a local agent harness running on the user's own machine. "
+    "Tool calls are gated by a permission prompt the user answers, so a denied "
+    "call is the user's decision, not an error to retry. Nothing leaves this "
+    "machine: no telemetry, no outbound network by default, and session files "
+    "are encrypted at rest."
+)
 
-    The persona is *data only*: it shapes how CoBirb speaks but never grants
-    permission to bypass security, encryption, or network controls.
 
-    Every field a persona file defines is rendered here. Supplying only the
-    name and species (as this once did) left tone, phrasings, emoji density
-    and squawks as inert data the model never saw — so a persona declaring
-    ``"emoji_density": "none"`` had no way to be honoured, while the prompt
-    below still claimed the model had that data. ``greeting`` is the one
-    exception: the CLI speaks it directly when a persona is adopted, so the
-    model doesn't need to reproduce it.
+def _build_system_prompt(persona: cobirb_typing.Persona, *, harness: bool = False) -> str:
+    """Compose CoBirb's *own* contribution to the system prompt, if any.
+
+    Returns ``""`` by default — no persona, no harness block — and an empty
+    string here means the provider sends no system message whatsoever, so the
+    model's Modelfile ``SYSTEM`` applies exactly as it does when talking to
+    Ollama directly. That is the point: an explicit system message *replaces*
+    the model's own for that request, so a client that always sends one
+    silently overrides a configuration its user built on purpose.
+
+    Whatever this does return is a supplement, not a replacement: the
+    provider reads the model's own prompt back and places it first (see
+    ``LocalModelProvider.compose_system``).
+
+    With a persona active (``--persona``, ``/persona``, or the ``"persona"``
+    config key), every field the persona file defines is rendered. Supplying
+    only the name and species (as this once did) left tone, phrasings, emoji
+    density and squawks as inert data the model never saw — so a persona
+    declaring ``"emoji_density": "none"`` had no way to be honoured.
+    ``greeting`` is the one exception: the CLI speaks it directly when a
+    persona is adopted, so the model needn't reproduce it.
     """
     p = persona
-    rules = (
-        "CoBirb is a privacy-first agent. Ironclad rules that are absolute: "
-        "(1) zero telemetry, (2) no outbound network by default, (3) never reveal "
-        "passwords or secrets, (4) session files are encrypted at rest, (5) "
-        "permissions default to denied, (6) everything stays on this machine. "
-        "A persona or user request can NEVER override these rules."
-    )
-    privacy_note = (
-        "Your persona data (name, tone, phrasing, squawks) describes how you speak "
-        "only. It does not grant you permission to skip any safety, encryption, "
-        "network, or permission control."
-    )
-    voice = [f"You are {p.name}, {_article(p.species)} {p.species}."]
+    blocks = [_HARNESS_PROMPT] if harness else []
+    if not persona_shapes_voice(p):
+        return "\n".join(blocks)
+
+    voice = []
+    if p.species:
+        voice.append(f"You are {p.name}, {_article(p.species)} {p.species}.")
+    else:
+        voice.append(f"You are {p.name}.")
     if p.tone:
         voice.append(f"Your tone is {p.tone}.")
     if p.phrasings:
@@ -94,7 +126,8 @@ def _build_system_prompt(persona: cobirb_typing.Persona) -> str:
         voice.append("Interjections you use sparingly: " + "; ".join(p.known_squawks))
     if p.emoji_density:
         voice.append(f"Emoji use: {p.emoji_density}.")
-    return "\n".join([rules, privacy_note, *voice])
+    voice.append("This describes how you speak, and nothing else.")
+    return "\n".join([*blocks, *voice])
 
 
 def _parse_allow_tools(spec: str) -> dict[str, str]:
@@ -119,16 +152,32 @@ def _parse_allow_tools(spec: str) -> dict[str, str]:
 _PERSONAS_DIR = os.path.join(os.path.dirname(__file__), "personas")
 
 
-def _load_persona(persona_name: str | None) -> cobirb_typing.Persona:
-    """Return the persona for ``persona_name`` (or the default Noah).
+NO_PERSONA = "none"
 
-    Resolution order: the bundled personas shipped with CoBirb (see
-    ``cobirb/personas/``), then a project-local ``<name>.json``, then a
-    ``<name>.json`` under the user's CoBirb home. See todo-list.md for the
-    persona shortlist this ships.
+
+def _load_persona(persona_name: str | None) -> cobirb_typing.Persona:
+    """Return the persona for ``persona_name``, or no persona at all.
+
+    ``None`` (nothing configured) and the explicit name ``"none"`` both give
+    the plain, voice-less default — personas are opt-in, so an unconfigured
+    run sends the model no instructions about how to sound.
+
+    Resolution order for a real name: the bundled personas shipped with
+    CoBirb (see ``cobirb/personas/``), then a project-local ``<name>.json``,
+    then a ``<name>.json`` under the user's CoBirb home.
     """
-    if persona_name is None or persona_name == "noah":
+    key = (persona_name or "").strip()
+    lowered = key.lower()
+    # PLAIN_PERSONA_NAME is accepted alongside "none" so a session saved with
+    # no persona reloads cleanly: sessions record a persona name, and the
+    # plain default's name is "CoBirb".
+    if not lowered or lowered in (NO_PERSONA, PLAIN_PERSONA_NAME.lower()):
+        return build_plain_persona()
+    # Case-insensitive so "Noah" (as stored in a session) resolves to the
+    # same persona "noah" (as typed on the command line) does.
+    if lowered == "noah":
         return build_default_persona()
+    persona_name = key
     candidates = [
         os.path.join(_PERSONAS_DIR, f"{persona_name}.json"),
         os.path.join(os.getcwd(), f"{persona_name}.json"),
@@ -140,22 +189,49 @@ def _load_persona(persona_name: str | None) -> cobirb_typing.Persona:
             data = _load_json(path)
             break
     if data is None:
-        print(f"unknown persona '{persona_name}'. Falling back to Noah.", file=sys.stderr)
-        return build_default_persona()
+        # Falls back to *no* persona rather than to Noah: a typo in
+        # --persona shouldn't quietly dress the model up in a character the
+        # user never asked for.
+        print(f"unknown persona '{persona_name}'. Continuing without one.", file=sys.stderr)
+        return build_plain_persona()
     from .typing.spi import Persona
 
     return Persona.from_dict(data)
 
 
 def _available_personas() -> list[str]:
-    """Names of every persona CoBirb can resolve out of the box: the
-    built-in Noah plus every ``*.json`` bundled under ``cobirb/personas/``."""
+    """Every persona CoBirb can resolve out of the box, for the ``/persona``
+    picker and listing.
+
+    ``"none"`` leads because it is the default and the way back to it: the
+    picker has to be able to *remove* a persona, not only swap one for
+    another. After it come the built-in Noah and every ``*.json`` bundled
+    under ``cobirb/personas/``.
+    """
     names = {"noah"}
     if os.path.isdir(_PERSONAS_DIR):
         for fname in os.listdir(_PERSONAS_DIR):
             if fname.endswith(".json"):
                 names.add(fname[: -len(".json")])
-    return sorted(names)
+    return [NO_PERSONA, *sorted(names)]
+
+
+def _persona_key(persona: cobirb_typing.Persona) -> str:
+    """The name that reloads ``persona`` — what ``--persona`` takes, which is
+    not always what the persona calls itself.
+
+    ``kawaii.json`` introduces itself as "Imouto", so a session that recorded
+    the display name could not be reopened: ``_load_persona("Imouto")`` finds
+    no such file. Sessions therefore store this key instead.
+    """
+    if not persona_shapes_voice(persona):
+        return NO_PERSONA
+    for name in _available_personas():
+        if name != NO_PERSONA and _load_persona(name).name == persona.name:
+            return name
+    # A persona the user wrote themselves: the file name is the best guess
+    # available, and matches the common case of naming the file after it.
+    return persona.name
 
 
 def _load_json(path: str) -> dict[str, Any]:
@@ -177,6 +253,16 @@ def _nested(config: Config, *keys: str) -> Any:
     return value
 
 
+def _resolve_harness_prompt(cli_value: str | None, config: Config) -> bool:
+    """Resolve whether CoBirb sends its own harness block:
+    ``--system-prompt {off,harness}`` overrides the ``"system_prompt"`` config
+    key, and with neither given it is **off** — CoBirb sends no system message
+    of its own and the model's Modelfile ``SYSTEM`` applies untouched.
+    """
+    value = cli_value if cli_value is not None else config.get("system_prompt", default="off")
+    return str(value).strip().lower() == "harness"
+
+
 def _resolve_plan_mode(cli_value: str | None, config: Config) -> bool:
     """Resolve whether plan mode starts on: ``--plan-mode {on,off}`` (CLI)
     overrides the ``"plan_mode"`` boolean in config; with neither given, it
@@ -195,7 +281,7 @@ def _resolve_plan_mode(cli_value: str | None, config: Config) -> bool:
 # scrolling interactive loop used before the TUI replaced it.
 # --------------------------------------------------------------------------- #
 def _apply_persona_switch(
-    arg: str, persona: cobirb_typing.Persona, system: str
+    arg: str, persona: cobirb_typing.Persona, system: str, *, harness: bool = False
 ) -> tuple[cobirb_typing.Persona, str, str]:
     """Handle ``/persona [name]``.
 
@@ -209,7 +295,9 @@ def _apply_persona_switch(
     if not arg:
         return persona, system, f"Available personas: {', '.join(_available_personas())}"
     new_persona = _load_persona(arg)
-    new_system = _build_system_prompt(new_persona)
+    new_system = _build_system_prompt(new_persona, harness=harness)
+    if not persona_shapes_voice(new_persona):
+        return new_persona, new_system, "Persona off — the model speaks in its own voice."
     greeting = new_persona.greeting or "switched personas."
     return new_persona, new_system, f"{new_persona.name}: {greeting}"
 
@@ -471,7 +559,7 @@ def _build_orchestrator(
         except Exception as exc:  # noqa: BLE001 - fail closed to the core default
             _report_plugin_issues({"io": f"failed to instantiate: {exc}"})
 
-    policy = build_default_policy()
+    policy = build_default_policy(audit_log_enabled=bool(_nested(config, "audit_log")))
     for name, arg in allow_overrides.items():
         policy.allow(name, arg)
 
@@ -481,9 +569,9 @@ def _build_orchestrator(
         if crypto_issue:
             _report_plugin_issues({"crypto": crypto_issue})
         if os.path.isfile(session_path):
-            manager = SessionManager.load(session_path, crypto, password, cwd, persona.name)
+            manager = SessionManager.load(session_path, crypto, password, cwd, _persona_key(persona))
         else:
-            manager = SessionManager.create(session_path, crypto, cwd, persona.name, password)
+            manager = SessionManager.create(session_path, crypto, cwd, _persona_key(persona), password)
     else:
         manager = None
 
@@ -502,11 +590,26 @@ def _render(text: str) -> None:
     print(text)
 
 
+def _render_user_prompt(prompt: str) -> None:
+    """Echo what the user asked, marked the way interactive mode marks it.
+
+    Goes through a Rich ``Console`` rather than ``_render``'s bare ``print``
+    so the ``>`` is coloured and a multi-line prompt is indented under it —
+    the two renderers are supposed to look identical (see
+    ``plugins.core.render``), and this was the last place still printing a
+    bare "You:" label.
+    """
+    from rich.console import Console
+
+    Console().print(render.build_user_message(prompt))
+    print()
+
+
 def _render_final_answer(orchestrator: Any, persona_name: str, text: str) -> None:
     """Show the model's finished reply.
 
     Prefers the orchestrator's ``io`` adapter's ``render_answer`` hook when
-    it has one (rendered markdown in a panel — see
+    it has one (marked, markdown-rendered — see
     ``TerminalIO.render_answer``), falling back to a plain "name: text"
     line for an adapter without it (including test doubles and a bare
     stub orchestrator with no ``io`` attribute at all).
@@ -546,10 +649,20 @@ def _run_one_shot(
     model_name: str | None = None,
     plan_mode: bool = False,
 ) -> int:
-    _render(f"You: {prompt}\n")
-    orchestrator, _, _ = _build_orchestrator(
-        cwd, persona, allow_overrides, system, session_path, password, model_name
-    )
+    # Wiring first, echo second: a prompt echoed before the session failed to
+    # open reads as though the task was attempted, when nothing ran at all.
+    try:
+        orchestrator, _, _ = _build_orchestrator(
+            cwd, persona, allow_overrides, system, session_path, password, model_name
+        )
+    except Exception as exc:  # noqa: BLE001 - a bad password must not traceback
+        # Chiefly a session that wouldn't decrypt. Wiring failures used to
+        # escape here as an unhandled traceback, which for the commonest
+        # cause (a mistyped password) is a terrible way to be told.
+        print(f"cobirb: could not open {session_path} — {_session_open_error(exc)}", file=sys.stderr)
+        return 1
+
+    _render_user_prompt(prompt)
     try:
         session = orchestrator.run(
             prompt, system, cwd=cwd, persona=persona.name, session_path=session_path, plan_mode=plan_mode
@@ -579,6 +692,7 @@ def _run_tui(
     cwd: str,
     model_name: str | None = None,
     plan_mode: bool = False,
+    harness: bool = False,
 ) -> int:
     """Interactive mode: hand off to the full-screen Textual app.
 
@@ -606,8 +720,50 @@ def _run_tui(
         cwd=cwd,
         model_name=model_name,
         plan_mode=plan_mode,
+        harness=harness,
     )
+
+    # Resuming an existing session file: open it *before* the app starts.
+    #
+    # Doing this inside the running app meant a wrong password took you all
+    # the way in — full-screen UI, a model to pick — only to report the
+    # failure into a transcript belonging to a session that had never
+    # opened. If a session was asked for and can't be unlocked, there is
+    # nothing to interact with, so nothing should start: the error belongs
+    # on the terminal you typed the command into, with a non-zero exit.
+    #
+    # The app object exists by now but hasn't run, so its I/O bridge can
+    # already be handed to the orchestrator — which is what keeps this the
+    # same single code path that opens a session everywhere else, and means
+    # the file is decrypted exactly once.
+    if session_path is not None and os.path.isfile(session_path):
+        try:
+            app.orchestrator, _, _ = _build_orchestrator(
+                cwd,
+                persona,
+                allow_overrides,
+                system,
+                session_path,
+                password,
+                model_name,
+                io_factory=lambda: app.io_bridge,
+            )
+        except Exception as exc:  # noqa: BLE001 - a bad password is routine, not a crash
+            print(
+                f"cobirb: could not open {session_path} — {_session_open_error(exc)}",
+                file=sys.stderr,
+            )
+            return 1
+
     app.run()
+
+    # After app.run() returns, never from inside the app: Textual owns the
+    # whole screen until then, so anything printed earlier would be painted
+    # over and lost. Read back off the app rather than using the argument —
+    # the Sessions tab can start or resume a different session mid-run, and
+    # the hint has to name the file that was actually written.
+    if app.session_path is not None and os.path.isfile(app.session_path):
+        print(_resume_hint(app.session_path))
     return 0
 
 
@@ -638,8 +794,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "-w",
         nargs="?",
         const=True,
-        help="Prompt for the session password. Never taken from the command line "
-        "(that would leak it into shell history); any value given here is ignored.",
+        metavar="PASSWORD",
+        help="Run in an encrypted session, starting a new one under "
+        f"{_sessions_dir_display()} if --session names none. Give the password "
+        "here ('-w hunter2') or leave it off ('-w') to be prompted without "
+        "echo — a password on the command line is visible in shell history "
+        "and process listings.",
     )
 
     opts = parser.add_argument_group("options")
@@ -650,7 +810,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--persona",
         "--agent",
         dest="persona",
-        help="Persona name or file (default: noah; bundled: professional, neighbor, kawaii).",
+        help="Adopt a persona (default: none — the model keeps its own voice). "
+        "Bundled: noah, professional, neighbor, kawaii; or point at your own "
+        "<name>.json. Pick one interactively any time with /persona.",
     )
     opts.add_argument(
         "--allow-tool",
@@ -666,6 +828,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Plan, then act, then validate with references, as 3 separate model "
         "phases (default: off, or the 'plan_mode' config key). Toggle mid-session "
         "with /plan on|off.",
+    )
+    opts.add_argument(
+        "--system-prompt",
+        choices=["off", "harness"],
+        default=None,
+        metavar="{off,harness}",
+        help="Whether CoBirb sends a system prompt of its own (default: off, "
+        "or the 'system_prompt' config key). Off means no system message is "
+        "sent at all, so the SYSTEM directive your model was built with "
+        "applies exactly as it does in Ollama. 'harness' adds a short "
+        "description of the tool-permission model, which stops some models "
+        "retrying a denied tool call. Either way, a persona (if you adopt "
+        "one) is added after your model's own prompt, never instead of it.",
     )
     opts.add_argument("--cwd", help="Working directory.")
     return parser
@@ -683,35 +858,46 @@ def main(argv: list[str] | None = None) -> int:
     allow_overrides = _parse_allow_tools(",".join(args.allow_tool))
     persona_name = args.persona or config.get("persona")
     persona = _load_persona(persona_name)
-    system = _build_system_prompt(persona)
+    harness = _resolve_harness_prompt(args.system_prompt, config)
+    system = _build_system_prompt(persona, harness=harness)
     plan_mode = _resolve_plan_mode(args.plan_mode, config)
 
-    # One-shot mode: prompt takes priority. A session path always needs a
-    # password to encrypt to (matching interactive mode below) — without
-    # this, --session without --password would run the whole task and only
-    # then crash trying to encrypt with a None password when saving.
+    # Either flag alone is enough to mean "this is a session": a path always
+    # needs a password to encrypt to, and a password with no path gets a new
+    # session under ~/.cobirb/sessions rather than being silently ignored.
+    session_path, password = _resolve_session(args.session, args.password)
+
     if args.prompt is not None:
-        password = None
-        if args.session or args.password:
-            password = _read_password()
-        return _run_one_shot(
+        status = _run_one_shot(
             args.prompt,
             persona,
             system,
             allow_overrides,
-            args.session,
+            session_path,
             password,
             args.cwd or ".",
             args.model,
             plan_mode,
         )
+        # Only on success: the hint is about a session this run actually
+        # wrote to. Printing it after a failure ("could not open …" followed
+        # by "Session saved") claims something that didn't happen.
+        if status == 0 and session_path is not None and os.path.isfile(session_path):
+            # stderr, not stdout: one-shot mode is meant to pipe, and this
+            # hint is for the human, not for whatever is reading the output.
+            print(_resume_hint(session_path), file=sys.stderr)
+        return status
 
-    # Interactive mode.
-    password = None
-    if args.session:
-        password = _read_password()
     return _run_tui(
-        persona, system, allow_overrides, args.session, password, args.cwd or ".", args.model, plan_mode
+        persona,
+        system,
+        allow_overrides,
+        session_path,
+        password,
+        args.cwd or ".",
+        args.model,
+        plan_mode,
+        harness,
     )
 
 
@@ -722,6 +908,73 @@ def _read_password() -> str:
     return getpass.getpass("CoBirb password: ")
 
 
+def _sessions_dir_display() -> str:
+    """``~/.cobirb/sessions`` with the home directory abbreviated, for help
+    text and the resume hint — the literal path is long and the ``~`` form is
+    what a user would type back."""
+    directory = session_module.default_sessions_dir()
+    home = os.path.expanduser("~")
+    return "~" + directory[len(home):] if directory.startswith(home) else directory
+
+
+def _resolve_session(session_arg: str | None, password_arg: Any) -> tuple[str | None, str | None]:
+    """Work out which session file to use and which password unlocks it.
+
+    Returns ``(session_path, password)``, both ``None`` when this run isn't a
+    session at all.
+
+    ``--password``/``-w`` on its own used to be inert in interactive mode:
+    the password was only ever read when ``--session`` also named a path, so
+    ``cobirb -w`` ran an ordinary throwaway conversation and nothing was
+    saved. Asking for a password is asking for an encrypted session, so one
+    is now created under ``~/.cobirb/sessions`` named for the current time.
+
+    ``-w <password>`` takes the password from the command line, and ``-w``
+    alone prompts for it without echo. The command-line form is what makes
+    ``cobirb -w 1234`` work in one go; it is also visible in shell history
+    and in ``ps``, which is why the bare form still exists and why the help
+    text says so.
+    """
+    if not session_arg and not password_arg:
+        return None, None
+    if password_arg is True or password_arg is None:
+        password = _read_password()
+    else:
+        password = str(password_arg)
+    path = session_arg or os.path.join(
+        session_module.default_sessions_dir(), f"session-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    )
+    return path, password
+
+
+def _session_open_error(exc: Exception) -> str:
+    """A readable reason a session file could not be opened.
+
+    A wrong password surfaces as the crypto library's ``InvalidTag``, which
+    carries **no message at all** — AES-GCM can only report that the
+    authentication tag didn't match, never why. Printed raw that produced a
+    dangling "could not open that session —" with nothing after the dash, so
+    an empty message is spelled out here instead. Tamper detection
+    (``SessionManager._verify_hashes``) does raise with a real message, and
+    that one is passed through unchanged.
+    """
+    message = str(exc).strip()
+    return message or "wrong password, or the file has been modified"
+
+
+def _resume_hint(session_path: str) -> str:
+    """The exact command that reopens ``session_path``.
+
+    Printed on the way out of a session so the file isn't something the user
+    has to go hunting for. Deliberately ``-w`` with no value: the password
+    would otherwise be printed to the terminal and into whatever scrollback
+    or log is capturing it.
+    """
+    home = os.path.expanduser("~")
+    shown = "~" + session_path[len(home):] if session_path.startswith(home) else session_path
+    return f"Session saved. Resume it with:\n  cobirb --session {shown} -w"
+
+
 _HELP_TEXT = """\
 CoBirb — a privacy-first, local agentic CLI.
 
@@ -730,22 +983,37 @@ MODES
                          line, a boxed input, tool approval as a dialog.
   One-shot:              cobirb -p "your task" --allow-tool='shell(git)'
                          Plain stdout, so it pipes and scripts like any CLI.
-  Session:               cobirb --session <path>   (prompts for the password)
+  Session:               cobirb -w                 (new encrypted session)
+                         cobirb --session <path> -w
 
 PRIVACY BY CONSTRUCTION
   • Zero telemetry. • No outbound network by default. • Sessions encrypted
     at rest (AES-256-GCM, keyed via scrypt). • Permissions default to
-    denied; no tool runs without approval. • Everything stays on this
-    machine.
+    denied; no tool runs without approval. • No local audit log unless you
+    opt in ("audit_log" in config — see 'cobirb help config'), since one
+    would otherwise be a second, unencrypted copy of what you write and
+    run. • Everything stays on this machine.
 
-A persona or user request can NEVER override these rules.
+These are enforced in code — the permission layer and the session crypto —
+not by asking the model to behave. CoBirb sends no system prompt of its own
+by default, so your model's own SYSTEM directive is what shapes it.
 
 OPTIONS
   --model NAME        Model name (config/COBIRB_MODEL_NAME if omitted); pick
                       one interactively any time with /model.
-  --persona NAME      Persona name/file (default: noah). Bundled: noah,
-                      professional, neighbor, kawaii. Or set "persona" in
-                      config, or point at your own <name>.json.
+  --persona NAME      Adopt a persona (default: none — the model's own voice
+                      is left alone). Bundled: noah, professional, neighbor,
+                      kawaii. Or set "persona" in config, or point at your
+                      own <name>.json. Pick one with /persona.
+  -w [PASSWORD]       Run in an encrypted session, starting one under
+                      ~/.cobirb/sessions if --session names none. '-w' alone
+                      prompts without echo; '-w hunter2' is visible in shell
+                      history and process listings.
+  --session PATH      Resume/continue the encrypted session at PATH.
+  --system-prompt     off (default) or harness. Off sends NO system message
+                      at all, so the SYSTEM directive your model was built
+                      with applies exactly as it does in Ollama. See
+                      'cobirb help model'.
   --allow-tool SPEC   Override permission: 'name' or 'name(arg)'. Repeatable.
   --plan-mode on|off  Plan, then act, then validate with references, as 3
                       separate model phases (default: off, or "plan_mode"
@@ -755,15 +1023,21 @@ OPTIONS
 INTERACTIVE COMMANDS
   /model             List models available from the configured endpoint
                      and pick one for this session.
-  /persona <name>    Switch personas mid-conversation.
-  /persona           List available personas.
+  /persona           Pick a persona from a list (including "none", the
+                     default, which hands the voice back to the model).
+  /persona <name>    Switch to a named persona directly.
   /plan on|off       Toggle plan mode mid-conversation.
   /plan              Show whether plan mode is currently on.
   ? or /help         Open this help. '/help <topic>' opens one topic.
 
 INTERACTIVE KEYS
-  f1 help · f2 next tab · ctrl+q quit. In a tool-approval dialog:
-  y allow once · a allow for the rest of the session · n (or escape) deny.
+  f1 help · f2 next tab · ctrl+q quit · up/down recall earlier prompts (the
+  last 100, in memory only — nothing you type is written to disk).
+  ctrl+c copies the transcript selection if you have dragged one out with
+  the mouse, and otherwise cancels a running turn (a stuck or slow shell
+  command, most usefully — quitting mid-turn tries this first too, so it
+  never sits waiting on one either). In a tool-approval dialog: y allow
+  once · a allow for the rest of the session · n (or escape) deny.
 
 TOPICS
   Run 'cobirb help <topic>' for more: session, persona, plan, model,
@@ -774,13 +1048,30 @@ _HELP_TOPICS: dict[str, str] = {
     "session": """\
 SESSION — encrypted, resumable conversations
 
-  cobirb --session <path>              Interactive, resumed/created at <path>.
-  cobirb -p "task" --session <path>    One-shot, resumed/created at <path>.
+  cobirb -w                            New session under ~/.cobirb/sessions.
+  cobirb -w hunter2                    Same, with the password given inline.
+  cobirb --session <path> -w           Resumed/created at <path>.
+  cobirb -p "task" -w                  One-shot, saved to a new session.
 
-Either form prompts for a password (never taken from the command line — that
-would leak it into shell history). The same password unlocks an existing
-session or sets one for a session being created. In interactive mode, the
-Sessions tab lists and starts sessions for you without needing --session at
+Asking for a password is asking for a session: -w on its own starts one named
+for the current time under ~/.cobirb/sessions, so there is no path to invent
+up front. The same password unlocks an existing session or sets one for a
+session being created.
+
+'-w' with no value prompts for the password without echoing it. '-w hunter2'
+takes it straight from the command line, which is quicker and is also visible
+in your shell history and to anyone who can list processes — your call which
+trade you want.
+
+Resuming shows you the conversation you are rejoining: interactive mode
+replays the saved turns into the transcript, between two dim rules, before
+you type anything. The file is unlocked before anything starts, so a wrong
+password reports on the terminal and exits non-zero — a session that can't
+be decrypted never opens the app at all.
+
+On exit, the command that reopens the session is printed to the terminal, so
+the file is never something you have to go hunting for. In interactive mode
+the Sessions tab also lists and starts sessions without needing --session at
 all — see its own screen for details.
 
   • Encrypted at rest: AES-256-GCM, keyed via scrypt over the password. The
@@ -791,13 +1082,21 @@ all — see its own screen for details.
     "persona": """\
 PERSONA — how CoBirb speaks
 
-  cobirb --persona <name>       Select a persona for this run.
-  /persona <name>                Switch personas mid-conversation.
-  /persona                       List available personas.
+  cobirb --persona <name>       Adopt a persona for this run.
+  /persona                      Pick one from a list, "none" included.
+  /persona <name>               Switch to a named persona directly.
 
-Bundled: noah (default), professional, neighbor, kawaii. Set "persona" in
-config to change the default, or point --persona at your own <name>.json
-(same shape as the bundled files — see cobirb/personas/*.json).
+Personas are OFF by default. A persona is a costume for the model — a name, a
+species, a tone, stock phrases — and CoBirb sends it as a system message,
+which replaces whatever SYSTEM directive the local model's own Modelfile
+sets. Wearing one by default would silently override your model's own
+configuration on every turn, so an unconfigured run sends no voice
+instructions at all and the model sounds like itself.
+
+Bundled: noah, professional, neighbor, kawaii. Set "persona" in config to
+adopt one by default, or point --persona at your own <name>.json (same shape
+as the bundled files — see cobirb/personas/*.json). "none" turns it back
+off.
 
 Personas are pure data: name, tone, greeting, phrasings, emoji density,
 squawks. They shape tone only and can never grant permission to skip
@@ -850,6 +1149,31 @@ If interactive mode starts with no working model — nothing configured, or
 "default_model" named one that isn't there — it fetches the list itself and
 opens the same picker /model would, so you're never left staring at a
 session with nothing to talk to.
+
+YOUR MODEL'S OWN SYSTEM PROMPT
+
+Ollama accepts one system message per request, and sending one REPLACES the
+SYSTEM directive the model was built with. A model you made with
+'ollama create' around a custom SYSTEM is a configuration you chose, so
+CoBirb does not overwrite it:
+
+  • By default CoBirb sends no system message at all. Your model behaves
+    inside CoBirb exactly as it does in 'ollama run' — same SYSTEM, same
+    voice, same everything.
+  • When CoBirb does have something to add (a persona, plan-mode phase
+    instructions, or --system-prompt harness), it reads your model's own
+    SYSTEM back via /api/show and puts it FIRST, then appends its own part.
+    Yours is supplemented, never discarded.
+
+  --system-prompt off       The default. Nothing of CoBirb's is sent.
+  --system-prompt harness   Add a short description of the tool-permission
+                            model. Worth trying if a model keeps retrying a
+                            tool call you denied; it has no other effect.
+  "system_prompt"           The same choice in config.
+
+Nothing about CoBirb's actual guarantees depends on any of this: permissions
+are enforced in policy.py and sessions are encrypted by the crypto backend,
+not by asking a model to cooperate.
 """,
     "plugins": """\
 PLUGINS — bolt-on capabilities
@@ -900,13 +1224,29 @@ Read from (repo overrides user): ~/.cobirb/config.json, then ./cobirb.json
       "name": "...", "base_url": "..."}}  Model name/endpoint (local Ollama
                                  by default; any OpenAI-compatible server
                                  works).
-  "persona"                      Default persona name (or --persona).
+  "persona"                      Persona to adopt by default (or --persona).
+                                 Unset means none: the model keeps its voice.
+  "system_prompt"                "off" (default) or "harness" — whether
+                                 CoBirb sends a system prompt of its own.
+                                 See 'cobirb help model'.
   "plugins": {"model"|"io"|"crypto": "<name>"}
                                  Select a discovered plugin for that slot
                                  (see 'cobirb help plugins'); the core
                                  default is kept when unset.
   "plan_mode"                    Start with plan mode on (default: false).
                                  See 'cobirb help plan'.
+  "audit_log"                    Keep a local record of every tool call —
+                                 name, arguments, cwd, timestamp — at
+                                 ~/.cobirb/audit.jsonl (default: false).
+                                 Off by default because the arguments
+                                 logged are whatever a tool call actually
+                                 carried, unredacted: write_file's full
+                                 content, edit_file's full old/new text,
+                                 apply_patch's full diff, shell's full
+                                 command. Unlike sessions, this log is
+                                 plain text, not encrypted — only turn it
+                                 on if you want that trail and understand
+                                 what ends up in it.
 
 Nothing here ever defaults to a networked provider — model/provider
 settings are opt-in, matching CoBirb's no-network-by-default rule.

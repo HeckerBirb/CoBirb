@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from cobirb.orchestrator import Orchestrator, _materialize, build_default_policy
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
@@ -224,6 +225,26 @@ def test_cli_exposes_default_policy():
     assert policy.is_allowed("shell", {"command": "git status"})
 
 
+def test_build_default_policy_audit_log_is_off_unless_requested(tmp_path, monkeypatch):
+    """Regression test: an always-on audit log would duplicate file
+    contents/diffs/shell commands into an unencrypted trail, at odds with
+    sessions being encrypted at rest — it must stay opt-in end to end,
+    including through this factory."""
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    policy = build_default_policy()
+    policy.log("write_file", {"path": "x", "content": "secret"}, cwd=str(tmp_path))
+    assert not policy.audit.enabled
+    assert not os.path.exists(policy.audit.path)
+
+
+def test_build_default_policy_audit_log_can_be_turned_on(tmp_path, monkeypatch):
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    policy = build_default_policy(audit_log_enabled=True)
+    policy.log("read_file", {"path": "x"}, cwd=str(tmp_path))
+    assert policy.audit.enabled
+    assert os.path.exists(policy.audit.path)
+
+
 def test_default_policy_allows_shell_scope():
     policy = Policy()
     policy.allow_all_core_tools()
@@ -280,13 +301,17 @@ def test_run_streams_live_through_io_when_supported():
     session = orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
 
     # Rendered as more than one call (proves genuine incremental streaming,
-    # not the whole answer written in one go), labeled once up front, and
-    # the fully assembled visible text is exactly what was said — without
-    # pinning the exact chunk boundaries or trailing-newline mechanics,
-    # which are incidental to *that* streaming happened correctly.
+    # not the whole answer written in one go), and the fully assembled
+    # visible text is exactly what was said — without pinning the exact chunk
+    # boundaries or trailing-newline mechanics, which are incidental to
+    # *that* streaming happened correctly.
+    #
+    # Nothing but the model's own words goes through render(): the persona
+    # label used to be written into the stream here, which made it part of
+    # the text every renderer received. How a reply is introduced is the I/O
+    # adapter's business — see the begin_stream hook below.
     assert len(io.rendered) > 1
-    assert io.rendered[0] == "noah: "
-    assert "".join(io.rendered) == "noah: Hello there\n"
+    assert "".join(io.rendered) == "Hello there\n"
     # The final turn still gets the fully assembled content.
     assert session.turns[-1].content == "Hello there"
     assert session.summary == "Hello there"
@@ -553,7 +578,7 @@ def test_chat_wraps_the_first_streamed_chunk_in_the_spinner():
 
     assert io.spinner_calls == [("enter", "noah is thinking…"), ("exit", "noah is thinking…")]
     # The spinner must not have swallowed any streamed content.
-    assert "".join(io.rendered) == "noah: Hello\n"
+    assert "".join(io.rendered) == "Hello\n"
 
 
 def test_chat_works_without_a_spinner_hook():
@@ -865,3 +890,78 @@ def test_plan_mode_does_not_double_render_a_streamed_phase():
     assert "plan text" in joined
     assert "act text" in joined
     assert "validate text" in joined
+
+
+# --------------------------------------------------------------------------- #
+# begin_stream: how a streamed reply is introduced.
+#
+# The orchestrator used to write f"{persona}: " straight into the stream via
+# io.render(), which made the persona label part of the text every renderer
+# received. Once replies were marked with "> ", transcripts read
+# "> CoBirb: hello" — the label had been baked into the content and no
+# renderer could tell it apart from what the model actually said.
+# --------------------------------------------------------------------------- #
+class _StreamAwareIO(_RecordingIO):
+    def __init__(self):
+        super().__init__()
+        self.begin_calls = []
+
+    def begin_stream(self, persona_name):
+        self.begin_calls.append(persona_name)
+
+
+def test_streaming_announces_the_reply_through_the_hook_not_the_content():
+    io = _StreamAwareIO()
+    orchestrator = Orchestrator(
+        model=_StreamingModel(["Hel", "lo"]), tools={}, policy=Policy(), io=io
+    )
+
+    orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
+
+    assert io.begin_calls == ["noah"]
+    assert "noah" not in "".join(io.rendered)
+
+
+def test_the_hook_fires_once_per_reply_not_once_per_chunk():
+    io = _StreamAwareIO()
+    orchestrator = Orchestrator(
+        model=_StreamingModel(["a", "b", "c", "d"]), tools={}, policy=Policy(), io=io
+    )
+
+    orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
+
+    assert io.begin_calls == ["noah"]
+
+
+def test_the_hook_never_fires_for_a_reply_with_no_content():
+    io = _StreamAwareIO()
+    orchestrator = Orchestrator(model=_StreamingModel([]), tools={}, policy=Policy(), io=io)
+
+    orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
+
+    assert io.begin_calls == []
+
+
+def test_streaming_still_works_for_an_adapter_without_the_hook():
+    """Duck-typed like every other chrome hook: an adapter that doesn't
+    implement it still gets the content."""
+    io = _RecordingIO()  # no begin_stream at all
+    orchestrator = Orchestrator(
+        model=_StreamingModel(["Hel", "lo"]), tools={}, policy=Policy(), io=io
+    )
+
+    session = orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
+
+    assert "".join(io.rendered) == "Hello\n"
+    assert session.summary == "Hello"
+
+
+def test_the_persona_label_still_reaches_the_spinner():
+    """It was only ever wrong in the *content*; "noah is thinking…" is a
+    status line and stays."""
+    io = _SpinningIO()
+    orchestrator = Orchestrator(model=_StreamingModel(["Hi"]), tools={}, policy=Policy(), io=io)
+
+    orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
+
+    assert io.spinner_calls[0] == ("enter", "noah is thinking…")

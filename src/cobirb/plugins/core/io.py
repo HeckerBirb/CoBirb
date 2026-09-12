@@ -81,6 +81,18 @@ class TerminalIO(I_OAdapter):
         ``Orchestrator._chat``. Degrades to a static line on a non-tty."""
         return self._console.status(label, spinner="dots")
 
+    def begin_stream(self, persona_name: str) -> None:
+        """Called when the first token of a streamed reply arrives.
+
+        Draws the same ``>`` marker a finished reply gets, so a streamed and
+        a non-streamed reply look identical in the scrollback. The marker is
+        written here rather than by the orchestrator because it is chrome:
+        the orchestrator supplies the text, each adapter decides how a reply
+        is introduced (the TUI's, for instance, draws nothing here — its
+        streaming preview is already marked).
+        """
+        self._console.print(render.stream_marker(), end="")
+
     def render_header(
         self, persona_name: str, model_name: str, cwd: str, session_path: str | None = None
     ) -> None:
@@ -88,15 +100,19 @@ class TerminalIO(I_OAdapter):
         self._console.print(render.build_header_panel(persona_name, model_name, cwd, session_path))
 
     def render_answer(self, persona_name: str, text: str) -> None:
-        """The assistant's finished reply, rendered as markdown in a panel.
+        """The assistant's finished reply: markdown behind a ``>`` marker.
 
         Used for a reply that arrives whole (not streamed) — a streamed
         reply was already shown token-by-token via ``render`` and would
         just be duplicated here. See ``Orchestrator.last_turn_streamed``.
+
+        ``persona_name`` is part of the shared hook signature but is not
+        printed: the marker's colour is what distinguishes a reply from the
+        prompt above it.
         """
         if not text:
             return
-        self._console.print(render.build_answer_panel(persona_name, text))
+        self._console.print(render.build_assistant_message(text))
 
     def render_plan(self, persona_name: str, text: str) -> None:
         """Plan mode's planning-phase reply (see

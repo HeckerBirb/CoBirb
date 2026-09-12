@@ -27,6 +27,7 @@ import threading
 import time
 from typing import Any
 
+from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -41,10 +42,30 @@ from ..policy import PermissionError
 from ..typing import spi as cobirb_typing
 from .io_bridge import TuiIO
 from .panes import PluginsPane, SessionsPane
-from .screens import ApprovalModal, HelpModal, ModelPickerModal, TextPromptModal
-from .widgets import StatusBar, StreamPreview
+from .screens import (
+    ApprovalModal,
+    HelpModal,
+    ModelPickerModal,
+    PersonaPickerModal,
+    TextPromptModal,
+)
+from .widgets import PromptInput, StatusBar, StreamPreview, TranscriptLog
 
 _TAB_ORDER = ["current", "sessions", "plugins"]
+
+
+def _session_turns(orchestrator: Any) -> list[Any]:
+    """The saved turns an orchestrator's session holds, or ``[]``.
+
+    ``orchestrator.session`` is a ``SessionManager``; the ``Session`` it
+    wraps is one level further in, and either can legitimately be ``None``
+    (no session, or a manager that never opened one). Defensive rather than
+    chained attribute access because this also runs against the stub
+    orchestrators the tests inject.
+    """
+    manager = getattr(orchestrator, "session", None)
+    session_data = getattr(manager, "session", None)
+    return list(getattr(session_data, "turns", None) or [])
 
 
 class CoBirbApp(App[None]):
@@ -57,6 +78,15 @@ class CoBirbApp(App[None]):
         Binding("f1", "help", "Help"),
         Binding("f2", "next_tab", "Next tab"),
         Binding("ctrl+q", "quit", "Quit"),
+        # priority=True: fires even while the (disabled, mid-turn) prompt
+        # input nominally holds focus — Ctrl+C should always be able to
+        # break out of a stuck turn, not just when something else happens
+        # to have focus. Textual's own default Ctrl+C binding
+        # (action_help_quit, "press ctrl+q to quit") only fires when there
+        # is nothing to cancel — see action_cancel_turn, which also has to
+        # hand Ctrl+C back to "copy the selection" itself, since claiming
+        # the key at priority takes it away from Screen's own copy binding.
+        Binding("ctrl+c", "cancel_turn", "Copy/Cancel", show=True, priority=True),
     ]
 
     def __init__(
@@ -69,6 +99,7 @@ class CoBirbApp(App[None]):
         cwd: str,
         model_name: str | None = None,
         plan_mode: bool = False,
+        harness: bool = False,
     ) -> None:
         super().__init__()
         self.persona = persona
@@ -79,6 +110,11 @@ class CoBirbApp(App[None]):
         self.cwd = cwd
         self.model_name = model_name
         self.plan_mode = plan_mode
+        # Whether CoBirb contributes its own harness block to the system
+        # prompt (--system-prompt harness). Kept because every later rebuild
+        # of `self.system` — a /persona switch, resuming a session — has to
+        # make the same choice this run started with.
+        self.harness = harness
         self.io_bridge = TuiIO(self)
         # Built lazily on the first real turn (never for a slash-command-only
         # session) and reused for every turn after that: reusing the same
@@ -90,6 +126,10 @@ class CoBirbApp(App[None]):
         # know the real name doesn't exist yet at mount time.
         self.resolved_model_name = cli._resolve_model_name(model_name, cwd)
         self.ui_thread_id = threading.get_ident()
+        # True for exactly the span between submitting a prompt and
+        # _on_turn_finished — see action_cancel_turn and action_quit, which
+        # both need to know whether there's a turn worth cancelling.
+        self._turn_in_progress = False
 
     # ------------------------------------------------------------------ #
     # Composition
@@ -98,10 +138,13 @@ class CoBirbApp(App[None]):
         yield Header(show_clock=False)
         with TabbedContent(initial="current"):
             with TabPane("Current", id="current"):
-                yield RichLog(id="transcript", markup=False, highlight=False, wrap=True)
+                # TranscriptLog, not a plain RichLog: a stock one can't be
+                # selected or copied out of at all (see its docstring).
+                # action_cancel_turn is the Ctrl+C half of the same fix.
+                yield TranscriptLog(id="transcript", markup=False, highlight=False, wrap=True)
                 yield StreamPreview(id="streaming-preview")
                 with Container(id="prompt-box"):
-                    yield Input(id="prompt-input", placeholder="Message CoBirb…")
+                    yield PromptInput(id="prompt-input", placeholder="Message CoBirb…")
             with TabPane("Sessions", id="sessions"):
                 yield SessionsPane()
             with TabPane("Plugins", id="plugins"):
@@ -132,17 +175,19 @@ class CoBirbApp(App[None]):
         self.io_bridge.render_header(
             self.persona.name, self.resolved_model_name, self.cwd, self.session_path
         )
-        greeting = self.persona.greeting or f"{self.persona.name} is here."
+        # A persona greets in character; with no persona (the default) there
+        # is no character to greet as, so this stays a plain ready line
+        # rather than inventing a voice the user didn't ask for.
         self.write_transcript(
             render.build_notice(
-                f"{self.persona.name}: {greeting}"
+                f"{self.persona.name}: {self.persona.greeting}"
                 if self.persona.greeting
-                else greeting
+                else f"{self.persona.name} ready."
             )
         )
         self.write_transcript(
             render.build_notice(
-                "/model picks a model · /persona <name> switches personas · "
+                "/model picks a model · /persona picks a persona · "
                 "/plan on|off toggles plan mode · ? or /help for help"
             )
         )
@@ -150,6 +195,15 @@ class CoBirbApp(App[None]):
 
         self.refresh_plugins_pane()
         self.refresh_sessions_pane()
+        # A resumed session arrives already open: `_run_tui` unlocks the file
+        # before the app is allowed to start, precisely so a wrong password
+        # never gets this far (there would be no conversation to show and
+        # nothing to interact with). So there is nothing to decrypt here —
+        # only turns to draw.
+        if self.orchestrator is not None and self.session_path is not None:
+            self.render_history(
+                _session_turns(self.orchestrator), os.path.basename(self.session_path)
+            )
         # Validates whatever model got configured against the endpoint's
         # live list, and opens the /model picker itself if that didn't work
         # out — see _select_model_worker's docstring for the exact rules.
@@ -174,7 +228,83 @@ class CoBirbApp(App[None]):
         the panel for the tool call it led to.
         """
         self._flush_stream()
-        self.query_one("#transcript", RichLog).write(renderable)
+        self.query_one("#transcript", TranscriptLog).write(renderable)
+
+    def render_history(self, turns: list[Any], label: str) -> None:
+        """Replay a resumed conversation into the transcript.
+
+        Resuming used to drop you into an empty screen: the conversation was
+        loaded and fed to the model, so it knew what had been said, but you
+        couldn't see any of it. Every comparable CLI shows the thread you are
+        rejoining, and a session you can't read is most of the reason to keep
+        one.
+
+        Bracketed by dim rules so restored turns are never mistaken for
+        something that just happened.
+        """
+        log = self.query_one("#transcript", TranscriptLog)
+        if not turns:
+            log.write(render.build_notice(f"{label} — no turns yet; your next message starts it."))
+            return
+        log.write(Text(""))
+        log.write(render.build_history_divider(f"{label} · {len(turns)} earlier turn(s)"))
+        for turn in turns:
+            self._replay_turn(log, turn)
+        log.write(Text(""))
+        log.write(render.build_history_divider("end of restored history"))
+        # No trailing blank: whatever comes next writes its own leading one
+        # (see write_user_prompt), and two would open a gap.
+
+    def _replay_turn(self, log: TranscriptLog, turn: Any) -> None:
+        """Write one saved turn, matching how it looked when it happened."""
+        role = getattr(turn, "role", "")
+        content = getattr(turn, "content", "") or ""
+        tool_use = getattr(turn, "tool_use", None)
+        phase = getattr(turn, "phase", None)
+
+        if role == "tool":
+            # The tool turn records the result; the call that produced it is
+            # on the turn itself, so one panel shows both.
+            call = (tool_use or [{}])[0]
+            log.write(
+                render.build_tool_call_panel(
+                    call.get("name", "?"), call.get("arguments", {}) or {}, content, replayed=True
+                )
+            )
+            return
+
+        if role == "user":
+            log.write(Text(""))
+            log.write(render.build_user_message(content))
+            log.write(Text(""))
+            return
+
+        if not content.strip():
+            # An assistant turn whose only purpose was to announce a tool
+            # call — the call itself is rendered by the tool turn that
+            # follows, so an empty bubble here would be noise.
+            return
+        if phase == "plan":
+            log.write(render.build_plan_panel(self.persona.name, content))
+        elif phase == "validate":
+            log.write(render.build_validation_panel(self.persona.name, content))
+        else:
+            log.write(render.build_assistant_message(content))
+
+    def write_user_prompt(self, prompt: str) -> None:
+        """Append what the user just sent, fenced by blank lines.
+
+        The blank line on each side is the point: without it a prompt sat
+        flush against the panel above and the reply below, and the whole
+        transcript read as one undifferentiated column. Spacing here rather
+        than inside ``build_user_message`` keeps the renderable itself
+        composable — ``TerminalIO`` spaces its own output with newlines.
+        """
+        self._flush_stream()
+        log = self.query_one("#transcript", TranscriptLog)
+        log.write(Text(""))
+        log.write(render.build_user_message(prompt))
+        log.write(Text(""))
 
     def append_stream(self, text: str) -> None:
         self.query_one("#streaming-preview", StreamPreview).append(text)
@@ -190,7 +320,11 @@ class CoBirbApp(App[None]):
         preview = self.query_one("#streaming-preview", StreamPreview)
         text = preview.take()
         if text.strip():
-            self.query_one("#transcript", RichLog).write(text.rstrip("\n"))
+            # Marked the same way a non-streamed reply is, so the transcript
+            # reads uniformly whether or not the model streamed it.
+            self.query_one("#transcript", TranscriptLog).write(
+                render.build_streamed_message(text.rstrip("\n"))
+            )
 
     def set_busy(self, label: str) -> None:
         self.query_one(StatusBar).busy = label
@@ -214,6 +348,13 @@ class CoBirbApp(App[None]):
         if not prompt:
             return
 
+        # Before the slash-command branches below, not after: "/persona
+        # kawaii" is exactly the kind of thing worth arrowing back to, and a
+        # history that only remembered messages sent to the model would drop
+        # every command the moment it ran.
+        if isinstance(event.input, PromptInput):
+            event.input.remember(prompt)
+
         if prompt == "?" or prompt == "/help" or prompt.startswith("/help "):
             topic = prompt[len("/help"):].strip()
             self.action_help(topic)
@@ -227,12 +368,15 @@ class CoBirbApp(App[None]):
                 self._select_model_worker(auto=False)
             return
 
-        if prompt.startswith("/persona"):
-            self.persona, self.system, message = cli._apply_persona_switch(
-                prompt[len("/persona"):].strip(), self.persona, self.system
-            )
-            self.query_one(StatusBar).persona_name = self.persona.name
-            self.write_transcript(render.build_notice(message))
+        if prompt == "/persona" or prompt.startswith("/persona "):
+            arg = prompt[len("/persona"):].strip()
+            # Bare /persona opens the picker, exactly like bare /model;
+            # /persona <name> still switches directly, so anything scripted
+            # or recalled from history keeps working.
+            if arg:
+                self._apply_persona(arg)
+            else:
+                self.pick_persona()
             return
 
         if prompt.startswith("/plan"):
@@ -241,15 +385,17 @@ class CoBirbApp(App[None]):
             self.write_transcript(render.build_notice(message))
             return
 
-        self.write_transcript(render.build_notice(f"You: {prompt}"))
+        self.write_user_prompt(prompt)
         # Disabled here, on the main thread, and re-enabled in
         # _on_turn_finished — this is what replaces the old loop's
         # "continue? [y/N]" gate. There is nothing to confirm: when the box
         # comes back, you just keep typing.
         event.input.disabled = True
+        self._turn_in_progress = True
         self._run_turn(prompt)
 
     def _on_turn_finished(self) -> None:
+        self._turn_in_progress = False
         self._flush_stream()
         self.set_busy("")
         prompt_input = self.query_one("#prompt-input", Input)
@@ -414,6 +560,45 @@ class CoBirbApp(App[None]):
         self.write_transcript(render.build_notice(f"Model set to {name}."))
 
     # ------------------------------------------------------------------ #
+    # /persona: pick one from a list, the same way /model does
+    # ------------------------------------------------------------------ #
+    def pick_persona(self) -> None:
+        """Open the persona picker.
+
+        Unlike the model picker this needs no worker thread: the choices are
+        a directory listing of bundled personas, not a network round trip, so
+        there is nothing to block on and ``push_screen`` with a callback is
+        enough.
+        """
+        current = cli.NO_PERSONA if not cli.persona_shapes_voice(self.persona) else None
+        if current is None:
+            # Match by the name the picker lists (the file/bundle name), not
+            # the persona's display name — "kawaii" is the option, "Momo" or
+            # whatever it calls itself is what the persona says it is.
+            current = next(
+                (
+                    name
+                    for name in cli._available_personas()
+                    if cli._load_persona(name).name == self.persona.name
+                ),
+                None,
+            )
+        self.push_screen(
+            PersonaPickerModal(cli._available_personas(), current), self._on_persona_picked
+        )
+
+    def _on_persona_picked(self, name: str | None) -> None:
+        if name is not None:
+            self._apply_persona(name)
+
+    def _apply_persona(self, name: str) -> None:
+        self.persona, self.system, message = cli._apply_persona_switch(
+            name, self.persona, self.system, harness=self.harness
+        )
+        self.query_one(StatusBar).persona_name = self.persona.name
+        self.write_transcript(render.build_notice(message))
+
+    # ------------------------------------------------------------------ #
     # Plugins tab
     # ------------------------------------------------------------------ #
     def refresh_plugins_pane(self) -> None:
@@ -461,7 +646,9 @@ class CoBirbApp(App[None]):
             config = Config(cwd=self.cwd)
             _, discovered, _ = cli._discover_plugins(self.cwd, config)
             crypto, _ = cli._build_crypto(config, discovered)
-            manager = session.SessionManager.load(path, crypto, password, self.cwd, self.persona.name)
+            manager = session.SessionManager.load(
+                path, crypto, password, self.cwd, cli._persona_key(self.persona)
+            )
         except Exception as exc:  # noqa: BLE001 - wrong password/corruption is routine, not fatal
             self.call_from_thread(
                 self.query_one(SessionsPane).set_status, f"Could not open that session — {exc}"
@@ -478,16 +665,33 @@ class CoBirbApp(App[None]):
         # one code path that ever opens a session file, tested once.
         self.orchestrator = None
         self.persona = cli._load_persona(manager.session.persona)
-        self.system = cli._build_system_prompt(self.persona)
+        self.system = cli._build_system_prompt(self.persona, harness=self.harness)
         status = self.query_one(StatusBar)
         status.persona_name = self.persona.name
         status.session_path = path
-        turns = len(manager.session.turns)
+        turns = list(manager.session.turns)
+
+        # A different conversation is being opened, so the transcript of the
+        # old one is cleared rather than having the resumed turns appended
+        # under it — two threads in one scrollback with no boundary would be
+        # worse than either alone. The manager here is already decrypted, so
+        # the history is replayed straight from it.
+        self.query_one("#transcript", TranscriptLog).clear()
+        self.io_bridge.render_header(
+            self.persona.name, self.resolved_model_name, self.cwd, path
+        )
+        self.render_history(turns, os.path.basename(path))
+
         self.query_one(SessionsPane).set_status(
-            f"Resumed '{os.path.basename(path)}' — {turns} turn(s), persona {self.persona.name}. "
-            "Your next message continues it."
+            f"Resumed '{os.path.basename(path)}' — {len(turns)} turn(s), persona "
+            f"{self.persona.name}. Your next message continues it."
         )
         self.refresh_sessions_pane()
+        # Straight back to the conversation: resuming is a thing you do in
+        # order to keep talking, and leaving the user on the Sessions tab
+        # makes them go and find it.
+        self.query_one(TabbedContent).active = "current"
+        self.query_one("#prompt-input", Input).focus()
 
     @work(thread=True, exclusive=True, group="session")
     def _new_session_worker(self) -> None:
@@ -534,3 +738,89 @@ class CoBirbApp(App[None]):
         tabs = self.query_one(TabbedContent)
         index = _TAB_ORDER.index(tabs.active) if tabs.active in _TAB_ORDER else -1
         tabs.active = _TAB_ORDER[(index + 1) % len(_TAB_ORDER)]
+
+    def action_cancel_turn(self) -> None:
+        """Ctrl+C: copy the selection if there is one, else stop a stuck turn.
+
+        Copy comes first, and has to be handled here, because this binding is
+        ``priority=True``: that wins over every other Ctrl+C in the app,
+        including ``Screen``'s own ``ctrl+c -> screen.copy_text``. Claiming
+        the key for cancellation is what left the transcript impossible to
+        copy out of — text could be selected with the mouse, but the key that
+        copies it never reached Textual. Delegating here gives both meanings
+        one unambiguous key, disambiguated by whether anything is selected.
+
+        Cancelling matters because a long-running or hung ``shell`` call (a
+        command that doesn't produce output until you interact with it, a
+        server, a game loop — anything that doesn't exit on its own) would
+        otherwise leave the input disabled with no way back short of waiting
+        out its timeout (up to 5 minutes by default) or killing the whole app
+        from outside.
+
+        Falls back to Textual's own default Ctrl+C behavior (a "press
+        ctrl+q to quit" toast) when there is nothing to copy and no turn is
+        running — that's what this key did before it was bound to something
+        more useful here.
+        """
+        if self.action_copy_selection():
+            return
+        if not self._turn_in_progress:
+            self.action_help_quit()
+            return
+        if self._attempt_cancel():
+            self.notify("Cancelling the running command…", title="Cancel")
+        else:
+            self.notify(
+                "Still waiting on the model — there's no running command to stop yet.",
+                title="Cancel",
+            )
+
+    def action_copy_selection(self) -> bool:
+        """Copy whatever is selected in the transcript, if anything.
+
+        Returns whether it copied, so ``action_cancel_turn`` can tell whether
+        Ctrl+C has already been spoken for this press.
+
+        ``copy_to_clipboard`` writes via the terminal's OSC 52 escape, which
+        reaches the real system clipboard even across SSH, but not every
+        terminal honours it — hence the explicit toast rather than copying
+        silently, so a terminal that drops it is visibly distinguishable from
+        nothing having been selected.
+        """
+        selection = self.screen.get_selected_text()
+        if not selection:
+            return False
+        self.copy_to_clipboard(selection)
+        self.screen.clear_selection()
+        lines = len(selection.splitlines())
+        self.notify(
+            f"Copied {lines} line{'s' if lines != 1 else ''} to the clipboard.", title="Copy"
+        )
+        return True
+
+    def _attempt_cancel(self) -> bool:
+        """Try to unstick whatever the in-flight turn is currently blocked
+        on. Only the ``shell`` tool is actually interruptible this way
+        today — a stuck model call has no handle to interrupt from here,
+        it just has a much shorter timeout of its own (120s) than a shell
+        command's (300s default). Returns whether anything was stopped.
+        """
+        if self.orchestrator is None:
+            return False
+        shell_tool = self.orchestrator.tools.get("shell")
+        cancel = getattr(shell_tool, "cancel_running", None)
+        return callable(cancel) and cancel()
+
+    async def action_quit(self) -> None:
+        """Quit — but first try to unstick a running turn.
+
+        Without this, quitting mid-turn (Ctrl+Q) blocks for however long
+        that turn takes to finish on its own, because Textual/asyncio's own
+        shutdown sequence waits for the worker thread to actually return —
+        which, for a hung shell command, could be its full timeout. This is
+        the same bug from the user's side either way (Ctrl+C or Ctrl+Q both
+        looked like the whole app had frozen); this fixes it for both.
+        """
+        if self._turn_in_progress:
+            self._attempt_cancel()
+        await super().action_quit()

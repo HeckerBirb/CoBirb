@@ -15,7 +15,7 @@ import json
 import logging
 from typing import Any, Callable, Iterable
 
-from .policy import Policy
+from .policy import AuditLog, Policy
 from .session import Session, SessionManager, Turn
 from .typing import spi as cobirb_typing
 
@@ -51,6 +51,19 @@ _VALIDATE_PHASE_INSTRUCTIONS = (
     "user's request was successfully fulfilled. If it was not fully fulfilled, say so "
     "plainly and explain what remains — do not claim success you can't back up."
 )
+
+
+def _join_system(*parts: str) -> str:
+    """Join system-prompt blocks, dropping empty ones.
+
+    Empties are dropped rather than joined so that a run with no CoBirb
+    prompt of its own doesn't produce one made entirely of blank lines: a
+    system message of ``"\\n\\nACT PHASE..."`` is still a system message, and
+    still replaces the model's own Modelfile ``SYSTEM`` directive. When every
+    part is empty the result is ``""``, which the provider reads as "send no
+    system message at all".
+    """
+    return "\n\n".join(part for part in parts if part and part.strip())
 
 
 def _materialize(reply: "str | Iterable[str]") -> str:
@@ -140,19 +153,30 @@ class Orchestrator:
 
         # cwd is per-run metadata, not conversation history, so it rides on
         # the system prompt rather than being spliced into the turn history.
-        system_with_cwd = f"{system}\n\nWorking directory: {cwd}"
+        #
+        # An empty `system` stays empty. That is how the provider is told to
+        # send no system message at all and leave the model's own Modelfile
+        # SYSTEM directive in force (see LocalModelProvider.compose_system) —
+        # appending a working-directory line unconditionally would turn
+        # "CoBirb adds nothing" into a one-line system prompt that silently
+        # replaced the user's own. The tools resolve relative paths against
+        # cwd themselves, so nothing breaks without the line; the model just
+        # isn't told up front which directory it is in.
+        system_with_cwd = f"{system}\n\nWorking directory: {cwd}" if system else ""
         logger.info("starting run; turns=%d plan_mode=%s", len(session.turns), plan_mode)
         self.last_turn_streamed = False
         self._stream_label = persona
 
         if plan_mode:
             plan_text, plan_streamed = self._run_plan_phase(
-                f"{system_with_cwd}\n\n{_PLAN_PHASE_INSTRUCTIONS}", session
+                _join_system(system_with_cwd, _PLAN_PHASE_INSTRUCTIONS), session
             )
             if not plan_streamed:
                 self._render_phase("plan", persona, plan_text)
 
-        act_system = f"{system_with_cwd}\n\n{_ACT_PHASE_INSTRUCTIONS}" if plan_mode else system_with_cwd
+        act_system = (
+            _join_system(system_with_cwd, _ACT_PHASE_INSTRUCTIONS) if plan_mode else system_with_cwd
+        )
         content, streamed = self._loop(act_system, session, max_turns, phase="act" if plan_mode else None)
         session.summary = content
         self.last_turn_streamed = streamed
@@ -165,7 +189,10 @@ class Orchestrator:
             self.last_turn_streamed = streamed or self._render_answer(persona, content)
 
             validation_text, validation_streamed = self._loop(
-                f"{system_with_cwd}\n\n{_VALIDATE_PHASE_INSTRUCTIONS}", session, max_turns=4, phase="validate"
+                _join_system(system_with_cwd, _VALIDATE_PHASE_INSTRUCTIONS),
+                session,
+                max_turns=4,
+                phase="validate",
             )
             session.validation = validation_text
             if not validation_streamed:
@@ -302,14 +329,25 @@ class Orchestrator:
         first = self._spun(label, lambda: next(stream, _STREAM_EMPTY))
 
         chunks: list[str] = []
-        label_shown = False
+        started = False
 
         def _emit(chunk: str) -> None:
-            nonlocal label_shown
+            nonlocal started
             if chunk:
-                if not label_shown:
-                    self.io.render(f"{self._stream_label}: ")
-                    label_shown = True
+                if not started:
+                    # Tell the adapter a reply is starting and let *it* decide
+                    # what to draw. This used to render f"{label}: " straight
+                    # into the stream, which meant the persona name became
+                    # part of the text the renderer received — so once replies
+                    # were marked with "> " the transcript read
+                    # "> CoBirb: hello" instead of "> hello". Chrome is the
+                    # adapter's business; the orchestrator only knows *when*
+                    # the first token arrived, which is the one thing an
+                    # adapter can't work out for itself.
+                    begin = getattr(self.io, "begin_stream", None)
+                    if callable(begin):
+                        begin(self._stream_label)
+                    started = True
                 self.io.render(chunk)
                 chunks.append(chunk)
 
@@ -464,11 +502,21 @@ class Orchestrator:
         return self.session.path if self.session else None
 
 
-def build_default_policy(allowed: set[str] | None = None, denied: set[str] | None = None) -> Policy:
+def build_default_policy(
+    allowed: set[str] | None = None,
+    denied: set[str] | None = None,
+    audit_log_enabled: bool = False,
+) -> Policy:
     """Build a policy, allowing the built-in core tools by default.
 
     The ``shell`` scope is narrowed to a safe default set of first words.
+
+    ``audit_log_enabled`` is off unless explicitly turned on (``"audit_log":
+    true`` in config — see ``cobirb help config`` and ``AuditLog``'s own
+    docstring for why): the audit trail would otherwise duplicate file
+    contents, diffs, and shell commands into an unencrypted log every run,
+    regardless of anyone ever asking for one.
     """
-    policy = Policy(allowed=allowed, denied=denied)
+    policy = Policy(allowed=allowed, denied=denied, audit=AuditLog(enabled=audit_log_enabled))
     policy.allow_all_core_tools()
     return policy

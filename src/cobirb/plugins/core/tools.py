@@ -372,9 +372,26 @@ class ShellTool(CobirbTool):
     The permission layer can match on the first word after splitting on shell
     separators (`; | && &`), so `bash -n` can be allowed without allowing `bash`.
     See DESIGN.md §8 and todo-list.md for the motivation.
+
+    Runs the command in its own process group (POSIX; a plain child on other
+    platforms) rather than sharing the caller's, so a command that
+    backgrounds or forks something long-running (``python game.py &``, a
+    server, anything that doesn't exit on its own) can be torn down as a
+    whole — by ``timeout`` below, or by ``cancel_running()`` — instead of
+    leaving that descendant running as an orphan once the immediate shell
+    process is gone.
     """
 
     name = "shell"
+
+    def __init__(self, cwd: str | None = None) -> None:
+        super().__init__(cwd)
+        # Set only while a call is actually in flight; read from another
+        # thread by cancel_running() (the TUI's Ctrl+C / quit-while-running
+        # handling — see tui/app.py). Tool calls run one at a time on the
+        # orchestrator's own thread, so there is never more than one to track.
+        self._current_process: Any = None
+        self._cancel_requested = False
 
     def description(self) -> str:
         return "Execute a shell command. Requires explicit approval."
@@ -392,21 +409,74 @@ class ShellTool(CobirbTool):
         import subprocess
 
         command = arguments["command"]
+        timeout = arguments.get("timeout", 300)
+        self._cancel_requested = False
         try:
-            result = subprocess.run(
+            process = subprocess.Popen(
                 command,
                 shell=True,
-                capture_output=True,
-                text=True,
                 cwd=self._cwd,
-                timeout=arguments.get("timeout", 300),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=(os.name == "posix"),
             )
-            content = f"exit={result.returncode}\n{result.stdout}{result.stderr}"
-            return ToolResult(ok=result.returncode == 0, content=content, meta={"returncode": result.returncode})
-        except subprocess.TimeoutExpired:
-            return ToolResult(ok=False, content="Command timed out.", error="timeout")
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:  # noqa: BLE001 - defensive
             return ToolResult(ok=False, content=f"Command failed: {exc}", error=str(exc))
+
+        self._current_process = process
+        timed_out = False
+        try:
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                self._kill(process)
+                stdout, stderr = process.communicate()
+        finally:
+            self._current_process = None
+
+        # Cancellation takes priority even if it happened to race with the
+        # timeout firing at the same moment — the user's explicit action is
+        # the more informative thing to report.
+        if self._cancel_requested:
+            return ToolResult(ok=False, content="Command cancelled.", error="cancelled")
+        if timed_out:
+            return ToolResult(ok=False, content="Command timed out.", error="timeout")
+        content = f"exit={process.returncode}\n{stdout}{stderr}"
+        return ToolResult(ok=process.returncode == 0, content=content, meta={"returncode": process.returncode})
+
+    @staticmethod
+    def _kill(process: Any) -> None:
+        """Kill ``process`` and, on POSIX, everything in its process group —
+        see the class docstring for why a plain ``process.kill()`` isn't
+        enough for a command that backgrounds or forks."""
+        import signal
+
+        try:
+            if os.name == "posix":
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            else:
+                process.kill()
+        except ProcessLookupError:
+            pass  # already gone — nothing to do
+
+    def cancel_running(self) -> bool:
+        """Stop the in-flight command, if any. Returns whether there was
+        anything to cancel.
+
+        This is what lets the TUI's Ctrl+C (or quitting while a turn is
+        running) actually interrupt a stuck or merely slow shell call —
+        without it, the ``timeout`` above is the only way out, and the
+        whole app (including quitting it) blocks until either the command
+        finishes or that timeout elapses.
+        """
+        process = self._current_process
+        if process is None or process.poll() is not None:
+            return False
+        self._cancel_requested = True
+        self._kill(process)
+        return True
 
 
 # Registry of built-in tools.

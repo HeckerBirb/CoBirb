@@ -179,3 +179,67 @@ def test_live_multi_step_tool_calls_converge(tmp_path):
     assert not session.summary.startswith("Stopped after"), "tool-calling loop did not converge"
     assert "alpha" in session.summary.lower()
     assert "beta" in session.summary.lower()
+
+
+# --------------------------------------------------------------------------- #
+# Respecting the model's own Modelfile SYSTEM directive, against a real server.
+#
+# test_model.py covers the composition rules with the network mocked. What it
+# can't show is that the *actual* Ollama behaviour matches the assumption the
+# whole design rests on: that omitting the system message lets the model's own
+# SYSTEM apply, and that sending one replaces it.
+# --------------------------------------------------------------------------- #
+def test_live_model_system_prompt_matches_what_api_show_reports():
+    """The lookup reads the same field `ollama show --modelfile` prints."""
+    import json
+
+    provider = LocalModelProvider(model=TEST_MODEL)
+    request = urllib.request.Request(
+        f"{OLLAMA_URL}/api/show",
+        data=json.dumps({"model": TEST_MODEL}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        expected = json.loads(response.read().decode("utf-8")).get("system") or ""
+
+    assert provider.model_system_prompt() == expected
+
+
+def test_live_model_with_its_own_system_prompt_keeps_it_when_cobirb_sends_none():
+    """The point of the whole feature: a model built with a custom SYSTEM
+    must behave inside CoBirb exactly as it does in `ollama run`.
+
+    Skipped for a model that declares no SYSTEM of its own — there would be
+    nothing to preserve, so the test could not distinguish success from a
+    provider that silently dropped it.
+    """
+    provider = LocalModelProvider(model=TEST_MODEL)
+    own = provider.model_system_prompt().strip()
+    if not own:
+        pytest.skip(f"{TEST_MODEL} declares no SYSTEM of its own; nothing to preserve")
+
+    # An empty CoBirb prompt must send no system message at all, leaving the
+    # model's own in force — so the model can still answer from it.
+    reply = provider.chat("", "Who are you? Answer in one short sentence.")
+
+    assert reply.strip()
+
+
+def test_live_composed_prompt_carries_the_models_own_first():
+    provider = LocalModelProvider(model=TEST_MODEL)
+    own = provider.model_system_prompt().strip()
+    composed = provider.compose_system("Answer only in lowercase.")
+
+    if own:
+        assert composed.startswith(own)
+        assert composed.endswith("Answer only in lowercase.")
+    else:
+        assert composed == "Answer only in lowercase."
+
+
+def test_live_empty_cobirb_prompt_composes_to_nothing():
+    provider = LocalModelProvider(model=TEST_MODEL)
+
+    assert provider.compose_system("") == ""
+    assert provider.compose_system("   \n  ") == ""

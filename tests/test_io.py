@@ -98,9 +98,18 @@ def test_render_answer_renders_markdown_content():
     term, buf = _make_terminal_io()
     term.render_answer("Noah", "**bold** and a list:\n\n- one\n- two")
     out = buf.getvalue()
-    assert "Noah" in out
     assert "bold" in out
     assert "one" in out and "two" in out
+
+
+def test_render_answer_marks_the_reply_and_does_not_label_it():
+    """Replies carry the same ``>`` the prompt does, told apart by colour —
+    not by a persona name printed above every one of them."""
+    term, buf = _make_terminal_io()
+    term.render_answer("Noah", "Hello there.")
+    out = buf.getvalue()
+    assert out.startswith("> Hello there.")
+    assert "Noah" not in out
 
 
 def test_render_answer_is_a_noop_for_empty_text():
@@ -180,3 +189,20 @@ def test_render_validation_is_a_noop_for_empty_text():
     term, buf = _make_terminal_io()
     term.render_validation("Noah", "")
     assert buf.getvalue() == ""
+
+
+def test_begin_stream_writes_the_reply_marker():
+    """A scrolling renderer can't wrap a reply that hasn't arrived yet, so it
+    writes the marker when the first token shows up."""
+    term, buf = _make_terminal_io()
+    term.begin_stream("Noah")
+    term.render("Hello")
+
+    assert buf.getvalue() == "> Hello"
+
+
+def test_begin_stream_does_not_print_the_persona_name():
+    term, buf = _make_terminal_io()
+    term.begin_stream("Noah")
+
+    assert "Noah" not in buf.getvalue()

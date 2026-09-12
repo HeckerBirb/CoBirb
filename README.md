@@ -1,7 +1,7 @@
 # CoBirb 🦜
 
-A privacy-first, Copilot-like agentic CLI. Your CoBirb Noah lives in your terminal —
-helpful, playful, and entirely local.
+A privacy-first, Copilot-like agentic CLI. It lives in your terminal, runs against your own
+local models, and stays out of their way.
 
 > **Privacy is not a feature. It's the foundation.**
 
@@ -14,7 +14,10 @@ opt a capability in.**
 - 🔒 Sessions are encrypted at rest (AES-256-GCM, keyed via scrypt — already
   quantum-resistant for a password-protected local file; see `crypto.py` for
   why a KEM seal wouldn't add anything here).
-- 🦜 Friendly parrot persona — playful, never saccharine.
+- 🔒 Your model's own `SYSTEM` prompt is left alone. CoBirb sends no system message by
+  default, so a model you built with `ollama create` behaves inside CoBirb exactly as it
+  does in `ollama run`. When CoBirb does add something, yours goes first.
+- 🦜 Optional personas — a parrot called Noah and friends, off unless you ask.
 
 ## Status
 
@@ -35,6 +38,13 @@ COBIRB_MODEL_NAME="llama3.1" cobirb
 
 # One-shot: plain stdout, pipes and scripts like any CLI.
 COBIRB_MODEL_NAME="llama3.1" cobirb -p "list the files in this directory" --allow-tool=list_dir
+
+# In an encrypted session: -w starts one under ~/.cobirb/sessions and the
+# command to resume it is printed when you exit. Give the password inline
+# (visible in shell history) or leave it off to be prompted without echo.
+cobirb -w hunter2
+cobirb -w
+cobirb --session ~/.cobirb/sessions/session-20260912-185817.json -w
 ```
 
 Run the test suite with `pytest`.
@@ -50,27 +60,59 @@ Running `cobirb` with no `-p` opens a full-screen terminal app, with three tabs:
 - **Current** — the conversation. A **live status line** shows persona · model · plan mode ·
   working directory, kept current as you change it. A **boxed input**: submit and it greys out
   while the turn runs, then comes back — there's no "continue? [y/N]" to answer, you just keep
-  typing. The **transcript** shows the same panels one-shot mode prints: the reply as rendered
-  markdown, tool calls and results with syntax-highlighted diffs, plan/validation panels in plan
-  mode. **Tool approval is a dialog** — `y` allow once, `a` allow for the rest of the session,
+  typing. The **transcript** reads as one column: your prompt and the model's reply
+  each carry a `>` marker, in different colours, with the reply still rendered as markdown.
+  Tool calls, errors and plan/validation phases stay in panels — they aren't conversation.
+  Drag to select any of it and `ctrl+c` copies it. **Tool approval is a dialog** — `y` allow once, `a` allow for the rest of the session,
   `n` or escape to deny. Permission is still default-deny; this just makes "denied" mean "asks
   first".
 - **Sessions** — lists encrypted session files found in `~/.cobirb/sessions/` (or wherever
   `COBIRB_HOME` points), lets you resume one (prompts for its password) or start a new one
   (prompts for a name and password), all without needing `--session` on the command line.
+  Resuming replays the saved conversation into the transcript and drops you back on the
+  Current tab, so you rejoin a thread you can actually read. `cobirb --session <path> -w`
+  does the same at startup — and unlocks the file *before* the app starts, so a wrong
+  password prints on the terminal and exits non-zero rather than opening an empty session.
 - **Plugins** — a live view of every registered tool, which model/I/O/crypto implementation is
   active for each slot, and any plugin discovery problems — the same information a broken
   `plugins.*` config selection would otherwise only report to a stderr the full-screen app hides.
 
 In the input: `/model` lists the models the configured endpoint currently has and lets you pick
-one for this session; `/persona <name>` switches personas (`/persona` alone lists them); `/plan
+one for this session; `/persona` opens the same kind of picker for personas —
+including `none`, the default — and `/persona <name>` switches directly; `/plan
 on|off` toggles plan mode (`/plan` alone reports it); `?` or `/help` opens the help screen
-(`/help <topic>` for one topic). Keys: `f1` help, `f2` next tab, `ctrl+q` quit.
+(`/help <topic>` for one topic). Keys: `f1` help, `f2` next tab, `ctrl+q` quit, `up`/`down`
+recall earlier prompts (the last 100, in memory only), `ctrl+c` copies the transcript
+selection if you've dragged one out with the mouse and otherwise cancels a running turn —
+most useful against a stuck or slow `shell` command; quitting mid-turn tries this first too,
+so it's never stuck waiting on one either.
 
 If no model is configured, or the configured one isn't actually available, interactive mode
 fetches the endpoint's model list itself and opens the same picker `/model` would — set
 `"default_model"` in config to skip that when it resolves to a real model, and don't worry about
 it when it doesn't: an unavailable `default_model` is ignored, not an error.
+
+## Your model's own system prompt
+
+Ollama takes one system message per request, and sending one **replaces** the `SYSTEM`
+directive the model was built with. A model you created with `ollama create` around a custom
+`SYSTEM` is a configuration you chose deliberately, so CoBirb doesn't overwrite it:
+
+- **By default CoBirb sends no system message at all.** Same model, same `SYSTEM`, same
+  behaviour as `ollama run`.
+- When CoBirb *does* have something to add — a persona, plan-mode phase instructions, or
+  `--system-prompt harness` — it reads your model's own prompt back via `/api/show` and places
+  it **first**, then appends its own part. Yours is supplemented, never discarded.
+
+```bash
+cobirb --system-prompt off      # the default: nothing of CoBirb's is sent
+cobirb --system-prompt harness  # adds a short note about the tool-permission model,
+                                # which stops some models retrying a denied tool call
+```
+
+Or set `"system_prompt"` in config. None of CoBirb's actual guarantees depend on this —
+permissions are enforced in `policy.py` and sessions are encrypted by the crypto backend, not
+by asking a model to cooperate.
 
 ## Configuration
 

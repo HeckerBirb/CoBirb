@@ -138,7 +138,10 @@ HelpModal {
     background: $surface;
 }
 
-ModelPickerModal {
+/* Matches ModelPickerModal and PersonaPickerModal alike: Textual's type
+   selectors match base class names too, and both pickers are the same
+   dialog with a different title. */
+PickerModal {
     align: center middle;
 }
 

@@ -256,3 +256,178 @@ def test_build_messages_falls_back_for_non_json_context():
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "just a plain string, not JSON"},
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Respecting the model's own Modelfile SYSTEM directive.
+#
+# Ollama accepts one system message per request and sending one *replaces*
+# whatever SYSTEM the model was built with. CoBirb used to send one on every
+# single turn, so a model created with `ollama create` around a custom SYSTEM
+# behaved differently inside CoBirb than it did in `ollama run` — the user's
+# own configuration was silently overridden and there was no way to turn that
+# off.
+# --------------------------------------------------------------------------- #
+class _RoutingResponses:
+    """Answers /api/show and /api/chat differently, recording what was asked.
+
+    The provider now makes two different calls, so a single canned response
+    can't exercise the interesting part any more.
+    """
+
+    def __init__(self, system: str | None, chat_payload: dict | None = None):
+        self.system = system
+        self.chat_payload = chat_payload or {"message": {"role": "assistant", "content": "ok"}}
+        self.requests: list[tuple[str, dict]] = []
+
+    def __call__(self, request, timeout=None):
+        url = request.full_url
+        body = json.loads(request.data.decode("utf-8"))
+        self.requests.append((url, body))
+        if url.endswith("/api/show"):
+            return _FakeResponse({} if self.system is None else {"system": self.system})
+        return _FakeResponse(self.chat_payload)
+
+    @property
+    def chat_messages(self) -> list[dict]:
+        """The *most recent* chat request's messages — tests that send more
+        than one turn care about the last one, not the first."""
+        return [body for url, body in self.requests if url.endswith("/api/chat")][-1]["messages"]
+
+    @property
+    def show_calls(self) -> int:
+        return sum(1 for url, _ in self.requests if url.endswith("/api/show"))
+
+
+def test_no_system_message_is_sent_when_cobirb_has_nothing_to_add(monkeypatch):
+    """The default. Omitting the message entirely is what lets Ollama apply
+    the model's own SYSTEM — an empty system message would still replace it."""
+    responses = _RoutingResponses(system="You are Karen Gemmason.")
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+
+    LocalModelProvider(model="gemma4-unchained").chat("", "[]")
+
+    assert all(m["role"] != "system" for m in responses.chat_messages)
+
+
+def test_no_lookup_is_made_when_there_is_nothing_to_compose(monkeypatch):
+    """Sending nothing needs no knowledge of the model's prompt, so the
+    default path costs no extra round trip."""
+    responses = _RoutingResponses(system="You are Karen Gemmason.")
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+
+    LocalModelProvider(model="gemma4-unchained").chat("", "[]")
+
+    assert responses.show_calls == 0
+
+
+def test_the_models_own_prompt_leads_when_cobirb_adds_a_persona(monkeypatch):
+    responses = _RoutingResponses(system="You are Karen Gemmason, a large language model.")
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+
+    LocalModelProvider(model="gemma4-unchained").chat("You are Noah, a Parrot.", "[]")
+
+    system = next(m for m in responses.chat_messages if m["role"] == "system")["content"]
+    assert system == "You are Karen Gemmason, a large language model.\n\nYou are Noah, a Parrot."
+
+
+def test_cobirbs_prompt_stands_alone_when_the_model_declares_no_system(monkeypatch):
+    responses = _RoutingResponses(system=None)
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+
+    LocalModelProvider(model="plain").chat("You are Noah, a Parrot.", "[]")
+
+    system = next(m for m in responses.chat_messages if m["role"] == "system")["content"]
+    assert system == "You are Noah, a Parrot."
+
+
+def test_the_models_own_prompt_is_fetched_once_and_reused(monkeypatch):
+    """It can't change between requests, and paying a round trip per turn to
+    re-read it would be pure latency."""
+    responses = _RoutingResponses(system="Model prompt.")
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+    provider = LocalModelProvider(model="gemma4-unchained")
+
+    provider.chat("CoBirb prompt.", "[]")
+    provider.chat("CoBirb prompt.", "[]")
+    provider.chat("CoBirb prompt.", "[]")
+
+    assert responses.show_calls == 1
+
+
+def test_switching_models_re_reads_the_prompt(monkeypatch):
+    responses = _RoutingResponses(system="First model's prompt.")
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+    provider = LocalModelProvider(model="first")
+    provider.chat("CoBirb prompt.", "[]")
+
+    responses.system = "Second model's prompt."
+    provider._model = "second"
+    provider.chat("CoBirb prompt.", "[]")
+
+    system = next(m for m in responses.chat_messages if m["role"] == "system")["content"]
+    assert system.startswith("Second model's prompt.")
+    assert responses.show_calls == 2
+
+
+def test_an_unreadable_model_prompt_never_blocks_the_turn(monkeypatch):
+    """Best-effort context, not a precondition: if the lookup fails the turn
+    still runs with whatever CoBirb had to say."""
+    def urlopen(request, timeout=None):
+        if request.full_url.endswith("/api/show"):
+            raise urllib.error.URLError("nope")
+        return _FakeResponse({"message": {"role": "assistant", "content": "ok"}})
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+
+    reply = LocalModelProvider(model="llama3.1").chat("CoBirb prompt.", "[]")
+
+    assert reply == "ok"
+
+
+def test_a_failed_lookup_is_not_cached_so_it_can_recover(monkeypatch):
+    """A transient blip must not permanently drop the user's own prompt for
+    the rest of the session."""
+    provider = LocalModelProvider(model="llama3.1")
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda request, timeout=None: (_ for _ in ()).throw(urllib.error.URLError("down")),
+    )
+    assert provider.model_system_prompt() == ""
+
+    responses = _RoutingResponses(system="Back up.")
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+    assert provider.model_system_prompt() == "Back up."
+
+
+def test_a_whitespace_only_model_prompt_is_treated_as_absent(monkeypatch):
+    """Modelfile SYSTEM blocks routinely carry leading/trailing newlines."""
+    responses = _RoutingResponses(system="\r\n   \r\n")
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+
+    LocalModelProvider(model="m").chat("CoBirb prompt.", "[]")
+
+    system = next(m for m in responses.chat_messages if m["role"] == "system")["content"]
+    assert system == "CoBirb prompt."
+
+
+def test_a_model_prompts_surrounding_whitespace_is_trimmed_when_composing(monkeypatch):
+    responses = _RoutingResponses(system="\r\nYou are Karen Gemmason.\r\n")
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+
+    LocalModelProvider(model="m").chat("Extra.", "[]")
+
+    system = next(m for m in responses.chat_messages if m["role"] == "system")["content"]
+    assert system == "You are Karen Gemmason.\n\nExtra."
+
+
+def test_build_messages_omits_an_empty_system_message():
+    assert _build_messages("", '[{"role": "user", "content": "hi"}]') == [
+        {"role": "user", "content": "hi"}
+    ]
+
+
+def test_build_messages_keeps_a_system_message_when_there_is_one():
+    messages = _build_messages("rules", '[{"role": "user", "content": "hi"}]')
+
+    assert messages[0] == {"role": "system", "content": "rules"}

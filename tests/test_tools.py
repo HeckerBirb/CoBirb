@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import difflib
-
+import threading
+import time
+from types import SimpleNamespace
 
 from cobirb.plugins.core.tools import (
     ApplyPatchTool,
@@ -215,6 +217,108 @@ def test_shell_executes(tmp_path):
     result = _mk_tool(ShellTool).execute({"command": "echo hi"})
     assert result.ok
     assert "hi" in result.content
+
+
+def test_shell_reports_a_nonzero_exit_code():
+    result = _mk_tool(ShellTool).execute({"command": "exit 3"})
+    assert not result.ok
+    assert result.meta["returncode"] == 3
+
+
+def test_shell_times_out_a_command_that_never_exits():
+    result = _mk_tool(ShellTool).execute({"command": "sleep 5", "timeout": 0.2})
+    assert not result.ok
+    assert result.error == "timeout"
+    assert "timed out" in result.content
+
+
+def test_shell_timeout_also_kills_a_backgrounded_descendant(tmp_path):
+    """Regression test for the real bug this was built to fix: a command
+    that backgrounds or forks something long-running (a game loop, a
+    server — anything that doesn't exit on its own) used to leave that
+    descendant running as an orphan once the immediate shell process was
+    gone, and the CLI reported "timed out" this reported even though
+    something was still alive and (depending on what it does) could still
+    be holding resources or a stray pipe open."""
+    marker = tmp_path / "still-running"
+    tool = _mk_tool(ShellTool)
+
+    result = tool.execute(
+        {
+            # The backgrounded loop keeps touching `marker`'s mtime for a
+            # while; if it's still alive after the tool call returns, the
+            # process group wasn't actually killed.
+            "command": f"(for i in $(seq 1 50); do touch {marker}; sleep 0.1; done) & sleep 0.2",
+            "timeout": 0.05,
+        }
+    )
+
+    assert result.error == "timeout"
+    mtime_at_return = marker.stat().st_mtime if marker.exists() else None
+    time.sleep(0.5)
+    mtime_after_wait = marker.stat().st_mtime if marker.exists() else None
+    assert mtime_at_return == mtime_after_wait  # nothing touched it again — the loop is dead
+
+
+def test_shell_cancel_running_stops_an_in_flight_command():
+    tool = _mk_tool(ShellTool)
+    result_box: list[ToolResult] = []
+
+    def run_it():
+        result_box.append(tool.execute({"command": "sleep 30", "timeout": 300}))
+
+    thread = threading.Thread(target=run_it)
+    thread.start()
+    # Give execute() a moment to actually start the process before cancelling.
+    for _ in range(50):
+        if tool._current_process is not None:
+            break
+        time.sleep(0.05)
+    assert tool._current_process is not None
+
+    cancelled = tool.cancel_running()
+    thread.join(timeout=5)
+
+    assert cancelled is True
+    assert not thread.is_alive()
+    [result] = result_box
+    assert result.error == "cancelled"
+    assert "cancelled" in result.content
+
+
+def test_shell_cancel_running_is_a_noop_with_nothing_in_flight():
+    assert _mk_tool(ShellTool).cancel_running() is False
+
+
+def test_shell_cancel_running_is_a_noop_once_the_command_already_finished():
+    tool = _mk_tool(ShellTool)
+    tool.execute({"command": "echo hi"})
+    assert tool.cancel_running() is False
+
+
+def test_shell_reports_a_failure_to_even_start_the_command(monkeypatch):
+    def fake_popen(*args, **kwargs):
+        raise OSError("no such shell")
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    result = _mk_tool(ShellTool).execute({"command": "echo hi"})
+    assert not result.ok
+    assert "no such shell" in result.content
+
+
+def test_shell_kill_swallows_a_process_that_is_already_gone():
+    """A race between checking a process is still alive and actually
+    signalling it — os.killpg/getpgid on a pid that's already gone raises
+    ProcessLookupError, which must be swallowed, not surfaced as a crash."""
+    ShellTool._kill(SimpleNamespace(pid=2**30))  # not a real pid; must not raise
+
+
+def test_shell_kill_falls_back_to_a_plain_kill_off_posix(monkeypatch):
+    """No process groups outside POSIX — just kill the one process."""
+    monkeypatch.setattr("cobirb.plugins.core.tools.os.name", "nt")
+    killed = []
+    ShellTool._kill(SimpleNamespace(pid=123, kill=lambda: killed.append(1)))
+    assert killed == [1]
 
 
 def test_registry_names_and_get():

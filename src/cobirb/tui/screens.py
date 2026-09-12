@@ -98,28 +98,32 @@ class HelpModal(ModalScreen[None]):
         self.dismiss(None)
 
 
-class ModelPickerModal(ModalScreen[Optional[str]]):
-    """Choose a model from the list the configured endpoint reported.
+class PickerModal(ModalScreen[Optional[str]]):
+    """Choose one name from a list, with the current one marked.
 
-    Opened by ``/model`` and by the startup model check (``CoBirbApp``) when
-    no configured model turns out to be usable. Dismisses with the chosen
-    model name, or ``None`` on escape/cancel — a cancel changes nothing, it
-    doesn't clear whatever model was already in use.
+    Shared by ``/model`` and ``/persona`` so the two feel like the same
+    command with a different noun — picking a persona by arrowing through a
+    list is the same job as picking a model, and there is no reason for one
+    to be a menu and the other a name you have to already know how to spell.
+
+    Dismisses with the chosen name, or ``None`` on escape/cancel — a cancel
+    changes nothing, it never clears what was already in use.
     """
 
     BINDINGS = [Binding("escape", "cancel", "Cancel", show=True)]
+    TITLE_TEXT = "Select"
 
-    def __init__(self, models: list[str], current: str | None = None) -> None:
+    def __init__(self, choices: list[str], current: str | None = None) -> None:
         super().__init__()
-        self._models = models
+        self._choices = choices
         self._current = current
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="model-dialog"):
-            yield Static("Select a model", id="model-title")
+            yield Static(self.TITLE_TEXT, id="model-title")
             options = [
                 Option(f"{'> ' if name == self._current else '  '}{name}", id=name)
-                for name in self._models
+                for name in self._choices
             ]
             yield OptionList(*options, id="model-options")
 
@@ -132,6 +136,27 @@ class ModelPickerModal(ModalScreen[Optional[str]]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class ModelPickerModal(PickerModal):
+    """Choose a model from the list the configured endpoint reported.
+
+    Opened by ``/model`` and by the startup model check (``CoBirbApp``) when
+    no configured model turns out to be usable.
+    """
+
+    TITLE_TEXT = "Select a model"
+
+
+class PersonaPickerModal(PickerModal):
+    """Choose a persona, including "none" — which is the default.
+
+    Personas are opt-in (see ``plugins.core.persona``), so this list always
+    offers the way back out of one as its first entry rather than only
+    offering costumes to swap between.
+    """
+
+    TITLE_TEXT = "Select a persona"
 
 
 class TextPromptModal(ModalScreen[Optional[str]]):
