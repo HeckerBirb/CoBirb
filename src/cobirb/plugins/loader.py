@@ -59,14 +59,20 @@ def load_plugins(entry_points: im.EntryPoints | None = None) -> tuple[dict[str, 
             path = os.path.join(search_dir, name)
             if not os.path.isdir(path):
                 continue
-            try:
-                for kind, base in _INTERFACES.items():
+            # The try sits inside the interface loop so the failing kind is
+            # actually known. It used to wrap the loop and key the error on
+            # `kind` after the fact — a variable that leaks out of a for
+            # statement, so every failure was filed under whichever interface
+            # happened to be tried first regardless of the real cause.
+            for kind, base in _INTERFACES.items():
+                try:
                     obj = _load_local_plugin(path, kind)
-                    if obj is not None:
-                        discovered[f"{kind}:{name}"] = obj
-                        break
-            except Exception as exc:  # noqa: BLE001 - fail-closed per plugin
-                errors[f"{kind}:{name}"] = str(exc)
+                except Exception as exc:  # noqa: BLE001 - fail-closed per plugin
+                    errors[f"local:{name}"] = str(exc)
+                    break
+                if obj is not None:
+                    discovered[f"{kind}:{name}"] = obj
+                    break
 
     return discovered, errors
 

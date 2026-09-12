@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import sys
 import time
 from typing import Any
 
@@ -91,11 +92,21 @@ class AuditLog:
         self.enabled = enabled
 
     def append(self, entry: dict[str, Any]) -> None:
+        """Record one tool call, never at the cost of the call itself.
+
+        An unwritable log path (a read-only volume, a full disk, a directory
+        that can't be created) used to take down the tool call this was only
+        observing. The trail is worth having, but not more than the work it
+        is a trail of — so a failure is reported once and stepped over.
+        """
         if not self.enabled:
             return
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        with open(self.path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry) + "\n")
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry) + "\n")
+        except OSError as exc:
+            print(f"cobirb: could not write the audit log at {self.path} — {exc}", file=sys.stderr)
 
 
 def _tokenize(command: str) -> list[str] | None:

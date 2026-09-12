@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from cobirb.policy import AuditLog
 from cobirb.plugins.core.tools import (
     ApplyPatchTool,
     CobirbTool,
@@ -20,6 +21,7 @@ from cobirb.plugins.core.tools import (
     ToolRegistry,
     ToolResult,
     WriteFileTool,
+    _shell_timeout,
 )
 
 def _mk_tool(cls):
@@ -441,3 +443,44 @@ def test_registry_rejects_a_tool_whose_name_is_not_a_method():
 
     with pytest.raises(TypeError, match="must be a method"):
         ToolRegistry(".").register(StringNamedTool())
+
+
+def test_grep_reports_an_invalid_regex_as_such(tmp_path):
+    """re.error isn't an OSError, so it used to escape grep's handler and
+    reach the model as a generic "tool failed" with nothing actionable."""
+    result = GrepTool(str(tmp_path)).execute({"pattern": "([unclosed"})
+
+    assert not result.ok
+    assert result.error == "bad_pattern"
+    assert "valid regex" in result.content
+
+
+def test_shell_timeout_is_clamped_and_defaults_sensibly():
+    """The timeout is model-supplied, so it is bounded rather than trusted:
+    an unbounded one would make a hung command outlive any way of stopping it
+    short of cancelling the turn."""
+    assert _shell_timeout(None) == 300
+    assert _shell_timeout("not a number") == 300
+    assert _shell_timeout(0) == 300
+    assert _shell_timeout(-5) == 300
+    assert _shell_timeout(10) == 10
+    assert _shell_timeout(10_000) == 600
+
+
+def test_shell_declares_the_timeout_it_actually_reads():
+    """It was read from the arguments but absent from the schema, so the
+    model could neither discover it nor know its bounds."""
+    schema = ShellTool(".").parameters()
+    assert "timeout" in schema["properties"]
+
+
+def test_audit_log_failure_does_not_take_down_the_tool_call(tmp_path, capsys):
+    """The trail is worth having, but not more than the work it is a trail
+    of — an unwritable path is reported, not raised."""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("i am a file")
+    log = AuditLog(str(blocker / "audit.jsonl"), enabled=True)
+
+    log.append({"tool": "read_file"})
+
+    assert "could not write the audit log" in capsys.readouterr().err

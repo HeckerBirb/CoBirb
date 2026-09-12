@@ -50,9 +50,12 @@ _SCRYPT_P = 1
 class AesGcmScryptSessionCrypto(SessionCrypto):
     """Default session crypto. AES-256-GCM bulk cipher over a scrypt-derived key.
 
-    The crypto library is imported lazily so the core has no hard dependency on
-    ``cryptography``. If it is unavailable the core still loads — the crypto plugin
-    just fails when a session is actually encrypted.
+    ``cryptography`` is a required dependency and is imported at module scope;
+    this docstring used to claim it was imported lazily so the core had no
+    hard dependency on it, which was never true of the shipped code. The
+    backend is still resolved at construction time and may come back ``None``,
+    so an install where the library is present but unusable fails when a
+    session is actually encrypted rather than at import.
     """
 
     _AUTO = object()  # sentinel: "detect the backend" vs. an explicit (possibly None) override

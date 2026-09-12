@@ -288,7 +288,10 @@ class GlobTool(CobirbTool):
                 "pattern": {"type": "string", "description": "Glob pattern, e.g. 'src/**/*.py'."},
                 "include_ignored": {
                     "type": "boolean",
-                    "description": "Include files normally ignored by .gitignore.",
+                    "description": (
+                        "Include vendor and cache directories (.git, .venv, node_modules, "
+                        "__pycache__, ...) that are skipped by default."
+                    ),
                     "default": False,
                 },
             },
@@ -323,7 +326,9 @@ class GrepTool(CobirbTool):
                 "path": {"type": "string", "description": "Optional path/directory to restrict search."},
                 "include_ignored": {
                     "type": "boolean",
-                    "description": "Include files normally ignored.",
+                    "description": (
+                        "Include vendor and cache directories that are skipped by default."
+                    ),
                     "default": False,
                 },
             },
@@ -341,6 +346,17 @@ class GrepTool(CobirbTool):
             paths = [p for p in glob_module.glob(root + "/**/*", recursive=True)]
             if not include_ignored:
                 paths = [p for p in paths if not _is_ignored_path(p)]
+            # Compiled once, up front, so an invalid pattern is reported as
+            # what it is. Left to re.search it would raise re.error on the
+            # first line of the first file, escape this handler (which only
+            # catches OSError), and reach the model as a generic tool failure
+            # with nothing actionable in it.
+            try:
+                expression = re.compile(pattern)
+            except re.error as exc:
+                return ToolResult(
+                    ok=False, content=f"Not a valid regex: {pattern!r} — {exc}", error="bad_pattern"
+                )
             matches = []
             for p in paths:
                 if not os.path.isfile(p):
@@ -348,7 +364,7 @@ class GrepTool(CobirbTool):
                 try:
                     with open(p, "r", encoding="utf-8", errors="ignore") as fh:
                         for lineno, line in enumerate(fh, 1):
-                            if re.search(pattern, line):
+                            if expression.search(line):
                                 matches.append(f"{p}:{lineno}: {line.strip()}")
                 except (OSError, UnicodeDecodeError):
                     continue
@@ -379,6 +395,27 @@ class ListDirTool(CobirbTool):
             return ToolResult(ok=True, content="\n".join(entries))
         except OSError as exc:
             return ToolResult(ok=False, content=f"Could not list {path}: {exc}", error=str(exc))
+
+
+_DEFAULT_SHELL_TIMEOUT = 300
+# A ceiling as well as a default. The timeout used to be read straight out of
+# the arguments with no declared parameter and no bound, so it was invisible
+# to the model that might set it and unbounded if one guessed at it — a large
+# enough value would have made a hung command effectively unkillable except
+# by cancelling the turn.
+_MAX_SHELL_TIMEOUT = 600
+
+
+def _shell_timeout(value: Any) -> float:
+    """Clamp a caller-supplied timeout into something survivable, falling
+    back to the default for anything that isn't a usable number."""
+    try:
+        seconds = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return float(_DEFAULT_SHELL_TIMEOUT)
+    if seconds != seconds or seconds <= 0:  # NaN or nonsense
+        return float(_DEFAULT_SHELL_TIMEOUT)
+    return min(seconds, float(_MAX_SHELL_TIMEOUT))
 
 
 class ShellTool(CobirbTool):
@@ -417,6 +454,14 @@ class ShellTool(CobirbTool):
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": "Shell command to execute."},
+                "timeout": {
+                    "type": "number",
+                    "description": (
+                        f"Seconds to wait before killing the command "
+                        f"(default {_DEFAULT_SHELL_TIMEOUT}, maximum {_MAX_SHELL_TIMEOUT})."
+                    ),
+                    "default": _DEFAULT_SHELL_TIMEOUT,
+                },
             },
             "required": ["command"],
         }
@@ -425,7 +470,7 @@ class ShellTool(CobirbTool):
         import subprocess
 
         command = arguments["command"]
-        timeout = arguments.get("timeout", 300)
+        timeout = _shell_timeout(arguments.get("timeout"))
         self._cancel_requested = False
         try:
             process = subprocess.Popen(
