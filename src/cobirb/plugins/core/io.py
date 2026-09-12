@@ -13,7 +13,7 @@ from typing import Any
 
 from rich.console import Console
 
-from ...typing.spi import I_OAdapter
+from ...typing.spi import DECISION_ALWAYS, DECISION_DENY, DECISION_ONCE, DECISIONS, I_OAdapter
 from . import render
 
 
@@ -76,12 +76,12 @@ class TerminalIO(I_OAdapter):
         except (EOFError, KeyboardInterrupt):
             # Fail closed: no one to ask (closed/non-interactive stdin, or
             # Ctrl-C) means deny, not hang or guess yes.
-            return "deny"
+            return DECISION_DENY
         if answer in ("y", "yes"):
-            return "once"
+            return DECISION_ONCE
         if answer in ("a", "always"):
-            return "always"
-        return "deny"
+            return DECISION_ALWAYS
+        return DECISION_DENY
 
     # ------------------------------------------------------------------ #
     # Extra chrome. Not part of I_OAdapter — reached for via getattr, with

@@ -13,6 +13,14 @@ from typing import Any, Iterable, Optional
 # --------------------------------------------------------------------------- #
 # Shared data types
 # --------------------------------------------------------------------------- #
+# The three answers `I_OAdapter.confirm` may give. A three-value protocol
+# compared by string literal at four boundaries (the orchestrator, both
+# shipped adapters, the approval modal) is one typo away from silently
+# meaning "deny", which is safe but wrong.
+DECISION_ONCE = "once"
+DECISION_ALWAYS = "always"
+DECISION_DENY = "deny"
+DECISIONS = frozenset({DECISION_ONCE, DECISION_ALWAYS, DECISION_DENY})
 @dataclass
 class ToolCall:
     """A structured tool invocation emitted by the model.

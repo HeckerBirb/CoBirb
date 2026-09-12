@@ -34,7 +34,7 @@ pip install -e ".[dev]"                                  # Python 3.11+, .venv/
 cobirb                                                   # interactive (Textual app)
 cobirb -p "task" --allow-tool=list_dir                   # one-shot, pipeable
 cobirb help [session|persona|plan|model|plugins|tools|config]
-pytest                                                   # 508 tests; hold green + ~97% cov
+pytest                                                   # keep green; see §11 on coverage
 COBIRB_TEST_MODEL=llama3.1 pytest -m integration         # needs a real local Ollama
 ```
 
@@ -43,7 +43,9 @@ style by hand.
 
 | Path | Responsibility |
 |---|---|
-| `cli.py` | Argparse, help text, one-shot — **and** app composition (§11, known problem). |
+| `cli.py` | Argparse, help text, one-shot mode. Nothing else. |
+| `runtime/` | The application layer both front-ends compose a run out of: `personas`, `commands`, `plugins`, `wiring`, `sessions`. |
+| `help_text.py` | The prose `cobirb help` prints. |
 | `orchestrator.py` | The agent loop; model ↔ tools, policy-gated. |
 | `policy.py` | Permissions, shell-command scanning, audit log. |
 | `session.py` | `Turn`/`Session`, encrypted `SessionManager`, session discovery. |
@@ -391,12 +393,22 @@ same thing; the multiplicity is backward compatibility, not three behaviors.
 Env: `COBIRB_HOME` (relocates the whole `.cobirb` tree — see `paths.py`; how tests isolate), `COBIRB_MODEL_NAME`,
 `COBIRB_OLLAMA_URL`, `COBIRB_PROJECT_DIR`, `COBIRB_TEST_MODEL`.
 
-## 11. Known gaps (audited; decisions pending)
+## 11. Testing
 
-Recorded so they aren't rediscovered or "fixed" mid-discussion.
+`pytest` runs the suite. Coverage sits around 97%, which is **higher than the bar and not a target
+to defend**: the aim is roughly 90%, and above all a suite that tests contracts rather than
+internals.
 
-- **S1/S2 — `cli.py` is the composition root.** `tui/app.py` imports twelve private `cli._*`
-  functions because the wiring has nowhere else to live; the underscores are fiction.
+The concrete test: if a change preserves a function's contract and behaviour, its tests should not
+need to change. A suite that has to be hand-held through every refactor is the failure mode — and
+this one has been there. Symptoms to watch for and fix in the test, not the source: asserting on
+whole recorded-call dicts, on exact log strings, on private helpers, or on call sequences when the
+observable result is what matters. Loosening or deleting an over-specified test is a legitimate
+outcome, and a small coverage drop is a fine price for a suite that stops obstructing change.
+
+Where the doubles live: `conftest.py` holds the three that were genuinely shared
+(`DummyModel`, `StubSession`, `StubSessionManager`). The rest are local to the file whose questions
+they are shaped around, deliberately.
 
 ## 12. Roadmap
 

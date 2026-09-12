@@ -353,41 +353,14 @@ class CoBirbApp(App[None]):
         if not prompt:
             return
 
-        # Before the slash-command branches below, not after: "/persona
-        # kawaii" is exactly the kind of thing worth arrowing back to, and a
-        # history that only remembered messages sent to the model would drop
-        # every command the moment it ran.
+        # Before the command dispatch below, not after: "/persona kawaii" is
+        # exactly the kind of thing worth arrowing back to, and a history that
+        # only remembered messages sent to the model would drop every command
+        # the moment it ran.
         if isinstance(event.input, PromptInput):
             event.input.remember(prompt)
 
-        if prompt == "?" or prompt == "/help" or prompt.startswith("/help "):
-            topic = prompt[len("/help"):].strip()
-            self.action_help(topic)
-            return
-
-        if prompt == "/model" or prompt.startswith("/model "):
-            arg = prompt[len("/model"):].strip()
-            if arg:
-                self.write_transcript(render.build_notice("Usage: /model — lists available models to choose from."))
-            else:
-                self._select_model_worker(auto=False)
-            return
-
-        if prompt == "/persona" or prompt.startswith("/persona "):
-            arg = prompt[len("/persona"):].strip()
-            # Bare /persona opens the picker, exactly like bare /model;
-            # /persona <name> still switches directly, so anything scripted
-            # or recalled from history keeps working.
-            if arg:
-                self._apply_persona(arg)
-            else:
-                self.pick_persona()
-            return
-
-        if prompt.startswith("/plan"):
-            self.plan_mode, message = commands.apply_plan_toggle(prompt[len("/plan"):], self.plan_mode)
-            self.query_one(StatusBar).plan_mode = self.plan_mode
-            self.write_transcript(render.build_notice(message))
+        if self._dispatch_command(prompt):
             return
 
         self.write_user_prompt(prompt)
@@ -398,6 +371,67 @@ class CoBirbApp(App[None]):
         event.input.disabled = True
         self._turn_in_progress = True
         self._run_turn(prompt)
+
+    # ------------------------------------------------------------------ #
+    # Slash commands
+    # ------------------------------------------------------------------ #
+    def _dispatch_command(self, prompt: str) -> bool:
+        """Run ``prompt`` as a slash command, or report that it isn't one.
+
+        A dict rather than the chain of ``startswith`` branches this replaced:
+        each of those re-sliced the command name out of the prompt with
+        ``prompt[len("/model"):]``, so the literal appeared twice per command
+        and adding one meant editing the middle of a chain. Matching the first
+        word exactly also fixes ``/planned`` being read as ``/plan`` with the
+        argument "ned".
+
+        An unrecognised ``/thing`` is deliberately *not* a command: it goes to
+        the model like any other message, since it is far more likely to be
+        prose than a typo'd command.
+        """
+        if prompt == "?":
+            self.action_help("")
+            return True
+        if not prompt.startswith("/"):
+            return False
+        name, _, argument = prompt.partition(" ")
+        handler = self._COMMANDS.get(name)
+        if handler is None:
+            return False
+        handler(self, argument.strip())
+        return True
+
+    def _cmd_help(self, argument: str) -> None:
+        self.action_help(argument)
+
+    def _cmd_model(self, argument: str) -> None:
+        if argument:
+            self.write_transcript(
+                render.build_notice("Usage: /model — lists available models to choose from.")
+            )
+            return
+        self._select_model_worker(auto=False)
+
+    def _cmd_persona(self, argument: str) -> None:
+        # Bare /persona opens the picker, exactly like bare /model; /persona
+        # <name> still switches directly, so anything scripted or recalled
+        # from history keeps working.
+        if argument:
+            self._apply_persona(argument)
+        else:
+            self.pick_persona()
+
+    def _cmd_plan(self, argument: str) -> None:
+        self.plan_mode, message = commands.apply_plan_toggle(argument, self.plan_mode)
+        self.query_one(StatusBar).plan_mode = self.plan_mode
+        self.write_transcript(render.build_notice(message))
+
+    _COMMANDS = {
+        "/help": _cmd_help,
+        "/model": _cmd_model,
+        "/persona": _cmd_persona,
+        "/plan": _cmd_plan,
+    }
 
     def _on_turn_finished(self) -> None:
         self._turn_in_progress = False

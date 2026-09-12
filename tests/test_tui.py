@@ -2125,3 +2125,33 @@ async def test_resuming_an_empty_session_says_so_instead_of_drawing_rules(tmp_pa
         text = _transcript_text(app)
         assert "no turns yet" in text
         assert "end of restored history" not in text
+
+
+async def test_an_unknown_slash_command_goes_to_the_model(monkeypatch):
+    """`/deploy the thing` is far more likely to be prose than a typo'd
+    command, so it is sent rather than swallowed."""
+    orchestrator = _StubOrchestrator()
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/deploy the thing")
+        await _until(pilot, lambda: bool(orchestrator.calls))
+
+        assert orchestrator.calls[0]["prompt"] == "/deploy the thing"
+
+
+async def test_a_command_prefix_is_matched_as_a_whole_word(monkeypatch):
+    """The old chain used startswith, so "/planned" parsed as /plan with the
+    argument "ned" and silently reported plan mode instead of being sent."""
+    orchestrator = _StubOrchestrator()
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/planned obsolescence")
+        await _until(pilot, lambda: bool(orchestrator.calls))
+
+        assert orchestrator.calls[0]["prompt"] == "/planned obsolescence"

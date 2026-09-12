@@ -15,6 +15,12 @@ from typing import Any
 
 from . import paths
 
+# Which stage of a plan-mode run produced a turn (Turn.phase). Compared in
+# three modules; a typo here renders wrong rather than failing.
+PHASE_PLAN = "plan"
+PHASE_ACT = "act"
+PHASE_VALIDATE = "validate"
+
 
 def default_sessions_dir() -> str:
     """Where interactive mode looks for and offers to save session files.

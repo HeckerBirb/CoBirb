@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from ..plugins.core import render
-from ..typing.spi import I_OAdapter
+from ..typing.spi import DECISION_ALWAYS, DECISION_DENY, DECISION_ONCE, DECISIONS, I_OAdapter
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, avoids an import cycle
     from .app import CoBirbApp
@@ -114,8 +114,8 @@ class TuiIO(I_OAdapter):
                 self._app.request_approval, tool_name, arguments, scope
             )
         except Exception:  # noqa: BLE001 - no one to ask means deny, never guess yes
-            return "deny"
-        return decision if decision in ("once", "always", "deny") else "deny"
+            return DECISION_DENY
+        return decision if decision in DECISIONS else DECISION_DENY
 
     # ------------------------------------------------------------------ #
     # Extra chrome. Not part of I_OAdapter — reached for via getattr by the

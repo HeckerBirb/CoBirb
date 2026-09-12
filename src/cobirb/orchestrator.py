@@ -16,7 +16,7 @@ import logging
 from typing import Any, Callable, Iterable
 
 from .policy import AuditLog, Policy
-from .session import Session, SessionManager, Turn
+from .session import PHASE_ACT, PHASE_PLAN, PHASE_VALIDATE, Session, SessionManager, Turn
 from .typing import spi as cobirb_typing
 
 logger = logging.getLogger("cobirb")
@@ -204,12 +204,12 @@ class Orchestrator:
                 _join_system(system_with_cwd, _PLAN_PHASE_INSTRUCTIONS), session
             )
             if not plan_streamed:
-                self._render_phase("plan", persona, plan_text)
+                self._render_phase(PHASE_PLAN, persona, plan_text)
 
         act_system = (
             _join_system(system_with_cwd, _ACT_PHASE_INSTRUCTIONS) if plan_mode else system_with_cwd
         )
-        content, streamed = self._loop(act_system, session, max_turns, phase="act" if plan_mode else None)
+        content, streamed = self._loop(act_system, session, max_turns, PHASE_ACT if plan_mode else None)
         session.summary = content
         self.last_turn_streamed = streamed
 
@@ -224,11 +224,11 @@ class Orchestrator:
                 _join_system(system_with_cwd, _VALIDATE_PHASE_INSTRUCTIONS),
                 session,
                 max_turns=4,
-                phase="validate",
+                phase=PHASE_VALIDATE,
             )
             session.validation = validation_text
             if not validation_streamed:
-                self._render_phase("validation", persona, validation_text)
+                self._render_phase(PHASE_VALIDATE, persona, validation_text)
 
         return session
 
@@ -258,7 +258,7 @@ class Orchestrator:
         context = self._build_context(session)
         reply, streamed = self._chat(system, context, tools=[])
         content = _materialize(reply)
-        session.add(Turn(role="assistant", content=content, phase="plan"))
+        session.add(Turn(role="assistant", content=content, phase=PHASE_PLAN))
         return content, streamed and bool(content)
 
     def _loop(
@@ -441,7 +441,7 @@ class Orchestrator:
         raises — there's no one to ask, so the safe answer is no.
         """
         if self.io is None or not hasattr(self.io, "confirm"):
-            return "deny"
+            return cobirb_typing.DECISION_DENY
         try:
             confirm_scoped = getattr(self.io, "confirm_scoped", None)
             if callable(confirm_scoped):
@@ -451,8 +451,8 @@ class Orchestrator:
             else:
                 decision = self.io.confirm(tool_name, arguments)
         except Exception:  # noqa: BLE001 - a broken adapter must not open access
-            return "deny"
-        return decision if decision in ("once", "always", "deny") else "deny"
+            return cobirb_typing.DECISION_DENY
+        return decision if decision in cobirb_typing.DECISIONS else cobirb_typing.DECISION_DENY
 
     def _execute_tool(self, call: cobirb_typing.ToolCall, phase: str | None = None) -> None:
         tool_name = call.name
@@ -468,14 +468,14 @@ class Orchestrator:
         # or one that can't ask (see I_OAdapter.confirm's contract).
         if not self.policy.is_allowed(tool_name, arguments):
             decision = self._request_approval(tool_name, arguments)
-            if decision == "deny":
+            if decision == cobirb_typing.DECISION_DENY:
                 result = cobirb_typing.ToolResult(
                     ok=False, content=f"Permission denied: tool '{tool_name}' is not permitted."
                 )
                 session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
                 self._render_tool_call(tool_name, arguments, result)
                 return
-            if decision == "always":
+            if decision == cobirb_typing.DECISION_ALWAYS:
                 # What "always" widens to is the policy's decision, not the
                 # orchestrator's — a read grants a directory, a shell call
                 # grants its invocation, everything else grants the tool.
@@ -537,12 +537,17 @@ class Orchestrator:
         """
         if not text:
             return
+        # The plain fallback says "validation", not "validate": the phase
+        # constant names a stage of the run, and this is prose shown to a
+        # person. Keeping them separate is why the label is mapped rather
+        # than interpolated straight from `phase`.
+        label = "validation" if phase == PHASE_VALIDATE else phase
         render_through(
             self.io,
-            "render_plan" if phase == "plan" else "render_validation",
+            "render_plan" if phase == PHASE_PLAN else "render_validation",
             persona_name,
             text,
-            fallback=lambda: self.io.render(f"\n[{phase}] {text}\n"),
+            fallback=lambda: self.io.render(f"\n[{label}] {text}\n"),
         )
 
     # ------------------------------------------------------------------ #
