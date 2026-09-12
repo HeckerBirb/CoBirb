@@ -49,6 +49,7 @@ style by hand.
 | `session.py` | `Turn`/`Session`, encrypted `SessionManager`, session discovery. |
 | `config.py` | Layered user + repo config reader. |
 | `typing/spi.py` | **The plugin contract.** All SPI interfaces and shared dataclasses. |
+| `paths.py` | Every path under `~/.cobirb`. Derived in one place, on purpose. |
 | `plugins/loader.py` | Discovery (entry points + local dirs), fail-closed. |
 | `plugins/core/` | Built-ins: `tools`, `model`, `io`, `crypto`, `persona`, `render`. |
 | `personas/*.json` | `professional`, `neighbor`, `kawaii`. Noah is built in code. |
@@ -222,8 +223,8 @@ the model sounds like itself.
   checks exactly that and is the signal to emit no persona block.
 - **Bundled:** `noah` (code), `professional`, `neighbor`, `kawaii` (JSON). Fields: `name`,
   `species`, `tone`, `greeting`, `phrasings[]`, `emoji_density`, `known_squawks[]`.
-- **Resolution:** bundled → `./<name>.json` → user home. An unknown name falls back to *no* persona,
-  never Noah — a typo must not dress the model in a character nobody asked for.
+- **Resolution:** bundled → `./<name>.json` → `~/.cobirb/personas/<name>.json`. An unknown name
+  falls back to *no* persona, never Noah — a typo must not dress the model in a character nobody asked for.
 - Sessions store `cli._persona_key()` (the name that *reloads* it), not the display name:
   `kawaii.json` calls itself something else, so the display name wouldn't resolve back to a file.
 - Tone: friendly and playful, **not** saccharine. Light puns, no sparkle.
@@ -387,15 +388,13 @@ deeply. Nothing defaults to a networked provider. See `cobirb.json.example`.
 Model name resolution: `--model` → `model` → `models.default.name` → `default_model`. All name the
 same thing; the multiplicity is backward compatibility, not three behaviors.
 
-Env: `COBIRB_HOME` (relocates the whole `.cobirb` tree — how tests isolate), `COBIRB_MODEL_NAME`,
+Env: `COBIRB_HOME` (relocates the whole `.cobirb` tree — see `paths.py`; how tests isolate), `COBIRB_MODEL_NAME`,
 `COBIRB_OLLAMA_URL`, `COBIRB_PROJECT_DIR`, `COBIRB_TEST_MODEL`.
 
 ## 11. Known gaps (audited; decisions pending)
 
 Recorded so they aren't rediscovered or "fixed" mid-discussion.
 
-- **B3 — user personas are read from `~/cobirb/`** while config, sessions, audit and plugins all use
-  `~/.cobirb/`.
 - **S1/S2 — `cli.py` is the composition root.** `tui/app.py` imports twelve private `cli._*`
   functions because the wiring has nowhere else to live; the underscores are fiction.
 

@@ -11,6 +11,7 @@ import os
 import sys
 from typing import Any
 
+from .. import paths
 from ..plugins.core import (
     PLAIN_PERSONA_NAME,
     build_default_persona,
@@ -113,7 +114,7 @@ def load_persona(persona_name: str | None) -> cobirb_typing.Persona:
     candidates = [
         os.path.join(_PERSONAS_DIR, f"{persona_name}.json"),
         os.path.join(os.getcwd(), f"{persona_name}.json"),
-        os.path.join(os.environ.get("COBIRB_HOME", os.path.expanduser("~")), "cobirb", f"{persona_name}.json"),
+        os.path.join(paths.user_personas_dir(), f"{persona_name}.json"),
     ]
     data = None
     for path in candidates:

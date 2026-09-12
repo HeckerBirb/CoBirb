@@ -32,6 +32,8 @@ import sys
 import time
 from typing import Any
 
+from . import paths
+
 # Tokens made only of these characters are shell operators rather than words.
 _PUNCTUATION = set("();<>|&")
 
@@ -86,9 +88,7 @@ class AuditLog:
     """
 
     def __init__(self, path: str | None = None, enabled: bool = False) -> None:
-        self.path = path or os.path.join(
-            os.environ.get("COBIRB_HOME", os.path.expanduser("~")), ".cobirb", "audit.jsonl"
-        )
+        self.path = path or paths.audit_path()
         self.enabled = enabled
 
     def append(self, entry: dict[str, Any]) -> None:

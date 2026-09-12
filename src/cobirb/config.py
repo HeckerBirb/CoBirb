@@ -10,6 +10,8 @@ import os
 import sys
 from typing import Any
 
+from . import paths
+
 
 def _load(path: str | None) -> dict[str, Any]:
     """Read one config layer, reporting and skipping anything unreadable.
@@ -65,8 +67,7 @@ class Config:
         # launched from — otherwise `cd ~ && cobirb --cwd /project` silently
         # ignores /project/cobirb.json, the same class of mistake the tools
         # layer already had with relative paths.
-        home = os.environ.get("COBIRB_HOME", os.path.expanduser("~"))
-        self.user_path = user_path or os.path.join(home, ".cobirb", "config.json")
+        self.user_path = user_path or paths.config_path()
         self.repo_path = repo_path or os.path.join(cwd or ".", "cobirb.json")
         user = _load(self.user_path)
         repo = _load(self.repo_path)

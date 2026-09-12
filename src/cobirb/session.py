@@ -13,20 +13,16 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import paths
+
 
 def default_sessions_dir() -> str:
     """Where interactive mode looks for and offers to save session files.
 
-    Mirrors ``Config``'s own home resolution (``COBIRB_HOME``, else the real
-    home directory) so the two stay consistent and so tests get the same
-    per-test isolation ``COBIRB_HOME`` already gives ``Config``. A session
-    opened with an explicit ``--session <path>`` elsewhere on disk is
-    unaffected — this directory is only where the TUI's Sessions tab looks
-    to list and offer new sessions, not a requirement for the ``--session``
-    flag.
+    Kept as a name here because the Sessions tab and the CLI both ask for it
+    by this name; the path itself is derived in one place (``paths``).
     """
-    home = os.environ.get("COBIRB_HOME", os.path.expanduser("~"))
-    return os.path.join(home, ".cobirb", "sessions")
+    return paths.sessions_dir()
 
 
 @dataclass

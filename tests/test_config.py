@@ -152,3 +152,37 @@ def test_a_broken_repo_config_does_not_discard_the_user_config(tmp_path, monkeyp
     (tmp_path / "cobirb.json").write_text("{oops")
 
     assert Config(cwd=str(tmp_path)).get("default_model") == "from-user"
+
+
+def test_every_cobirb_path_sits_under_one_home(tmp_path, monkeypatch):
+    """Five modules used to resolve COBIRB_HOME independently and join their
+    own subpath onto it, which is how user personas ended up in ~/cobirb/
+    while everything else used ~/.cobirb/. One derivation, one tree."""
+    from cobirb import paths
+
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    root = str(tmp_path / ".cobirb")
+
+    assert paths.cobirb_dir() == root
+    for path in (
+        paths.config_path(),
+        paths.sessions_dir(),
+        paths.audit_path(),
+        paths.user_personas_dir(),
+        paths.user_plugins_dir(),
+    ):
+        assert path.startswith(root + os.sep), path
+
+
+def test_a_user_persona_resolves_from_the_cobirb_home_tree(tmp_path, monkeypatch):
+    """It was looked for in ~/cobirb/<name>.json — no dot, no subdirectory —
+    so a persona put where every other CoBirb file lives never resolved."""
+    from cobirb import paths
+    from cobirb.runtime.personas import load_persona
+
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    personas_dir = tmp_path / ".cobirb" / "personas"
+    personas_dir.mkdir(parents=True)
+    (personas_dir / "pirate.json").write_text('{"name": "Redbeard", "tone": "salty"}')
+
+    assert load_persona("pirate").name == "Redbeard"

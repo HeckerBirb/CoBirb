@@ -11,6 +11,7 @@ import importlib.metadata as im
 import os
 from typing import Any
 
+from .. import paths
 from ..typing import spi as cobirb_typing
 
 
@@ -80,10 +81,9 @@ def load_plugins(entry_points: im.EntryPoints | None = None) -> tuple[dict[str, 
 def _plugin_dirs() -> list[str]:
     """Directories where local plugins may live."""
     project = os.environ.get("COBIRB_PROJECT_DIR", ".")
-    user = os.environ.get("COBIRB_HOME", os.path.expanduser("~"))
     return [
         os.path.join(project, "cobirb", "plugins"),
-        os.path.join(user, ".cobirb", "plugins"),
+        paths.user_plugins_dir(),
     ]
 
 
