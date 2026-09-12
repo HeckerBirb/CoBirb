@@ -89,5 +89,16 @@ build it.
 ## 7. Unresolved questions (to resolve before/while scaffolding)
 
 - ~~Exact KEM/DSA variant at runtime~~ — resolved: no PQ-KEM seal (see §2, "Session encryption").
-- UI: `rich`-based TUI for interactive; subprocess-style CLI for `-p`. (Chosen; revisit if needed.)
-- Whether to add a `py.typed` marker and package `pyproject.toml` for distribution.
+- ~~UI: `rich`-based TUI for interactive~~ — resolved: adopted for real (header banner, markdown
+  answers, tool-call panels with diff highlighting, a spinner); subprocess-style CLI for `-p`
+  stays plain. See DESIGN.md §11 and `plugins/core/io.py`.
+  **Superseded for interactive mode:** `rich` alone gets you good-looking *scrollback*, not an
+  app — no tab bar, no fixed layout regions, no boxed input, no modal. Interactive mode has since
+  moved to a full-screen [Textual](https://textual.textualize.io/) app (`cobirb/tui/`), which is
+  an accepted, explicit exception to the "few dependencies" stance. `rich` is still what draws
+  every panel in both modes: the builders live in `plugins/core/render.py` and are shared by
+  `TerminalIO` (prints them) and `TuiIO` (writes them into a `RichLog`). One-shot mode is
+  unchanged and never imports Textual. See DESIGN.md §11 and `cobirb/tui/app.py`.
+- ~~Whether to add a `py.typed` marker and package `pyproject.toml` for distribution~~ — resolved:
+  yes. `src/cobirb/py.typed` ships via `[tool.setuptools.package-data]`, and the
+  `Typing :: Typed` classifier is set.

@@ -14,6 +14,54 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+def default_sessions_dir() -> str:
+    """Where interactive mode looks for and offers to save session files.
+
+    Mirrors ``Config``'s own home resolution (``COBIRB_HOME``, else the real
+    home directory) so the two stay consistent and so tests get the same
+    per-test isolation ``COBIRB_HOME`` already gives ``Config``. A session
+    opened with an explicit ``--session <path>`` elsewhere on disk is
+    unaffected — this directory is only where the TUI's Sessions tab looks
+    to list and offer new sessions, not a requirement for the ``--session``
+    flag.
+    """
+    home = os.environ.get("COBIRB_HOME", os.path.expanduser("~"))
+    return os.path.join(home, ".cobirb", "sessions")
+
+
+@dataclass
+class SessionFile:
+    """One ``.json`` file found in a sessions directory, without decrypting
+    it — just what the filesystem can tell us."""
+
+    path: str
+    name: str
+    size: int
+    modified: float
+
+
+def discover_sessions(directory: str) -> list[SessionFile]:
+    """List the session files in ``directory``, most recently modified first.
+
+    Returns ``[]`` for a directory that doesn't exist yet (e.g. no session
+    has ever been saved there) rather than raising — an empty list reads
+    naturally as "nothing here yet."
+    """
+    if not os.path.isdir(directory):
+        return []
+    files = []
+    for name in os.listdir(directory):
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(directory, name)
+        if not os.path.isfile(path):
+            continue
+        stat = os.stat(path)
+        files.append(SessionFile(path=path, name=name, size=stat.st_size, modified=stat.st_mtime))
+    files.sort(key=lambda f: f.modified, reverse=True)
+    return files
+
+
 @dataclass
 class Turn:
     """A single user or assistant message."""
@@ -21,6 +69,11 @@ class Turn:
     role: str
     content: str
     tool_use: list[dict[str, Any]] | None = None
+    # Which phase of a plan-mode run produced this turn ("plan", "act", or
+    # "validate" — see Orchestrator.run()), or None for a normal turn/run
+    # with plan mode off. Purely descriptive: never affects how a turn is
+    # replayed into context (see Orchestrator._build_context).
+    phase: str | None = None
     ts: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     _stored_hash: str | None = None
 
@@ -38,6 +91,7 @@ class Turn:
             "role": self.role,
             "content": self.content,
             "tool_use": self.tool_use,
+            "phase": self.phase,
             "ts": self.ts,
             "hash": self.digest(),
         }
@@ -48,13 +102,29 @@ class Turn:
             role=data["role"],
             content=data["content"],
             tool_use=data.get("tool_use"),
+            phase=data.get("phase"),
             ts=data.get("ts", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
             _stored_hash=data.get("hash"),
         )
 
     def digest(self) -> str:
-        """Content hash for tamper detection."""
-        return hashlib.sha256(f"{self.role}:{self.content}".encode("utf-8")).hexdigest()
+        """Content hash for tamper detection.
+
+        Covers ``tool_use`` and ``phase`` as well as the text: ``tool_use``
+        records which tool ran with which arguments, so a hash over the
+        prose alone would happily accept a session whose recorded
+        ``read_file`` call had been rewritten into a ``shell`` one; ``phase``
+        records which stage of a plan-mode run a turn came from, so the
+        same rewrite risk applies to relabeling a "plan" turn as "validate"
+        after the fact. Serialized with sorted keys so the digest is stable
+        across runs.
+        """
+        payload = json.dumps(
+            {"role": self.role, "content": self.content, "tool_use": self.tool_use, "phase": self.phase},
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -67,6 +137,10 @@ class Session:
     persona: str = "noah"
     turns: list[Turn] = field(default_factory=list)
     summary: str | None = None
+    # Set only when a run used plan mode (Orchestrator.run(plan_mode=True)):
+    # the model's own validate-phase report on whether/how the request was
+    # actually fulfilled, with references. None for a normal run.
+    validation: str | None = None
 
     def add(self, turn: Turn) -> None:
         self.turns.append(turn)
@@ -83,17 +157,19 @@ class Session:
             "persona": self.persona,
             "turns": [t.to_dict() for t in self.turns],
             "summary": self.summary,
+            "validation": self.validation,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Session":
         return cls(
             schema=data.get("schema", 1),
-            created_at=data.get("created_at"),
+            created_at=data.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             working_dir=data.get("working_dir", "."),
             persona=data.get("persona", "noah"),
             turns=[Turn.from_dict(t) for t in data.get("turns", [])],
             summary=data.get("summary"),
+            validation=data.get("validation"),
         )
 
 
@@ -112,11 +188,14 @@ class SessionManager:
         persona: str = "noah",
         password: str | None = None,
     ) -> None:
+        # `password` is accepted for call-compatibility but deliberately not
+        # retained: save()/load() take it per call, so keeping a copy would
+        # hold the unlock secret in memory for the manager's whole lifetime
+        # to no purpose.
         self.path = path
         self.crypto = crypto
         self.working_dir = working_dir
         self.persona = persona
-        self.password = password
         self.session: Session | None = None
 
     @classmethod
@@ -129,7 +208,11 @@ class SessionManager:
         password: str | None = None,
     ) -> "SessionManager":
         manager = cls(path, crypto, working_dir, persona, password)
-        manager.session = Session(created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        manager.session = Session(
+            created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            working_dir=working_dir,
+            persona=persona,
+        )
         return manager
 
     @classmethod
@@ -138,8 +221,8 @@ class SessionManager:
     ) -> "SessionManager":
         """Load an existing session, verifying turn hashes against the file.
 
-        The ``password`` is used to decrypt the blob and is stored for the
-        lifetime of the manager so the session can be re-saved.
+        The ``password`` decrypts the blob and is not retained; ``save()``
+        takes it again per call.
         """
         manager = cls(path, crypto, working_dir, persona, password)
         blob = _read_blob(path)

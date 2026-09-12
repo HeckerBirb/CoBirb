@@ -17,15 +17,26 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Topic :: Software Development :: Code Generators",
+    "Typing :: Typed",
 ]
 
-# Runtime dependencies are intentionally minimal so the core stays thin and local-only.
+# Runtime dependencies are kept few and deliberate: each one is a decision,
+# not a convenience. All of them are local-only — no network client, no
+# telemetry, and no compiled extension beyond the one `cryptography` needs.
 # `cryptography` backs the default (core) SessionCrypto plugin; it is vetted, not
 # hand-rolled crypto, and is required because AesGcmScryptSessionCrypto ships as a
 # built-in core plugin rather than an opt-in extra.
+# `textual` powers interactive mode's full-screen app (see cobirb/tui/). This is
+# an accepted, explicit exception to the older "keep dependencies minimal" line:
+# matching the intended interactive experience — a persistent tab bar, fixed
+# layout regions, a boxed input, modal tool approval — needs a real TUI
+# framework, not more `rich` polish. It shares `rich` (already required), adds
+# no compiled extension, and is imported lazily, so one-shot/programmatic mode
+# never loads it.
 dependencies = [
     "rich>=13.7",
     "cryptography>=42.0",
+    "textual>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +44,9 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    # Textual's App.run_test()/Pilot harness is async, so the TUI suite needs
+    # an asyncio-aware runner.
+    "pytest-asyncio>=0.24",
 ]
 
 [project.scripts]
@@ -53,11 +67,22 @@ core-crypto = "cobirb.plugins.core.crypto:AesGcmScryptSessionCrypto"
 where = ["src"]
 
 [tool.setuptools.package-data]
-cobirb = ["personas/*.json"]
+# py.typed (PEP 561) declares that this package ships inline type hints a
+# consuming project's type checker should read, rather than treating cobirb
+# as untyped. personas/*.json are the bundled persona data files.
+# tui/*.tcss is the Textual stylesheet the interactive app loads at runtime via
+# CSS_PATH — without it listed here, an installed (non-editable) CoBirb starts
+# interactive mode and immediately fails to find its own layout.
+cobirb = ["py.typed", "personas/*.json", "tui/*.tcss"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# tests/test_tui.py drives the app through Textual's async Pilot harness;
+# "auto" lets those `async def test_...` functions run without each needing its
+# own @pytest.mark.asyncio decoration.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "integration: hits a real local Ollama server; skipped unless COBIRB_TEST_MODEL is set (see tests/test_integration_ollama.py)",
 ]

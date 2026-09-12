@@ -8,6 +8,7 @@ observable behavior (what a caller actually sees) changing at all.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -104,3 +105,15 @@ def test_malformed_json_config_file_raises_rather_than_being_silently_ignored(tm
 
     with pytest.raises(json.JSONDecodeError):
         Config(user_path=str(user_path), repo_path=str(tmp_path / "no-repo.json"))
+
+
+def test_bundled_example_config_is_valid_and_loadable(tmp_path):
+    """cobirb.json.example (referenced by README and DESIGN.md §9/§11) must
+    stay valid, loadable JSON that Config can actually read — a stale or
+    broken example is worse than no example at all."""
+    example_path = os.path.join(os.path.dirname(__file__), "..", "cobirb.json.example")
+    config = Config(user_path=example_path, repo_path=str(tmp_path / "no-repo.json"))
+
+    assert config.get("default_model")
+    assert config.get("models", "default", "name")
+    assert config.get("persona")

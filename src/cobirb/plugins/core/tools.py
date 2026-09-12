@@ -6,10 +6,9 @@ every tool must be explicitly allowed before it runs. See DESIGN.md §8.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
-from typing import Any, Callable
+from typing import Any
 
 from ...typing.spi import Tool, ToolResult
 
@@ -423,16 +422,6 @@ BUILTIN_TOOLS: list[type[Tool]] = [
 ]
 
 
-def _first_word(command: str) -> str:
-    """Return the first word of a shell command, split on common separators.
-
-    Used by the permission layer to allow narrow scopes like ``bash -n`` without
-    allowing ``bash``. See todo-list.md.
-    """
-    parts = re.split(r";|\||&&|&|\n", command.strip())
-    return parts[0].split()[0] if parts else ""
-
-
 class ToolRegistry:
     """Holds the built-in tools and supports plugin extension."""
 
@@ -443,7 +432,12 @@ class ToolRegistry:
             self.register(tool_cls(self.cwd))
 
     def register(self, tool: Tool) -> None:
-        self._tools[tool.name] = tool
+        # Built-in tools set ``name`` as a plain class attribute (a string);
+        # third-party plugins may instead implement it as the method the SPI
+        # documents (``def name(self) -> str``). Support both rather than
+        # storing a bound method object as the registry key for the latter.
+        name = tool.name() if callable(tool.name) else tool.name
+        self._tools[name] = tool
 
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
@@ -457,7 +451,3 @@ class ToolRegistry:
 
     def is_known(self, name: str) -> bool:
         return name in self._tools
-
-    def first_word(self, command: str) -> str:
-        """Convenience accessor for the permission layer."""
-        return _first_word(command)

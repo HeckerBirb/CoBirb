@@ -30,10 +30,20 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
 class Config:
     """A simple, layered configuration reader."""
 
-    def __init__(self, user_path: str | None = None, repo_path: str | None = None) -> None:
+    def __init__(
+        self,
+        user_path: str | None = None,
+        repo_path: str | None = None,
+        cwd: str | None = None,
+    ) -> None:
+        # The repo-scoped config belongs to the directory CoBirb is working
+        # *on* (``--cwd``), not the directory the process happened to be
+        # launched from — otherwise `cd ~ && cobirb --cwd /project` silently
+        # ignores /project/cobirb.json, the same class of mistake the tools
+        # layer already had with relative paths.
         home = os.environ.get("COBIRB_HOME", os.path.expanduser("~"))
         self.user_path = user_path or os.path.join(home, ".cobirb", "config.json")
-        self.repo_path = repo_path or os.path.join(".", "cobirb.json")
+        self.repo_path = repo_path or os.path.join(cwd or ".", "cobirb.json")
         user = _load(self.user_path)
         repo = _load(self.repo_path)
         # Repo config overrides user config.

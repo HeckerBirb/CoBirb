@@ -112,6 +112,45 @@ def test_live_tool_call_round_trip(tmp_path):
     assert "banana" in session.summary.lower()
 
 
+def test_live_plan_mode_converges_through_all_three_phases(tmp_path):
+    """Plan mode against a real model: the planning phase must produce a
+    genuine plan without calling any tools, the act phase must still call
+    tools and converge as usual, and the validate phase must produce a
+    real report — proving the plan/act/validate system-prompt additions
+    (_PLAN_PHASE_INSTRUCTIONS etc.) actually hold up against a real model,
+    not just the scripted stubs in test_orchestrator.py/test_cli.py."""
+    (tmp_path / "note.txt").write_text("the secret word is banana")
+
+    registry = ToolRegistry(str(tmp_path))
+    policy = build_default_policy()
+    provider = LocalModelProvider(model=TEST_MODEL)
+    orchestrator = Orchestrator(
+        model=provider,
+        tools={t.name: t for t in registry.values()},
+        policy=policy,
+        io=TerminalIO(),
+    )
+
+    session = orchestrator.run(
+        "Read note.txt and tell me the secret word in it.",
+        "You are a helpful assistant with access to tools. Use them when needed.",
+        cwd=str(tmp_path),
+        max_turns=8,
+        plan_mode=True,
+    )
+
+    plan_turns = [t for t in session.turns if t.phase == "plan"]
+    assert plan_turns, "no plan-phase turn recorded"
+    assert plan_turns[0].tool_use is None, "the planning phase must never call tools"
+
+    assert any(t.role == "tool" for t in session.turns), "act phase never called a tool"
+    assert not session.summary.startswith("Stopped after"), "act phase did not converge"
+    assert "banana" in session.summary.lower()
+
+    assert session.validation, "validate phase produced no report"
+    assert not session.validation.startswith("Stopped after"), "validate phase did not converge"
+
+
 def test_live_multi_step_tool_calls_converge(tmp_path):
     """A sequential two-file task must also converge, not just a single
     tool call — this is closer to real agentic usage than one lone call."""

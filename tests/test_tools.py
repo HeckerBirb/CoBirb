@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import difflib
 
-import pytest
 
 from cobirb.plugins.core.tools import (
     ApplyPatchTool,
@@ -18,8 +17,6 @@ from cobirb.plugins.core.tools import (
     ToolResult,
     WriteFileTool,
 )
-from cobirb.plugins.core.tools import _first_word
-
 
 def _mk_tool(cls):
     return cls()
@@ -246,10 +243,6 @@ def test_registry_custom_tool_extension():
     assert "my_tool" in registry.names()
 
 
-def test_first_word():
-    assert _first_word("git status") == "git"
-    assert _first_word("bash -n") == "bash"
-    assert _first_word("a; b") == "a"
 
 
 # --------------------------------------------------------------------------- #

@@ -123,9 +123,32 @@ class LocalModelProvider(ModelProvider):
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
             raise RuntimeError(
-                f"Could not reach the model provider at {self._base_url}: {exc}. "
-                "Is Ollama running? (see DESIGN.md §6.3)"
+                f"Could not reach the model provider at {self._base_url}: {exc}. Is Ollama running?"
             ) from exc
+
+    def list_models(self) -> list[str]:
+        """Return the model names available from the configured endpoint.
+
+        Queries the OpenAI-compatible ``GET /v1/models`` route rather than
+        Ollama's own ``/api/tags`` — Ollama serves both, but the OpenAI-style
+        route is also what other self-hosted, OpenAI-compatible servers
+        (llama.cpp, vLLM, LM Studio, ...) expose, so this works unmodified if
+        ``base_url`` ever points somewhere other than Ollama. Used by
+        interactive mode's ``/model`` picker and its startup model check —
+        never called from the one-shot/programmatic path.
+        """
+        request = urllib.request.Request(
+            f"{self._base_url}/v1/models", headers={"Accept": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Could not reach the model provider at {self._base_url}: {exc}. Is Ollama running?"
+            ) from exc
+        entries = payload.get("data") or []
+        return sorted({entry["id"] for entry in entries if entry.get("id")})
 
     def chat(
         self,
@@ -138,8 +161,9 @@ class LocalModelProvider(ModelProvider):
         if not self._model:
             raise RuntimeError(
                 "No model configured. Set --model, COBIRB_MODEL_NAME, or "
-                "models.default.name in your CoBirb config. No models are "
-                "embedded by default (see DESIGN.md §6.3)."
+                "\"default_model\"/models.default.name in your CoBirb config — "
+                "or, in interactive mode, pick one with /model. No models are "
+                "embedded by default."
             )
         payload: dict[str, Any] = {
             "model": self._model,
@@ -176,8 +200,7 @@ class LocalModelProvider(ModelProvider):
             response = urllib.request.urlopen(request, timeout=120)
         except urllib.error.URLError as exc:
             raise RuntimeError(
-                f"Could not reach the model provider at {self._base_url}: {exc}. "
-                "Is Ollama running? (see DESIGN.md §6.3)"
+                f"Could not reach the model provider at {self._base_url}: {exc}. Is Ollama running?"
             ) from exc
 
         tool_calls: list[ToolCall] = []

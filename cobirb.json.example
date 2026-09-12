@@ -1,0 +1,16 @@
+{
+  "default_model": "llama3.1",
+  "models": {
+    "default": {
+      "name": "llama3.1",
+      "base_url": "http://localhost:11434"
+    }
+  },
+  "persona": "noah",
+  "plugins": {
+    "model": "core-model",
+    "io": "core-io",
+    "crypto": "core-crypto"
+  },
+  "plan_mode": false
+}

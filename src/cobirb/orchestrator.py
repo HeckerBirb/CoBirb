@@ -13,33 +13,44 @@ from __future__ import annotations
 
 import json
 import logging
-import time
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from .policy import Policy
 from .session import Session, SessionManager, Turn
 from .typing import spi as cobirb_typing
 
-SessionCrypto = cobirb_typing.SessionCrypto
-
 logger = logging.getLogger("cobirb")
 
-# Steps of the agent loop, in order.
-_STEPS = [
-    "understand",
-    "inspect",
-    "plan",
-    "act",
-    "observe",
-    "reason",
-    "iterate",
-    "validate",
-    "report",
-]
+# Sentinel distinguishing "no chunk yet" from a real (possibly empty-string)
+# streamed chunk when peeking the first item of a model's stream in _chat().
+_STREAM_EMPTY = object()
 
-
-class AgentError(Exception):
-    """Raised when the agent loop cannot proceed."""
+# System-prompt addenda for plan mode's three phases (Orchestrator.run,
+# plan_mode=True). Off by default — the model plans/acts/validates
+# implicitly in one pass, matching DESIGN.md §3's loop as actually
+# implemented. On, each phase gets its own model call(s) and its own
+# labeled Turn(s) (see Turn.phase), so a user who wants the more literal
+# "plan → act → validate" framing DESIGN.md §3 describes can opt into it.
+_PLAN_PHASE_INSTRUCTIONS = (
+    "PLANNING PHASE. Do not call any tools and do not attempt the task itself yet — "
+    "no tools are available to you for this reply. Write a short, numbered plan "
+    "describing the concrete steps you will take to fulfill the user's request above. "
+    "This plan will be shown to the user now and stays in the conversation history for "
+    "your own reference in the next phase."
+)
+_ACT_PHASE_INSTRUCTIONS = (
+    "ACT PHASE. A plan for this request was already produced in the assistant turn "
+    "above — follow it, adapting as needed if what you find while working contradicts "
+    "it. Use tools as needed to complete the user's request."
+)
+_VALIDATE_PHASE_INSTRUCTIONS = (
+    "VALIDATION PHASE. The task above is believed complete. Verify that it actually "
+    "was: re-read changed files, re-run any relevant tests or commands, or otherwise "
+    "check your own work using the available tools. Then report, with concrete "
+    "references (file paths, line numbers, command/test output), how and why the "
+    "user's request was successfully fulfilled. If it was not fully fulfilled, say so "
+    "plainly and explain what remains — do not claim success you can't back up."
+)
 
 
 def _materialize(reply: "str | Iterable[str]") -> str:
@@ -91,6 +102,7 @@ class Orchestrator:
         persona: str = "noah",
         max_turns: int = 8,
         session_path: str | None = None,
+        plan_mode: bool = False,
     ) -> Session:
         """Run the loop for a single objective.
 
@@ -104,22 +116,116 @@ class Orchestrator:
         set to whether the *final* answer specifically was already shown
         this way, so a caller (e.g. the CLI) knows whether it still needs to
         print ``session.summary`` itself or would just be duplicating output.
+
+        With ``plan_mode=True`` (config/``/plan`` — see cli.py), the single
+        act loop below is bracketed by two extra model calls instead of
+        being the whole run: a **plan** phase first (one reply, no tools,
+        recorded as a "plan"-phase turn and shown to the user immediately),
+        then the same act loop as always (now "act"-phase turns, following
+        the plan), then a **validate** phase (its own bounded tool-using
+        loop, "validate"-phase turns) that checks and reports on the result
+        in ``session.validation``. Off (the default), the model plans/acts/
+        validates implicitly in one pass, as before.
+
+        In plan mode specifically, the act phase's own answer is also shown
+        live here (via ``_render_answer``) rather than left to the caller's
+        usual post-``run()`` print (see ``cli._render_final_answer``): the
+        validate phase renders its own report *before* ``run()`` returns, so
+        if the act answer were left for the caller to print afterward, the
+        user would read the validation of a request before ever seeing what
+        the answer to it was. ``last_turn_streamed`` is set accordingly so
+        that post-``run()`` print becomes a no-op rather than a duplicate.
         """
         session = self._open_session(prompt, system, cwd, persona, session_path)
 
         # cwd is per-run metadata, not conversation history, so it rides on
         # the system prompt rather than being spliced into the turn history.
         system_with_cwd = f"{system}\n\nWorking directory: {cwd}"
-        context = self._build_context(session)
-        logger.info("starting run; turns=%d", len(session.turns))
+        logger.info("starting run; turns=%d plan_mode=%s", len(session.turns), plan_mode)
         self.last_turn_streamed = False
         self._stream_label = persona
 
+        if plan_mode:
+            plan_text, plan_streamed = self._run_plan_phase(
+                f"{system_with_cwd}\n\n{_PLAN_PHASE_INSTRUCTIONS}", session
+            )
+            if not plan_streamed:
+                self._render_phase("plan", persona, plan_text)
+
+        act_system = f"{system_with_cwd}\n\n{_ACT_PHASE_INSTRUCTIONS}" if plan_mode else system_with_cwd
+        content, streamed = self._loop(act_system, session, max_turns, phase="act" if plan_mode else None)
+        session.summary = content
+        self.last_turn_streamed = streamed
+
+        if plan_mode:
+            # Show the answer now — before validating it — rather than
+            # leaving it to the caller's usual post-run() print, which
+            # would land after the validate phase's own panel below and
+            # read as "validated, then here's what was validated."
+            self.last_turn_streamed = streamed or self._render_answer(persona, content)
+
+            validation_text, validation_streamed = self._loop(
+                f"{system_with_cwd}\n\n{_VALIDATE_PHASE_INSTRUCTIONS}", session, max_turns=4, phase="validate"
+            )
+            session.validation = validation_text
+            if not validation_streamed:
+                self._render_phase("validation", persona, validation_text)
+
+        return session
+
+    def _render_answer(self, persona_name: str, text: str) -> bool:
+        """Show a finished answer live, via ``io``'s ``render_answer`` hook
+        if it has one (the same hook ``cli._render_final_answer`` uses for
+        a normal, non-plan-mode run), else a plain fallback through
+        ``render()``. Only used directly by ``run()`` for plan mode's act
+        phase (see its docstring for why); a normal run leaves rendering
+        the final answer to the caller instead. Returns whether anything
+        was actually shown (``False`` with no ``io`` attached), so the
+        caller knows whether it still needs to show the text some other way.
+        """
+        if self.io is None or not text:
+            return False
+        render_answer = getattr(self.io, "render_answer", None)
+        if callable(render_answer):
+            render_answer(persona_name, text)
+        else:
+            self.io.render(f"\n{persona_name}: {text}\n")
+        return True
+
+    def _run_plan_phase(self, system: str, session: Session) -> tuple[str, bool]:
+        """One reply with no tools offered — the model can only think out
+        loud, never act. Recorded as its own "plan"-phase turn."""
+        context = self._build_context(session)
+        reply, streamed = self._chat(system, context, tools=[])
+        content = _materialize(reply)
+        session.add(Turn(role="assistant", content=content, phase="plan"))
+        return content, streamed and bool(content)
+
+    def _loop(
+        self,
+        system: str,
+        session: Session,
+        max_turns: int,
+        phase: str | None,
+        tools: "list[cobirb_typing.Tool] | None" = None,
+    ) -> tuple[str, bool]:
+        """Drive one bounded model<->tool loop until the model gives a
+        plain final answer, or ``max_turns`` is exhausted (a synthetic
+        "stopped after" message is returned instead, matching the un-added,
+        summary-only behavior the plain loop always had — see
+        ``run()``'s history before plan mode existed). Used both for the
+        normal act loop and, in plan mode, the validate phase too.
+        """
+        context = self._build_context(session)
         for _ in range(max_turns):
-            reply, streamed = self._chat(system_with_cwd, context)
+            reply, streamed = self._chat(system, context, tools)
 
             # If the model wants to act, allow it (policy-gated) and keep going.
-            tool_calls = self.model.parse_tool_calls(reply) if self.model.supports_tool_calling() else []
+            tool_calls = (
+                self.model.parse_tool_calls(reply)
+                if tools != [] and self.model.supports_tool_calling()
+                else []
+            )
             if tool_calls:
                 # Record the model's own decision to call these tools *before*
                 # executing them, as its own assistant turn. Without this, a
@@ -132,50 +238,85 @@ class Orchestrator:
                         role="assistant",
                         content=_materialize(reply),
                         tool_use=[{"name": c.name, "arguments": c.arguments} for c in tool_calls],
+                        phase=phase,
                     )
                 )
-                self._execute_tool_calls(tool_calls)
+                self._execute_tool_calls(tool_calls, phase=phase)
                 context = self._build_context(session)
                 continue
 
             # No tool calls: this is the model's final answer for this turn.
             content = _materialize(reply)
-            session.add(Turn(role="assistant", content=content))
-            session.summary = content
-            self.last_turn_streamed = streamed and bool(content)
-            return session
+            session.add(Turn(role="assistant", content=content, phase=phase))
+            return content, streamed and bool(content)
 
-        session.summary = f"Stopped after {max_turns} turns without a final answer."
-        return session
+        return f"Stopped after {max_turns} turns without a final answer.", False
 
-    def _chat(self, system: str, context: str) -> tuple[str, bool]:
+    def _spun(self, label: str, fn: Callable[[], Any]) -> Any:
+        """Run ``fn()``, showing ``io``'s spinner (if it has one) around the
+        call. Waiting on the model is the one genuinely unpredictable
+        latency in the loop — everything else (tool execution) is local.
+        Falls back to calling ``fn()`` directly for an ``io`` with no
+        ``spinner`` hook (including ``None`` and duck-typed test doubles),
+        matching the ``supports_streaming`` duck-typing just below.
+        """
+        spin = getattr(self.io, "spinner", None) if self.io is not None else None
+        if not callable(spin):
+            return fn()
+        with spin(label):
+            return fn()
+
+    def _chat(
+        self, system: str, context: str, tools: "list[cobirb_typing.Tool] | None" = None
+    ) -> tuple[str, bool]:
         """Get the model's reply for this turn, streaming it live to ``io``
         when the model supports streaming and an I/O adapter is attached.
+
+        ``tools`` defaults to every registered tool (``self.tools``); pass
+        an explicit ``[]`` to offer none — used by plan mode's planning
+        phase, which must not be able to act at all (see
+        ``Orchestrator._run_plan_phase``).
 
         A label (the active persona's name, set by ``run()``) is rendered
         once, right before the first non-empty chunk of *this* turn — we
         can't know in advance whether a turn will end up being a tool call
         or the final answer, so any turn that produces visible content gets
-        labeled the same way a non-streaming reply would be.
+        labeled the same way a non-streaming reply would be. A spinner (see
+        ``_spun``) covers the wait for that first chunk (or the whole call,
+        when not streaming) so the terminal isn't just idle while the model
+        thinks.
 
         Returns ``(content, streamed)``. Falls back to a single
         non-streaming call otherwise (including for duck-typed test doubles
         that don't implement ``supports_streaming``).
         """
-        tools = list(self.tools.values())
+        if tools is None:
+            tools = list(self.tools.values())
         supports_streaming = getattr(self.model, "supports_streaming", lambda: False)()
+        label = f"{self._stream_label} is thinking…"
         if self.io is None or not supports_streaming:
-            return _materialize(self.model.chat(system, context, tools)), False
+            reply = self._spun(label, lambda: self.model.chat(system, context, tools))
+            return _materialize(reply), False
 
-        chunks = []
+        stream = iter(self.model.chat(system, context, tools, stream=True))
+        first = self._spun(label, lambda: next(stream, _STREAM_EMPTY))
+
+        chunks: list[str] = []
         label_shown = False
-        for chunk in self.model.chat(system, context, tools, stream=True):
+
+        def _emit(chunk: str) -> None:
+            nonlocal label_shown
             if chunk:
                 if not label_shown:
                     self.io.render(f"{self._stream_label}: ")
                     label_shown = True
                 self.io.render(chunk)
                 chunks.append(chunk)
+
+        if first is not _STREAM_EMPTY:
+            _emit(first)
+        for chunk in stream:
+            _emit(chunk)
         if chunks:
             self.io.render("\n")
         return "".join(chunks), True
@@ -209,9 +350,9 @@ class Orchestrator:
     # ------------------------------------------------------------------ #
     # Tool dispatch (policy-gated)
     # ------------------------------------------------------------------ #
-    def _execute_tool_calls(self, tool_calls: list[cobirb_typing.ToolCall]) -> None:
+    def _execute_tool_calls(self, tool_calls: list[cobirb_typing.ToolCall], phase: str | None = None) -> None:
         for call in tool_calls:
-            self._execute_tool(call)
+            self._execute_tool(call, phase)
 
     def _request_approval(self, tool_name: str, arguments: dict[str, Any]) -> str:
         """Ask ``io`` whether to allow a not-yet-permitted tool call.
@@ -228,7 +369,7 @@ class Orchestrator:
             return "deny"
         return decision if decision in ("once", "always", "deny") else "deny"
 
-    def _execute_tool(self, call: cobirb_typing.ToolCall) -> None:
+    def _execute_tool(self, call: cobirb_typing.ToolCall, phase: str | None = None) -> None:
         tool_name = call.name
         arguments = call.arguments
         session = self.session.session
@@ -243,13 +384,11 @@ class Orchestrator:
         if not self.policy.is_allowed(tool_name, arguments):
             decision = self._request_approval(tool_name, arguments)
             if decision == "deny":
-                session.add(
-                    Turn(
-                        role="tool",
-                        content=f"Permission denied: tool '{tool_name}' is not permitted.",
-                        tool_use=tool_use,
-                    )
+                result = cobirb_typing.ToolResult(
+                    ok=False, content=f"Permission denied: tool '{tool_name}' is not permitted."
                 )
+                session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
+                self._render_tool_call(tool_name, arguments, result)
                 return
             if decision == "always":
                 shell_command = arguments.get("command") if tool_name == "shell" else None
@@ -257,12 +396,65 @@ class Orchestrator:
 
         tool = self.tools.get(tool_name)
         if tool is None:
-            session.add(Turn(role="tool", content=f"Unknown tool '{tool_name}'.", tool_use=tool_use))
+            result = cobirb_typing.ToolResult(ok=False, content=f"Unknown tool '{tool_name}'.")
+            session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
+            self._render_tool_call(tool_name, arguments, result)
             return
 
         self.policy.log(tool_name, arguments, cwd=self.session.working_dir)
-        result = tool.execute(arguments)
-        session.add(Turn(role="tool", content=result.content, tool_use=tool_use))
+        try:
+            result = tool.execute(arguments)
+        except Exception as exc:  # noqa: BLE001 - a tool must not abort the run
+            # A tool raising is routine, not fatal: models regularly emit a
+            # mistyped or missing argument (``{"file": ...}`` instead of
+            # ``{"path": ...}``), which most tools surface as a KeyError.
+            # Report it as a failed tool result so the model can see what
+            # went wrong and correct itself on the next turn, rather than
+            # tearing down the whole run over a recoverable mistake.
+            result = cobirb_typing.ToolResult(
+                ok=False, content=f"Tool '{tool_name}' failed: {type(exc).__name__}: {exc}"
+            )
+            session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
+            self._render_tool_call(tool_name, arguments, result)
+            return
+        session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
+        self._render_tool_call(tool_name, arguments, result)
+
+    def _render_tool_call(
+        self, tool_name: str, arguments: dict[str, Any], result: cobirb_typing.ToolResult
+    ) -> None:
+        """Show a tool call and its result live, via ``io``'s
+        ``render_tool_call`` hook if it has one (see
+        ``TerminalIO.render_tool_call``), else a plain one-line fallback
+        through ``render()``. No-op with no ``io`` attached — there's
+        nowhere to show it, and the session history already has it.
+        """
+        if self.io is None:
+            return
+        render_call = getattr(self.io, "render_tool_call", None)
+        if callable(render_call):
+            render_call(tool_name, arguments, result)
+            return
+        status = "ok" if result.ok else "failed"
+        self.io.render(f"\n[{tool_name}: {status}] {result.content}\n")
+
+    def _render_phase(self, phase: str, persona_name: str, text: str) -> None:
+        """Show a plan-mode phase's result (plan or validation report) live,
+        via ``io``'s ``render_plan``/``render_validation`` hook if it has
+        one (see ``TerminalIO``), else a plain fallback through
+        ``render()``. Not called when the phase's own reply already
+        streamed live (see ``run()``) — that would just duplicate it. The
+        act phase's own final answer is handled separately by the CLI (see
+        ``cli._render_final_answer``), not here.
+        """
+        if self.io is None or not text:
+            return
+        hook_name = "render_plan" if phase == "plan" else "render_validation"
+        render_phase = getattr(self.io, hook_name, None)
+        if callable(render_phase):
+            render_phase(persona_name, text)
+            return
+        self.io.render(f"\n[{phase}] {text}\n")
 
     # ------------------------------------------------------------------ #
     # Convenience: register a fresh session path

@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from cobirb.orchestrator import Orchestrator, _materialize, build_default_policy
-from cobirb.plugins.core.tools import ShellTool, ToolRegistry
+from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
+from cobirb.plugins.core.tools import ToolRegistry
 from cobirb.policy import Policy
+from cobirb.session import SessionManager
 from cobirb.typing.spi import ToolCall
 
 
@@ -479,3 +479,389 @@ def test_broken_confirm_denies_rather_than_crashing(tmp_path):
     )
     session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
     assert "Permission denied" in _tool_turn(session).content
+
+
+def test_tool_that_raises_is_reported_to_the_model_not_fatal(tmp_path):
+    """Regression: a tool raising used to propagate out of run() and tear
+    down the whole session. Models routinely emit a mistyped argument name
+    (``{"file": ...}`` instead of ``{"path": ...}``), which tools surface as
+    a KeyError — that has to come back as a failed tool result the model can
+    correct, not end the run."""
+    registry = ToolRegistry(str(tmp_path))
+    policy = Policy()
+    policy.allow("read_file")
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("read_file", {"file": "wrong-argument-name"}),
+        tools={t.name: t for t in registry.values()},
+        policy=policy,
+    )
+
+    session = orchestrator.run("read it", "sys", cwd=str(tmp_path))
+
+    tool_turn = _tool_turn(session)
+    assert "failed" in tool_turn.content
+    assert "KeyError" in tool_turn.content
+    # The run still reached a normal final answer afterwards.
+    assert session.turns[-1].role == "assistant"
+    assert not session.summary.startswith("Stopped after")
+
+
+# --------------------------------------------------------------------------- #
+# Phase D: a spinner around the wait for the model, and richer tool-call
+# chrome — both duck-typed hooks on ``io`` (``spinner``/``render_tool_call``)
+# so an adapter without them (like the plain ``_RecordingIO`` above) is
+# never required to implement chrome it can't use.
+# --------------------------------------------------------------------------- #
+class _SpinningIO(_RecordingIO):
+    """A _RecordingIO that also records spinner usage."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.spinner_calls = []
+
+    class _Spin:
+        def __init__(self, calls, label):
+            self._calls = calls
+            self._label = label
+
+        def __enter__(self):
+            self._calls.append(("enter", self._label))
+            return self
+
+        def __exit__(self, *exc_info):
+            self._calls.append(("exit", self._label))
+            return False
+
+    def spinner(self, label):
+        return self._Spin(self.spinner_calls, label)
+
+
+def test_chat_wraps_a_non_streaming_call_in_the_spinner_when_io_has_one():
+    io = _SpinningIO()
+    orchestrator = Orchestrator(model=_DummyModel(reply="hi"), tools={}, policy=Policy(), io=io)
+
+    orchestrator.run("hello", "sys", cwd="/tmp", persona="noah")
+
+    assert io.spinner_calls == [("enter", "noah is thinking…"), ("exit", "noah is thinking…")]
+
+
+def test_chat_wraps_the_first_streamed_chunk_in_the_spinner():
+    io = _SpinningIO()
+    orchestrator = Orchestrator(model=_StreamingModel(["Hel", "lo"]), tools={}, policy=Policy(), io=io)
+
+    orchestrator.run("hello", "sys", cwd="/tmp", persona="noah")
+
+    assert io.spinner_calls == [("enter", "noah is thinking…"), ("exit", "noah is thinking…")]
+    # The spinner must not have swallowed any streamed content.
+    assert "".join(io.rendered) == "noah: Hello\n"
+
+
+def test_chat_works_without_a_spinner_hook():
+    """An io without a spinner attribute (like the plain _RecordingIO used
+    throughout this file) must not be treated as broken — just no spinner."""
+    io = _RecordingIO()
+    orchestrator = Orchestrator(model=_DummyModel(reply="hi"), tools={}, policy=Policy(), io=io)
+
+    session = orchestrator.run("hello", "sys", cwd="/tmp")
+
+    assert session.turns[-1].content == "hi"
+
+
+class _ToolRenderingIO(_RecordingIO):
+    """A _RecordingIO that also records render_tool_call invocations."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tool_calls = []
+
+    def render_tool_call(self, tool_name, arguments, result):
+        self.tool_calls.append((tool_name, arguments, result))
+
+
+def test_successful_tool_call_is_rendered_via_the_render_tool_call_hook(tmp_path):
+    (tmp_path / "a.txt").write_text("hello")
+    io = _ToolRenderingIO()
+    policy = Policy()
+    policy.allow("read_file")
+    registry = ToolRegistry(str(tmp_path))
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
+        tools={t.name: t for t in registry.values()},
+        policy=policy,
+        io=io,
+    )
+
+    orchestrator.run("read file", "sys", cwd=str(tmp_path))
+
+    assert len(io.tool_calls) == 1
+    tool_name, arguments, result = io.tool_calls[0]
+    assert tool_name == "read_file"
+    assert arguments == {"path": str(tmp_path / "a.txt")}
+    assert result.ok is True
+    assert result.content == "hello"
+
+
+def test_denied_tool_call_is_still_rendered():
+    io = _ToolRenderingIO(confirm_decision="deny")
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("read_file", {"path": "x"}), tools={}, policy=Policy(), io=io
+    )
+
+    orchestrator.run("read file", "sys", cwd="/tmp")
+
+    assert len(io.tool_calls) == 1
+    tool_name, _, result = io.tool_calls[0]
+    assert tool_name == "read_file"
+    assert result.ok is False
+    assert "Permission denied" in result.content
+
+
+def test_tool_call_falls_back_to_plain_render_without_the_hook(tmp_path):
+    """An io with plain render() but no render_tool_call must still show
+    something for a tool call, via the generic render() fallback."""
+    (tmp_path / "a.txt").write_text("hello")
+    io = _RecordingIO()
+    policy = Policy()
+    policy.allow("read_file")
+    registry = ToolRegistry(str(tmp_path))
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
+        tools={t.name: t for t in registry.values()},
+        policy=policy,
+        io=io,
+    )
+
+    orchestrator.run("read file", "sys", cwd=str(tmp_path))
+
+    assert any("read_file" in text and "hello" in text for text in io.rendered)
+
+
+def test_no_tool_call_rendering_without_an_io_adapter():
+    """No io attached: nothing to render to, and nothing must crash."""
+    policy = Policy()
+    policy.allow("read_file")
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("read_file", {"path": "x"}), tools={}, policy=policy
+    )
+
+    session = orchestrator.run("read file", "sys", cwd="/tmp")
+
+    assert session.turns[-1].role == "assistant"
+
+
+# --------------------------------------------------------------------------- #
+# Plan mode: an explicit plan → act → validate run, opt-in via
+# run(plan_mode=True) (wired up from config/--plan-mode//plan in cli.py).
+# Off by default — every test above already covers that the default
+# (plan_mode=False) behavior is byte-for-byte unchanged.
+# --------------------------------------------------------------------------- #
+class _RecordingToolCountModel:
+    """Cycles through canned replies per call, recording how many tools it
+    was offered each time — lets tests assert the planning phase genuinely
+    got none while the act/validate phases got the full set."""
+
+    def __init__(self, replies):
+        self._replies = list(replies)
+        self.tool_counts: list[int | None] = []
+
+    def name(self):
+        return "plan-mode-stub"
+
+    def chat(self, system, context, tools=None, *, stream=False):
+        self.tool_counts.append(None if tools is None else len(tools))
+        return self._replies.pop(0)
+
+    def parse_tool_calls(self, reply):
+        return []
+
+    def supports_tool_calling(self):
+        return True
+
+    def supports_streaming(self):
+        return False
+
+
+def test_plan_mode_off_by_default_leaves_turns_untagged_and_no_validation():
+    orchestrator = Orchestrator(model=_DummyModel(reply="hi"), tools={}, policy=Policy())
+
+    session = orchestrator.run("hello", "sys", cwd="/tmp")
+
+    assert session.turns[-1].phase is None
+    assert session.validation is None
+
+
+def test_plan_mode_runs_plan_then_act_then_validate_as_separate_phases(tmp_path):
+    registry = ToolRegistry(str(tmp_path))
+    model = _RecordingToolCountModel(["1. Read the file. 2. Report back.", "Done reading.", "Confirmed: read it."])
+    orchestrator = Orchestrator(
+        model=model, tools={t.name: t for t in registry.values()}, policy=Policy()
+    )
+
+    session = orchestrator.run("read the file", "sys", cwd=str(tmp_path), persona="noah", plan_mode=True)
+
+    # The planning call got no tools at all; the act/validate calls got the
+    # full registered set.
+    assert model.tool_counts[0] == 0
+    assert model.tool_counts[1] > 0
+    assert model.tool_counts[2] > 0
+
+    assistant_turns = [t for t in session.turns if t.role == "assistant"]
+    assert [t.phase for t in assistant_turns] == ["plan", "act", "validate"]
+    assert "Read the file" in assistant_turns[0].content
+    assert session.summary == "Done reading."
+    assert session.validation == "Confirmed: read it."
+
+
+def test_plan_mode_still_executes_tool_calls_during_the_act_phase(tmp_path):
+    (tmp_path / "a.txt").write_text("hello")
+    policy = Policy()
+    policy.allow("read_file")
+    registry = ToolRegistry(str(tmp_path))
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}, reply="done"),
+        tools={t.name: t for t in registry.values()},
+        policy=policy,
+    )
+
+    session = orchestrator.run("read file", "sys", cwd=str(tmp_path), plan_mode=True)
+
+    tool_turn = _tool_turn(session)
+    assert tool_turn.content == "hello"
+    assert tool_turn.phase == "act"
+
+
+class _RecordingPhaseIO(_RecordingIO):
+    """A _RecordingIO that also records render_plan/render_answer/
+    render_validation calls, both individually and (via ``events``) in the
+    order they actually happened across all three."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.plans = []
+        self.answers = []
+        self.validations = []
+        self.events: list[tuple[str, str, str]] = []
+
+    def render_plan(self, persona_name, text):
+        self.plans.append((persona_name, text))
+        self.events.append(("plan", persona_name, text))
+
+    def render_answer(self, persona_name, text):
+        self.answers.append((persona_name, text))
+        self.events.append(("answer", persona_name, text))
+
+    def render_validation(self, persona_name, text):
+        self.validations.append((persona_name, text))
+        self.events.append(("validation", persona_name, text))
+
+
+def test_plan_mode_renders_the_plan_and_validation_via_the_io_hooks(tmp_path):
+    io = _RecordingPhaseIO()
+    model = _RecordingToolCountModel(["The plan.", "Acted.", "Validated."])
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), io=io)
+
+    orchestrator.run("do it", "sys", cwd=str(tmp_path), persona="noah", plan_mode=True)
+
+    assert io.plans == [("noah", "The plan.")]
+    assert io.validations == [("noah", "Validated.")]
+
+
+def test_plan_mode_falls_back_to_plain_render_without_the_hooks(tmp_path):
+    io = _RecordingIO()
+    model = _RecordingToolCountModel(["The plan.", "Acted.", "Validated."])
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), io=io)
+
+    orchestrator.run("do it", "sys", cwd=str(tmp_path), persona="noah", plan_mode=True)
+
+    assert any("plan" in text and "The plan." in text for text in io.rendered)
+    assert any("noah" in text and "Acted." in text for text in io.rendered)
+    assert any("validation" in text and "Validated." in text for text in io.rendered)
+
+
+def test_plan_mode_renders_the_act_answer_before_validation(tmp_path):
+    """Regression test: the validate phase's panel used to appear before
+    the answer it was validating, because the act phase's final answer was
+    only ever printed by the CLI after run() fully returned — by which
+    point the validate phase (rendered live, from inside run()) had
+    already shown its own panel. The orchestrator must render the act
+    answer itself, in order, before running validate. See cli.py's
+    end-to-end test of the same regression against a real TerminalIO."""
+    io = _RecordingPhaseIO()
+    model = _RecordingToolCountModel(["The plan.", "The answer.", "The validation."])
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), io=io)
+
+    orchestrator.run("do it", "sys", cwd=str(tmp_path), persona="noah", plan_mode=True)
+
+    assert [kind for kind, _, _ in io.events] == ["plan", "answer", "validation"]
+    assert io.answers == [("noah", "The answer.")]
+    # The caller (e.g. the CLI) must not print the answer a second time.
+    assert orchestrator.last_turn_streamed is True
+
+
+def test_plan_mode_session_round_trips_through_real_encrypted_storage(tmp_path):
+    """Integration: a real encrypted SessionManager (not just Session.to_dict
+    /from_dict in isolation — see test_session.py) must actually preserve
+    phase-tagged turns and the validation report across a save/reload
+    cycle, the two pieces plan mode adds to the session schema. Mirrors
+    exactly how cli._build_orchestrator wires a session in: build the
+    crypto, then SessionManager.create, then hand it to the Orchestrator."""
+    session_path = str(tmp_path / "session.json")
+    crypto = AesGcmScryptSessionCrypto()
+    manager = SessionManager.create(session_path, crypto, str(tmp_path), "noah", "pw")
+
+    model = _RecordingToolCountModel(["1. Do X.", "Did X.", "Confirmed: X was done."])
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), session=manager)
+
+    orchestrator.run("do X", "sys", cwd=str(tmp_path), persona="noah", plan_mode=True)
+    manager.save("pw")
+
+    reloaded = SessionManager.load(session_path, AesGcmScryptSessionCrypto(), "pw", str(tmp_path), "noah")
+    phases = [t.phase for t in reloaded.session.turns if t.role == "assistant"]
+    assert phases == ["plan", "act", "validate"]
+    assert reloaded.session.validation == "Confirmed: X was done."
+    assert reloaded.session.summary == "Did X."
+
+
+class _AllStreamingModel:
+    """Streams a distinct single chunk on each successive call — supports
+    streaming (and, vacuously, tool calling with no calls ever emitted),
+    unlike _RecordingToolCountModel above."""
+
+    def __init__(self, chunks_per_call):
+        self._calls = list(chunks_per_call)
+
+    def name(self):
+        return "stub"
+
+    def chat(self, system, context, tools=None, *, stream=False):
+        chunks = self._calls.pop(0)
+        return iter(chunks) if stream else "".join(chunks)
+
+    def parse_tool_calls(self, reply):
+        return []
+
+    def supports_tool_calling(self):
+        return True
+
+    def supports_streaming(self):
+        return True
+
+
+def test_plan_mode_does_not_double_render_a_streamed_phase():
+    """If a phase's reply already streamed live (model+io both support
+    streaming — a model-wide capability, so every phase streams together),
+    _render_phase must not also box it up afterward — that would show the
+    same content twice, same reasoning as last_turn_streamed for the act
+    phase's own final answer."""
+    io = _RecordingPhaseIO()
+    model = _AllStreamingModel([["plan text"], ["act text"], ["validate text"]])
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), io=io)
+
+    orchestrator.run("do it", "sys", cwd="/tmp", persona="noah", plan_mode=True)
+
+    assert io.plans == []
+    assert io.validations == []
+    joined = "".join(io.rendered)
+    assert "plan text" in joined
+    assert "act text" in joined
+    assert "validate text" in joined

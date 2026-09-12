@@ -108,6 +108,39 @@ def test_name_reflects_configured_model():
     assert LocalModelProvider().name() == "(unconfigured)"
 
 
+def test_list_models_returns_sorted_ids(monkeypatch):
+    def fake_urlopen(request, timeout=None):
+        assert request.full_url == "http://localhost:11434/v1/models"
+        return _FakeResponse(
+            {"object": "list", "data": [{"id": "gemma4", "object": "model"}, {"id": "llama3.1"}]}
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    assert LocalModelProvider().list_models() == ["gemma4", "llama3.1"]
+
+
+def test_list_models_ignores_entries_without_an_id(monkeypatch):
+    def fake_urlopen(request, timeout=None):
+        return _FakeResponse({"data": [{"id": "llama3.1"}, {"object": "model"}, {"id": ""}]})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    assert LocalModelProvider().list_models() == ["llama3.1"]
+
+
+def test_list_models_handles_a_missing_data_key(monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout=None: _FakeResponse({}))
+    assert LocalModelProvider().list_models() == []
+
+
+def test_list_models_wraps_connection_errors(monkeypatch):
+    def fake_urlopen(request, timeout=None):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError, match="Could not reach the model provider"):
+        LocalModelProvider().list_models()
+
+
 def test_supports_tool_calling_requires_model():
     assert LocalModelProvider(model="llama3.1").supports_tool_calling() is True
     assert LocalModelProvider().supports_tool_calling() is False

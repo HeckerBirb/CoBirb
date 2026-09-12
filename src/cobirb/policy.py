@@ -4,19 +4,38 @@ Enforces the ironclad rule **"default-deny"**: no tool runs unless it is
 explicitly allowed and never denied. See DESIGN.md §8.
 
 - Approval granularity: per-tool-name, or per-tool-with-narrow-args.
-- The `shell` tool's scope can be narrowed by its first word (e.g. allow
-  ``bash -n`` without allowing ``bash``), so a broad ``shell`` allow does not
-  necessarily mean the agent can run anything.
+- The ``shell`` tool's scope is narrowed per *command segment*: a shell
+  command may chain several invocations (``git status; rm -rf /``), and the
+  shell runs all of them, so **every** segment must be permitted — not just
+  the first. See ``_segments`` and todo-list.md for the motivation.
+- Redirection (``>``, ``>>``, ``<``) stays attached to the command it
+  belongs to rather than starting a new one — ``git log > out.txt`` is one
+  command, not two. Anything the policy still cannot verify (command
+  substitution, a subshell, an unbalanced quote) is refused rather than
+  waved through: the shell would execute the whole string, so what can't
+  be checked can't run.
 - The audit log is append-only and never leaves the machine.
 """
 from __future__ import annotations
 
-import re
-
 import json
 import os
+import shlex
 import time
 from typing import Any
+
+# Tokens made only of these characters are shell operators rather than words.
+_PUNCTUATION = set("();<>|&")
+
+# Operators that merely separate one command from the next. Each side is a
+# command in its own right and is checked independently.
+_SEPARATOR_CHARS = set(";|&")
+
+# Redirection operators (`>`, `>>`, `<`, `<<`, `>|`, ...) stay part of the
+# command they redirect, rather than splitting it or being refused outright:
+# `git log > out.txt` is a single command, and the target file is not
+# something a shell-level scan can usefully allow/deny on its own.
+_REDIRECT_CHARS = set("<>")
 
 
 class PermissionError(Exception):
@@ -37,19 +56,63 @@ class AuditLog:
             fh.write(json.dumps(entry) + "\n")
 
 
-def _first_word(command: str) -> str:
-    """Return the first word of a shell command, split on common separators.
+def _tokenize(command: str) -> list[str] | None:
+    """Tokenize a shell command, honouring quotes and returning operators
+    (``;``, ``&&``, ``|``, ``>`` ...) as tokens of their own.
 
-    Used to narrow ``shell`` scope (e.g. ``bash -n`` without ``bash``).
+    Returns ``None`` when the command cannot be parsed (an unbalanced quote,
+    say). Callers must treat that as "not verifiable", and therefore deny:
+    guessing at a command the policy can't read is how allow-lists get
+    bypassed.
     """
-    parts = re.split(r";|\||&&|&|\n", command.strip())
-    return parts[0].split()[0] if parts and parts[0] else ""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        return list(lexer)
+    except ValueError:
+        return None
 
 
-def _words(command: str) -> list[str]:
-    """Split the first ``;``/``|``/``&&``/``&``-separated chunk into words."""
-    parts = re.split(r";|\||&&|&|\n", command.strip())
-    return parts[0].split() if parts else []
+def _segments(command: str) -> list[list[str]] | None:
+    """Split a shell command into its separately-executed segments.
+
+    ``"git status; rm -rf /"`` becomes ``[["git", "status"], ["rm", "-rf", "/"]]``
+    — two commands, both of which the shell will run, so both must be
+    permitted. Quoting is respected, so a separator inside a quoted argument
+    (``git commit -m "fix: a; b"``) does *not* split the command.
+
+    Returns ``None`` if the command can't be parsed, or if it uses a
+    construct whose contents this scan cannot see and therefore cannot
+    verify: command substitution (``$(...)``, backticks) or a subshell.
+    """
+    if "`" in command:
+        return None  # backtick substitution hides an arbitrary command
+    tokens = _tokenize(command)
+    if tokens is None:
+        return None
+
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token and set(token) <= _PUNCTUATION:
+            if set(token) <= _SEPARATOR_CHARS:
+                if current:
+                    segments.append(current)
+                    current = []
+                continue
+            if set(token) <= _REDIRECT_CHARS:
+                # Part of the current command, not a new one and not denied
+                # outright — appended as a literal token so the following
+                # target filename rides along in the same segment.
+                current.append(token)
+                continue
+            # ( ) and anything mixing redirect/separator characters: a
+            # subshell or a construct this scan can't confidently read.
+            return None
+        current.append(token)
+    if current:
+        segments.append(current)
+    return segments
 
 
 class Policy:
@@ -66,6 +129,9 @@ class Policy:
       when ``command`` has more than one word — narrowing to just the first
       word (e.g. bare ``python``) would defeat the point of narrowing at all,
       since ``python`` alone can run arbitrary code via ``-c``.
+
+    Both are applied to *every* segment of a chained command, so an allowed
+    binary can't be used to smuggle a denied one in after a separator.
     """
 
     def __init__(
@@ -88,25 +154,42 @@ class Policy:
     def is_allowed(self, tool_name: str, arguments: dict[str, Any] | None = None) -> bool:
         """Return True only if the tool is explicitly allowed and not denied.
 
-        For the ``shell`` tool, a command is allowed if its first word is
-        unrestricted-allowed, or if it matches an allowed narrow prefix.
+        For the ``shell`` tool with a command, every segment of that command
+        must be permitted (see ``_shell_allowed``).
         """
         if self.is_denied(tool_name):
             return False
 
         if tool_name == "shell" and arguments is not None:
-            command = arguments.get("command", "")
-            words = _words(command)
-            if not words:
-                return True
-            if words[0] in self._allowed:
-                return True
-            return any(words[: len(prefix)] == list(prefix) for prefix in self._allowed_prefixes)
+            return self._shell_allowed(arguments)
 
-        if tool_name not in self._allowed:
+        return tool_name in self._allowed
+
+    def _shell_allowed(self, arguments: dict[str, Any]) -> bool:
+        """Whether every command in a ``shell`` invocation is permitted.
+
+        Fails closed. A missing or blank command, an unparseable one, and one
+        using command substitution or a subshell are all denied: the shell
+        executes the entire string, so anything this can't verify must not
+        run. A denial is not a dead end — the orchestrator then asks the user
+        (see ``I_OAdapter.confirm``), so being strict here costs a prompt,
+        not a capability.
+        """
+        command = arguments.get("command")
+        if not isinstance(command, str) or not command.strip():
             return False
 
-        return True
+        segments = _segments(command)
+        if not segments:  # unparseable/unverifiable (None) or nothing to run ([])
+            return False
+        return all(self._segment_allowed(words) for words in segments)
+
+    def _segment_allowed(self, words: list[str]) -> bool:
+        """Whether one command segment is permitted: its binary is trusted
+        outright, or the segment matches an allowed narrow prefix."""
+        if words[0] in self._allowed:
+            return True
+        return any(words[: len(prefix)] == list(prefix) for prefix in self._allowed_prefixes)
 
     def allow(self, tool_name: str, command: str | None = None) -> None:
         """Allow a tool.
@@ -117,7 +200,7 @@ class Policy:
         prefix is trusted — narrower than allowing the binary outright.
         """
         if command is not None:
-            words = _words(command)
+            words = _first_segment_words(command)
             if len(words) > 1:
                 self._allowed_prefixes.add(tuple(words))
                 return
@@ -154,3 +237,16 @@ class Policy:
             self._allowed.add(first)
         for prefix in ("python --version", "python -m pytest", "python -m cobirb"):
             self.allow("shell", prefix)
+
+
+def _first_segment_words(command: str) -> list[str]:
+    """Words of the first segment of ``command``, for building allow rules.
+
+    Unlike ``_segments`` this never refuses: it describes a rule the user is
+    writing, not a command about to run, and falls back to a naive split so
+    an odd rule can't crash rule construction.
+    """
+    segments = _segments(command)
+    if segments:
+        return segments[0]
+    return command.split()

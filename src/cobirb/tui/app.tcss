@@ -1,0 +1,195 @@
+/* Layout for CoBirb's interactive mode (see tui/app.py).
+   Deliberately restrained: the transcript is Rich panels built by
+   plugins/core/render.py, and the chrome around them should frame that
+   content rather than compete with it. */
+
+#transcript {
+    height: 1fr;
+    padding: 0 1;
+    background: $surface;
+}
+
+/* Hidden (display: none, set in code) until tokens actually arrive, so an
+   empty preview never eats a row of transcript. */
+#streaming-preview {
+    height: auto;
+    max-height: 12;
+    padding: 0 1;
+    background: $surface;
+}
+
+/* The boxed input from the design: a bordered container wrapping a
+   border-less Input, so the box is the frame and the widget inside it
+   doesn't draw a second one. */
+#prompt-box {
+    height: 3;
+    border: round $accent;
+    background: $surface;
+}
+
+#prompt-input {
+    border: none;
+    height: 1;
+    padding: 0 1;
+    background: $surface;
+}
+
+#prompt-input:disabled {
+    color: $text-disabled;
+}
+
+/* The two bottom rows, docked together (see compose()): the live status line
+   above Textual's key-binding Footer. */
+#footer-bar {
+    dock: bottom;
+    height: 2;
+}
+
+/* persona · model · plan mode · cwd, kept current for the whole session. */
+StatusBar {
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+    /* One line, however narrow the terminal: a status bar that wraps would
+       push the key-binding row off the bottom of the screen. */
+    text-overflow: ellipsis;
+}
+
+/* Plugins tab (tui/panes.py::PluginsPane) */
+PluginsPane {
+    height: 1fr;
+}
+
+#plugins-log {
+    height: 1fr;
+    padding: 0 1;
+    background: $surface;
+}
+
+#plugins-actions {
+    height: auto;
+    padding: 1;
+}
+
+/* Sessions tab (tui/panes.py::SessionsPane) */
+SessionsPane {
+    height: 1fr;
+}
+
+#sessions-active {
+    height: auto;
+    padding: 1 1 0 1;
+}
+
+#sessions-list {
+    height: 1fr;
+    margin: 1;
+}
+
+#sessions-actions {
+    height: auto;
+    padding: 0 1;
+}
+
+#sessions-actions Button {
+    margin-right: 1;
+}
+
+#sessions-status {
+    height: auto;
+    padding: 0 1 1 1;
+    color: $text-muted;
+}
+
+ApprovalModal {
+    align: center middle;
+}
+
+#approval-dialog {
+    width: 72;
+    max-width: 90%;
+    height: auto;
+    max-height: 80%;
+    padding: 1 2;
+    border: round $warning;
+    background: $surface;
+}
+
+#approval-buttons {
+    height: auto;
+    padding-top: 1;
+    align-horizontal: center;
+}
+
+#approval-buttons Button {
+    margin: 0 1;
+}
+
+HelpModal {
+    align: center middle;
+}
+
+#help-dialog {
+    width: 86;
+    max-width: 95%;
+    height: 80%;
+    padding: 1 2;
+    border: round $accent;
+    background: $surface;
+}
+
+ModelPickerModal {
+    align: center middle;
+}
+
+#model-dialog {
+    width: 60;
+    max-width: 90%;
+    height: auto;
+    max-height: 80%;
+    padding: 1 2;
+    border: round $accent;
+    background: $surface;
+}
+
+#model-title {
+    padding-bottom: 1;
+    text-style: bold;
+}
+
+#model-options {
+    height: auto;
+    max-height: 20;
+}
+
+TextPromptModal {
+    align: center middle;
+}
+
+#prompt-dialog {
+    width: 60;
+    max-width: 90%;
+    height: auto;
+    padding: 1 2;
+    border: round $accent;
+    background: $surface;
+}
+
+#prompt-title {
+    text-style: bold;
+}
+
+#prompt-label {
+    padding-bottom: 1;
+    color: $text-muted;
+}
+
+#prompt-buttons {
+    height: auto;
+    padding-top: 1;
+    align-horizontal: center;
+}
+
+#prompt-buttons Button {
+    margin: 0 1;
+}
