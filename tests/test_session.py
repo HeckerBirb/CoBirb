@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -249,3 +250,17 @@ def test_a_session_without_a_persona_reloads_without_one(tmp_path):
     session = Session.from_dict({"turns": []})
 
     assert session.persona == "none"
+
+
+def test_session_files_are_written_readable_only_by_their_owner(tmp_path):
+    """Encrypted, so this is defence in depth — but a session landing
+    world-readable at the default umask on a shared machine is a needless
+    invitation, and creating it with the mode costs nothing."""
+    import stat
+
+    path = str(tmp_path / "s.json")
+    manager = SessionManager.create(path, AesGcmScryptSessionCrypto(), password="pw")
+    manager.session.add_text("user", "hello")
+    manager.save("pw")
+
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600

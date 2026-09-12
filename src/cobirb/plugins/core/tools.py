@@ -54,6 +54,28 @@ class CobirbTool(Tool):
 # --------------------------------------------------------------------------- #
 # Built-in tools
 # --------------------------------------------------------------------------- #
+# A tool result is not just shown to the user: it becomes a turn in the
+# encrypted session *and* a message in the next model request. An unbounded
+# read therefore costs memory, context window and session size at once, and a
+# single stray large file could exhaust all three. These caps are generous
+# enough that ordinary source files are never touched, and truncation is
+# always announced so the model knows it is looking at part of something.
+_MAX_READ_BYTES = 256 * 1024
+_MAX_GREP_MATCHES = 500
+
+
+def _truncated(text: str, limit: int, what: str) -> str:
+    """``text`` cut to ``limit`` bytes, with a note saying so if it was."""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    kept = encoded[:limit].decode("utf-8", errors="ignore")
+    return (
+        f"{kept}\n\n[truncated: {what} is {len(encoded)} bytes, showing the first "
+        f"{len(kept.encode('utf-8'))}]"
+    )
+
+
 class ReadFileTool(CobirbTool):
     NAME = "read_file"
 
@@ -73,7 +95,7 @@ class ReadFileTool(CobirbTool):
         path = self._resolve(arguments["path"])
         try:
             with open(path, "r", encoding="utf-8") as fh:
-                return ToolResult(ok=True, content=fh.read())
+                return ToolResult(ok=True, content=_truncated(fh.read(), _MAX_READ_BYTES, path))
         except OSError as exc:
             return ToolResult(ok=False, content=f"Could not read {path}: {exc}", error=str(exc))
 
@@ -357,8 +379,11 @@ class GrepTool(CobirbTool):
                 return ToolResult(
                     ok=False, content=f"Not a valid regex: {pattern!r} — {exc}", error="bad_pattern"
                 )
-            matches = []
+            matches: list[str] = []
+            capped = False
             for p in paths:
+                if capped:
+                    break
                 if not os.path.isfile(p):
                     continue
                 try:
@@ -366,9 +391,17 @@ class GrepTool(CobirbTool):
                         for lineno, line in enumerate(fh, 1):
                             if expression.search(line):
                                 matches.append(f"{p}:{lineno}: {line.strip()}")
+                                if len(matches) >= _MAX_GREP_MATCHES:
+                                    capped = True
+                                    break
                 except (OSError, UnicodeDecodeError):
                     continue
-            return ToolResult(ok=True, content="\n".join(matches) if matches else "(no matches)")
+            if not matches:
+                return ToolResult(ok=True, content="(no matches)")
+            content = "\n".join(matches)
+            if capped:
+                content += f"\n\n[stopped at {_MAX_GREP_MATCHES} matches; narrow the pattern or path]"
+            return ToolResult(ok=True, content=_truncated(content, _MAX_READ_BYTES, "this result"))
         except OSError as exc:
             return ToolResult(ok=False, content=f"grep failed: {exc}", error=str(exc))
 

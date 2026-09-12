@@ -103,7 +103,11 @@ class AuditLog:
             return
         try:
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
-            with open(self.path, "a", encoding="utf-8") as fh:
+            # 0o600, and created with it rather than chmod'ed after: unlike a
+            # session this log is plaintext, and by its own docstring it holds
+            # file contents, diffs and shell commands verbatim.
+            fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(entry) + "\n")
         except OSError as exc:
             print(f"cobirb: could not write the audit log at {self.path} — {exc}", file=sys.stderr)

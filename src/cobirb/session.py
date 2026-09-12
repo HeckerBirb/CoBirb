@@ -259,6 +259,16 @@ def _read_blob(path: str) -> bytes:
 
 
 def _write_blob(path: str, blob: bytes) -> None:
+    """Write the encrypted session, readable only by its owner.
+
+    The blob is encrypted, so the mode is defence in depth rather than the
+    thing keeping it private — but a session file landing world-readable at
+    the default umask on a shared machine is a needless invitation, and
+    creating it with the mode is free.
+    """
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "wb") as fh:
+    # os.open rather than open() + chmod: the latter leaves a window in which
+    # the file exists at the umask's mode.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as fh:
         fh.write(blob)

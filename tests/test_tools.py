@@ -484,3 +484,34 @@ def test_audit_log_failure_does_not_take_down_the_tool_call(tmp_path, capsys):
     log.append({"tool": "read_file"})
 
     assert "could not write the audit log" in capsys.readouterr().err
+
+
+def test_read_file_truncates_a_very_large_file_and_says_so(tmp_path):
+    """A tool result becomes a session turn and a model message, so an
+    unbounded read costs memory, context and session size at once."""
+    big = tmp_path / "big.txt"
+    big.write_text("x" * (300 * 1024))
+
+    result = ReadFileTool(str(tmp_path)).execute({"path": "big.txt"})
+
+    assert result.ok
+    assert len(result.content.encode()) < 300 * 1024
+    assert "truncated" in result.content
+
+
+def test_read_file_leaves_an_ordinary_file_alone(tmp_path):
+    (tmp_path / "small.py").write_text("print('hi')\n")
+
+    result = ReadFileTool(str(tmp_path)).execute({"path": "small.py"})
+
+    assert result.content == "print('hi')\n"
+
+
+def test_grep_stops_at_the_match_cap_and_says_so(tmp_path):
+    (tmp_path / "many.txt").write_text("needle\n" * 900)
+
+    result = GrepTool(str(tmp_path)).execute({"pattern": "needle", "path": "."})
+
+    assert result.ok
+    assert len(result.content.splitlines()) < 900
+    assert "stopped at" in result.content
