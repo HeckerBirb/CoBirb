@@ -3,8 +3,6 @@
 Discovers plugins from (in order): installed entry points, then local plugin
 directories. Loading is lazy, cached per run, and **fail-closed**: a broken plugin
 never bricks the core — the error is reported and the core continues.
-
-See PLUGIN_SPEC.md §2.
 """
 from __future__ import annotations
 

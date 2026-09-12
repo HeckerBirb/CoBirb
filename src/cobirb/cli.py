@@ -359,7 +359,7 @@ def _report_plugin_issues(issues: dict[str, str]) -> None:
     """Print discovery/merge problems for third-party plugins to stderr.
 
     Never fatal: a broken or colliding plugin is reported and skipped, the
-    core keeps running on its built-ins. See PLUGIN_SPEC.md §2 and §6.
+    core keeps running on its built-ins.
     """
     for ident, message in issues.items():
         print(f"cobirb: plugin problem — {ident}: {message}", file=sys.stderr)
@@ -370,7 +370,7 @@ def _merge_tool_plugins(registry: ToolRegistry, discovered: dict[str, Any]) -> d
 
     Tools are additive (unlike the model/io/crypto singleton slots below):
     every discovered tool plugin is registered, because the permission
-    policy still gates whether it can actually run (PLUGIN_SPEC.md §6). A
+    policy still gates whether it can actually run. A
     plugin can never shadow a built-in (or a different plugin's) tool name,
     though — if its declared name collides with one already registered
     under a different implementation, it's skipped and reported rather than

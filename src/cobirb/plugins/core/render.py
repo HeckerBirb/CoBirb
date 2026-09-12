@@ -7,8 +7,6 @@ scrolling, one-shot/programmatic path, which prints these to a ``Console``)
 and the Textual TUI's ``TuiIO`` (interactive mode, which writes the very same
 objects into a ``RichLog``). Keeping the panel/diff construction here means
 the chrome is defined once instead of drifting between the two.
-
-See DESIGN.md §11 and PLUGIN_SPEC.md's I/O adapter section.
 """
 from __future__ import annotations
 

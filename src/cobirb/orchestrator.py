@@ -2,7 +2,7 @@
 
 The core is intentionally thin — it does not contain feature business logic. It
 connects a model provider, a tool registry, a policy layer, an I/O adapter, and a
-session manager, and drives the agentic loop. See DESIGN.md §3 and §4.
+session manager, and drives the agentic loop.
 
 The loop preserves the Copilot design but keeps it local and approval-gated:
 
@@ -26,11 +26,11 @@ logger = logging.getLogger("cobirb")
 _STREAM_EMPTY = object()
 
 # System-prompt addenda for plan mode's three phases (Orchestrator.run,
-# plan_mode=True). Off by default — the model plans/acts/validates
-# implicitly in one pass, matching DESIGN.md §3's loop as actually
-# implemented. On, each phase gets its own model call(s) and its own
-# labeled Turn(s) (see Turn.phase), so a user who wants the more literal
-# "plan → act → validate" framing DESIGN.md §3 describes can opt into it.
+# plan_mode=True). Off by default — the model plans, acts and validates
+# implicitly within one continuous loop, the way someone working through a
+# task does, with no hard stop between thinking and doing. On, each phase
+# gets its own model call(s) and its own labeled Turn(s) (see Turn.phase),
+# for anyone who wants those checkpoints made explicit.
 _PLAN_PHASE_INSTRUCTIONS = (
     "PLANNING PHASE. Do not call any tools and do not attempt the task itself yet — "
     "no tools are available to you for this reply. Write a short, numbered plan "

@@ -24,8 +24,8 @@ opt a capability in.**
 
 🚧 **Early v0.1.0 — working prototype.** The core loop, built-in tools, the permission
 model, encrypted sessions, and a local Ollama model provider are implemented and
-tested. See [`DESIGN.md`](./DESIGN.md) for the full design and
-[`PLUGIN_SPEC.md`](./PLUGIN_SPEC.md) for the plugin SPI.
+tested. See [`AGENTS.md`](./AGENTS.md) for the architecture, the plugin SPI, and the
+reasoning behind both.
 
 ## Quick start
 
@@ -123,7 +123,8 @@ nothing defaults to a networked provider. See `cobirb help config` for what each
 
 ## Documentation
 
-- [AGENTS.md](./AGENTS.md) — developer notes for this project (for me and future contributors).
+- [AGENTS.md](./AGENTS.md) — the single source of truth: architecture, the plugin SPI,
+  the security design, and the working conventions.
 
 ## License
 

@@ -1,7 +1,7 @@
 """User + repo scoped config, with model/provider settings opt-in.
 
 Config is read-only for the core. Model/provider settings are opt-in and never
-default to any networked provider. See DESIGN.md §9.
+default to any networked provider.
 """
 from __future__ import annotations
 

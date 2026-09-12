@@ -1,8 +1,7 @@
 """Core type definitions and the Plugin SPI interfaces.
 
 This module defines the *contract* that plugins implement. The core depends on
-these interfaces but never imports plugin internals. See PLUGIN_SPEC.md for the
-formal specification.
+these interfaces but never imports plugin internals.
 """
 from __future__ import annotations
 
@@ -71,7 +70,7 @@ class ModelProvider(abc.ABC):
     """Turns a system prompt + context into agent turns. Local or remote.
 
     Remote providers (network) are NOT part of core. They are registered as
-    plugins and gated behind the permission layer. See DESIGN.md §5.
+    plugins and gated behind the permission layer.
     """
 
     @abc.abstractmethod
@@ -117,7 +116,7 @@ class I_OAdapter(abc.ABC):
     """Renders output and optionally captures input for the user.
 
     Out-of-scope for v0.1.0 (core ships a plain-text terminal renderer).
-    Implementations may be added in v0.2.0. See DESIGN.md §5.3.
+    Implementations may be added in v0.2.0.
     """
 
     @abc.abstractmethod
@@ -157,8 +156,9 @@ class I_OAdapter(abc.ABC):
 class SessionCrypto(abc.ABC):
     """Encrypts/decrypts session files. Default backend: AES-256-GCM + scrypt.
 
-    The core ships no hard crypto dependency. See DESIGN.md §7.2 (including
-    why this deliberately has no post-quantum KEM).
+    The core ships no hard crypto dependency, and this deliberately has no
+    post-quantum KEM: a password-protected local file has no key exchange for
+    one to protect.
     """
 
     @abc.abstractmethod

@@ -4,7 +4,7 @@ CoBirb ships **no models** and makes **no outbound network calls by default**.
 This provider only ever talks to a *local* Ollama server (default
 ``http://localhost:11434``, or wherever the user points it) and only once the
 user has explicitly named a model — via ``--model``, ``COBIRB_MODEL_NAME``, or
-``models.default.name`` in config. See DESIGN.md §6.3.
+``models.default.name`` in config.
 
 **The model's own prompt wins.** Ollama takes one system message per request,
 and sending one *replaces* the ``SYSTEM`` directive the model was built with.
@@ -57,9 +57,9 @@ def _build_messages(system: str, context: str) -> list[dict[str, Any]]:
     converging: a "tool" result appeared out of nowhere, with no preceding
     assistant message announcing the tool call it answers, so the model had
     no signal a prior call was already satisfied and would just repeat it.
-    ``context`` is documented (PLUGIN_SPEC.md §3.1) as "a compact string...
-    the provider is responsible for how it packs it" — here that packing is
-    JSON, parsed back into role-tagged messages.
+    The SPI leaves ``context`` as a compact string and makes each provider
+    responsible for how it unpacks it; here that packing is JSON, parsed back
+    into role-tagged messages.
 
     An empty ``system`` produces **no system message at all**, rather than an
     empty one. That distinction is the whole of ``respect_model_system``: an

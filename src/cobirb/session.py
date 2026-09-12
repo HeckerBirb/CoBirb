@@ -2,7 +2,7 @@
 
 Persists conversations to disk only as an encrypted blob. The plaintext session
 exists in RAM only, never on disk. Each turn carries a content hash so tampering
-with the session file is detectable on reload. See DESIGN.md §7.
+with the session file is detectable on reload.
 """
 from __future__ import annotations
 

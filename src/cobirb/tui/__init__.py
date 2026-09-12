@@ -2,7 +2,7 @@
 
 Imported lazily by ``cli._run_tui`` — ``textual`` is only needed for this one
 mode, so one-shot/programmatic mode (``cobirb -p "..."``) never pays for it
-and never breaks if it is missing. See DESIGN.md §11.
+and never breaks if it is missing.
 """
 from __future__ import annotations
 

@@ -163,7 +163,7 @@ def test_turn_phase_defaults_to_none_when_absent_from_an_old_session_file():
 
 
 def test_relabeling_a_turns_phase_is_detected_as_tampering(tmp_path):
-    """The same rewrite risk that applies to tool_use (DESIGN.md §7.3)
+    """The same rewrite risk that applies to tool_use
     applies to phase: relabeling a "plan" turn as "validate" after the
     fact must not load clean."""
     path = str(tmp_path / "session.json")

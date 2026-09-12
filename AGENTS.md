@@ -59,6 +59,9 @@ style by hand.
 
 - **Docstrings explain *why*, not what** — this is the house style and the reason the code is
   navigable. When you fix a subtle bug, the reason it was a bug goes in the docstring there.
+- **Source code never cites a documentation file.** Not this one either. Docstrings used to end in
+  `See DESIGN.md §7.`; those documents are gone and the pointers went with them. If the rationale
+  matters, state it at the point of decision — which is the house style anyway.
 - `from __future__ import annotations` in every module.
 - **Fail-closed, never crash.** Broken plugin → reported and skipped. Tool raises → failed
   `ToolResult` the model can correct from. Adapter can't ask → deny. The broad `except Exception`

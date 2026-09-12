@@ -2,7 +2,7 @@
 
 Tools are the "hands" of the agent. The core ships a registry of built-in tools;
 third-party plugins extend it. The registry enforces a default-deny policy:
-every tool must be explicitly allowed before it runs. See DESIGN.md §8.
+every tool must be explicitly allowed before it runs.
 """
 from __future__ import annotations
 
@@ -370,8 +370,9 @@ class ShellTool(CobirbTool):
     """Highest-privilege tool. Gated behind the permission layer.
 
     The permission layer can match on the first word after splitting on shell
-    separators (`; | && &`), so `bash -n` can be allowed without allowing `bash`.
-    See DESIGN.md §8 and todo-list.md for the motivation.
+    separators (`; | && &`), so `bash -n` can be allowed without allowing
+    `bash` — the motivation being that a bare binary is often too broad to
+    trust when a specific invocation of it is perfectly safe.
 
     Runs the command in its own process group (POSIX; a plain child on other
     platforms) rather than sharing the caller's, so a command that

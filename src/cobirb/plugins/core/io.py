@@ -6,7 +6,6 @@ full-screen Textual app instead (``cobirb.tui``), whose ``TuiIO`` adapter
 builds the very same panels from ``render.py`` and writes them into a
 ``RichLog`` rather than printing them. Speech and vision adapters are
 I_OAdapter implementations that can be added later without touching core.
-See DESIGN.md §5.3 and §11.
 """
 from __future__ import annotations
 

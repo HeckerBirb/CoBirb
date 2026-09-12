@@ -1,7 +1,5 @@
 """CoBirb — a privacy-first, Copilot-like agentic CLI.
 
-See DESIGN.md and PLUGIN_SPEC.md for the full design and plugin SPI.
-
 The core is intentionally thin: it wires together pluggable providers
 (model, tools, I/O, crypto, persona) and enforces a privacy-first,
 default-deny policy layer.

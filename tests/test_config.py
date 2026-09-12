@@ -108,7 +108,7 @@ def test_malformed_json_config_file_raises_rather_than_being_silently_ignored(tm
 
 
 def test_bundled_example_config_is_valid_and_loadable(tmp_path):
-    """cobirb.json.example (referenced by README and DESIGN.md §9/§11) must
+    """cobirb.json.example (the starting point the README points users at) must
     stay valid, loadable JSON that Config can actually read — a stale or
     broken example is worse than no example at all."""
     example_path = os.path.join(os.path.dirname(__file__), "..", "cobirb.json.example")

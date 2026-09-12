@@ -35,7 +35,7 @@ def test_shell_narrowed_by_first_word():
 def test_allow_narrows_shell_to_exact_prefix_not_bare_binary():
     """Allowing a multi-word command must not implicitly trust the bare
     binary for any other arguments — that would defeat the point of
-    narrowing (see todo-list.md's python/bash motivation)."""
+    narrowing: `python -m pytest` must not imply `python -c '...'`."""
     policy = Policy()
     policy.allow("shell", "python -m cobirb")
     assert policy.is_allowed("shell", {"command": "python -m cobirb"})

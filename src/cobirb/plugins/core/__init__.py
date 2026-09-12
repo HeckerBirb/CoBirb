@@ -1,7 +1,7 @@
 """Built-in (core) plugins.
 
 These plugins are always available. Third-party plugins extend the same registry
-without touching this module. See PLUGIN_SPEC.md §5.2.
+without touching this module.
 """
 from __future__ import annotations
 

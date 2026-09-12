@@ -11,8 +11,6 @@ which is not CoBirb's call to make — the model is the user's, running on the
 user's machine. ``build_plain_persona()`` is therefore what an unconfigured run
 gets: a label to print next to replies, and no voice instructions at all.
 ``--persona noah`` (or ``/persona``) opts back in.
-
-See DESIGN.md §6 and PLUGIN_SPEC.md §3.5.
 """
 from __future__ import annotations
 
