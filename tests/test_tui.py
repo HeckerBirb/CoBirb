@@ -26,6 +26,8 @@ from textual.selection import Selection
 from textual.widgets import Footer, Input, OptionList, RichLog, TabbedContent
 from textual.widgets.option_list import Option
 
+from conftest import StubSession, StubSessionManager
+
 from cobirb import cli, session
 from cobirb.tui.app import CoBirbApp
 from cobirb.tui.panes import PluginsPane, SessionsPane
@@ -77,25 +79,12 @@ async def _until(pilot, predicate, *, tries: int = 200):
     raise AssertionError("condition never became true while polling the app")
 
 
-class _StubSession:
-    summary = "ok"
-    validation = ""
-
-
-class _StubSessionManager:
-    def __init__(self):
-        self.saved_with = []
-
-    def save(self, password=None):
-        self.saved_with.append(password)
-
-
 class _StubOrchestrator:
     """Stands in for a real Orchestrator: records the run() it was given and
     can be told to raise, stream, or make a tool call along the way."""
 
     def __init__(self, *, run_raises=None, with_session_manager=False, on_run=None, io=None, tools=None):
-        self.session = _StubSessionManager() if with_session_manager else None
+        self.session = StubSessionManager() if with_session_manager else None
         self.io = io
         self.last_turn_streamed = False
         self.calls = []
@@ -111,7 +100,7 @@ class _StubOrchestrator:
             raise self._run_raises
         if self._on_run is not None:
             self._on_run(self)
-        return _StubSession()
+        return StubSession()
 
 
 def _stub_build(orchestrator=None, record=None):
@@ -436,7 +425,7 @@ class _CancellableOrchestrator(_StubOrchestrator):
     def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False):
         self.calls.append({"prompt": prompt, "persona": persona, "plan_mode": plan_mode})
         self._release.wait(timeout=5)
-        return _StubSession()
+        return StubSession()
 
 
 async def test_ctrl_c_cancels_a_stuck_turn_and_the_input_comes_back(monkeypatch):

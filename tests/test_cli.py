@@ -12,6 +12,8 @@ import os
 
 import pytest
 
+from conftest import DummyModel, StubSession, StubSessionManager
+
 from cobirb import cli, session
 from cobirb.cli import (
     _available_personas,
@@ -96,20 +98,6 @@ def test_resolve_plan_mode_cli_flag_overrides_config(tmp_path):
     assert _resolve_plan_mode("on", config) is True
 
 
-class _DummyModel:
-    """A stub model that returns a fixed reply and never calls tools."""
-
-    def __init__(self, reply="hello"):
-        self.reply = reply
-
-    def chat(self, *args, **kwargs):
-        return self.reply
-
-    def parse_tool_calls(self, reply):
-        return []
-
-    def supports_tool_calling(self):
-        return False
 
 
 def test_build_orchestrator_creates_new_session_on_first_run(tmp_path):
@@ -204,7 +192,7 @@ def test_run_with_session_records_user_prompt(tmp_path):
     orchestrator = _build_orchestrator(
         str(tmp_path), persona, {}, session_path, "pw"
     )
-    orchestrator.model = _DummyModel(reply="hi there")
+    orchestrator.model = DummyModel(reply="hi there")
 
     session = orchestrator.run("hello noah", "system prompt", cwd=str(tmp_path))
 
@@ -223,10 +211,10 @@ def test_run_twice_with_same_session_accumulates_history(tmp_path):
     orchestrator = _build_orchestrator(
         str(tmp_path), persona, {}, session_path, "pw"
     )
-    orchestrator.model = _DummyModel(reply="first reply")
+    orchestrator.model = DummyModel(reply="first reply")
     orchestrator.run("first message", "system prompt", cwd=str(tmp_path))
 
-    orchestrator.model = _DummyModel(reply="second reply")
+    orchestrator.model = DummyModel(reply="second reply")
     session = orchestrator.run("second message", "system prompt", cwd=str(tmp_path))
 
     contents = [t.content for t in session.turns]
@@ -285,14 +273,6 @@ def test_persona_key_is_none_for_the_plain_default():
     assert cli._persona_key(_load_persona(None)) == "none"
 
 
-class _StubSession:
-    summary = "ok"
-    turns = ()
-
-
-class _StubSessionManager:
-    def __init__(self):
-        self.saved_with = []
 
     def save(self, password):
         self.saved_with.append(password)
@@ -302,8 +282,8 @@ class _StubOrchestrator:
     last_turn_streamed = False
 
     def __init__(self, run_result=None, run_raises=None, with_session_manager=False):
-        self.session = _StubSessionManager() if with_session_manager else None
-        self._run_result = run_result if run_result is not None else _StubSession()
+        self.session = StubSessionManager() if with_session_manager else None
+        self._run_result = run_result if run_result is not None else StubSession()
         self._run_raises = run_raises
 
     def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False):
