@@ -115,7 +115,7 @@ def test_run_tool_dispatch(tmp_path):
     registry = ToolRegistry(str(tmp_path))
     orchestrator = Orchestrator(
         model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
     )
     session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
@@ -133,7 +133,7 @@ def test_tool_call_and_result_both_recorded_with_matching_tool_use(tmp_path):
     registry = ToolRegistry(str(tmp_path))
     orchestrator = Orchestrator(
         model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
     )
     session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
@@ -166,7 +166,7 @@ def test_context_passed_to_model_encodes_full_turn_structure(tmp_path):
 
     orchestrator = Orchestrator(
         model=_CapturingToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
     )
     orchestrator.run("read file", "sys", cwd=str(tmp_path))
@@ -185,7 +185,7 @@ def test_run_tool_dispatch_denied(tmp_path):
     registry = ToolRegistry(str(tmp_path))
     orchestrator = Orchestrator(
         model=_ToolCallModel("shell", {"command": "rm file"}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
     )
     session = orchestrator.run("rm file", "sys", cwd=str(tmp_path))
@@ -198,7 +198,7 @@ def test_run_without_permission(tmp_path):
     registry = ToolRegistry(str(tmp_path))
     orchestrator = Orchestrator(
         model=_ToolCallModel("shell", {"command": "danger"}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
     )
     session = orchestrator.run("danger", "sys", cwd=str(tmp_path))
@@ -210,7 +210,7 @@ def test_policy_gates_tool_access():
     registry = ToolRegistry(".")
     orchestrator = Orchestrator(
         model=_ToolCallModel("read_file", {"path": "unsafe op"}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
     )
     session = orchestrator.run("unsafe op", "sys", cwd="/tmp")
@@ -414,7 +414,7 @@ def test_unpermitted_tool_can_be_approved_once(tmp_path):
     registry = ToolRegistry(str(tmp_path))
     orchestrator = Orchestrator(
         model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
         io=io,
     )
@@ -433,7 +433,7 @@ def test_unpermitted_tool_approved_always_updates_policy(tmp_path):
     registry = ToolRegistry(str(tmp_path))
     orchestrator = Orchestrator(
         model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
         io=io,
     )
@@ -459,7 +459,7 @@ def test_unpermitted_shell_approved_always_narrows_to_exact_command(tmp_path):
     registry = ToolRegistry(str(tmp_path))
     orchestrator = Orchestrator(
         model=_ToolCallModel("shell", {"command": "python -m pytest"}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
         io=io,
     )
@@ -475,7 +475,7 @@ def test_unpermitted_tool_denied_via_prompt(tmp_path):
     registry = ToolRegistry(str(tmp_path))
     orchestrator = Orchestrator(
         model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
         io=io,
     )
@@ -506,7 +506,7 @@ def test_broken_confirm_denies_rather_than_crashing(tmp_path):
     registry = ToolRegistry(str(tmp_path))
     orchestrator = Orchestrator(
         model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
         io=_BrokenIO(),
     )
@@ -525,7 +525,7 @@ def test_tool_that_raises_is_reported_to_the_model_not_fatal(tmp_path):
     policy.allow("read_file")
     orchestrator = Orchestrator(
         model=_ToolCallModel("read_file", {"file": "wrong-argument-name"}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
     )
 
@@ -619,7 +619,7 @@ def test_successful_tool_call_is_rendered_via_the_render_tool_call_hook(tmp_path
     registry = ToolRegistry(str(tmp_path))
     orchestrator = Orchestrator(
         model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
         io=io,
     )
@@ -659,7 +659,7 @@ def test_tool_call_falls_back_to_plain_render_without_the_hook(tmp_path):
     registry = ToolRegistry(str(tmp_path))
     orchestrator = Orchestrator(
         model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
         io=io,
     )
@@ -727,7 +727,7 @@ def test_plan_mode_runs_plan_then_act_then_validate_as_separate_phases(tmp_path)
     registry = ToolRegistry(str(tmp_path))
     model = _RecordingToolCountModel(["1. Read the file. 2. Report back.", "Done reading.", "Confirmed: read it."])
     orchestrator = Orchestrator(
-        model=model, tools={t.name: t for t in registry.values()}, policy=Policy()
+        model=model, tools=registry.tools, policy=Policy()
     )
 
     session = orchestrator.run("read the file", "sys", cwd=str(tmp_path), persona="noah", plan_mode=True)
@@ -752,7 +752,7 @@ def test_plan_mode_still_executes_tool_calls_during_the_act_phase(tmp_path):
     registry = ToolRegistry(str(tmp_path))
     orchestrator = Orchestrator(
         model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}, reply="done"),
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
     )
 

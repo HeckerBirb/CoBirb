@@ -12,7 +12,8 @@ import urllib.error
 import pytest
 
 from cobirb.plugins.core.model import LocalModelProvider, _build_messages
-from cobirb.typing.spi import ToolCall
+from cobirb.plugins.core.tools import ReadFileTool
+from cobirb.typing.spi import Tool, ToolCall, ToolResult
 
 
 class _FakeResponse:
@@ -46,7 +47,9 @@ class _FakeStreamResponse:
 
 
 class _StubTool:
-    name = "read_file"
+    def name(self) -> str:
+        return "read_file"
+
 
     def description(self) -> str:
         return "Read a file."
@@ -275,7 +278,7 @@ class _RoutingResponses:
     can't exercise the interesting part any more.
     """
 
-    def __init__(self, system: str | None, chat_payload: dict | None = None):
+    def __init__(self, system: str | None = None, chat_payload: dict | None = None):
         self.system = system
         self.chat_payload = chat_payload or {"message": {"role": "assistant", "content": "ok"}}
         self.requests: list[tuple[str, dict]] = []
@@ -293,6 +296,11 @@ class _RoutingResponses:
         """The *most recent* chat request's messages — tests that send more
         than one turn care about the last one, not the first."""
         return [body for url, body in self.requests if url.endswith("/api/chat")][-1]["messages"]
+
+    @property
+    def chat_request(self) -> dict:
+        """The most recent chat request's body."""
+        return [body for url, body in self.requests if url.endswith("/api/chat")][-1]
 
     @property
     def show_calls(self) -> int:
@@ -431,3 +439,53 @@ def test_build_messages_keeps_a_system_message_when_there_is_one():
     messages = _build_messages("rules", '[{"role": "user", "content": "hi"}]')
 
     assert messages[0] == {"role": "system", "content": "rules"}
+
+
+# --------------------------------------------------------------------------- #
+# Plugin conformance (regression).
+#
+# The SPI declares Tool.name as a method. Every built-in implemented it as a
+# plain string class attribute instead, so four consumers branched on
+# `callable(tool.name)` — and the one that forgot, _tool_schema, put a bound
+# method into the request payload. json.dumps then raised for every turn, for
+# as long as a spec-conformant plugin was installed. Nothing covered a
+# method-named tool reaching the provider, which is why it shipped.
+# --------------------------------------------------------------------------- #
+class _ConformantPluginTool(Tool):
+    """A minimal tool written exactly as the SPI documents: nothing but the
+    four required methods, `name` among them."""
+
+    def name(self) -> str:
+        return "plugin_tool"
+
+    def description(self) -> str:
+        return "does a plugin thing"
+
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {}}
+
+    def execute(self, arguments: dict) -> ToolResult:
+        return ToolResult(ok=True, content="done")
+
+
+def test_a_spec_conformant_tool_plugin_serializes_into_the_request(monkeypatch):
+    responses = _RoutingResponses()
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+
+    LocalModelProvider(model="m").chat("", "[]", tools=[_ConformantPluginTool()])
+
+    tool = responses.chat_request["tools"][0]
+    assert tool["function"]["name"] == "plugin_tool"
+    assert tool["function"]["description"] == "does a plugin thing"
+
+
+def test_builtin_and_plugin_tools_serialize_identically(monkeypatch):
+    """Whatever the built-ins do, a plugin implementing the documented
+    interface must produce the same shape — that equivalence is the contract."""
+    responses = _RoutingResponses()
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+
+    LocalModelProvider(model="m").chat("", "[]", tools=[ReadFileTool(), _ConformantPluginTool()])
+
+    names = [t["function"]["name"] for t in responses.chat_request["tools"]]
+    assert names == ["read_file", "plugin_tool"]

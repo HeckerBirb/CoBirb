@@ -6,6 +6,8 @@ import threading
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from cobirb.plugins.core.tools import (
     ApplyPatchTool,
     CobirbTool,
@@ -325,12 +327,12 @@ def test_registry_names_and_get():
     registry = ToolRegistry(".")
     assert "read_file" in registry.names()
     assert registry.is_known("read_file")
-    assert registry.get("read_file").name == "read_file"
+    assert registry.get("read_file").name() == "read_file"
 
 
 def test_registry_custom_tool_extension():
     class MyTool(CobirbTool):
-        name = "my_tool"
+        NAME = "my_tool"
 
         def description(self):
             return "custom"
@@ -417,3 +419,25 @@ def test_grep_defaults_to_configured_cwd_when_no_path_given(tmp_path):
     result = GrepTool(cwd=str(tmp_path)).execute({"pattern": "needle"})
     assert result.ok
     assert "a.txt" in result.content
+
+
+def test_registry_rejects_a_tool_whose_name_is_not_a_method():
+    """The SPI declares `name` as a method. A tool that uses a plain string
+    is rejected at the boundary with a message saying so, rather than being
+    tolerated and serializing a bound method into a request payload much
+    later — which is exactly how that bug reached users once."""
+
+    class StringNamedTool(CobirbTool):
+        name = "oops"
+
+        def description(self):
+            return "d"
+
+        def parameters(self):
+            return {"type": "object", "properties": {}}
+
+        def execute(self, arguments):
+            return ToolResult(ok=True, content="ok")
+
+    with pytest.raises(TypeError, match="must be a method"):
+        ToolRegistry(".").register(StringNamedTool())

@@ -95,7 +95,7 @@ def test_live_tool_call_round_trip(tmp_path):
     provider = LocalModelProvider(model=TEST_MODEL)
     orchestrator = Orchestrator(
         model=provider,
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
         io=TerminalIO(),
     )
@@ -126,7 +126,7 @@ def test_live_plan_mode_converges_through_all_three_phases(tmp_path):
     provider = LocalModelProvider(model=TEST_MODEL)
     orchestrator = Orchestrator(
         model=provider,
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
         io=TerminalIO(),
     )
@@ -162,7 +162,7 @@ def test_live_multi_step_tool_calls_converge(tmp_path):
     provider = LocalModelProvider(model=TEST_MODEL)
     orchestrator = Orchestrator(
         model=provider,
-        tools={t.name: t for t in registry.values()},
+        tools=registry.tools,
         policy=policy,
         io=TerminalIO(),
     )

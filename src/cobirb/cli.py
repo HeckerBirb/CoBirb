@@ -384,7 +384,13 @@ def _merge_tool_plugins(registry: ToolRegistry, discovered: dict[str, Any]) -> d
         except Exception as exc:  # noqa: BLE001 - fail-closed per plugin
             problems[f"tool:{plugin_name}"] = f"failed to instantiate: {exc}"
             continue
-        tool_name = instance.name() if callable(instance.name) else instance.name
+        if not callable(instance.name):
+            problems[f"tool:{plugin_name}"] = (
+                "name must be a method returning a string, as the Tool interface "
+                "declares — not a plain attribute; skipped"
+            )
+            continue
+        tool_name = instance.name()
         existing = registry.get(tool_name)
         if existing is not None:
             if type(existing) is cls:
@@ -492,7 +498,7 @@ def describe_plugins(cwd: str) -> PluginsSummary:
     tools = sorted(
         (
             ToolInfo(
-                name=tool.name() if callable(tool.name) else tool.name,
+                name=tool.name(),
                 description=tool.description(),
                 source="core" if type(tool) in BUILTIN_TOOLS else "plugin",
             )

@@ -33,7 +33,7 @@ def _tool_schema(tool: Tool) -> dict[str, Any]:
     return {
         "type": "function",
         "function": {
-            "name": tool.name,
+            "name": tool.name(),
             "description": tool.description(),
             "parameters": tool.parameters(),
         },

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 from ...typing.spi import Tool, ToolResult
 
@@ -17,10 +17,25 @@ from ...typing.spi import Tool, ToolResult
 # Tool base
 # --------------------------------------------------------------------------- #
 class CobirbTool(Tool):
-    """Concrete base class for built-in tools."""
+    """Concrete base class for built-in tools.
+
+    Subclasses declare their machine name as the ``NAME`` class attribute and
+    inherit ``name()`` from here. The SPI declares ``name`` as a *method*, and
+    the built-ins used to override it with a plain string instead — a
+    different type than the interface promised, which meant every consumer had
+    to branch on ``callable(tool.name)`` and the one that forgot serialized a
+    bound method into a request payload. Declaring the value and the accessor
+    separately keeps the terse per-tool declaration without breaking the
+    contract a plugin author reads.
+    """
+
+    NAME: ClassVar[str] = ""
 
     def __init__(self, cwd: str | None = None) -> None:
         self._cwd = cwd
+
+    def name(self) -> str:
+        return self.NAME
 
     def _resolve(self, path: str) -> str:
         """Resolve ``path`` against this tool's configured working
@@ -40,7 +55,7 @@ class CobirbTool(Tool):
 # Built-in tools
 # --------------------------------------------------------------------------- #
 class ReadFileTool(CobirbTool):
-    name = "read_file"
+    NAME = "read_file"
 
     def description(self) -> str:
         return "Read the contents of a file at a path."
@@ -64,7 +79,7 @@ class ReadFileTool(CobirbTool):
 
 
 class WriteFileTool(CobirbTool):
-    name = "write_file"
+    NAME = "write_file"
 
     def description(self) -> str:
         return "Create or overwrite a file at a path with the given content."
@@ -91,7 +106,7 @@ class WriteFileTool(CobirbTool):
 
 
 class EditFileTool(CobirbTool):
-    name = "edit_file"
+    NAME = "edit_file"
 
     def description(self) -> str:
         return "Replace a region of a file: old_str must match exactly, new_str is the replacement."
@@ -195,7 +210,7 @@ def _apply_patch_hunks(original_lines: list[str], hunks: list[tuple[int, list[tu
 
 
 class ApplyPatchTool(CobirbTool):
-    name = "apply_patch"
+    NAME = "apply_patch"
 
     def description(self) -> str:
         return "Apply a structured diff patch to a file (unified diff format)."
@@ -261,7 +276,7 @@ def _is_ignored_path(path: str) -> bool:
 
 
 class GlobTool(CobirbTool):
-    name = "glob"
+    NAME = "glob"
 
     def description(self) -> str:
         return "Find files matching a glob pattern (searches from the working directory)."
@@ -295,7 +310,7 @@ class GlobTool(CobirbTool):
 
 
 class GrepTool(CobirbTool):
-    name = "grep"
+    NAME = "grep"
 
     def description(self) -> str:
         return "Search file contents for a regex pattern."
@@ -343,7 +358,7 @@ class GrepTool(CobirbTool):
 
 
 class ListDirTool(CobirbTool):
-    name = "list_dir"
+    NAME = "list_dir"
 
     def description(self) -> str:
         return "List the contents of a directory."
@@ -383,7 +398,7 @@ class ShellTool(CobirbTool):
     process is gone.
     """
 
-    name = "shell"
+    NAME = "shell"
 
     def __init__(self, cwd: str | None = None) -> None:
         super().__init__(cwd)
@@ -503,12 +518,21 @@ class ToolRegistry:
             self.register(tool_cls(self.cwd))
 
     def register(self, tool: Tool) -> None:
-        # Built-in tools set ``name`` as a plain class attribute (a string);
-        # third-party plugins may instead implement it as the method the SPI
-        # documents (``def name(self) -> str``). Support both rather than
-        # storing a bound method object as the registry key for the latter.
-        name = tool.name() if callable(tool.name) else tool.name
-        self._tools[name] = tool
+        """Register ``tool`` under the name it reports.
+
+        Validates here rather than tolerating a non-conformant tool, because
+        tolerance is what let a bound method reach a JSON payload once
+        already: a tool whose ``name`` isn't the method the SPI documents is
+        rejected at the boundary with a message that says so, and the caller
+        (see ``cli._merge_tool_plugins``) reports and skips it rather than
+        letting it break a turn much later.
+        """
+        if not callable(tool.name):
+            raise TypeError(
+                f"{type(tool).__name__}.name must be a method returning a string, "
+                "as the Tool interface declares — not a plain attribute"
+            )
+        self._tools[tool.name()] = tool
 
     @property
     def tools(self) -> dict[str, Tool]:

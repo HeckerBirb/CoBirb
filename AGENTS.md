@@ -176,9 +176,11 @@ class SessionCrypto(abc.ABC):
   `spinner`, `begin_stream`, `render_header`, `render_answer`, `render_plan`, `render_validation`,
   `render_tool_call`, `write_error`. Reached via `getattr(io, ..., None)` with a plain-`render()`
   fallback, so a future speech/vision adapter isn't forced to implement chrome.
-- ⚠️ **`Tool.name` is contested.** The SPI declares a *method*; all eight built-ins use a `str`
-  class attribute, so consumers branch on `callable(tool.name)`. `model._tool_schema` doesn't,
-  which breaks every turn for a conformant plugin. Unresolved — §11.
+- **`Tool.name` is a method, and only a method.** Built-ins declare `NAME: ClassVar[str]` and
+  inherit `name()` from `CobirbTool`; a tool that exposes `name` as a plain attribute is rejected
+  by `ToolRegistry.register` with a message saying so, and `cli._merge_tool_plugins` reports and
+  skips it. Tolerating both shapes is what once let a bound method reach a JSON payload and break
+  every turn, so the boundary validates instead.
 
 ### 5.3 Built-in tools
 
@@ -392,8 +394,6 @@ Env: `COBIRB_HOME` (relocates the whole `.cobirb` tree — how tests isolate), `
 
 Recorded so they aren't rediscovered or "fixed" mid-discussion.
 
-- **B1 — `_tool_schema` breaks conformant tool plugins** (§5.2): `json.dumps` raises on a bound
-  method, so every turn fails while such a plugin is installed.
 - **B2 — malformed config JSON tracebacks** out of every command, `cobirb help` included.
 - **B3 — user personas are read from `~/cobirb/`** while config, sessions, audit and plugins all use
   `~/.cobirb/`.
