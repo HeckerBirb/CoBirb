@@ -80,8 +80,8 @@ Running `cobirb` with no `-p` opens a full-screen terminal app, with three tabs:
 
 In the input: `/model` lists the models the configured endpoint currently has and lets you pick
 one for this session; `/persona` opens the same kind of picker for personas —
-including `none`, the default — and `/persona <name>` switches directly; `/plan
-on|off` toggles plan mode (`/plan` alone reports it); `?` or `/help` opens the help screen
+including `none`, the default — and `/persona <name>` switches directly; `/context` shows how much of the model's window this session is using;
+`/plan on|off` toggles plan mode (`/plan` alone reports it); `?` or `/help` opens the help screen
 (`/help <topic>` for one topic). Keys: `f1` help, `f2` next tab, `ctrl+q` quit, `up`/`down`
 recall earlier prompts (the last 100, in memory only), `ctrl+c` copies the transcript
 selection if you've dragged one out with the mouse and otherwise cancels a running turn —
@@ -114,6 +114,21 @@ cobirb --system-prompt harness  # adds a short note about the tool-permission mo
 Or set `"system_prompt"` in config. None of CoBirb's actual guarantees depend on this —
 permissions are enforced in `policy.py` and sessions are encrypted by the crypto backend, not
 by asking a model to cooperate.
+
+## What CoBirb does not protect you from
+
+Being straight about the edges, since the rest of this page makes strong claims:
+
+- **An approved shell command runs with your full user privileges.** CoBirb decides
+  *whether* a command runs, not what it can reach once it does. Approve `npm test` and
+  that command can read `~/.ssh` and open a socket like any other program you'd run.
+  There is no sandbox. Approve narrowly, and prefer `shell(git status)`-style rules over
+  trusting a bare binary.
+- **The model can be wrong, and it edits real files.** Sessions are encrypted and tool
+  calls are gated, but nothing yet snapshots your working tree — keep your work in git.
+- **Context is finite.** Long sessions are compacted to fit the model's window (see
+  `/context`); old tool results are summarised away first. Nothing is lost from your
+  session file, only from what the model is shown.
 
 ## Configuration
 

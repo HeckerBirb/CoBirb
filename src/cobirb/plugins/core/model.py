@@ -48,6 +48,25 @@ def _extract_tool_calls(message: dict[str, Any]) -> list[ToolCall]:
     ]
 
 
+def _num_ctx(parameters: Any) -> int | None:
+    """Pull ``num_ctx`` out of ``/api/show``'s ``parameters`` block.
+
+    Ollama returns those as one newline-separated string of ``name value``
+    pairs rather than as JSON, so this reads it as text.
+    """
+    if not isinstance(parameters, str):
+        return None
+    for line in parameters.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] == "num_ctx":
+            try:
+                value = int(parts[1])
+            except ValueError:
+                return None
+            return value if value > 0 else None
+    return None
+
+
 def _build_messages(system: str, context: str) -> list[dict[str, Any]]:
     """Turn the orchestrator's JSON-encoded turn history into a proper
     multi-turn Ollama ``messages`` array, instead of flattening the whole
@@ -129,6 +148,8 @@ class LocalModelProvider(ModelProvider):
         # failed lookup returns "" without being remembered, so a transient
         # blip doesn't permanently drop the user's own prompt.
         self._model_system_cache: dict[str, str] = {}
+        # Same one-lookup-per-model reasoning as the system cache above.
+        self._context_window_cache: dict[str, int] = {}
 
     def name(self) -> str:
         return f"ollama/{self._model}" if self._model else "(unconfigured)"
@@ -200,6 +221,39 @@ class LocalModelProvider(ModelProvider):
             return ""
         self._model_system_cache[self._model] = system
         return system
+
+    def context_window(self) -> int | None:
+        """How many tokens this endpoint will actually serve, or ``None``.
+
+        Optional and duck-typed, the same way ``list_models`` is — the
+        orchestrator reaches for it via ``getattr`` and falls back to a
+        conservative default, so a ``plugins.model`` provider that lacks it
+        breaks nothing.
+
+        **The trap this exists to avoid:** a model's advertised
+        ``context_length`` is nearly always far larger than what Ollama will
+        actually serve. Unless the Modelfile sets ``num_ctx``, Ollama uses its
+        own default (4096 at the time of writing) no matter what the model
+        claims it can do. Believing the advertised 131072 would mean packing a
+        request the server then silently truncates — precisely the failure
+        ``cobirb.context`` exists to prevent.
+
+        So only ``num_ctx`` is trusted here. When it isn't set, this returns
+        ``None`` and the caller uses its conservative default; a user who has
+        raised the window can say so with ``"context_tokens"`` in config.
+        """
+        if not self._model:
+            return None
+        if self._model in self._context_window_cache:
+            return self._context_window_cache[self._model]
+        try:
+            payload = self._post("/api/show", {"model": self._model})
+        except Exception:  # noqa: BLE001 - best-effort, never blocks a turn
+            return None
+        window = _num_ctx(payload.get("parameters"))
+        if window is not None:
+            self._context_window_cache[self._model] = window
+        return window
 
     def compose_system(self, system: str) -> str:
         """Combine CoBirb's own system prompt with the model's, if any.

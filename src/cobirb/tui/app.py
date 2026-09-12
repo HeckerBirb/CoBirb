@@ -421,6 +421,23 @@ class CoBirbApp(App[None]):
         else:
             self.pick_persona()
 
+    def _cmd_context(self, argument: str) -> None:
+        """How much of the model's window this session is using.
+
+        Worth surfacing rather than leaving in the log: on a local model the
+        window is usually far smaller than people expect, and this is where
+        they find that out before it degrades an answer.
+        """
+        if self.orchestrator is None:
+            self.write_transcript(
+                render.build_notice("No turns yet — the context budget is measured on the first one.")
+            )
+            return
+        report = self.orchestrator.last_compaction
+        self.write_transcript(
+            render.build_notice(report.describe() if report else "Nothing sent to the model yet.")
+        )
+
     def _cmd_plan(self, argument: str) -> None:
         self.plan_mode, message = commands.apply_plan_toggle(argument, self.plan_mode)
         self.query_one(StatusBar).plan_mode = self.plan_mode
@@ -431,6 +448,7 @@ class CoBirbApp(App[None]):
         "/model": _cmd_model,
         "/persona": _cmd_persona,
         "/plan": _cmd_plan,
+        "/context": _cmd_context,
     }
 
     def _on_turn_finished(self) -> None:

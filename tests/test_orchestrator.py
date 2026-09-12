@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 import os
 
+from cobirb.context import DEFAULT_CONTEXT_TOKENS, history_budget
 from cobirb.orchestrator import Orchestrator, _materialize, build_default_policy
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 from cobirb.plugins.core.tools import ToolRegistry
 from cobirb.policy import Policy
-from cobirb.session import SessionManager
+from cobirb.session import SessionManager, Turn
 from cobirb.typing.spi import ToolCall
 
 
@@ -973,3 +974,68 @@ def test_the_persona_label_still_reaches_the_spinner():
     orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
 
     assert io.spinner_calls[0] == ("enter", "noah is thinking…")
+
+
+# --------------------------------------------------------------------------- #
+# Context compaction (see cobirb/context.py).
+#
+# The orchestrator used to serialize every turn of the session on every model
+# call, with no token budget at all. A long session outgrew the window, the
+# server truncated from the front, and the model lost the task it was given.
+# --------------------------------------------------------------------------- #
+class _WindowedModel(_DummyModel):
+    """A model that reports a small context window, as a local one would."""
+
+    def __init__(self, window, reply="done"):
+        super().__init__(reply)
+        self.window = window
+        self.contexts = []
+
+    def context_window(self):
+        return self.window
+
+    def chat(self, system, context, tools=None, *, stream=False):
+        self.contexts.append(context)
+        return self.reply
+
+
+def test_a_long_history_is_compacted_before_it_reaches_the_model():
+    model = _WindowedModel(window=2048)
+    manager = SessionManager.create("x", None, ".", "none")
+    for n in range(40):
+        manager.session.add(Turn(role="user", content=f"question {n}"))
+        manager.session.add(Turn(role="tool", content="y" * 4000, tool_use=[{"name": "read_file"}]))
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), session=manager)
+
+    orchestrator.run("the objective", "sys", cwd="/tmp")
+
+    sent = json.loads(model.contexts[0])
+    assert len(sent) < len(manager.session.turns)
+    assert orchestrator.last_compaction.changed
+    assert orchestrator.last_compaction.estimated_tokens <= orchestrator._context_budget()
+
+
+def test_a_short_session_is_not_compacted_at_all():
+    """The common case must be untouched — same bytes as before this existed."""
+    model = _WindowedModel(window=8192)
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
+
+    orchestrator.run("hello", "sys", cwd="/tmp")
+
+    assert not orchestrator.last_compaction.changed
+
+
+def test_an_explicit_context_budget_beats_the_providers_answer():
+    """Config wins: the user knows what num_ctx they actually start Ollama
+    with, and the provider can only report what the Modelfile says."""
+    model = _WindowedModel(window=100_000)
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), context_tokens=4096)
+
+    assert orchestrator._context_budget() == history_budget(4096)
+
+
+def test_a_provider_without_the_hook_falls_back_to_the_conservative_default():
+    """Duck-typed, like every other optional provider capability."""
+    orchestrator = Orchestrator(model=_DummyModel(), tools={}, policy=Policy())
+
+    assert orchestrator._context_budget() == history_budget(DEFAULT_CONTEXT_TOKENS)

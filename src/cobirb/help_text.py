@@ -58,6 +58,8 @@ INTERACTIVE COMMANDS
   /persona           Pick a persona from a list (including "none", the
                      default, which hands the voice back to the model).
   /persona <name>    Switch to a named persona directly.
+  /context           Show how much of the model's context window this
+                     session is using, and what has been compacted away.
   /plan on|off       Toggle plan mode mid-conversation.
   /plan              Show whether plan mode is currently on.
   ? or /help         Open this help. '/help <topic>' opens one topic.
@@ -270,6 +272,14 @@ Read from (repo overrides user): ~/.cobirb/config.json, then ./cobirb.json
       "name": "...", "base_url": "..."}}  Model name/endpoint (local Ollama
                                  by default; any OpenAI-compatible server
                                  works).
+  "context_tokens"               How many tokens your endpoint actually
+                                 serves. Ollama uses its own num_ctx default
+                                 (4096) unless the Modelfile says otherwise,
+                                 no matter how large a window the model
+                                 advertises — so CoBirb only trusts num_ctx,
+                                 and assumes 4096 when it can't find one.
+                                 Raise this if you start Ollama with more;
+                                 /context shows what is in use.
   "allow_tools"                  Permission rules you always want, as a list
                                  in --allow-tool's syntax, e.g.
                                  ["read_file", "shell(git)",

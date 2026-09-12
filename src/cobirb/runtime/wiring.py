@@ -153,6 +153,10 @@ def build_orchestrator(
         io=io_adapter,
         session=manager,
         crypto=crypto,
+        # Only trusted if the user set it: Ollama serves its own default
+        # num_ctx regardless of what a model advertises, so this is how
+        # someone who has raised the window tells CoBirb about it.
+        context_tokens=config.get("context_tokens"),
     )
 
 

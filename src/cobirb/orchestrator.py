@@ -15,6 +15,7 @@ import json
 import logging
 from typing import Any, Callable, Iterable
 
+from .context import DEFAULT_CONTEXT_TOKENS, CompactionReport, compact, history_budget
 from .policy import AuditLog, Policy
 from .session import PHASE_ACT, PHASE_PLAN, PHASE_VALIDATE, Session, SessionManager, Turn
 from .typing import spi as cobirb_typing
@@ -122,6 +123,7 @@ class Orchestrator:
         io: cobirb_typing.I_OAdapter | None = None,
         session: SessionManager | None = None,
         crypto: Any = None,
+        context_tokens: int | None = None,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -129,6 +131,11 @@ class Orchestrator:
         self.io = io
         self.crypto = crypto
         self.session = session
+        # The model's usable context window. None means "ask the provider on
+        # first use, then remember" — see _context_budget.
+        self.context_tokens = context_tokens
+        # What the last _build_context had to throw away, for /context.
+        self.last_compaction: CompactionReport | None = None
         # Whether the most recent run()'s final answer was already streamed
         # live to `io` (see run()'s docstring) — false until a run happens.
         self.last_turn_streamed = False
@@ -407,6 +414,24 @@ class Orchestrator:
         self.session.session.add(Turn(role="user", content=prompt))
         return self.session.session
 
+    def _context_budget(self) -> int:
+        """Tokens of history this model can be given.
+
+        Asked of the provider once (the optional ``context_window`` hook) and
+        then remembered, since it cannot change mid-run. Falls back to a
+        deliberately conservative default when the provider can't say —
+        over-estimating means the server truncates silently, which is the
+        failure this whole path exists to avoid.
+        """
+        if self.context_tokens is None:
+            window = getattr(self.model, "context_window", None)
+            if callable(window):
+                try:
+                    self.context_tokens = window()
+                except Exception:  # noqa: BLE001 - never block a turn on this
+                    self.context_tokens = None
+        return history_budget(self.context_tokens or DEFAULT_CONTEXT_TOKENS)
+
     def _build_context(self, session: Session) -> str:
         """Serialize the turn history as JSON (role, content, tool_use per
         turn) so a provider can reconstruct a proper multi-turn messages
@@ -414,8 +439,17 @@ class Orchestrator:
         every turn being flattened into a single opaque blob, which gave
         tool-calling models no reliable signal that a prior tool call was
         already satisfied.
+
+        Trimmed to fit the model's window on the way out (see
+        ``cobirb.context``). A short session is returned unchanged; a long one
+        loses its oldest tool results first and its oldest turns only if that
+        wasn't enough.
         """
         turns = [{"role": t.role, "content": t.content, "tool_use": t.tool_use} for t in session.turns]
+        turns, report = compact(turns, self._context_budget())
+        self.last_compaction = report
+        if report.changed:
+            logger.info("compacted context: %s", report.describe())
         return json.dumps(turns)
 
     # ------------------------------------------------------------------ #

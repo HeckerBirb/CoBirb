@@ -489,3 +489,67 @@ def test_builtin_and_plugin_tools_serialize_identically(monkeypatch):
 
     names = [t["function"]["name"] for t in responses.chat_request["tools"]]
     assert names == ["read_file", "plugin_tool"]
+
+
+# --------------------------------------------------------------------------- #
+# Context window discovery.
+#
+# A model advertises a context_length far larger than Ollama will actually
+# serve: without num_ctx in the Modelfile, Ollama uses its own default no
+# matter what the model claims. Believing the advertised figure means packing
+# a request the server then silently truncates — the exact failure
+# cobirb.context exists to prevent — so only num_ctx is trusted.
+# --------------------------------------------------------------------------- #
+class _ShowResponses:
+    """Answers /api/show with a given parameters block."""
+
+    def __init__(self, parameters=None, model_info=None):
+        self.payload = {}
+        if parameters is not None:
+            self.payload["parameters"] = parameters
+        if model_info is not None:
+            self.payload["model_info"] = model_info
+
+    def __call__(self, request, timeout=None):
+        return _FakeResponse(self.payload)
+
+
+def test_context_window_reads_num_ctx(monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _ShowResponses("stop \"<|im_end|>\"\nnum_ctx 32768"))
+
+    assert LocalModelProvider(model="m").context_window() == 32768
+
+
+def test_context_window_ignores_the_advertised_context_length(monkeypatch):
+    """The model says 131072; Ollama will serve 4096 unless told otherwise.
+    Trusting the advertisement is how the request gets silently truncated."""
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _ShowResponses(parameters="stop \"x\"", model_info={"llama.context_length": 131072}),
+    )
+
+    assert LocalModelProvider(model="m").context_window() is None
+
+
+def test_context_window_is_none_when_the_endpoint_cannot_answer(monkeypatch):
+    def boom(*args, **kwargs):
+        raise urllib.error.URLError("nope")
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+
+    assert LocalModelProvider(model="m").context_window() is None
+
+
+def test_context_window_is_looked_up_once_per_model(monkeypatch):
+    calls = []
+
+    def counting(request, timeout=None):
+        calls.append(request.full_url)
+        return _FakeResponse({"parameters": "num_ctx 16384"})
+
+    monkeypatch.setattr("urllib.request.urlopen", counting)
+    provider = LocalModelProvider(model="m")
+
+    assert provider.context_window() == 16384
+    assert provider.context_window() == 16384
+    assert len(calls) == 1

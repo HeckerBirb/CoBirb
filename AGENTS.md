@@ -16,8 +16,13 @@ sessions, Ollama provider and the interactive app are implemented and tested.
 ## 2. Ironclad constraints (never violate)
 
 1. **Zero telemetry.** No analytics, crash reports, or pings.
-2. **No outbound network by default.** Only the model layer may touch it, only when the user
-   configures a provider. Remote providers are plugins, never core defaults.
+2. **No outbound network by default, and no shipped remote provider — ever.** Only the model
+   layer may touch the network, only when the user configures a provider, and CoBirb will never
+   package or bless one. Decided September 2026: local models only, forever. The SPI still lets a
+   third party write a remote provider; that is their choice to make and ours to not make for
+   them. **This shapes engineering everywhere else:** everything must work well against a 7B model
+   on a 4096-token window, which is why compaction, grounding and small clean contexts matter more
+   here than they would in a tool aimed at frontier models.
 3. **Never echo the password.** `-w` with no value reads stdin without echo; never logged, stored,
    or retained past the call that needs it.
 4. **Sessions encrypted at rest.** Plaintext never hits disk. No PQ-KEM — §7.
@@ -99,6 +104,27 @@ three phases, each recorded as a `Turn` tagged with `Turn.phase`:
 `phase` is descriptive — it never changes context replay, but it *is* covered by the turn hash
 (§7), so a "plan" turn can't be relabeled "validate". In plan mode `run()` renders the act answer
 itself, so the user reads the answer before the validation of it.
+
+## 4b. Context management
+
+`Orchestrator._build_context` serialises the turn history to JSON for the provider — and trims it
+to fit first (`cobirb/context.py`). Without this, a session outgrew the window, the server silently
+truncated from the front, and the model lost its own objective; that reads to a user as "it got
+dumb halfway through".
+
+Passes run in order of how much they cost to lose: **elide old tool results** (a file read eight
+turns ago is the cheapest thing to forget, and the call announcing it stays so the model doesn't
+re-read it) → **drop the oldest turns** as a contiguous prefix, never orphaning a tool result from
+the assistant turn that requested it → **trim inside the working set**, which only fires when one
+enormous read is bigger than the whole budget. A short session takes a fast path and is returned
+byte-for-byte unchanged. No model call is involved; summarisation would be better and can be added
+on top, but a deterministic rule that never makes things worse is the right first version.
+
+**The `num_ctx` trap.** A model advertising a 131072-token `context_length` will still be served
+Ollama's own default (4096) unless its Modelfile sets `num_ctx`. So `LocalModelProvider.context_window()`
+trusts *only* `num_ctx`, returns `None` otherwise, and the caller falls back to a conservative
+4096. Guessing high recreates the exact bug; guessing low only costs some avoidable compaction.
+`"context_tokens"` in config is how a user who runs a bigger window says so. `/context` shows it.
 
 ## 5. Plugin SPI
 
@@ -317,6 +343,12 @@ unwise but `bash -n` is fine; `python -m pytest` is safe where bare `python` isn
 asks, giving `once` / `always` (extends the live policy for this run) / `deny`. That's what makes
 default-deny mean *asks first* rather than *the model never learns it could have worked*. No
 adapter, or one that can't ask, fails closed.
+
+**What the policy layer does not do: sandbox.** It decides *whether* a command runs, never what
+it can reach once running. An approved `npm test` has your full user privileges and can read
+`~/.ssh`. Decided: document this plainly (README has a "What CoBirb does not protect you from"
+section) rather than build a sandbox. The SPI allows a third party to replace the built-in `shell`
+tool with a sandboxing one, which is the right place for it. Don't quietly imply otherwise in docs.
 
 **Audit log** — append-only, local, never leaves the machine, **off by default** (`"audit_log":
 true`). Off because arguments are logged unredacted: `write_file`'s full content, `edit_file`'s
