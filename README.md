@@ -119,6 +119,12 @@ by asking a model to cooperate.
 
 Being straight about the edges, since the rest of this page makes strong claims:
 
+- **Your model server is a separate program you didn't write.** CoBirb's guarantees end at
+  the socket. Ollama binds an *unauthenticated* local port — any process running as you can
+  read what you send it or issue its own requests — fetches weights from a registry, and
+  makes outbound requests on its own schedule. None of that is malicious; all of it is trust
+  rather than enforcement. `llama-server`, LM Studio and vLLM have the same shape. The fix is
+  not a better server but no server at all: an embedded GGUF runtime is planned for v0.4.0.
 - **An approved shell command runs with your full user privileges.** CoBirb decides
   *whether* a command runs, not what it can reach once it does. Approve `npm test` and
   that command can read `~/.ssh` and open a socket like any other program you'd run.

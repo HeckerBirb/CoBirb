@@ -344,6 +344,14 @@ asks, giving `once` / `always` (extends the live policy for this run) / `deny`. 
 default-deny mean *asks first* rather than *the model never learns it could have worked*. No
 adapter, or one that can't ask, fails closed.
 
+**What CoBirb does not enforce: anything past the model socket.** Every prompt, file and diff
+goes to a long-lived server nobody here wrote, over an unauthenticated local port other processes
+can also use, by a program that fetches from a registry and makes its own outbound requests. That
+is trust, not enforcement, and it is the largest remaining gap between the pitch and the code. The
+answer is the embedded GGUF runtime at v0.4.0 (`libllama` in-process — no daemon, no socket, no
+registry), which lands as a `ModelProvider` plugin behind an optional extra. Until then, say so
+plainly rather than implying the promise reaches further than it does.
+
 **What the policy layer does not do: sandbox.** It decides *whether* a command runs, never what
 it can reach once running. An approved `npm test` has your full user privileges and can read
 `~/.ssh`. Decided: document this plainly (README has a "What CoBirb does not protect you from"
@@ -444,9 +452,25 @@ they are shaped around, deliberately.
 
 ## 12. Roadmap
 
-**v0.1.0 (now)** core runtime, tools, permissions, encrypted sessions, personas, CLI + TUI ·
-**v0.2.0** speech/vision adapters, MCP (opt-in, add-only), subagent parallelism ·
-**v0.3.0** custom agents & skills (config-first), live hooks · **v0.4.0** plugin distribution.
+- **v0.1.0 (now)** — core runtime, tools, permissions, encrypted sessions, personas, CLI + TUI.
+- **v0.2.0 "Trustworthy"** — the beta. Context compaction *(done)*, project instructions file,
+  `.gitignore` awareness, diff preview before write, checkpoint + `/undo`, headless/CI mode,
+  malformed-tool-call repair, parallel read-only tools.
+- **v0.3.0 "Grounded"** — repo map, git integration, self-verification loop, write-scope grants,
+  secret redaction, session export.
+- **v0.4.0 "Extensible"** — MCP client (stdio only), **embedded GGUF runtime**, per-role model
+  selection, hooks, custom commands/skills.
+- **v0.5.0 "The Flock"** — subagent orchestration: charter → scaffold → fan-out → integrate.
+- **v0.6.0–0.9.0** — plugin distribution, cross-session memory, vision, mid-turn steering,
+  session branching, SPI freeze and session migrations.
+- **v1.1.0+** — runtime isolation for the embedded model (subprocess, no network namespace).
+
+**Settled decisions.** *Local models only, forever* — no shipped remote provider, ever (§2), and
+from 0.4 not even a local *server*: CoBirb runs the weights itself. The shell privilege gap is
+documented rather than sandboxed (§8). Speech I/O is deliberately deferred past 1.0 — a large
+platform-specific dependency for a workflow almost nobody uses on a coding agent. No
+embedding-based RAG: a repo map plus grep beats it for code at a fraction of the machinery.
 
 **Omitted forever:** cloud sessions, remote control, background agents, telemetry. They contradict
-the founding principle.
+the founding principle. (Subagents are not background agents — they are local, in-process, and
+bounded by a turn you asked for.)
