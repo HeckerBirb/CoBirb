@@ -36,7 +36,7 @@ from textual.widgets import Footer, Header, Input, RichLog, TabbedContent, TabPa
 
 from .. import cli, session
 from ..config import Config
-from ..orchestrator import Orchestrator
+from ..orchestrator import Orchestrator, render_through
 from ..plugins.core import render
 from ..policy import PermissionError
 from ..typing import spi as cobirb_typing
@@ -471,11 +471,16 @@ class CoBirbApp(App[None]):
         always lands in the transcript — even if a ``plugins.io`` selection
         put some other adapter in the orchestrator's I/O slot.
         """
-        render_answer = getattr(getattr(self.orchestrator, "io", None), "render_answer", None)
-        if callable(render_answer):
-            render_answer(self.persona.name, summary or "Completed.")
-        else:
-            self.io_bridge.render_answer(self.persona.name, summary or "Completed.")
+        answer = summary or "Completed."
+
+        def into_the_transcript() -> None:
+            self.io_bridge.render_answer(self.persona.name, answer)
+
+        io_adapter = getattr(self.orchestrator, "io", None)
+        if not render_through(
+            io_adapter, "render_answer", self.persona.name, answer, fallback=into_the_transcript
+        ):
+            into_the_transcript()  # no adapter at all
 
     # ------------------------------------------------------------------ #
     # /model: list what the configured endpoint has, and pick one

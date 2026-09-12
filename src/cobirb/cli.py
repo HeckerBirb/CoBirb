@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .config import Config
-from .orchestrator import Orchestrator, build_default_policy
+from .orchestrator import Orchestrator, build_default_policy, render_through
 from .plugins.loader import load_plugins
 from .policy import PermissionError
 from . import session as session_module
@@ -628,12 +628,14 @@ def _render_final_answer(orchestrator: Any, persona_name: str, text: str) -> Non
     line for an adapter without it (including test doubles and a bare
     stub orchestrator with no ``io`` attribute at all).
     """
+    answer = text or "Completed."
+
+    def plain() -> None:
+        _render(f"{persona_name}: {answer}")
+
     io_adapter = getattr(orchestrator, "io", None)
-    render_answer = getattr(io_adapter, "render_answer", None) if io_adapter is not None else None
-    if callable(render_answer):
-        render_answer(persona_name, text or "Completed.")
-    else:
-        _render(f"{persona_name}: {text or 'Completed.'}")
+    if not render_through(io_adapter, "render_answer", persona_name, answer, fallback=plain):
+        plain()  # no adapter at all (a bare stub orchestrator)
 
 
 def _resolve_model_name(model_name: str | None, cwd: str) -> str:

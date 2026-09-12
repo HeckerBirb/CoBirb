@@ -66,6 +66,38 @@ def _join_system(*parts: str) -> str:
     return "\n\n".join(part for part in parts if part and part.strip())
 
 
+def render_through(
+    io: Any, hook: str, *args: Any, fallback: Callable[[], None] | None = None
+) -> bool:
+    """Show something via ``io``'s optional ``hook``, else via ``fallback``.
+
+    The I/O adapter contract is four methods, but both shipped adapters also
+    expose a set of richer, duck-typed rendering hooks (``render_answer``,
+    ``render_tool_call``, ``render_plan``, ...). Anything that wants one has
+    to probe for it and cope with its absence, and that probe had been
+    written out five times across three modules, each with a slightly
+    different fallback and a docstring explaining why it wasn't one of the
+    others.
+
+    ``fallback`` is a callable supplied by the caller rather than a format
+    string decided here: what a hookless adapter should be shown is the
+    caller's business, and the core has no opinion about how a reply looks.
+
+    Returns whether anything was actually shown, so a caller can tell whether
+    it still needs to display the text some other way.
+    """
+    if io is None:
+        return False
+    render_hook = getattr(io, hook, None)
+    if callable(render_hook):
+        render_hook(*args)
+        return True
+    if fallback is not None:
+        fallback()
+        return True
+    return False
+
+
 def _materialize(reply: "str | Iterable[str]") -> str:
     """Return a plain string from the model's reply.
 
@@ -210,14 +242,15 @@ class Orchestrator:
         was actually shown (``False`` with no ``io`` attached), so the
         caller knows whether it still needs to show the text some other way.
         """
-        if self.io is None or not text:
+        if not text:
             return False
-        render_answer = getattr(self.io, "render_answer", None)
-        if callable(render_answer):
-            render_answer(persona_name, text)
-        else:
-            self.io.render(f"\n{persona_name}: {text}\n")
-        return True
+        return render_through(
+            self.io,
+            "render_answer",
+            persona_name,
+            text,
+            fallback=lambda: self.io.render(f"\n{persona_name}: {text}\n"),
+        )
 
     def _run_plan_phase(self, system: str, session: Session) -> tuple[str, bool]:
         """One reply with no tools offered — the model can only think out
@@ -483,14 +516,15 @@ class Orchestrator:
         through ``render()``. No-op with no ``io`` attached — there's
         nowhere to show it, and the session history already has it.
         """
-        if self.io is None:
-            return
-        render_call = getattr(self.io, "render_tool_call", None)
-        if callable(render_call):
-            render_call(tool_name, arguments, result)
-            return
         status = "ok" if result.ok else "failed"
-        self.io.render(f"\n[{tool_name}: {status}] {result.content}\n")
+        render_through(
+            self.io,
+            "render_tool_call",
+            tool_name,
+            arguments,
+            result,
+            fallback=lambda: self.io.render(f"\n[{tool_name}: {status}] {result.content}\n"),
+        )
 
     def _render_phase(self, phase: str, persona_name: str, text: str) -> None:
         """Show a plan-mode phase's result (plan or validation report) live,
@@ -501,14 +535,15 @@ class Orchestrator:
         act phase's own final answer is handled separately by the CLI (see
         ``cli._render_final_answer``), not here.
         """
-        if self.io is None or not text:
+        if not text:
             return
-        hook_name = "render_plan" if phase == "plan" else "render_validation"
-        render_phase = getattr(self.io, hook_name, None)
-        if callable(render_phase):
-            render_phase(persona_name, text)
-            return
-        self.io.render(f"\n[{phase}] {text}\n")
+        render_through(
+            self.io,
+            "render_plan" if phase == "plan" else "render_validation",
+            persona_name,
+            text,
+            fallback=lambda: self.io.render(f"\n[{phase}] {text}\n"),
+        )
 
     # ------------------------------------------------------------------ #
     # Convenience: register a fresh session path
