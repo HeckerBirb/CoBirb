@@ -11,13 +11,11 @@ opt a capability in.**
 
 - 🔒 No telemetry. No analytics. No pings.
 - 🔒 No outbound network by default. Models are yours to configure.
-- 🔒 Sessions are encrypted at rest (AES-256-GCM, keyed via scrypt — already
-  quantum-resistant for a password-protected local file; see `crypto.py` for
-  why a KEM seal wouldn't add anything here).
+- 🔒 Sessions are encrypted at rest (AES-256-GCM, keyed via scrypt).
 - 🔒 Your model's own `SYSTEM` prompt is left alone. CoBirb sends no system message by
   default, so a model you built with `ollama create` behaves inside CoBirb exactly as it
   does in `ollama run`. When CoBirb does add something, yours goes first.
-- 🦜 Optional personas — a parrot called Noah and friends, off unless you ask.
+- 🦜 Optional personas — various twists on the replies. Off by default.
 
 ## Status
 
@@ -122,8 +120,6 @@ nothing defaults to a networked provider. See `cobirb help config` for what each
 
 ## Documentation
 
-- [DESIGN.md](./DESIGN.md) — architecture, constraints, roadmap.
-- [PLUGIN_SPEC.md](./PLUGIN_SPEC.md) — formal plugin interface specification.
 - [AGENTS.md](./AGENTS.md) — developer notes for this project (for me and future contributors).
 
 ## License
