@@ -1,13 +1,20 @@
 """Permissions, audit, and the local-only policy layer.
 
 Enforces the ironclad rule **"default-deny"**: no tool runs unless it is
-explicitly allowed and never denied. See DESIGN.md §8.
+explicitly allowed and never denied. Nothing is pre-approved — a fresh policy
+permits nothing at all, and every capability is granted either by the user
+answering an approval prompt or by their own config/``--allow-tool``.
 
 - Approval granularity: per-tool-name, or per-tool-with-narrow-args.
+- Reading is scoped by *directory* rather than by file. Approving a read
+  grants the read-only tools access to that directory and everything under
+  it, because being asked again for every file in a tree the user already
+  said yes to is noise rather than safety. Writing and executing are never
+  granted this way — they are approved per call, or by an explicit rule.
 - The ``shell`` tool's scope is narrowed per *command segment*: a shell
   command may chain several invocations (``git status; rm -rf /``), and the
   shell runs all of them, so **every** segment must be permitted — not just
-  the first. See ``_segments`` and todo-list.md for the motivation.
+  the first. See ``_segments`` for the mechanics.
 - Redirection (``>``, ``>>``, ``<``) stays attached to the command it
   belongs to rather than starting a new one — ``git log > out.txt`` is one
   command, not two. Anything the policy still cannot verify (command
@@ -36,6 +43,24 @@ _SEPARATOR_CHARS = set(";|&")
 # `git log > out.txt` is a single command, and the target file is not
 # something a shell-level scan can usefully allow/deny on its own.
 _REDIRECT_CHARS = set("<>")
+
+# `find`'s -exec family terminates its command with a bare `;`, which the
+# segment scanner below reads as a command separator — so the program being
+# exec'd lands in a segment of its own (usually an empty tail) and is never
+# checked, while `find` itself looks innocuous. `find . -exec rm -rf {} ;`
+# is the whole allow-list defeated by one flag. A segment carrying one of
+# these is refused outright, on the same principle as command substitution:
+# what this scan cannot read, it cannot approve.
+_EXEC_FLAGS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
+
+# Tools that only ever read. These are the ones a *directory* approval
+# covers; everything else (write_file, edit_file, apply_patch, shell, and any
+# plugin tool) is approved per call or by an explicit rule.
+READ_TOOLS = frozenset({"read_file", "list_dir", "glob", "grep"})
+
+# Glob metacharacters — everything before the first component containing one
+# is the fixed directory prefix a pattern searches under.
+_GLOB_MAGIC = "*?["
 
 
 class PermissionError(Exception):
@@ -100,7 +125,8 @@ def _segments(command: str) -> list[list[str]] | None:
 
     Returns ``None`` if the command can't be parsed, or if it uses a
     construct whose contents this scan cannot see and therefore cannot
-    verify: command substitution (``$(...)``, backticks) or a subshell.
+    verify: command substitution (``$(...)``, backticks), a subshell, or
+    ``find``'s ``-exec`` family (see ``_EXEC_FLAGS``).
     """
     if "`" in command:
         return None  # backtick substitution hides an arbitrary command
@@ -129,11 +155,61 @@ def _segments(command: str) -> list[list[str]] | None:
         current.append(token)
     if current:
         segments.append(current)
+    if any(token in _EXEC_FLAGS for segment in segments for token in segment):
+        # The exec'd program is not in a segment this scan can attribute to
+        # anything, so the command as a whole is unverifiable.
+        return None
     return segments
+
+
+def _glob_base(pattern: str) -> str:
+    """The fixed directory prefix a glob pattern searches under.
+
+    ``"src/**/*.py"`` -> ``"src"``; ``"*.py"`` -> ``"."``. Used to decide
+    which directory a ``glob`` call is actually reading from.
+    """
+    base: list[str] = []
+    for part in pattern.replace("\\", "/").split("/"):
+        if any(char in part for char in _GLOB_MAGIC):
+            break
+        base.append(part)
+    return "/".join(base) or "."
+
+
+def _read_target(tool_name: str, arguments: dict[str, Any]) -> str | None:
+    """The path a read-only tool call is about to touch, as written.
+
+    Each read tool names its target differently — ``glob`` takes a
+    ``pattern``, ``grep``'s ``path`` is optional and defaults to the working
+    directory the way the tool itself defaults it — so the mapping lives here
+    rather than being guessed at the call site. ``None`` means the call
+    doesn't name a readable target at all, which is treated as "cannot
+    verify", and therefore denied.
+    """
+    if tool_name == "glob":
+        pattern = arguments.get("pattern")
+        return _glob_base(pattern) if isinstance(pattern, str) and pattern else None
+    target = arguments.get("path")
+    if target is None and tool_name == "grep":
+        target = "."  # GrepTool's own default
+    return target if isinstance(target, str) and target else None
 
 
 class Policy:
     """Default-deny permission policy with a local audit trail.
+
+    A fresh policy allows **nothing**. Capabilities arrive one of three ways:
+    the user answers an approval prompt, they list a rule in config's
+    ``allow_tools``, or they pass ``--allow-tool``. There is no pre-approved
+    set — the tool asks before it reads, writes, or runs anything.
+
+    Reads are scoped by directory (``allow_read_dir``): approving one read
+    grants every tool in ``READ_TOOLS`` access to that directory and its
+    subdirectories. This is the one place breadth is granted on a single
+    "yes", and it is deliberate — a user who has agreed to CoBirb reading a
+    project does not want to re-approve each of its files, and reading is the
+    capability where that trade is worth making. Writing and executing get no
+    equivalent.
 
     Two kinds of ``shell`` allow rules exist:
 
@@ -161,6 +237,7 @@ class Policy:
         self.cwd = cwd or os.getcwd()
         self._allowed = set(allowed or set())
         self._allowed_prefixes: set[tuple[str, ...]] = set()
+        self._allowed_read_dirs: set[str] = set()
         self._denied = set(denied or set())
         self.audit = audit or AuditLog()
 
@@ -172,7 +249,11 @@ class Policy:
         """Return True only if the tool is explicitly allowed and not denied.
 
         For the ``shell`` tool with a command, every segment of that command
-        must be permitted (see ``_shell_allowed``).
+        must be permitted (see ``_shell_allowed``). For a read-only tool, an
+        approved directory covering the path it names is enough (see
+        ``_read_allowed``) — as is a blanket rule naming the tool itself,
+        which is what ``--allow-tool=read_file`` produces and which
+        deliberately outranks the directory scope.
         """
         if self.is_denied(tool_name):
             return False
@@ -180,7 +261,61 @@ class Policy:
         if tool_name == "shell" and arguments is not None:
             return self._shell_allowed(arguments)
 
-        return tool_name in self._allowed
+        if tool_name in self._allowed:
+            return True
+
+        if tool_name in READ_TOOLS and arguments is not None:
+            return self._read_allowed(tool_name, arguments)
+
+        return False
+
+    # ------------------------------------------------------------------ #
+    # Directory-scoped reads
+    # ------------------------------------------------------------------ #
+    def _resolve(self, path: str) -> str:
+        """A path as the tools will actually resolve it: relative to this
+        policy's working directory, then fully resolved.
+
+        ``realpath`` rather than ``abspath`` so that ``..`` and symlinks
+        cannot be used to name a file outside an approved directory while
+        looking like one inside it.
+        """
+        if not os.path.isabs(path):
+            path = os.path.join(self.cwd, path)
+        return os.path.realpath(path)
+
+    def _read_allowed(self, tool_name: str, arguments: dict[str, Any]) -> bool:
+        """Whether a read-only call falls inside an approved directory."""
+        target = _read_target(tool_name, arguments)
+        if target is None:
+            return False
+        resolved = self._resolve(target)
+        return any(_within(resolved, directory) for directory in self._allowed_read_dirs)
+
+    def read_scope(self, tool_name: str, arguments: dict[str, Any]) -> str | None:
+        """The directory an "always" answer to this read call would approve.
+
+        For ``read_file`` that is the file's parent; for the tools that
+        already name a directory it is the target itself. ``None`` when the
+        call names nothing resolvable, in which case there is no scope to
+        offer and the answer can only apply to this one call.
+        """
+        target = _read_target(tool_name, arguments)
+        if target is None:
+            return None
+        resolved = self._resolve(target)
+        if tool_name == "read_file":
+            return os.path.dirname(resolved) or os.sep
+        return resolved
+
+    def allow_read_dir(self, directory: str) -> None:
+        """Approve reading ``directory`` and everything beneath it."""
+        self._allowed_read_dirs.add(self._resolve(directory))
+
+    @property
+    def allowed_read_dirs(self) -> set[str]:
+        """The approved read directories — a copy, for display and tests."""
+        return set(self._allowed_read_dirs)
 
     def _shell_allowed(self, arguments: dict[str, Any]) -> bool:
         """Whether every command in a ``shell`` invocation is permitted.
@@ -238,22 +373,62 @@ class Policy:
         }
         self.audit.append(entry)
 
-    def allow_all_core_tools(self) -> None:
-        """Convenience: allow the built-in core tools.
+    # ------------------------------------------------------------------ #
+    # Granting, after the user says yes
+    # ------------------------------------------------------------------ #
+    def grant(self, tool_name: str, arguments: dict[str, Any] | None = None) -> None:
+        """Widen the policy after an "always" approval.
 
-        The ``shell`` scope is narrowed to a safe default: binaries that are
-        safe regardless of arguments (git, ls, cat, grep, mkdir, find,
-        pytest) are allowed outright. ``python`` is deliberately *not*
-        allowed outright — ``python -c '...'`` runs arbitrary code — so only
-        specific narrow invocations are allowed instead.
+        What "always" means depends on the tool, and deciding that here keeps
+        the orchestrator from having to know: a read is granted over its
+        directory, a shell call over the invocation it named (a bare binary,
+        or an exact multi-word prefix), and anything else — writes, patches,
+        plugin tools — over the tool name, since there is no narrower unit
+        those calls have in common.
         """
-        for name in ("read_file", "write_file", "edit_file", "apply_patch", "glob", "grep", "list_dir"):
-            self._allowed.add(name)
-        self._allowed.add("shell")
-        for first in ("git", "ls", "cat", "grep", "mkdir", "find", "pytest"):
-            self._allowed.add(first)
-        for prefix in ("python --version", "python -m pytest", "python -m cobirb"):
-            self.allow("shell", prefix)
+        arguments = arguments or {}
+        if tool_name == "shell":
+            self.allow(tool_name, arguments.get("command"))
+            return
+        if tool_name in READ_TOOLS:
+            directory = self.read_scope(tool_name, arguments)
+            if directory is not None:
+                self.allow_read_dir(directory)
+                return
+        self.allow(tool_name)
+
+    def describe_grant(self, tool_name: str, arguments: dict[str, Any] | None = None) -> str:
+        """Plain-language description of what ``grant`` would permit, for the
+        approval prompt.
+
+        The user is agreeing to a scope, not to a single call, so the prompt
+        has to be able to say what that scope is — "read files in /x and its
+        subdirectories" is a different question from "allow read_file", and
+        only one of them is what actually happens.
+        """
+        arguments = arguments or {}
+        if tool_name == "shell":
+            words = _first_segment_words(str(arguments.get("command") or ""))
+            if len(words) > 1:
+                return f"run '{' '.join(words)}' commands"
+            if words:
+                return f"run '{words[0]}' commands"
+            return "run shell commands"
+        if tool_name in READ_TOOLS:
+            directory = self.read_scope(tool_name, arguments)
+            if directory is not None:
+                return f"read files in {directory} and its subdirectories"
+        return f"use '{tool_name}'"
+
+
+def _within(path: str, directory: str) -> bool:
+    """Whether ``path`` is ``directory`` itself or sits beneath it.
+
+    Both are already fully resolved by ``Policy._resolve``. The separator on
+    the prefix check is what stops ``/home/birb/project-secrets`` from
+    matching an approval for ``/home/birb/project``.
+    """
+    return path == directory or path.startswith(directory.rstrip(os.sep) + os.sep)
 
 
 def _first_segment_words(command: str) -> list[str]:

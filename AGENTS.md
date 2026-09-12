@@ -21,8 +21,8 @@ sessions, Ollama provider and the interactive app are implemented and tested.
 3. **Never echo the password.** `-w` with no value reads stdin without echo; never logged, stored,
    or retained past the call that needs it.
 4. **Sessions encrypted at rest.** Plaintext never hits disk. No PQ-KEM — §7.
-5. **Default-deny permissions.** No "trust this folder" magic. (§8 — the shipped default set is
-   wider than the slogan.)
+5. **Default-deny permissions.** Nothing is pre-approved; every capability comes from the user.
+   The one breadth granted on a single "yes" is a *read* directory (§8).
 6. **Everything local.** No cloud sessions, remote control, or background agents.
 
 Feature ideas conflicting with these are out of scope. Park them.
@@ -272,13 +272,24 @@ password never reaches scrollback.
 
 ## 8. Permissions & audit
 
-**Default-deny:** nothing runs unless explicitly allowed and never denied; a deny list always wins.
+**Default-deny, with nothing pre-approved.** `build_default_policy()` returns a policy that allows
+*nothing*; a deny list always wins over anything later granted. Capabilities arrive three ways: the
+user answers a prompt, they list rules in config's `allow_tools`, or they pass `--allow-tool`. Both
+rule forms take the same syntax — `name` or `name(arg)`, e.g. `shell(python -m pytest)`.
 
-**But the shipped default pre-approves a working set** (`build_default_policy()` →
-`allow_all_core_tools()`), matching Copilot CLI's ask/execute mode: the seven file tools outright;
-the binaries `git ls cat grep mkdir find pytest` with **any** arguments; and the exact prefixes
-`python --version`, `python -m pytest`, `python -m cobirb`. `python` is deliberately not trusted
-outright — `python -c '...'` runs anything. ⚠️ This set is wider than it looks; see §11.
+**Reads are scoped by directory** (`Policy.allow_read_dir`, `READ_TOOLS`). Approving one read grants
+`read_file`, `list_dir`, `glob` and `grep` that directory *and everything beneath it*. This is the
+only place breadth is granted on one "yes", and it's deliberate: a user who agreed to CoBirb reading
+a project does not want to re-approve each file, and reading is where that trade is worth making.
+Writing and executing get no equivalent — they're approved per call or by an explicit rule. Paths
+are compared after `realpath`, so `..` and symlinks can't name a file outside an approved tree, and
+the separator check stops a grant on `/x` covering `/x-secrets`.
+
+**`Policy.grant()` decides what an "always" answer widens to** — a read to its directory, a shell
+call to its invocation, anything else to the tool name — so the orchestrator doesn't have to know.
+`Policy.describe_grant()` renders that as prose for the prompt, reached through the optional
+`confirm_scoped` adapter hook, because agreeing to "always" on a read means agreeing to a directory
+and a prompt that can't say so is asking the user to agree blind.
 
 **Two kinds of `shell` rule:** *first-word* trusts a binary with any arguments (`git` also allows
 `git push`); *prefix* trusts one multi-word invocation (`python -m pytest` does not allow
@@ -288,9 +299,11 @@ the first word would defeat the point.
 **Every segment is checked.** `git status; rm -rf /` is two commands and the shell runs both, so
 `_segments` splits on `;`/`|`/`&` and requires all segments to pass. Quoting is respected;
 redirection stays attached to its command. Anything unverifiable — command substitution, backticks,
-subshells, unbalanced quotes — is **refused**, because the shell would run the whole string.
-(Motivation: `bash` outright is unwise but `bash -n` is fine; `python -m pytest` is safe where bare
-`python` isn't.)
+subshells, unbalanced quotes, and **`find`'s `-exec`/`-execdir`/`-ok` family** — is **refused**,
+because the shell would run the whole string. (`-exec` is refused specifically because the `;`
+terminating its clause reads as a separator, so the exec'd program lands in an unchecked tail
+segment while `find` itself looks innocuous.) Motivation for narrowing generally: `bash` outright is
+unwise but `bash -n` is fine; `python -m pytest` is safe where bare `python` isn't.
 
 **Interactive approval.** A call the static list doesn't cover isn't silently refused — `confirm()`
 asks, giving `once` / `always` (extends the live policy for this run) / `deny`. That's what makes
@@ -360,6 +373,7 @@ deeply. Nothing defaults to a networked provider. See `cobirb.json.example`.
 |---|---|
 | `default_model` | Default model. Validated at interactive startup; unavailable is ignored, not an error. |
 | `model`, `models.default.name` / `.base_url` | Equivalent older keys; endpoint URL. Any OpenAI-compatible server works. |
+| `allow_tools` | List of permission rules in `--allow-tool` syntax, e.g. `["read_file", "shell(git)"]`. The user's standing exemptions from the prompt. |
 | `persona` | Default persona. Unset or `"none"` means none. |
 | `system_prompt` | `"off"` (default) or `"harness"` — §6. |
 | `plugins.model` / `.io` / `.crypto` | Select a discovered plugin for that slot. |
@@ -375,10 +389,6 @@ Env: `COBIRB_HOME` (relocates the whole `.cobirb` tree — how tests isolate), `
 
 Recorded so they aren't rediscovered or "fixed" mid-discussion.
 
-- **X1 — the default policy is wider than the docs claim.** `find . -exec rm -rf {} ;` passes: the
-  `;` terminating `-exec` reads as a separator, so the exec'd program lands in an unchecked tail
-  segment. `git` with any arguments includes `git push` — outbound network, unprompted. README and
-  help text still promise "no tool runs without approval".
 - **B1 — `_tool_schema` breaks conformant tool plugins** (§5.2): `json.dumps` raises on a bound
   method, so every turn fails while such a plugin is installed.
 - **B2 — malformed config JSON tracebacks** out of every command, `cobirb help` included.

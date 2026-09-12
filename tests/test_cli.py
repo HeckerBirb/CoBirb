@@ -56,6 +56,28 @@ def test_parse_allow_tools_ignores_blank_entries():
 
 def test_parse_allow_tools_empty_spec():
     assert _parse_allow_tools("") == {}
+    assert _parse_allow_tools(None) == {}
+
+
+def test_parse_allow_tools_accepts_a_list():
+    """--allow-tool is repeatable and the "allow_tools" config key is a list;
+    both land here, and an entry may still carry several comma-separated
+    rules of its own."""
+    assert _parse_allow_tools(["read_file", "shell(git)"]) == {"read_file": "", "shell": "git"}
+    assert _parse_allow_tools(["read_file,list_dir"]) == {"read_file": "", "list_dir": ""}
+
+
+def test_config_allow_tools_permits_a_tool_without_a_prompt(tmp_path):
+    """The user's own standing rules are the escape hatch from a policy that
+    otherwise permits nothing — a tool named in config must run unprompted."""
+    (tmp_path / "cobirb.json").write_text('{"allow_tools": ["read_file", "shell(git)"]}')
+    orchestrator, _, _ = _build_orchestrator(str(tmp_path), _load_persona(None), {}, "")
+
+    assert orchestrator.policy.is_allowed("read_file", {"path": "anything.txt"})
+    assert orchestrator.policy.is_allowed("shell", {"command": "git status"})
+    # ...and nothing else came along for the ride.
+    assert not orchestrator.policy.is_allowed("write_file", {"path": "anything.txt"})
+    assert not orchestrator.policy.is_allowed("shell", {"command": "rm -rf /"})
 
 
 def test_resolve_plan_mode_defaults_off(tmp_path):
@@ -379,6 +401,10 @@ def test_cli_one_shot_plan_mode_persists_phase_tags_to_a_real_encrypted_session(
             "on",
             "--session",
             session_path,
+            # Nothing is permitted by default; this test is about phase tags
+            # surviving a save, not about the permission prompt.
+            "--allow-tool",
+            "read_file",
         ]
     )
 

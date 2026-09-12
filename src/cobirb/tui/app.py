@@ -329,15 +329,18 @@ class CoBirbApp(App[None]):
     def set_busy(self, label: str) -> None:
         self.query_one(StatusBar).busy = label
 
-    async def request_approval(self, tool_name: str, arguments: dict[str, Any]) -> str:
+    async def request_approval(
+        self, tool_name: str, arguments: dict[str, Any], scope: str | None = None
+    ) -> str:
         """Show the approval modal and resolve to the user's decision.
 
-        Awaited on the event loop on behalf of a worker thread (see
-        ``TuiIO.confirm``). ``push_screen_wait`` requires an active worker
-        context, which is exactly what that caller has — so this must not be
-        called from anywhere else.
+        ``scope`` describes what "always" would grant, so the dialog can say
+        so (see ``ApprovalModal``). Awaited on the event loop on behalf of a
+        worker thread (see ``TuiIO.confirm``). ``push_screen_wait`` requires
+        an active worker context, which is exactly what that caller has — so
+        this must not be called from anywhere else.
         """
-        return await self.push_screen_wait(ApprovalModal(tool_name, arguments))
+        return await self.push_screen_wait(ApprovalModal(tool_name, arguments, scope))
 
     # ------------------------------------------------------------------ #
     # Input handling

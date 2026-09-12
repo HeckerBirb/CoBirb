@@ -395,6 +395,14 @@ class Orchestrator:
     def _request_approval(self, tool_name: str, arguments: dict[str, Any]) -> str:
         """Ask ``io`` whether to allow a not-yet-permitted tool call.
 
+        An adapter may implement the optional ``confirm_scoped`` hook to
+        receive a plain-language description of what "always" would actually
+        grant (``Policy.describe_grant``) — approving a read widens access to
+        a whole directory tree, and a prompt that can't say so is asking the
+        user to agree to something it hasn't told them. Adapters that only
+        implement the documented ``confirm`` still work, they just ask the
+        narrower question.
+
         Fails closed (denies) when there's no interactive adapter attached,
         it doesn't implement ``confirm`` (duck-typed test doubles), or it
         raises — there's no one to ask, so the safe answer is no.
@@ -402,7 +410,13 @@ class Orchestrator:
         if self.io is None or not hasattr(self.io, "confirm"):
             return "deny"
         try:
-            decision = self.io.confirm(tool_name, arguments)
+            confirm_scoped = getattr(self.io, "confirm_scoped", None)
+            if callable(confirm_scoped):
+                decision = confirm_scoped(
+                    tool_name, arguments, self.policy.describe_grant(tool_name, arguments)
+                )
+            else:
+                decision = self.io.confirm(tool_name, arguments)
         except Exception:  # noqa: BLE001 - a broken adapter must not open access
             return "deny"
         return decision if decision in ("once", "always", "deny") else "deny"
@@ -429,8 +443,10 @@ class Orchestrator:
                 self._render_tool_call(tool_name, arguments, result)
                 return
             if decision == "always":
-                shell_command = arguments.get("command") if tool_name == "shell" else None
-                self.policy.allow(tool_name, shell_command)
+                # What "always" widens to is the policy's decision, not the
+                # orchestrator's — a read grants a directory, a shell call
+                # grants its invocation, everything else grants the tool.
+                self.policy.grant(tool_name, arguments)
 
         tool = self.tools.get(tool_name)
         if tool is None:
@@ -506,10 +522,21 @@ def build_default_policy(
     allowed: set[str] | None = None,
     denied: set[str] | None = None,
     audit_log_enabled: bool = False,
+    cwd: str | None = None,
 ) -> Policy:
-    """Build a policy, allowing the built-in core tools by default.
+    """Build the starting policy for a run, which allows **nothing**.
 
-    The ``shell`` scope is narrowed to a safe default set of first words.
+    There is deliberately no pre-approved set. An earlier version of this
+    granted the seven file tools outright plus a handful of shell binaries
+    with any arguments, which made "default-deny" untrue in the one direction
+    that matters: ``git`` with any arguments included ``git push``, and
+    ``find`` with any arguments included ``-exec``. Every capability now
+    arrives from the user — an approval prompt, ``allow_tools`` in config, or
+    ``--allow-tool``.
+
+    ``cwd`` must match the working directory the tools resolve paths against,
+    or a directory-scoped read approval will be compared against the wrong
+    tree (see ``Policy._resolve``).
 
     ``audit_log_enabled`` is off unless explicitly turned on (``"audit_log":
     true`` in config — see ``cobirb help config`` and ``AuditLog``'s own
@@ -517,6 +544,9 @@ def build_default_policy(
     contents, diffs, and shell commands into an unencrypted log every run,
     regardless of anyone ever asking for one.
     """
-    policy = Policy(allowed=allowed, denied=denied, audit=AuditLog(enabled=audit_log_enabled))
-    policy.allow_all_core_tools()
-    return policy
+    return Policy(
+        allowed=allowed,
+        denied=denied,
+        audit=AuditLog(enabled=audit_log_enabled),
+        cwd=cwd,
+    )

@@ -13,6 +13,7 @@
     "io": "core-io",
     "crypto": "core-crypto"
   },
+  "allow_tools": [],
   "plan_mode": false,
   "audit_log": false
 }

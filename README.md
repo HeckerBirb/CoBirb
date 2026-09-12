@@ -12,6 +12,9 @@ opt a capability in.**
 - 🔒 No telemetry. No analytics. No pings.
 - 🔒 No outbound network by default. Models are yours to configure.
 - 🔒 Sessions are encrypted at rest (AES-256-GCM, keyed via scrypt).
+- 🔒 Nothing is pre-approved. No tool reads, writes, or runs anything until you say so.
+  Approving a read covers that directory and below; writing and running ask every time,
+  unless you allow them yourself in config.
 - 🔒 Your model's own `SYSTEM` prompt is left alone. CoBirb sends no system message by
   default, so a model you built with `ollama create` behaves inside CoBirb exactly as it
   does in `ollama run`. When CoBirb does add something, yours goes first.
@@ -19,8 +22,8 @@ opt a capability in.**
 
 ## Status
 
-🚧 **Early v0.1.0 — working prototype.** The core loop, built-in tools, default-deny
-permissions, encrypted sessions, and a local Ollama model provider are implemented and
+🚧 **Early v0.1.0 — working prototype.** The core loop, built-in tools, the permission
+model, encrypted sessions, and a local Ollama model provider are implemented and
 tested. See [`DESIGN.md`](./DESIGN.md) for the full design and
 [`PLUGIN_SPEC.md`](./PLUGIN_SPEC.md) for the plugin SPI.
 
@@ -62,8 +65,8 @@ Running `cobirb` with no `-p` opens a full-screen terminal app, with three tabs:
   each carry a `>` marker, in different colours, with the reply still rendered as markdown.
   Tool calls, errors and plan/validation phases stay in panels — they aren't conversation.
   Drag to select any of it and `ctrl+c` copies it. **Tool approval is a dialog** — `y` allow once, `a` allow for the rest of the session,
-  `n` or escape to deny. Permission is still default-deny; this just makes "denied" mean "asks
-  first".
+  `n` or escape to deny. The dialog says what "always" would actually grant — for a read
+  that is a whole directory tree, so it names it rather than letting you agree blind.
 - **Sessions** — lists encrypted session files found in `~/.cobirb/sessions/` (or wherever
   `COBIRB_HOME` points), lets you resume one (prompts for its password) or start a new one
   (prompts for a name and password), all without needing `--session` on the command line.

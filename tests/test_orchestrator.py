@@ -217,12 +217,14 @@ def test_policy_gates_tool_access():
     assert any(turn.role == "tool" for turn in session.turns)
 
 
-def test_cli_exposes_default_policy():
+def test_default_policy_permits_nothing():
+    """The starting policy grants no capability at all: every tool has to be
+    approved by the user or named in their own config/--allow-tool."""
     policy = build_default_policy()
     assert isinstance(policy, Policy)
-    # Default policy permits the built-in core tools.
-    assert policy.is_allowed("read_file")
-    assert policy.is_allowed("shell", {"command": "git status"})
+    for name in ("read_file", "write_file", "edit_file", "apply_patch", "glob", "grep", "list_dir"):
+        assert not policy.is_allowed(name, {"path": "x", "pattern": "x"})
+    assert not policy.is_allowed("shell", {"command": "git status"})
 
 
 def test_build_default_policy_audit_log_is_off_unless_requested(tmp_path, monkeypatch):
@@ -245,12 +247,13 @@ def test_build_default_policy_audit_log_can_be_turned_on(tmp_path, monkeypatch):
     assert os.path.exists(policy.audit.path)
 
 
-def test_default_policy_allows_shell_scope():
-    policy = Policy()
-    policy.allow_all_core_tools()
-    assert policy.is_allowed("shell", {"command": "git status"})
-    assert policy.is_allowed("shell", {"command": "python -m cobirb"})
-    assert not policy.is_allowed("shell", {"command": "rm -rf /"})
+def test_default_policy_accepts_user_supplied_rules():
+    """Nothing is pre-approved, but the user's own rules are honoured — this
+    is the escape hatch that makes a deny-everything default workable."""
+    policy = build_default_policy()
+    policy.allow("shell", "python -m pytest")
+    assert policy.is_allowed("shell", {"command": "python -m pytest tests/"})
+    assert not policy.is_allowed("shell", {"command": "python -c 'print(1)'"})
 
 
 def test_loader_registers_core_plugins():
@@ -437,8 +440,13 @@ def test_unpermitted_tool_approved_always_updates_policy(tmp_path):
     session = orchestrator.run("read file", "sys", cwd=str(tmp_path))
 
     assert _tool_turn(session).content == "hello"
-    # "always" must update the policy so a later call skips the prompt.
-    assert policy.is_allowed("read_file")
+    # "always" on a read grants the file's whole directory, so a later read
+    # of a sibling — or of something in a subdirectory — skips the prompt.
+    (tmp_path / "sub").mkdir()
+    assert policy.is_allowed("read_file", {"path": str(tmp_path / "b.txt")})
+    assert policy.is_allowed("read_file", {"path": str(tmp_path / "sub" / "c.txt")})
+    # ...but it grants reading only. Writing there still has to be asked.
+    assert not policy.is_allowed("write_file", {"path": str(tmp_path / "b.txt")})
 
 
 def test_unpermitted_shell_approved_always_narrows_to_exact_command(tmp_path):

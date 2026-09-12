@@ -36,19 +36,29 @@ class ApprovalModal(ModalScreen[str]):
         Binding("escape", "decide('deny')", "Deny", show=False),
     ]
 
-    def __init__(self, tool_name: str, arguments: dict[str, Any]) -> None:
+    def __init__(self, tool_name: str, arguments: dict[str, Any], scope: str | None = None) -> None:
         super().__init__()
         self._tool_name = tool_name
         self._arguments = arguments
+        # What "always" would actually grant (Policy.describe_grant). Shown
+        # on the Always button and spelled out in the body, because approving
+        # a read widens access to a whole directory tree — agreeing to that
+        # from a dialog that only named one file would be agreeing blind.
+        self._scope = scope
 
     def compose(self) -> ComposeResult:
-        detail = self._arguments.get("command") or self._arguments.get("path") or ""
+        args = self._arguments
+        detail = args.get("command") or args.get("path") or args.get("pattern") or ""
         body = Text()
         body.append("Allow ", style="bold")
         body.append(self._tool_name, style="bold yellow")
         if detail:
             body.append(f"\n{detail}", style="dim")
         body.append("\n\nThis tool is not yet permitted for this session.", style="dim")
+        if self._scope:
+            body.append("\nAlways will ", style="dim")
+            body.append(self._scope, style="bold")
+            body.append(" for the rest of this session.", style="dim")
         with VerticalScroll(id="approval-dialog"):
             yield Static(body, id="approval-body")
             with Horizontal(id="approval-buttons"):

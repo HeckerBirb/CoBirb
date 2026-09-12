@@ -56,9 +56,22 @@ class TerminalIO(I_OAdapter):
         return None
 
     def confirm(self, tool_name: str, arguments: dict[str, Any]) -> str:
-        detail = arguments.get("command") or arguments.get("path") or ""
+        return self._ask(tool_name, arguments, None)
+
+    def confirm_scoped(self, tool_name: str, arguments: dict[str, Any], scope: str) -> str:
+        """``confirm``, but able to say what "always" would actually grant.
+
+        Optional hook (see ``Orchestrator._request_approval``). It matters
+        most for reads, where "always" approves a whole directory tree rather
+        than the one file named in the question.
+        """
+        return self._ask(tool_name, arguments, scope)
+
+    def _ask(self, tool_name: str, arguments: dict[str, Any], scope: str | None) -> str:
+        detail = arguments.get("command") or arguments.get("path") or arguments.get("pattern") or ""
         suffix = f" ({detail})" if detail else ""
-        prompt = f"\nAllow '{tool_name}'{suffix}? [y]es / [a]lways this session / [N]o: "
+        always = f"[a]lways ({scope})" if scope else "[a]lways this session"
+        prompt = f"\nAllow '{tool_name}'{suffix}? [y]es once / {always} / [N]o: "
         try:
             answer = input(prompt).strip().lower()
         except (EOFError, KeyboardInterrupt):

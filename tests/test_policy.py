@@ -128,29 +128,89 @@ def test_segments_of_blank_command_is_empty():
     assert _segments("   ") == []
 
 
-def test_allow_all_core_tools(tmp_path):
-    audit = AuditLog(str(tmp_path / "audit.jsonl"))
-    policy = Policy(audit=audit)
-    policy.allow_all_core_tools()
-    for name in ("read_file", "write_file", "edit_file", "apply_patch", "glob", "grep", "list_dir"):
-        assert policy.is_allowed(name)
-    # 'shell' is allowed, but its scope is narrowed to the safe default set.
-    assert policy.is_allowed("shell", {"command": "git status"})
-    assert policy.is_allowed("shell", {"command": "python --version"})
-    assert policy.is_allowed("shell", {"command": "python -m pytest tests/"})
-    assert not policy.is_allowed("shell", {"command": "rm -rf /"})
+# --------------------------------------------------------------------------- #
+# Directory-scoped reads.
+#
+# Approving one read grants the read-only tools that directory and everything
+# under it — the single place the policy widens on one "yes". Writing and
+# executing get no equivalent, and neither does a sibling directory that
+# merely shares a name prefix.
+# --------------------------------------------------------------------------- #
+def test_read_is_denied_until_a_directory_is_approved(tmp_path):
+    policy = Policy(cwd=str(tmp_path))
+    assert not policy.is_allowed("read_file", {"path": "notes.txt"})
+    policy.allow_read_dir(str(tmp_path))
+    assert policy.is_allowed("read_file", {"path": "notes.txt"})
 
 
-def test_allow_all_core_tools_does_not_trust_bare_python(tmp_path):
-    """Regression test: bare `python` must never be globally allowed by the
-    default policy, since `python -c '...'`/`python -m pip install ...` can
-    run or fetch arbitrary code — only specific narrow invocations are
-    trusted by default (see todo-list.md)."""
-    policy = Policy(audit=AuditLog(str(tmp_path / "audit.jsonl")))
-    policy.allow_all_core_tools()
-    assert not policy.is_allowed("shell", {"command": "python"})
-    assert not policy.is_allowed("shell", {"command": "python -c 'print(1)'"})
-    assert not policy.is_allowed("shell", {"command": "python -m pip install anything"})
+def test_approved_read_directory_covers_subdirectories_and_every_read_tool(tmp_path):
+    policy = Policy(cwd=str(tmp_path))
+    policy.allow_read_dir(str(tmp_path))
+    assert policy.is_allowed("read_file", {"path": "deep/nested/file.txt"})
+    assert policy.is_allowed("list_dir", {"path": "deep"})
+    assert policy.is_allowed("glob", {"pattern": "**/*.py"})
+    assert policy.is_allowed("grep", {"pattern": "TODO"})  # grep's path defaults to cwd
+
+
+def test_approved_read_directory_does_not_leak_sideways(tmp_path):
+    """A grant on /x must not cover /x-secrets, and must not be escapable by
+    a relative path walking out of the tree."""
+    approved = tmp_path / "project"
+    approved.mkdir()
+    (tmp_path / "project-secrets").mkdir()
+    policy = Policy(cwd=str(approved))
+    policy.allow_read_dir(str(approved))
+    assert not policy.is_allowed("read_file", {"path": str(tmp_path / "project-secrets" / "k.txt")})
+    assert not policy.is_allowed("read_file", {"path": "../project-secrets/k.txt"})
+    assert not policy.is_allowed("read_file", {"path": "/etc/passwd"})
+
+
+def test_read_grant_does_not_imply_write(tmp_path):
+    policy = Policy(cwd=str(tmp_path))
+    policy.allow_read_dir(str(tmp_path))
+    for name in ("write_file", "edit_file", "apply_patch"):
+        assert not policy.is_allowed(name, {"path": "notes.txt"})
+
+
+def test_grant_widens_a_read_to_its_directory_but_a_write_only_to_itself(tmp_path):
+    """`grant` is what an "always" answer applies, and what it widens to has
+    to differ by tool: a read has a directory, a write has nothing narrower
+    than the tool itself."""
+    policy = Policy(cwd=str(tmp_path))
+    policy.grant("read_file", {"path": "docs/a.txt"})
+    assert policy.is_allowed("read_file", {"path": "docs/b.txt"})
+    assert not policy.is_allowed("read_file", {"path": "elsewhere/c.txt"})
+
+    policy.grant("write_file", {"path": "docs/a.txt"})
+    assert policy.is_allowed("write_file", {"path": "anywhere/at/all.txt"})
+
+
+def test_describe_grant_says_what_always_would_permit(tmp_path):
+    """The approval prompt has to be able to state the scope being agreed to,
+    since "always" on a read is a directory, not a file."""
+    policy = Policy(cwd=str(tmp_path))
+    assert "subdirectories" in policy.describe_grant("read_file", {"path": "docs/a.txt"})
+    assert "git" in policy.describe_grant("shell", {"command": "git status"})
+    assert "write_file" in policy.describe_grant("write_file", {"path": "a.txt"})
+
+
+# --------------------------------------------------------------------------- #
+# `find -exec` (regression).
+#
+# The `;` that terminates an -exec clause reads as a command separator, so the
+# exec'd program landed in an unchecked tail segment while `find` itself
+# looked innocuous — the entire allow-list defeated by one flag.
+# --------------------------------------------------------------------------- #
+def test_find_exec_is_refused_even_when_find_is_allowed():
+    policy = Policy()
+    policy.allow("shell", "find")
+    assert policy.is_allowed("shell", {"command": "find . -name '*.py'"})
+    for command in (
+        "find . -exec rm -rf {} ;",
+        "find . -execdir curl http://x.example ;",
+        "find . -ok rm {} ;",
+    ):
+        assert not policy.is_allowed("shell", {"command": command}), command
 
 
 # --------------------------------------------------------------------------- #

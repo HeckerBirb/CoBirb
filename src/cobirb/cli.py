@@ -130,22 +130,34 @@ def _build_system_prompt(persona: cobirb_typing.Persona, *, harness: bool = Fals
     return "\n".join([*blocks, *voice])
 
 
-def _parse_allow_tools(spec: str) -> dict[str, str]:
-    """Parse an ``--allow-tool`` override spec.
+def _parse_allow_tools(specs: "str | list[str] | None") -> dict[str, str]:
+    """Parse permission rules written by the user.
 
-    Accepts comma-separated entries; each may be ``name`` or ``name(arg)`` to
-    narrow the ``shell`` scope by its first word (e.g. ``shell(git)``).
+    Used for both ``--allow-tool`` (repeatable) and the ``allow_tools`` config
+    key (a list), which take the same syntax: each entry is ``name`` or
+    ``name(arg)``, where ``arg`` narrows the ``shell`` scope to an invocation
+    (e.g. ``shell(git)``, ``shell(python -m pytest)``). A single entry may
+    also carry several rules separated by commas.
+
+    This is the user's own escape hatch from the default-deny policy, which
+    now pre-approves nothing at all (see ``build_default_policy``) — anything
+    they want to run unattended, they say so here once.
     """
+    if specs is None:
+        specs = []
+    if isinstance(specs, str):
+        specs = [specs]
     allowed: dict[str, str] = {}
-    for entry in spec.split(","):
-        entry = entry.strip()
-        if not entry:
-            continue
-        if "(" in entry:
-            name, _, arg = entry.partition("(")
-            allowed[name.strip()] = arg.strip().rstrip(")").strip()
-        else:
-            allowed[entry] = ""
+    for spec in specs:
+        for entry in str(spec).split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            if "(" in entry:
+                name, _, arg = entry.partition("(")
+                allowed[name.strip()] = arg.strip().rstrip(")").strip()
+            else:
+                allowed[entry] = ""
     return allowed
 
 
@@ -559,9 +571,15 @@ def _build_orchestrator(
         except Exception as exc:  # noqa: BLE001 - fail closed to the core default
             _report_plugin_issues({"io": f"failed to instantiate: {exc}"})
 
-    policy = build_default_policy(audit_log_enabled=bool(_nested(config, "audit_log")))
-    for name, arg in allow_overrides.items():
-        policy.allow(name, arg)
+    # Nothing is permitted until the user says so. Config's `allow_tools`
+    # comes first and `--allow-tool` after it; both only ever add, so the
+    # order is about readability rather than precedence.
+    policy = build_default_policy(
+        audit_log_enabled=bool(_nested(config, "audit_log")), cwd=registry.cwd
+    )
+    for rules in (_parse_allow_tools(_nested(config, "allow_tools")), allow_overrides):
+        for name, arg in rules.items():
+            policy.allow(name, arg)
 
     crypto = None
     if session_path is not None:
@@ -819,7 +837,9 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="SPEC",
-        help="Override permission: 'name' or 'name(arg)' (e.g. 'shell(git),read_file'). Repeatable.",
+        help="Permit a tool up front: 'name' or 'name(arg)' (e.g. "
+        "'shell(git),read_file'). Repeatable, and equivalent to the "
+        "'allow_tools' config key. Without one, every tool call asks.",
     )
     opts.add_argument(
         "--plan-mode",
@@ -855,7 +875,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = Config(cwd=args.cwd)
-    allow_overrides = _parse_allow_tools(",".join(args.allow_tool))
+    allow_overrides = _parse_allow_tools(args.allow_tool)
     persona_name = args.persona or config.get("persona")
     persona = _load_persona(persona_name)
     harness = _resolve_harness_prompt(args.system_prompt, config)
@@ -988,8 +1008,10 @@ MODES
 
 PRIVACY BY CONSTRUCTION
   • Zero telemetry. • No outbound network by default. • Sessions encrypted
-    at rest (AES-256-GCM, keyed via scrypt). • Permissions default to
-    denied; no tool runs without approval. • No local audit log unless you
+    at rest (AES-256-GCM, keyed via scrypt). • Nothing is pre-approved: no
+    tool reads, writes, or runs anything until you say so. Approving a read
+    covers that directory and below; writing and running are asked every
+    time unless you allow them yourself. • No local audit log unless you
     opt in ("audit_log" in config — see 'cobirb help config'), since one
     would otherwise be a second, unencrypted copy of what you write and
     run. • Everything stays on this machine.
@@ -1203,11 +1225,25 @@ TOOLS — what the agent can do
   list_dir       List a directory's contents.
   shell          Run a shell command. Highest privilege; gated.
 
-Every tool call is default-deny: an unpermitted call prompts you to allow
-it once, always (for the rest of this run), or deny it. Narrow a scope with
---allow-tool='name' or --allow-tool='name(arg)' (e.g. 'shell(git)' allows
-only commands whose first word is 'git'); repeat the flag for more than
-one. Third-party tool plugins extend this list — see 'cobirb help plugins'.
+Nothing is permitted up front. Every tool call you haven't already allowed
+prompts you to permit it once, always, or not at all — and what "always"
+covers depends on the tool:
+
+  read_file, list_dir,   The directory the call names, and everything under
+  glob, grep             it. Say yes once for a project and CoBirb can read
+                         it without asking again.
+  write_file, edit_file, The tool itself, for the rest of the run. There is
+  apply_patch            no directory shortcut for changing files.
+  shell                  Exactly the invocation you approved — 'git' if you
+                         approved a bare binary, 'python -m pytest' if you
+                         approved that. Never more.
+
+To skip the prompts for things you always want, list them yourself with
+--allow-tool='name' or --allow-tool='name(arg)' (e.g. 'shell(git)'), repeat
+the flag, or set "allow_tools" in config. A command CoBirb cannot fully
+read — command substitution, a subshell, or find's -exec — is refused
+rather than guessed at. Third-party tool plugins extend this list and are
+gated identically — see 'cobirb help plugins'.
 """,
     "config": """\
 CONFIG — user + repo scoped settings
@@ -1224,6 +1260,12 @@ Read from (repo overrides user): ~/.cobirb/config.json, then ./cobirb.json
       "name": "...", "base_url": "..."}}  Model name/endpoint (local Ollama
                                  by default; any OpenAI-compatible server
                                  works).
+  "allow_tools"                  Permission rules you always want, as a list
+                                 in --allow-tool's syntax, e.g.
+                                 ["read_file", "shell(git)",
+                                  "shell(python -m pytest)"].
+                                 Nothing is permitted without a rule here or
+                                 an approval at the prompt.
   "persona"                      Persona to adopt by default (or --persona).
                                  Unset means none: the model keeps its voice.
   "system_prompt"                "off" (default) or "harness" — whether
