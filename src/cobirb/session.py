@@ -134,7 +134,11 @@ class Session:
     schema: int = 1
     created_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     working_dir: str = "."
-    persona: str = "noah"
+    # "none" rather than "noah": personas are opt-in, so a session that
+    # doesn't record one must reload without one. This defaulted to "noah"
+    # from before that changed, which meant a persona-less session file came
+    # back wearing a costume nobody had asked for.
+    persona: str = "none"
     turns: list[Turn] = field(default_factory=list)
     summary: str | None = None
     # Set only when a run used plan mode (Orchestrator.run(plan_mode=True)):
@@ -166,7 +170,7 @@ class Session:
             schema=data.get("schema", 1),
             created_at=data.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             working_dir=data.get("working_dir", "."),
-            persona=data.get("persona", "noah"),
+            persona=data.get("persona", "none"),
             turns=[Turn.from_dict(t) for t in data.get("turns", [])],
             summary=data.get("summary"),
             validation=data.get("validation"),
@@ -185,7 +189,7 @@ class SessionManager:
         path: str,
         crypto: Any,
         working_dir: str = ".",
-        persona: str = "noah",
+        persona: str = "none",
         password: str | None = None,
     ) -> None:
         # `password` is accepted for call-compatibility but deliberately not
@@ -204,7 +208,7 @@ class SessionManager:
         path: str,
         crypto: Any,
         working_dir: str = ".",
-        persona: str = "noah",
+        persona: str = "none",
         password: str | None = None,
     ) -> "SessionManager":
         manager = cls(path, crypto, working_dir, persona, password)
@@ -217,7 +221,7 @@ class SessionManager:
 
     @classmethod
     def load(
-        cls, path: str, crypto: Any, password: str | None, working_dir: str = ".", persona: str = "noah"
+        cls, path: str, crypto: Any, password: str | None, working_dir: str = ".", persona: str = "none"
     ) -> "SessionManager":
         """Load an existing session, verifying turn hashes against the file.
 

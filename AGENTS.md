@@ -394,10 +394,8 @@ Env: `COBIRB_HOME` (relocates the whole `.cobirb` tree — how tests isolate), `
 
 Recorded so they aren't rediscovered or "fixed" mid-discussion.
 
-- **B2 — malformed config JSON tracebacks** out of every command, `cobirb help` included.
 - **B3 — user personas are read from `~/cobirb/`** while config, sessions, audit and plugins all use
   `~/.cobirb/`.
-- **B4 — `session.py` still defaults `persona` to `"noah"`** in four places, predating opt-in.
 - **S1/S2 — `cli.py` is the composition root.** `tui/app.py` imports twelve private `cli._*`
   functions because the wiring has nowhere else to live; the underscores are fiction.
 

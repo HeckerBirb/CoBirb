@@ -7,14 +7,38 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import Any
 
 
 def _load(path: str | None) -> dict[str, Any]:
+    """Read one config layer, reporting and skipping anything unreadable.
+
+    A stray comma used to escape as a raw ``JSONDecodeError`` from whichever
+    command happened to construct a ``Config`` — which is all of them,
+    including ``cobirb help``, which never reads a config key. Everywhere else
+    in this codebase a broken input is reported and stepped over; these two
+    layers were the exception.
+
+    Reported to stderr and skipped, rather than exiting: the other layer may
+    be perfectly good, and losing a run because the *user-scoped* file has a
+    typo in it would be a worse trade. The message names the file so the typo
+    is findable.
+    """
     if not path or not os.path.isfile(path):
         return {}
-    with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"cobirb: ignoring {path} — {exc}", file=sys.stderr)
+        return {}
+    if not isinstance(data, dict):
+        # Valid JSON, wrong shape: a list or a bare string would break the
+        # merge below in a much less obvious place.
+        print(f"cobirb: ignoring {path} — expected a JSON object", file=sys.stderr)
+        return {}
+    return data
 
 
 def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

@@ -96,15 +96,20 @@ def test_set_overwrites_a_non_dict_value_that_is_in_the_way():
     assert config.get("a", "b") == "x"
 
 
-def test_malformed_json_config_file_raises_rather_than_being_silently_ignored(tmp_path):
-    """A config file that exists but fails to parse should fail loudly
-    (surfacing the user's typo), not silently behave like an empty/missing
-    config — that would hide a real mistake from them."""
+def test_malformed_json_config_file_is_reported_but_not_silently_ignored(tmp_path, capsys):
+    """A config file that exists but fails to parse must not be treated as
+    if it were missing — that would hide a real mistake. It is reported by
+    name, with the parse error, and then skipped: raising instead took down
+    every command including ones that read no config at all."""
     user_path = tmp_path / "user.json"
     user_path.write_text("{not valid json")
 
-    with pytest.raises(json.JSONDecodeError):
-        Config(user_path=str(user_path), repo_path=str(tmp_path / "no-repo.json"))
+    config = Config(user_path=str(user_path), repo_path=str(tmp_path / "no-repo.json"))
+
+    assert config.data == {}
+    err = capsys.readouterr().err
+    assert str(user_path) in err
+    assert "ignoring" in err
 
 
 def test_bundled_example_config_is_valid_and_loadable(tmp_path):
@@ -117,3 +122,33 @@ def test_bundled_example_config_is_valid_and_loadable(tmp_path):
     assert config.get("default_model")
     assert config.get("models", "default", "name")
     assert config.get("persona")
+
+
+def test_a_malformed_config_is_reported_and_skipped_not_fatal(tmp_path, capsys):
+    """A stray comma used to traceback out of every command, `cobirb help`
+    included — it constructs a Config too, and never reads a key from it."""
+    (tmp_path / "cobirb.json").write_text('{"default_model": "m",}')
+
+    config = Config(cwd=str(tmp_path))
+
+    assert config.get("default_model") is None
+    assert "ignoring" in capsys.readouterr().err
+
+
+def test_a_config_that_is_valid_json_but_not_an_object_is_skipped(tmp_path, capsys):
+    (tmp_path / "cobirb.json").write_text('["not", "an", "object"]')
+
+    assert Config(cwd=str(tmp_path)).data == {}
+    assert "expected a JSON object" in capsys.readouterr().err
+
+
+def test_a_broken_repo_config_does_not_discard_the_user_config(tmp_path, monkeypatch):
+    """The layers are independent: one being unreadable must not take the
+    other down with it."""
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    user = tmp_path / ".cobirb"
+    user.mkdir()
+    (user / "config.json").write_text('{"default_model": "from-user"}')
+    (tmp_path / "cobirb.json").write_text("{oops")
+
+    assert Config(cwd=str(tmp_path)).get("default_model") == "from-user"

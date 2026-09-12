@@ -240,3 +240,12 @@ def test_discover_sessions_reports_size_and_path(tmp_path):
 
     assert entry.path == str(path)
     assert entry.size == len("hello")
+
+
+def test_a_session_without_a_persona_reloads_without_one(tmp_path):
+    """Personas are opt-in, so a session file that records none must come
+    back with none. This defaulted to "noah" from before that changed, which
+    put a costume on a model the user had never asked to dress up."""
+    session = Session.from_dict({"turns": []})
+
+    assert session.persona == "none"

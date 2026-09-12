@@ -246,11 +246,27 @@ def _persona_key(persona: cobirb_typing.Persona) -> str:
     return persona.name
 
 
-def _load_json(path: str) -> dict[str, Any]:
+def _load_json(path: str) -> dict[str, Any] | None:
+    """Read a persona file, or ``None`` if it can't be read.
+
+    A malformed persona file used to traceback out of the whole run. It is
+    reported and treated as a persona that couldn't be found — which lands
+    on the same "continuing without one" path a typo already takes, and for
+    the same reason: a broken costume is not worth losing the conversation
+    over.
+    """
     import json
 
-    with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"cobirb: could not read persona {path} — {exc}", file=sys.stderr)
+        return None
+    if not isinstance(data, dict):
+        print(f"cobirb: could not read persona {path} — expected a JSON object", file=sys.stderr)
+        return None
+    return data
 
 
 def _resolve_harness_prompt(cli_value: str | None, config: Config) -> bool:
