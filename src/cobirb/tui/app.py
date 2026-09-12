@@ -6,9 +6,9 @@ input, a transcript of Rich panels, and tool approval as a modal instead of a
 ``[y]es / [a]lways / [N]o:`` line.
 
 What it is *not* is a second copy of the CLI. Every bit of wiring one-shot
-mode does — ``cli._build_orchestrator``, ``cli._load_persona``,
-``cli._build_system_prompt``, ``cli._apply_persona_switch``,
-``cli._apply_plan_toggle`` — is reused verbatim here, and ``Orchestrator``
+mode does — ``wiring.build_orchestrator``, ``personas.load_persona``,
+``personas.build_system_prompt``, ``commands.apply_persona_switch``,
+``commands.apply_plan_toggle`` — is reused verbatim here, and ``Orchestrator``
 itself is untouched: it stays a synchronous blocking call, driven from a
 Textual thread worker and bridged back to the UI thread by ``TuiIO``.
 
@@ -34,10 +34,12 @@ from textual.binding import Binding
 from textual.containers import Container
 from textual.widgets import Footer, Header, Input, RichLog, TabbedContent, TabPane
 
-from .. import cli, session
+from .. import session
+from ..help_text import HELP_TEXT, HELP_TOPICS
+from ..runtime import commands, personas, plugins, wiring
 from ..config import Config
 from ..orchestrator import Orchestrator, render_through
-from ..plugins.core import render
+from ..plugins.core import persona_shapes_voice, render
 from ..policy import PermissionError
 from ..typing import spi as cobirb_typing
 from .io_bridge import TuiIO
@@ -124,7 +126,7 @@ class CoBirbApp(App[None]):
         self.orchestrator: Orchestrator | None = None
         # Resolved once, for the status bar — the orchestrator that would
         # know the real name doesn't exist yet at mount time.
-        self.resolved_model_name = cli._resolve_model_name(model_name, cwd)
+        self.resolved_model_name = wiring.resolve_model_name(model_name, cwd)
         self.ui_thread_id = threading.get_ident()
         # True for exactly the span between submitting a prompt and
         # _on_turn_finished — see action_cancel_turn and action_quit, which
@@ -383,7 +385,7 @@ class CoBirbApp(App[None]):
             return
 
         if prompt.startswith("/plan"):
-            self.plan_mode, message = cli._apply_plan_toggle(prompt[len("/plan"):], self.plan_mode)
+            self.plan_mode, message = commands.apply_plan_toggle(prompt[len("/plan"):], self.plan_mode)
             self.query_one(StatusBar).plan_mode = self.plan_mode
             self.write_transcript(render.build_notice(message))
             return
@@ -425,7 +427,7 @@ class CoBirbApp(App[None]):
         """
         try:
             if self.orchestrator is None:
-                self.orchestrator = cli._build_orchestrator(
+                self.orchestrator = wiring.build_orchestrator(
                     self.cwd,
                     self.persona,
                     self.allow_overrides,
@@ -464,7 +466,7 @@ class CoBirbApp(App[None]):
     def _render_final_answer(self, summary: str) -> None:
         """Show a finished, non-streamed reply.
 
-        Deliberately not ``cli._render_final_answer``: that one falls back to
+        Deliberately not ``cli._render_final_answer``: the CLI's version falls back to
         a bare ``print()`` for an adapter with no ``render_answer`` hook,
         which in a full-screen app would paint a line straight over the
         layout. Here the fallback is the TUI's own bridge, so the answer
@@ -509,7 +511,7 @@ class CoBirbApp(App[None]):
         self.call_from_thread(self._set_prompt_disabled, True)
         try:
             try:
-                models = cli._build_model(None, self.cwd).list_models()
+                models = wiring.build_model(None, self.cwd).list_models()
             except Exception as exc:  # noqa: BLE001 - report, never crash the app over this
                 if not auto or not self.model_name:
                     self.call_from_thread(
@@ -555,7 +557,7 @@ class CoBirbApp(App[None]):
 
     def _apply_selected_model(self, name: str) -> None:
         self.model_name = name
-        self.resolved_model_name = cli._resolve_model_name(name, self.cwd)
+        self.resolved_model_name = wiring.resolve_model_name(name, self.cwd)
         self.query_one(StatusBar).model_name = self.resolved_model_name
         # A model provider plugin swap is a config-time decision (plugins.model);
         # /model only ever manages the core, OpenAI-compatible provider, so it's
@@ -563,7 +565,7 @@ class CoBirbApp(App[None]):
         # that already exists, rather than rebuilding the whole thing (which
         # would also discard any "always allow" approvals from this session).
         if self.orchestrator is not None:
-            self.orchestrator.model = cli._build_model(name, self.cwd)
+            self.orchestrator.model = wiring.build_model(name, self.cwd)
         self.write_transcript(render.build_notice(f"Model set to {name}."))
 
     # ------------------------------------------------------------------ #
@@ -577,7 +579,7 @@ class CoBirbApp(App[None]):
         there is nothing to block on and ``push_screen`` with a callback is
         enough.
         """
-        current = cli.NO_PERSONA if not cli.persona_shapes_voice(self.persona) else None
+        current = personas.NO_PERSONA if not persona_shapes_voice(self.persona) else None
         if current is None:
             # Match by the name the picker lists (the file/bundle name), not
             # the persona's display name — "kawaii" is the option, "Momo" or
@@ -585,13 +587,13 @@ class CoBirbApp(App[None]):
             current = next(
                 (
                     name
-                    for name in cli._available_personas()
-                    if cli._load_persona(name).name == self.persona.name
+                    for name in personas.available_personas()
+                    if personas.load_persona(name).name == self.persona.name
                 ),
                 None,
             )
         self.push_screen(
-            PersonaPickerModal(cli._available_personas(), current), self._on_persona_picked
+            PersonaPickerModal(personas.available_personas(), current), self._on_persona_picked
         )
 
     def _on_persona_picked(self, name: str | None) -> None:
@@ -599,7 +601,7 @@ class CoBirbApp(App[None]):
             self._apply_persona(name)
 
     def _apply_persona(self, name: str) -> None:
-        self.persona, self.system, message = cli._apply_persona_switch(
+        self.persona, self.system, message = commands.apply_persona_switch(
             name, self.persona, self.system, harness=self.harness
         )
         self.query_one(StatusBar).persona_name = self.persona.name
@@ -614,7 +616,7 @@ class CoBirbApp(App[None]):
     @work(thread=True, exclusive=True, group="plugins")
     def _describe_plugins_worker(self) -> None:
         try:
-            summary = cli.describe_plugins(self.cwd)
+            summary = plugins.describe_plugins(self.cwd)
         except Exception as exc:  # noqa: BLE001 - show it in the pane, don't crash the app
             self.call_from_thread(self.query_one(PluginsPane).render_error, str(exc))
             return
@@ -651,10 +653,10 @@ class CoBirbApp(App[None]):
         self.call_from_thread(self.query_one(SessionsPane).set_status, "Unlocking…")
         try:
             config = Config(cwd=self.cwd)
-            _, discovered, _ = cli._discover_plugins(self.cwd, config)
-            crypto, _ = cli._build_crypto(config, discovered)
+            _, discovered, _ = plugins.discover_plugins(self.cwd, config)
+            crypto, _ = plugins.build_crypto(config, discovered)
             manager = session.SessionManager.load(
-                path, crypto, password, self.cwd, cli._persona_key(self.persona)
+                path, crypto, password, self.cwd, personas.persona_key(self.persona)
             )
         except Exception as exc:  # noqa: BLE001 - wrong password/corruption is routine, not fatal
             self.call_from_thread(
@@ -671,8 +673,8 @@ class CoBirbApp(App[None]):
         # _build_orchestrator already uses for --session, so there is only
         # one code path that ever opens a session file, tested once.
         self.orchestrator = None
-        self.persona = cli._load_persona(manager.session.persona)
-        self.system = cli._build_system_prompt(self.persona, harness=self.harness)
+        self.persona = personas.load_persona(manager.session.persona)
+        self.system = personas.build_system_prompt(self.persona, harness=self.harness)
         status = self.query_one(StatusBar)
         status.persona_name = self.persona.name
         status.session_path = path
@@ -733,11 +735,11 @@ class CoBirbApp(App[None]):
     # Actions
     # ------------------------------------------------------------------ #
     def action_help(self, topic: str = "") -> None:
-        text = cli._HELP_TOPICS.get(topic, cli._HELP_TEXT) if topic else cli._HELP_TEXT
-        if topic and topic not in cli._HELP_TOPICS:
+        text = HELP_TOPICS.get(topic, HELP_TEXT) if topic else HELP_TEXT
+        if topic and topic not in HELP_TOPICS:
             text = (
-                f"No help topic '{topic}'. Available: {', '.join(sorted(cli._HELP_TOPICS))}\n\n"
-                + cli._HELP_TEXT
+                f"No help topic '{topic}'. Available: {', '.join(sorted(HELP_TOPICS))}\n\n"
+                + HELP_TEXT
             )
         self.push_screen(HelpModal(text))
 

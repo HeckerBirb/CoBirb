@@ -1,7 +1,7 @@
 """Tests for interactive mode's Textual app (``cobirb.tui``).
 
 Driven through ``CoBirbApp.run_test()`` -> ``Pilot``, with
-``cobirb.tui.app.cli._build_orchestrator`` monkeypatched to hand back a stub
+``cobirb.tui.app.wiring.build_orchestrator`` monkeypatched to hand back a stub
 orchestrator — the same style ``test_cli.py`` uses for the CLI's own wiring,
 so no test here needs a real model.
 
@@ -28,7 +28,8 @@ from textual.widgets.option_list import Option
 
 from conftest import StubSession, StubSessionManager
 
-from cobirb import cli, session
+from cobirb import cli, help_text, session
+from cobirb.runtime import commands, personas, plugins, sessions, wiring
 from cobirb.tui.app import CoBirbApp
 from cobirb.tui.panes import PluginsPane, SessionsPane
 from cobirb.tui.screens import (
@@ -126,13 +127,13 @@ def _stub_build(orchestrator=None, record=None):
 
 
 def _make_app(**overrides) -> CoBirbApp:
-    persona = cli._load_persona(overrides.pop("persona_name", None))
+    persona = personas.load_persona(overrides.pop("persona_name", None))
     # Built here rather than taken as a plain string so `system` and
     # `harness` can't disagree — the real CLI derives one from the other.
     harness = overrides.get("harness", False)
     kwargs = dict(
         persona=persona,
-        system=cli._build_system_prompt(persona, harness=harness),
+        system=personas.build_system_prompt(persona, harness=harness),
         allow_overrides={},
         session_path=None,
         password=None,
@@ -254,7 +255,7 @@ async def test_the_sessions_and_plugins_tabs_hold_real_panes_not_placeholders():
 # --------------------------------------------------------------------------- #
 async def test_submitting_a_prompt_disables_the_input_runs_the_turn_and_re_enables_it(monkeypatch):
     orchestrator = _StubOrchestrator()
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -274,7 +275,7 @@ async def test_a_blank_submission_never_builds_an_orchestrator(monkeypatch):
     def fail_if_called(*args, **kwargs):
         raise AssertionError("orchestrator should not be built for a blank prompt")
 
-    monkeypatch.setattr(cli, "_build_orchestrator", fail_if_called)
+    monkeypatch.setattr(wiring, "build_orchestrator", fail_if_called)
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -289,7 +290,7 @@ async def test_the_orchestrator_is_built_once_and_reused_across_turns(monkeypatc
     silently stop applying on the next turn."""
     builds = []
     orchestrator = _StubOrchestrator()
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator, record=builds))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator, record=builds))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -307,7 +308,7 @@ async def test_the_tui_passes_its_own_io_bridge_into_the_orchestrator(monkeypatc
     """Without this, the orchestrator would render through the default
     ``TerminalIO`` and print straight over the full-screen app."""
     builds = []
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(record=builds))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(record=builds))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -321,7 +322,7 @@ async def test_the_tui_passes_its_own_io_bridge_into_the_orchestrator(monkeypatc
 
 async def test_a_permission_error_is_reported_and_the_input_comes_back(monkeypatch):
     orchestrator = _StubOrchestrator(run_raises=cli.PermissionError("nope"))
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -335,7 +336,7 @@ async def test_a_permission_error_is_reported_and_the_input_comes_back(monkeypat
 
 async def test_an_unexpected_error_is_reported_and_the_input_comes_back(monkeypatch):
     orchestrator = _StubOrchestrator(run_raises=RuntimeError("model exploded"))
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -357,7 +358,7 @@ async def test_a_failure_while_building_the_orchestrator_still_re_enables_the_in
     def explode(*args, **kwargs):
         raise RuntimeError("config is broken")
 
-    monkeypatch.setattr(cli, "_build_orchestrator", explode)
+    monkeypatch.setattr(wiring, "build_orchestrator", explode)
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -368,7 +369,7 @@ async def test_a_failure_while_building_the_orchestrator_still_re_enables_the_in
 
 async def test_the_session_is_saved_after_a_successful_turn(monkeypatch):
     orchestrator = _StubOrchestrator(with_session_manager=True)
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
 
     app = _make_app(session_path="/tmp/s.json", password="pw")
     async with app.run_test() as pilot:
@@ -383,7 +384,7 @@ async def test_the_session_is_saved_after_a_successful_turn(monkeypatch):
 
 async def test_nothing_is_saved_when_no_session_path_was_given(monkeypatch):
     orchestrator = _StubOrchestrator(with_session_manager=True)
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -430,7 +431,7 @@ class _CancellableOrchestrator(_StubOrchestrator):
 
 async def test_ctrl_c_cancels_a_stuck_turn_and_the_input_comes_back(monkeypatch):
     orchestrator = _CancellableOrchestrator()
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -449,7 +450,7 @@ async def test_ctrl_c_with_nothing_cancellable_does_not_touch_the_turn(monkeypat
     there's nothing this can interrupt, so it must say so and leave the
     turn running rather than pretending to have stopped anything."""
     orchestrator = _CancellableOrchestrator(shell_present=False)
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -530,7 +531,7 @@ async def test_persona_with_no_argument_opens_the_picker_without_building_anythi
     def fail_if_called(*args, **kwargs):
         raise AssertionError("orchestrator should not be built for /persona")
 
-    monkeypatch.setattr(cli, "_build_orchestrator", fail_if_called)
+    monkeypatch.setattr(wiring, "build_orchestrator", fail_if_called)
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -547,7 +548,7 @@ async def test_persona_with_no_argument_opens_the_picker_without_building_anythi
 
 async def test_persona_switch_updates_the_status_bar_and_later_turns(monkeypatch):
     builds = []
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(record=builds))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(record=builds))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -570,7 +571,7 @@ async def test_plan_status_reports_without_building_an_orchestrator(monkeypatch)
     def fail_if_called(*args, **kwargs):
         raise AssertionError("orchestrator should not be built for /plan")
 
-    monkeypatch.setattr(cli, "_build_orchestrator", fail_if_called)
+    monkeypatch.setattr(wiring, "build_orchestrator", fail_if_called)
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -608,7 +609,7 @@ async def test_plan_rejects_an_unrecognized_argument():
 
 async def test_plan_on_reaches_orchestrator_run(monkeypatch):
     orchestrator = _StubOrchestrator()
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -667,7 +668,7 @@ async def test_a_question_mark_inside_a_real_prompt_is_not_a_help_request(monkey
     """``?`` opens help only when it is the entire message — otherwise you
     could never ask CoBirb a question."""
     orchestrator = _StubOrchestrator()
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -698,7 +699,7 @@ def _confirming_orchestrator(decisions: list[str]):
 )
 async def test_the_approval_modal_returns_the_decision_to_the_worker(monkeypatch, key, expected):
     decisions: list[str] = []
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(_confirming_orchestrator(decisions)))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(_confirming_orchestrator(decisions)))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -721,7 +722,7 @@ async def test_the_approval_modal_returns_the_decision_to_the_worker(monkeypatch
 )
 async def test_the_approval_modal_buttons_resolve_the_same_way(monkeypatch, button, expected):
     decisions: list[str] = []
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(_confirming_orchestrator(decisions)))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(_confirming_orchestrator(decisions)))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -763,7 +764,7 @@ async def test_streamed_tokens_preview_live_and_land_in_the_transcript(monkeypat
         orchestrator.io.render("world")
         orchestrator.last_turn_streamed = True
 
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(_StubOrchestrator(on_run=on_run)))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(_StubOrchestrator(on_run=on_run)))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -785,7 +786,7 @@ async def test_a_panel_flushes_the_stream_first_so_ordering_is_preserved(monkeyp
         orchestrator.io.render("Noah: let me check.")
         orchestrator.io.render_tool_call("read_file", {"path": "note.txt"}, _Result("banana"))
 
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(_StubOrchestrator(on_run=on_run)))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(_StubOrchestrator(on_run=on_run)))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -810,7 +811,7 @@ async def test_the_spinner_label_shows_and_clears_on_the_status_bar(monkeypatch)
         with orchestrator.io.spinner("Noah is thinking…"):
             observed.append(orchestrator.io._app.query_one(StatusBar).busy)
 
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(_StubOrchestrator(on_run=on_run)))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(_StubOrchestrator(on_run=on_run)))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -866,7 +867,7 @@ async def test_the_final_answer_falls_back_to_the_bridge_for_an_adapter_without_
     the CLI's own fallback is a bare ``print()``, which in a full-screen app
     would paint a line straight over the layout."""
     orchestrator = _StubOrchestrator(io=object())  # no render_answer hook
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -928,7 +929,7 @@ async def test_the_bridge_dispatches_across_a_real_thread_boundary():
 # --------------------------------------------------------------------------- #
 # /model and the startup model check. These re-patch _select_model_worker
 # back to the real implementation (the autouse fixture above disables it by
-# default) and stub cli._build_model so no test hits a real network port.
+# default) and stub wiring.build_model so no test hits a real network port.
 # --------------------------------------------------------------------------- #
 class _FakeModelProvider:
     """Stands in for LocalModelProvider: reports a fixed model list, or
@@ -955,7 +956,7 @@ def _stub_list_models(monkeypatch, models=None, raises=None):
         return provider
 
     monkeypatch.setattr(CoBirbApp, "_select_model_worker", _REAL_SELECT_MODEL_WORKER)
-    monkeypatch.setattr(cli, "_build_model", fake_build_model)
+    monkeypatch.setattr(wiring, "build_model", fake_build_model)
 
 
 async def test_manual_model_command_opens_the_picker_with_the_fetched_list(monkeypatch):
@@ -998,7 +999,7 @@ async def test_selecting_a_model_hot_swaps_an_existing_orchestrators_model(monke
     *next* turn without discarding the orchestrator (which would also lose
     any "always allow" approvals from this session)."""
     orchestrator = _StubOrchestrator()
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
     _stub_list_models(monkeypatch, models=["llama3.1", "gemma4"])
 
     app = _make_app(model_name="gemma4")
@@ -1066,7 +1067,7 @@ async def test_model_command_with_an_argument_is_rejected_without_fetching(monke
             return super().list_models()
 
     monkeypatch.setattr(CoBirbApp, "_select_model_worker", _REAL_SELECT_MODEL_WORKER)
-    monkeypatch.setattr(cli, "_build_model", lambda *a, **k: _Tracking([]))
+    monkeypatch.setattr(wiring, "build_model", lambda *a, **k: _Tracking([]))
 
     # model_name=None means the startup check *does* fetch once (there's
     # nothing configured to validate) — the assertion below is on the count
@@ -1165,13 +1166,13 @@ async def test_plugins_pane_shows_the_registered_tools_and_active_slots():
 
 async def test_plugins_pane_refresh_button_repopulates_it(monkeypatch):
     calls = []
-    real_describe = cli.describe_plugins
+    real_describe = plugins.describe_plugins
 
     def counting_describe(cwd):
         calls.append(1)
         return real_describe(cwd)
 
-    monkeypatch.setattr(cli, "describe_plugins", counting_describe)
+    monkeypatch.setattr(plugins, "describe_plugins", counting_describe)
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -1184,7 +1185,7 @@ async def test_plugins_pane_refresh_button_repopulates_it(monkeypatch):
 
 
 async def test_plugins_pane_shows_an_error_instead_of_crashing_on_discovery_failure(monkeypatch):
-    monkeypatch.setattr(cli, "describe_plugins", lambda cwd: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(plugins, "describe_plugins", lambda cwd: (_ for _ in ()).throw(RuntimeError("boom")))
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -1349,7 +1350,7 @@ async def test_resuming_discards_an_already_built_orchestrator(monkeypatch):
     whatever orchestrator was already active. See TextPromptModal's
     ``on_input_submitted`` (``event.stop()``) for the fix."""
     orchestrator = _StubOrchestrator()
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -1570,7 +1571,7 @@ def test_history_entries_cannot_be_mutated_by_a_caller():
 
 
 async def test_up_and_down_walk_the_prompt_history(monkeypatch):
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build())
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build())
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -1593,7 +1594,7 @@ async def test_up_and_down_walk_the_prompt_history(monkeypatch):
 
 
 async def test_arrowing_back_down_past_the_newest_entry_restores_the_draft(monkeypatch):
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build())
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build())
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -1681,7 +1682,7 @@ async def test_the_transcript_allows_text_selection():
 # Telling "you" and the assistant apart
 # --------------------------------------------------------------------------- #
 async def test_a_submitted_prompt_is_marked_and_fenced_by_blank_lines(monkeypatch):
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build())
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build())
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -1780,7 +1781,7 @@ async def test_a_selected_span_is_highlighted_in_the_transcript():
 # /persona as a picker (the same shape as /model)
 # --------------------------------------------------------------------------- #
 async def test_choosing_a_persona_from_the_picker_applies_it(monkeypatch):
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build())
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build())
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -1880,12 +1881,12 @@ async def test_a_persona_switch_keeps_the_harness_choice_the_run_started_with():
     app = _make_app(harness=True)
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert app.system == cli._HARNESS_PROMPT
+        assert app.system == personas._HARNESS_PROMPT
 
         await _submit(pilot, app, "/persona noah")
         await pilot.pause()
 
-        assert app.system.startswith(cli._HARNESS_PROMPT)
+        assert app.system.startswith(personas._HARNESS_PROMPT)
         assert "African Grey Parrot" in app.system
 
 
@@ -1906,7 +1907,7 @@ def _marker_colours(app: CoBirbApp) -> list[tuple[str, str]]:
 async def test_prompts_and_replies_share_a_marker_in_different_colours(monkeypatch):
     """The requested shape: no "CoBirb:" label and no panel around replies —
     one column of `>` lines, told apart by the marker's colour."""
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build())
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build())
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -1923,7 +1924,7 @@ async def test_prompts_and_replies_share_a_marker_in_different_colours(monkeypat
 async def test_a_streamed_reply_is_marked_like_any_other(monkeypatch):
     """A streamed reply is flushed straight into the transcript rather than
     going through render_answer, so it needs marking on its own path."""
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build())
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build())
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -1989,7 +1990,7 @@ async def test_a_streamed_reply_carries_no_persona_label(monkeypatch):
             return SimpleNamespace(summary="Hello, how are you today?")
 
     orchestrator = _StreamingOrchestrator()
-    monkeypatch.setattr(cli, "_build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
 
     app = _make_app()
     async with app.run_test() as pilot:
