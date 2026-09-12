@@ -70,10 +70,3 @@ def build_default_persona() -> Persona:
         emoji_density="light",
         known_squawks=["Ha-ha!", "Done-done!", "Not today."],
     )
-
-
-def persona_to_json(persona: Persona) -> str:
-    """Serialize a persona to a JSON string."""
-    import json
-
-    return json.dumps(persona.to_dict(), indent=2)

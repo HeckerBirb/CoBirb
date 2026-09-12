@@ -510,6 +510,15 @@ class ToolRegistry:
         name = tool.name() if callable(tool.name) else tool.name
         self._tools[name] = tool
 
+    @property
+    def tools(self) -> dict[str, Tool]:
+        """The live name -> tool mapping the orchestrator dispatches against.
+
+        Public because the orchestrator is constructed with it; callers had
+        been reaching into ``registry._tools`` to get the same object.
+        """
+        return self._tools
+
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
 

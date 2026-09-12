@@ -425,11 +425,10 @@ class CoBirbApp(App[None]):
         """
         try:
             if self.orchestrator is None:
-                self.orchestrator, _, _ = cli._build_orchestrator(
+                self.orchestrator = cli._build_orchestrator(
                     self.cwd,
                     self.persona,
                     self.allow_overrides,
-                    self.system,
                     self.session_path,
                     self.password,
                     self.model_name,

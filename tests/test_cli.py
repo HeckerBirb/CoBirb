@@ -71,7 +71,7 @@ def test_config_allow_tools_permits_a_tool_without_a_prompt(tmp_path):
     """The user's own standing rules are the escape hatch from a policy that
     otherwise permits nothing — a tool named in config must run unprompted."""
     (tmp_path / "cobirb.json").write_text('{"allow_tools": ["read_file", "shell(git)"]}')
-    orchestrator, _, _ = _build_orchestrator(str(tmp_path), _load_persona(None), {}, "")
+    orchestrator = _build_orchestrator(str(tmp_path), _load_persona(None), {})
 
     assert orchestrator.policy.is_allowed("read_file", {"path": "anything.txt"})
     assert orchestrator.policy.is_allowed("shell", {"command": "git status"})
@@ -117,8 +117,8 @@ def test_build_orchestrator_creates_new_session_on_first_run(tmp_path):
     session_path = str(tmp_path / "new-session.json")
     persona = Persona(name="Noah")
 
-    orchestrator, _, _ = _build_orchestrator(
-        str(tmp_path), persona, {}, "system prompt", session_path, "pw"
+    orchestrator = _build_orchestrator(
+        str(tmp_path), persona, {}, session_path, "pw"
     )
 
     assert orchestrator.session is not None
@@ -134,7 +134,7 @@ def test_build_orchestrator_applies_allow_tool_overrides_to_the_policy(tmp_path)
     # A tool the default policy would not otherwise permit.
     allow_overrides = {"shell": "curl"}
 
-    orchestrator, _, _ = _build_orchestrator(str(tmp_path), persona, allow_overrides, "system prompt")
+    orchestrator = _build_orchestrator(str(tmp_path), persona, allow_overrides)
 
     assert orchestrator.policy.is_allowed("shell", {"command": "curl --version"})
     assert not orchestrator.policy.is_allowed("shell", {"command": "rm -rf /"})
@@ -147,14 +147,14 @@ def test_build_orchestrator_audit_log_is_off_by_default(tmp_path):
     being encrypted at rest. It must stay off unless "audit_log": true is
     set in config."""
     persona = Persona(name="Noah")
-    orchestrator, _, _ = _build_orchestrator(str(tmp_path), persona, {}, "system prompt")
+    orchestrator = _build_orchestrator(str(tmp_path), persona, {})
     assert orchestrator.policy.audit.enabled is False
 
 
 def test_build_orchestrator_audit_log_can_be_turned_on_via_config(tmp_path):
     (tmp_path / "cobirb.json").write_text('{"audit_log": true}')
     persona = Persona(name="Noah")
-    orchestrator, _, _ = _build_orchestrator(str(tmp_path), persona, {}, "system prompt")
+    orchestrator = _build_orchestrator(str(tmp_path), persona, {})
     assert orchestrator.policy.audit.enabled is True
 
 
@@ -163,15 +163,15 @@ def test_build_orchestrator_loads_existing_session_with_correct_password(tmp_pat
     session_path = str(tmp_path / "existing-session.json")
     persona = Persona(name="Noah")
 
-    orchestrator, _, _ = _build_orchestrator(
-        str(tmp_path), persona, {}, "system prompt", session_path, "correct-password"
+    orchestrator = _build_orchestrator(
+        str(tmp_path), persona, {}, session_path, "correct-password"
     )
     orchestrator.session.session.add_text("user", "hello")
     orchestrator.session.save("correct-password")
 
     # Re-open with the same password: must decrypt and recover the turn.
-    reopened, _, _ = _build_orchestrator(
-        str(tmp_path), persona, {}, "system prompt", session_path, "correct-password"
+    reopened = _build_orchestrator(
+        str(tmp_path), persona, {}, session_path, "correct-password"
     )
     assert [t.content for t in reopened.session.session.turns] == ["hello"]
 
@@ -180,13 +180,13 @@ def test_build_orchestrator_rejects_wrong_password_on_existing_session(tmp_path)
     session_path = str(tmp_path / "existing-session.json")
     persona = Persona(name="Noah")
 
-    orchestrator, _, _ = _build_orchestrator(
-        str(tmp_path), persona, {}, "system prompt", session_path, "correct-password"
+    orchestrator = _build_orchestrator(
+        str(tmp_path), persona, {}, session_path, "correct-password"
     )
     orchestrator.session.save("correct-password")
 
     try:
-        _build_orchestrator(str(tmp_path), persona, {}, "system prompt", session_path, "wrong-password")
+        _build_orchestrator(str(tmp_path), persona, {}, session_path, "wrong-password")
     except Exception:
         pass
     else:
@@ -201,8 +201,8 @@ def test_run_with_session_records_user_prompt(tmp_path):
     session_path = str(tmp_path / "session.json")
     persona = Persona(name="Noah")
 
-    orchestrator, _, _ = _build_orchestrator(
-        str(tmp_path), persona, {}, "system prompt", session_path, "pw"
+    orchestrator = _build_orchestrator(
+        str(tmp_path), persona, {}, session_path, "pw"
     )
     orchestrator.model = _DummyModel(reply="hi there")
 
@@ -220,8 +220,8 @@ def test_run_twice_with_same_session_accumulates_history(tmp_path):
     session_path = str(tmp_path / "session.json")
     persona = Persona(name="Noah")
 
-    orchestrator, _, _ = _build_orchestrator(
-        str(tmp_path), persona, {}, "system prompt", session_path, "pw"
+    orchestrator = _build_orchestrator(
+        str(tmp_path), persona, {}, session_path, "pw"
     )
     orchestrator.model = _DummyModel(reply="first reply")
     orchestrator.run("first message", "system prompt", cwd=str(tmp_path))
@@ -697,7 +697,7 @@ def test_resume_hint_abbreviates_the_home_directory(monkeypatch, tmp_path):
 def test_run_tui_prints_the_resume_hint_for_a_session_that_was_written(monkeypatch, tmp_path, capsys):
     written = tmp_path / "s.json"
     written.write_bytes(b"encrypted")
-    monkeypatch.setattr(cli, "_build_orchestrator", lambda *a, **k: (object(), None, None))
+    monkeypatch.setattr(cli, "_build_orchestrator", lambda *a, **k: object())
 
     class _FakeApp:
         def __init__(self, **kwargs):
@@ -765,7 +765,7 @@ def test_run_tui_reports_the_session_the_app_ended_on_not_the_one_it_started_wit
 # live in tests/test_tui.py, which drives the real app the same way.
 # --------------------------------------------------------------------------- #
 def test_run_one_shot_reports_the_final_answer(monkeypatch, capsys):
-    monkeypatch.setattr(cli, "_build_orchestrator", lambda *a, **k: (_StubOrchestrator(), None, None))
+    monkeypatch.setattr(cli, "_build_orchestrator", lambda *a, **k: _StubOrchestrator())
     persona = cli._load_persona(None)
     system = cli._build_system_prompt(persona)
 
@@ -779,7 +779,7 @@ def test_run_one_shot_reports_the_final_answer(monkeypatch, capsys):
 
 def test_run_one_shot_returns_1_and_reports_a_permission_error(monkeypatch, capsys):
     orchestrator = _StubOrchestrator(run_raises=cli.PermissionError("nope"))
-    monkeypatch.setattr(cli, "_build_orchestrator", lambda *a, **k: (orchestrator, None, None))
+    monkeypatch.setattr(cli, "_build_orchestrator", lambda *a, **k: orchestrator)
     persona = cli._load_persona(None)
     system = cli._build_system_prompt(persona)
 
@@ -793,7 +793,7 @@ def test_run_one_shot_returns_1_and_reports_unexpected_errors_without_crashing(m
     """A provider/tool exception must produce a clean error message and
     exit code, not an unhandled traceback."""
     orchestrator = _StubOrchestrator(run_raises=RuntimeError("model exploded"))
-    monkeypatch.setattr(cli, "_build_orchestrator", lambda *a, **k: (orchestrator, None, None))
+    monkeypatch.setattr(cli, "_build_orchestrator", lambda *a, **k: orchestrator)
     persona = cli._load_persona(None)
     system = cli._build_system_prompt(persona)
 
@@ -807,7 +807,7 @@ def test_run_one_shot_returns_1_and_reports_unexpected_errors_without_crashing(m
 
 def test_run_one_shot_saves_the_session_when_a_session_path_was_given(monkeypatch):
     orchestrator = _StubOrchestrator(with_session_manager=True)
-    monkeypatch.setattr(cli, "_build_orchestrator", lambda *a, **k: (orchestrator, None, None))
+    monkeypatch.setattr(cli, "_build_orchestrator", lambda *a, **k: orchestrator)
     persona = cli._load_persona(None)
     system = cli._build_system_prompt(persona)
 
@@ -818,7 +818,7 @@ def test_run_one_shot_saves_the_session_when_a_session_path_was_given(monkeypatc
 
 def test_run_one_shot_does_not_save_when_no_session_path_was_given(monkeypatch):
     orchestrator = _StubOrchestrator(with_session_manager=True)
-    monkeypatch.setattr(cli, "_build_orchestrator", lambda *a, **k: (orchestrator, None, None))
+    monkeypatch.setattr(cli, "_build_orchestrator", lambda *a, **k: orchestrator)
     persona = cli._load_persona(None)
     system = cli._build_system_prompt(persona)
 
@@ -1136,9 +1136,9 @@ def test_build_orchestrator_merges_discovered_tool_plugins(monkeypatch, tmp_path
     )
     persona = Persona(name="Noah")
 
-    orchestrator, registry, _ = _build_orchestrator(str(tmp_path), persona, {}, "system prompt")
+    orchestrator = _build_orchestrator(str(tmp_path), persona, {})
 
-    assert registry.is_known("fake_plugin_tool")
+    assert "fake_plugin_tool" in orchestrator.tools
     assert "fake_plugin_tool" in orchestrator.tools
 
 
@@ -1148,7 +1148,7 @@ def test_build_orchestrator_reports_plugin_errors_to_stderr(monkeypatch, tmp_pat
     )
     persona = Persona(name="Noah")
 
-    _build_orchestrator(str(tmp_path), persona, {}, "system prompt")
+    _build_orchestrator(str(tmp_path), persona, {})
 
     assert "boom" in capsys.readouterr().err
 
@@ -1161,7 +1161,7 @@ def test_build_orchestrator_uses_a_configured_io_plugin(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "load_plugins", lambda: ({"io:custom-io": _CustomIO}, {}))
     persona = Persona(name="Noah")
 
-    orchestrator, _, _ = _build_orchestrator(str(tmp_path), persona, {}, "system prompt")
+    orchestrator = _build_orchestrator(str(tmp_path), persona, {})
 
     assert isinstance(orchestrator.io, _CustomIO)
 
@@ -1171,7 +1171,7 @@ def test_build_orchestrator_reports_an_unknown_configured_model_plugin(monkeypat
     monkeypatch.setattr(cli, "load_plugins", lambda: ({}, {}))
     persona = Persona(name="Noah")
 
-    _build_orchestrator(str(tmp_path), persona, {}, "system prompt")
+    _build_orchestrator(str(tmp_path), persona, {})
 
     assert "unknown model plugin 'ghost'" in capsys.readouterr().err
 
@@ -1595,7 +1595,7 @@ def test_a_session_that_unlocks_is_handed_to_the_app_already_open(monkeypatch, t
 
     def build(*args, **kwargs):
         builds.append(kwargs.get("io_factory"))
-        return opened, None, None
+        return opened
 
     monkeypatch.setattr(cli, "_build_orchestrator", build)
     captured = {}

@@ -253,18 +253,6 @@ def _load_json(path: str) -> dict[str, Any]:
         return json.load(fh)
 
 
-def _nested(config: Config, *keys: str) -> Any:
-    """Safely descend a nested config path, returning ``None`` if any segment
-    is missing or not a mapping."""
-    value: Any = config.data
-    for key in keys:
-        if isinstance(value, dict) and key in value:
-            value = value[key]
-        else:
-            return None
-    return value
-
-
 def _resolve_harness_prompt(cli_value: str | None, config: Config) -> bool:
     """Resolve whether CoBirb sends its own harness block:
     ``--system-prompt {off,harness}`` overrides the ``"system_prompt"`` config
@@ -346,12 +334,12 @@ def _build_model(model_name: str | None, cwd: str | None = None, config: Config 
     config = config or Config(cwd=cwd)
     name = (
         model_name
-        or _nested(config, "model")
-        or _nested(config, "models", "default", "name")
-        or _nested(config, "default_model")
+        or config.get("model")
+        or config.get("models", "default", "name")
+        or config.get("default_model")
         or ""
     )
-    base_url = _nested(config, "models", "default", "base_url")
+    base_url = config.get("models", "default", "base_url")
     return LocalModelProvider(model=name, base_url=base_url)
 
 
@@ -426,23 +414,39 @@ def _discover_plugins(cwd: str, config: Config) -> tuple[ToolRegistry, dict[str,
     return registry, discovered, {**plugin_errors, **tool_issues}
 
 
+def _resolve_slot(
+    kind: str,
+    discovered: dict[str, Any],
+    config: Config,
+    default: Callable[[], Any],
+) -> tuple[Any, str | None]:
+    """Build the implementation for a singleton slot (model, io, or crypto).
+
+    Select by config name, instantiate, and fall back to the core default if
+    either step fails. Returns ``(instance, issue)``; the instance is always
+    usable, and ``issue`` is set whenever a selection couldn't be honored so
+    the caller can report why. ``default`` is a factory rather than an
+    instance because the core defaults take real constructor arguments (a
+    model name, a base URL) that a bare no-argument construction would lose.
+
+    Written once and parameterized because all three slots resolve the same
+    way; only the name and the fallback differ.
+    """
+    cls, issue = _select_plugin(kind, discovered, config)
+    if issue:
+        return default(), issue
+    if cls is None:
+        return default(), None
+    try:
+        return cls(), None
+    except Exception as exc:  # noqa: BLE001 - fail closed to the core default
+        return default(), f"failed to instantiate: {exc}"
+
+
 def _build_crypto(config: Config, discovered: dict[str, Any]) -> tuple[Any, str | None]:
     """Resolve the session crypto backend: the core AES-256-GCM+scrypt
-    default, or a config-selected ``plugins.crypto`` plugin.
-
-    Returns ``(crypto, issue)``. ``crypto`` is always usable — it falls back
-    to the core default whenever a selection couldn't be honored — and
-    ``issue`` is set in that case so the caller can report why.
-    """
-    crypto_cls, crypto_issue = _select_plugin("crypto", discovered, config)
-    if crypto_issue:
-        return AesGcmScryptSessionCrypto(), crypto_issue
-    if crypto_cls is not None:
-        try:
-            return crypto_cls(), None
-        except Exception as exc:  # noqa: BLE001 - fail closed to the core default
-            return AesGcmScryptSessionCrypto(), f"failed to instantiate: {exc}"
-    return AesGcmScryptSessionCrypto(), None
+    default, or a config-selected ``plugins.crypto`` plugin."""
+    return _resolve_slot("crypto", discovered, config, AesGcmScryptSessionCrypto)
 
 
 @dataclass
@@ -481,7 +485,7 @@ def describe_plugins(cwd: str) -> PluginsSummary:
         if issue:
             slots[kind] = f"core (config error: {issue})"
         elif cls is not None:
-            slots[kind] = str(_nested(config, "plugins", kind))
+            slots[kind] = str(config.get("plugins", kind))
         else:
             slots[kind] = "core"
 
@@ -510,7 +514,7 @@ def _select_plugin(kind: str, discovered: dict[str, Any], config: Config) -> tup
     existing default in both cases. Returns ``(None, message)`` when a name
     is selected but no matching plugin was discovered.
     """
-    name = _nested(config, "plugins", kind)
+    name = config.get("plugins", kind)
     if not name or name == f"core-{kind}":
         return None, None
     cls = discovered.get(f"{kind}:{name}")
@@ -523,13 +527,16 @@ def _build_orchestrator(
     cwd: str,
     persona: cobirb_typing.Persona,
     allow_overrides: dict[str, str],
-    system: str,
     session_path: str | None = None,
     password: str | None = None,
     model_name: str | None = None,
     io_factory: Callable[[], cobirb_typing.I_OAdapter] = TerminalIO,
-) -> tuple[Orchestrator, ToolRegistry, cobirb_typing.ModelProvider]:
+) -> Orchestrator:
     """Wire the core: registry -> provider -> policy -> orchestrator.
+
+    The system prompt is deliberately not a parameter: it belongs to a turn,
+    not to the wiring, and travels through ``Orchestrator.run()``. One used
+    to be accepted here and silently ignored.
 
     ``io_factory`` builds the default I/O adapter, and defaults to the
     scrolling ``TerminalIO`` every text-mode caller wants. Interactive mode
@@ -551,33 +558,23 @@ def _build_orchestrator(
     registry, discovered, discovery_issues = _discover_plugins(cwd, config)
     _report_plugin_issues(discovery_issues)
 
-    provider: cobirb_typing.ModelProvider = _build_model(model_name, cwd, config)
-    model_cls, model_issue = _select_plugin("model", discovered, config)
+    provider, model_issue = _resolve_slot(
+        "model", discovered, config, lambda: _build_model(model_name, cwd, config)
+    )
     if model_issue:
         _report_plugin_issues({"model": model_issue})
-    elif model_cls is not None:
-        try:
-            provider = model_cls()
-        except Exception as exc:  # noqa: BLE001 - fail closed to the core default
-            _report_plugin_issues({"model": f"failed to instantiate: {exc}"})
 
-    io_adapter: cobirb_typing.I_OAdapter = io_factory()
-    io_cls, io_issue = _select_plugin("io", discovered, config)
+    io_adapter, io_issue = _resolve_slot("io", discovered, config, io_factory)
     if io_issue:
         _report_plugin_issues({"io": io_issue})
-    elif io_cls is not None:
-        try:
-            io_adapter = io_cls()
-        except Exception as exc:  # noqa: BLE001 - fail closed to the core default
-            _report_plugin_issues({"io": f"failed to instantiate: {exc}"})
 
     # Nothing is permitted until the user says so. Config's `allow_tools`
     # comes first and `--allow-tool` after it; both only ever add, so the
     # order is about readability rather than precedence.
     policy = build_default_policy(
-        audit_log_enabled=bool(_nested(config, "audit_log")), cwd=registry.cwd
+        audit_log_enabled=bool(config.get("audit_log")), cwd=registry.cwd
     )
-    for rules in (_parse_allow_tools(_nested(config, "allow_tools")), allow_overrides):
+    for rules in (_parse_allow_tools(config.get("allow_tools")), allow_overrides):
         for name, arg in rules.items():
             policy.allow(name, arg)
 
@@ -593,15 +590,14 @@ def _build_orchestrator(
     else:
         manager = None
 
-    orchestrator = Orchestrator(
+    return Orchestrator(
         model=provider,
-        tools=registry._tools,
+        tools=registry.tools,
         policy=policy,
         io=io_adapter,
         session=manager,
         crypto=crypto,
     )
-    return orchestrator, registry, provider
 
 
 def _render(text: str) -> None:
@@ -670,8 +666,8 @@ def _run_one_shot(
     # Wiring first, echo second: a prompt echoed before the session failed to
     # open reads as though the task was attempted, when nothing ran at all.
     try:
-        orchestrator, _, _ = _build_orchestrator(
-            cwd, persona, allow_overrides, system, session_path, password, model_name
+        orchestrator = _build_orchestrator(
+            cwd, persona, allow_overrides, session_path, password, model_name
         )
     except Exception as exc:  # noqa: BLE001 - a bad password must not traceback
         # Chiefly a session that wouldn't decrypt. Wiring failures used to
@@ -756,11 +752,10 @@ def _run_tui(
     # the file is decrypted exactly once.
     if session_path is not None and os.path.isfile(session_path):
         try:
-            app.orchestrator, _, _ = _build_orchestrator(
+            app.orchestrator = _build_orchestrator(
                 cwd,
                 persona,
                 allow_overrides,
-                system,
                 session_path,
                 password,
                 model_name,
@@ -921,6 +916,13 @@ def main(argv: list[str] | None = None) -> int:
     )
 
 
+def _abbreviate_home(path: str) -> str:
+    """``/home/you/.cobirb/x`` as ``~/.cobirb/x``, for text a user might type
+    back. Paths outside the home directory are returned unchanged."""
+    home = os.path.expanduser("~")
+    return "~" + path[len(home):] if path.startswith(home) else path
+
+
 def _read_password() -> str:
     """Read a password from stdin without echoing it."""
     import getpass
@@ -932,9 +934,7 @@ def _sessions_dir_display() -> str:
     """``~/.cobirb/sessions`` with the home directory abbreviated, for help
     text and the resume hint — the literal path is long and the ``~`` form is
     what a user would type back."""
-    directory = session_module.default_sessions_dir()
-    home = os.path.expanduser("~")
-    return "~" + directory[len(home):] if directory.startswith(home) else directory
+    return _abbreviate_home(session_module.default_sessions_dir())
 
 
 def _resolve_session(session_arg: str | None, password_arg: Any) -> tuple[str | None, str | None]:
@@ -990,9 +990,10 @@ def _resume_hint(session_path: str) -> str:
     would otherwise be printed to the terminal and into whatever scrollback
     or log is capturing it.
     """
-    home = os.path.expanduser("~")
-    shown = "~" + session_path[len(home):] if session_path.startswith(home) else session_path
-    return f"Session saved. Resume it with:\n  cobirb --session {shown} -w"
+    return (
+        "Session saved. Resume it with:\n"
+        f"  cobirb --session {_abbreviate_home(session_path)} -w"
+    )
 
 
 _HELP_TEXT = """\

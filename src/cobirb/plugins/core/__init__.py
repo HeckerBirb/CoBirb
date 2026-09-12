@@ -13,7 +13,6 @@ from .persona import (
     build_default_persona,
     build_plain_persona,
     persona_shapes_voice,
-    persona_to_json,
 )
 from .tools import ToolRegistry
 
@@ -26,5 +25,4 @@ __all__ = [
     "build_default_persona",
     "build_plain_persona",
     "persona_shapes_voice",
-    "persona_to_json",
 ]

@@ -104,7 +104,9 @@ class _StubOrchestrator:
         self._on_run = on_run
 
     def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False):
-        self.calls.append({"prompt": prompt, "persona": persona, "plan_mode": plan_mode})
+        self.calls.append(
+            {"prompt": prompt, "system": system, "persona": persona, "plan_mode": plan_mode}
+        )
         if self._run_raises is not None:
             raise self._run_raises
         if self._on_run is not None:
@@ -121,15 +123,15 @@ def _stub_build(orchestrator=None, record=None):
     """
 
     def fake_build_orchestrator(
-        cwd, persona, allow_overrides, system, session_path=None, password=None,
+        cwd, persona, allow_overrides, session_path=None, password=None,
         model_name=None, io_factory=None,
     ):
         target = orchestrator if orchestrator is not None else _StubOrchestrator()
         if io_factory is not None and target.io is None:
             target.io = io_factory()
         if record is not None:
-            record.append({"persona": persona.name, "system": system, "io_factory": io_factory})
-        return target, None, None
+            record.append({"persona": persona.name, "io_factory": io_factory, "built": target})
+        return target
 
     return fake_build_orchestrator
 
@@ -273,7 +275,7 @@ async def test_submitting_a_prompt_disables_the_input_runs_the_turn_and_re_enabl
         prompt_input = app.query_one("#prompt-input", Input)
         await _until(pilot, lambda: not prompt_input.disabled)
 
-        assert orchestrator.calls == [{"prompt": "hello there", "persona": "CoBirb", "plan_mode": False}]
+        assert [(c["prompt"], c["persona"]) for c in orchestrator.calls] == [("hello there", "CoBirb")]
         text = _transcript_text(app)
         assert "hello there" in text  # the echoed user line
         assert "ok" in text  # the stub session's summary, via render_answer
@@ -572,7 +574,7 @@ async def test_persona_switch_updates_the_status_bar_and_later_turns(monkeypatch
 
         # The switch has to change the system prompt too, not just the label.
         assert builds[0]["persona"] == "Professional"
-        assert "Professional" in builds[0]["system"]
+        assert "Professional" in builds[0]["built"].calls[0]["system"]
 
 
 async def test_plan_status_reports_without_building_an_orchestrator(monkeypatch):
@@ -1366,7 +1368,7 @@ async def test_resuming_discards_an_already_built_orchestrator(monkeypatch):
         await _submit(pilot, app, "hello")
         await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
         assert app.orchestrator is orchestrator
-        assert orchestrator.calls == [{"prompt": "hello", "persona": "CoBirb", "plan_mode": False}]
+        assert [(c["prompt"], c["persona"]) for c in orchestrator.calls] == [("hello", "CoBirb")]
 
         await _switch_tab(pilot, app)
         await pilot.click("#sessions-new")
@@ -1379,7 +1381,7 @@ async def test_resuming_discards_an_already_built_orchestrator(monkeypatch):
         await _until(pilot, lambda: app.orchestrator is None)
 
         # Neither prompt was run as a chat turn against the old orchestrator.
-        assert orchestrator.calls == [{"prompt": "hello", "persona": "CoBirb", "plan_mode": False}]
+        assert [(c["prompt"], c["persona"]) for c in orchestrator.calls] == [("hello", "CoBirb")]
 
 
 async def test_new_session_prompts_for_a_name_then_a_password():
