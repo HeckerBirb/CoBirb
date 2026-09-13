@@ -990,12 +990,14 @@ class _WindowedModel(_DummyModel):
         super().__init__(reply)
         self.window = window
         self.contexts = []
+        self.systems = []
 
     def context_window(self):
         return self.window
 
     def chat(self, system, context, tools=None, *, stream=False):
         self.contexts.append(context)
+        self.systems.append(system)
         return self.reply
 
 
@@ -1039,3 +1041,27 @@ def test_a_provider_without_the_hook_falls_back_to_the_conservative_default():
     orchestrator = Orchestrator(model=_DummyModel(), tools={}, policy=Policy())
 
     assert orchestrator._context_budget() == history_budget(DEFAULT_CONTEXT_TOKENS)
+
+
+def test_project_instructions_reach_the_model_even_with_no_persona():
+    """The empty-system-prompt rule is about not *inventing* a system message,
+    not about withholding what the project explicitly asked to be told."""
+    model = _WindowedModel(window=8192)
+    orchestrator = Orchestrator(
+        model=model, tools={}, policy=Policy(), project_instructions="Always run pytest."
+    )
+
+    orchestrator.run("hello", "", cwd="/tmp")
+
+    assert "Always run pytest." in model.systems[0]
+
+
+def test_nothing_is_sent_when_there_are_no_instructions_and_no_persona():
+    """The default must stay: no system message at all, so the model's own
+    Modelfile SYSTEM applies untouched."""
+    model = _WindowedModel(window=8192)
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
+
+    orchestrator.run("hello", "", cwd="/tmp")
+
+    assert model.systems[0] == ""

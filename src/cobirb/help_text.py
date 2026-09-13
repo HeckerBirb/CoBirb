@@ -272,6 +272,16 @@ Read from (repo overrides user): ~/.cobirb/config.json, then ./cobirb.json
       "name": "...", "base_url": "..."}}  Model name/endpoint (local Ollama
                                  by default; any OpenAI-compatible server
                                  works).
+  "instructions"                 false to stop reading the project's
+                                 AGENTS.md / CoBirb.md from the working
+                                 directory into the system prompt. On by
+                                 default: a file in your own repo saying how
+                                 you want an agent to behave is a clear
+                                 enough signal not to need asking twice.
+  "instructions_max_chars"       How much of it to send (default 2000).
+                                 It rides on every request, so a long guide
+                                 crowds out the conversation on a small
+                                 window.
   "context_tokens"               How many tokens your endpoint actually
                                  serves. Ollama uses its own num_ctx default
                                  (4096) unless the Modelfile says otherwise,

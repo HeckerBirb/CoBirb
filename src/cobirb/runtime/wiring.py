@@ -15,6 +15,7 @@ from ..orchestrator import Orchestrator, build_default_policy
 from ..plugins.core import LocalModelProvider, TerminalIO
 from ..session import SessionManager
 from ..typing import spi as cobirb_typing
+from .instructions import DEFAULT_MAX_CHARS, load_instructions
 from .personas import persona_key
 from .plugins import build_crypto, discover_plugins, report_plugin_issues, resolve_slot
 
@@ -77,6 +78,18 @@ def parse_allow_tools(specs: "str | list[str] | None") -> dict[str, str]:
             else:
                 allowed[entry] = ""
     return allowed
+
+
+def _project_instructions(cwd: str, config: Config) -> str:
+    """This project's instructions, unless config turned them off.
+
+    Opt-out rather than opt-in: a file the user put in their own repo saying
+    how they want an agent to behave is about as clear a signal of intent as
+    there is, and making them ask for it twice would be silly.
+    """
+    if config.get("instructions") is False:
+        return ""
+    return load_instructions(cwd, int(config.get("instructions_max_chars", default=DEFAULT_MAX_CHARS)))
 
 
 def build_orchestrator(
@@ -157,6 +170,7 @@ def build_orchestrator(
         # num_ctx regardless of what a model advertises, so this is how
         # someone who has raised the window tells CoBirb about it.
         context_tokens=config.get("context_tokens"),
+        project_instructions=_project_instructions(cwd, config),
     )
 
 

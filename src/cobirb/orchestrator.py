@@ -124,6 +124,7 @@ class Orchestrator:
         session: SessionManager | None = None,
         crypto: Any = None,
         context_tokens: int | None = None,
+        project_instructions: str = "",
     ) -> None:
         self.model = model
         self.tools = tools
@@ -131,6 +132,10 @@ class Orchestrator:
         self.io = io
         self.crypto = crypto
         self.session = session
+        # What this project's AGENTS.md/CoBirb.md asks of an agent, resolved
+        # at wiring time (see runtime/instructions.py) because reading project
+        # files is not core's job. Composed into every turn's system prompt.
+        self.project_instructions = project_instructions
         # The model's usable context window. None means "ask the provider on
         # first use, then remember" — see _context_budget.
         self.context_tokens = context_tokens
@@ -201,7 +206,13 @@ class Orchestrator:
         # replaced the user's own. The tools resolve relative paths against
         # cwd themselves, so nothing breaks without the line; the model just
         # isn't told up front which directory it is in.
-        system_with_cwd = f"{system}\n\nWorking directory: {cwd}" if system else ""
+        # Project instructions count as something CoBirb has to say, so their
+        # presence alone is enough to start sending a system message — the
+        # empty-stays-empty rule above is about not inventing one, not about
+        # withholding what the project explicitly asked to be told.
+        system_with_cwd = _join_system(
+            system, self.project_instructions, f"Working directory: {cwd}"
+        ) if (system or self.project_instructions) else ""
         logger.info("starting run; turns=%d plan_mode=%s", len(session.turns), plan_mode)
         self.last_turn_streamed = False
         self._stream_label = persona

@@ -421,6 +421,7 @@ deeply. Nothing defaults to a networked provider. See `cobirb.json.example`.
 |---|---|
 | `default_model` | Default model. Validated at interactive startup; unavailable is ignored, not an error. |
 | `model`, `models.default.name` / `.base_url` | Equivalent older keys; endpoint URL. Any OpenAI-compatible server works. |
+| `instructions` / `instructions_max_chars` | Read `AGENTS.md`/`CoBirb.md` from the working directory into the system prompt (on by default, capped at 2000 chars). |
 | `allow_tools` | List of permission rules in `--allow-tool` syntax, e.g. `["read_file", "shell(git)"]`. The user's standing exemptions from the prompt. |
 | `persona` | Default persona. Unset or `"none"` means none. |
 | `system_prompt` | `"off"` (default) or `"harness"` — §6. |
