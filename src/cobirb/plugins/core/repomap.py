@@ -6,13 +6,14 @@ window working out where things live. A map of "these are the files that
 matter and this is what is in them" is the cheapest quality improvement
 available to a weak model.
 
-**Offered as a tool, not injected into every request.** Aider-style tools put
-their map in the system prompt of every turn, which works when the window is
-128k. CoBirb targets local models actually served 4096 tokens, where a
-permanent 1,500-token map would consume the conversation it was meant to
-help — and would fight the compaction that exists to stop exactly that. As a
-tool it costs nothing until asked for, and the model can ask about a subtree
-rather than always receiving the whole repository.
+**Both injected and offered as a tool.** A map is built into the project
+context at session start (see `runtime.wiring._project_context`), because
+having it from the first turn is most of why this kind of grounding works —
+a few thousand tokens of orientation is cheap against the windows CoBirb's
+hardware runs. An earlier version made it tool-only, reasoning that a
+permanent map would crowd the window; that reasoning came from an assumed
+4,096-token budget the target hardware does not have. The tool remains, for a
+subtree or a refresh after the layout changes under the agent's own hands.
 
 **Stdlib only.** Python symbols come from `ast`, which is exact and free.
 Other languages get a small set of regexes: crude next to tree-sitter, but
@@ -54,11 +55,13 @@ _PATTERNS: dict[frozenset[str], list[re.Pattern[str]]] = {
 # value, and parsing it is pure cost.
 _MAX_PARSE_BYTES = 512 * 1024
 
-# The default output budget. Deliberately small: this is a tool result, which
-# becomes a session turn and a message in the next request.
-DEFAULT_BUDGET_CHARS = 4000
+# The default output budget. Still bounded, because this becomes a session
+# turn and a message in every following request — but sized for the window the
+# target hardware actually runs, not the 4,096 tokens an earlier version of
+# this assumed. Roughly 4,000 tokens: enough to outline a real project.
+DEFAULT_BUDGET_CHARS = 16000
 
-_MAX_SYMBOLS_PER_FILE = 12
+_MAX_SYMBOLS_PER_FILE = 24
 
 # Files a reader opens first whatever the import graph says.
 _ENTRY_POINT_NAMES = {"__init__", "__main__", "main", "cli", "app", "index", "server", "setup"}

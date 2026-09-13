@@ -164,7 +164,7 @@ class Orchestrator:
         session: SessionManager | None = None,
         crypto: Any = None,
         context_tokens: int | None = None,
-        project_instructions: str = "",
+        project_context: str = "",
         redact_secrets: bool = True,
         verify: "VerifySettings | None" = None,
         checkpoints: "Checkpoints | None" = None,
@@ -184,10 +184,11 @@ class Orchestrator:
         # Snapshots taken before the agent changes a file, backing /undo.
         # None disables it entirely (`"checkpoints": false`).
         self.checkpoints = checkpoints
-        # What this project's AGENTS.md/CoBirb.md asks of an agent, resolved
-        # at wiring time (see runtime/instructions.py) because reading project
-        # files is not core's job. Composed into every turn's system prompt.
-        self.project_instructions = project_instructions
+        # What this project is and what it asks of an agent: its AGENTS.md,
+        # and an outline of its codebase. Resolved at wiring time because
+        # reading project files is not core's job, and composed into every
+        # turn's system prompt.
+        self.project_context = project_context
         # The model's usable context window. None means "ask the provider on
         # first use, then remember" — see _context_budget.
         self.context_tokens = context_tokens
@@ -272,8 +273,8 @@ class Orchestrator:
         # empty-stays-empty rule above is about not inventing one, not about
         # withholding what the project explicitly asked to be told.
         system_with_cwd = _join_system(
-            system, self.project_instructions, f"Working directory: {cwd}"
-        ) if (system or self.project_instructions) else ""
+            system, self.project_context, f"Working directory: {cwd}"
+        ) if (system or self.project_context) else ""
         logger.info("starting run; turns=%d plan_mode=%s", len(session.turns), plan_mode)
         self.last_turn_streamed = False
         self._stream_label = persona

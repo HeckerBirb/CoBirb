@@ -525,8 +525,9 @@ def _shell_timeout(value: Any) -> float:
 class RepoMapTool(CobirbTool):
     """A ranked outline of the codebase, for orientation.
 
-    A tool rather than something injected into every request: see
-    ``plugins.core.repomap`` for why that matters on a small window.
+    One is already in the system prompt at session start; this is for asking
+    about a subtree, or for refreshing after the layout has changed under the
+    agent's own hands.
     """
 
     NAME = "repo_map"

@@ -7,11 +7,14 @@ one, which was an easy thing to miss and a cheap thing to fix.
 
 Two decisions worth knowing about:
 
-**It is capped, hard.** This text rides on *every* request for the whole
-session. Against a 4096-token window — which is what a local model is usually
-actually served — a 3,000-word contributing guide would eat the conversation
-alive. So it is truncated at a budget the user can raise, and the truncation
-is announced rather than silent.
+**It is capped, but generously.** This text rides on *every* request for the
+whole session, so an unbounded file is still worth guarding against — a
+100 KB contributing guide is a quarter of a 128k window spent before the
+conversation starts. The cap was originally 2,000 characters, sized for a
+4,096-token window that CoBirb's users do not have; at 32k it comfortably
+sends a real project's conventions whole, which is the point of reading them
+at all. Truncation is announced rather than silent, and the budget is
+configurable.
 
 **It does not walk up the tree.** Only the working directory is read. Walking
 up to a git root sounds helpful right up until a monorepo's top-level
@@ -25,10 +28,11 @@ import os
 # the convention this project itself follows.
 INSTRUCTION_FILENAMES = ("AGENTS.md", "CoBirb.md", "COBIRB.md")
 
-# Roughly 500 tokens at four characters each. Enough for the conventions that
-# matter, small enough that it doesn't crowd out the conversation on a small
-# window. `"instructions_max_chars"` raises it.
-DEFAULT_MAX_CHARS = 2000
+# Roughly 8,000 tokens at four characters each — a few percent of the window
+# the target hardware runs, and enough to send most projects' conventions
+# whole rather than cutting them off mid-section.
+# `"instructions_max_chars"` raises or lowers it.
+DEFAULT_MAX_CHARS = 32000
 
 
 def find_instructions_file(cwd: str) -> str | None:

@@ -176,7 +176,22 @@ def test_estimate_tokens_is_roughly_four_characters_each():
     assert estimate_tokens("") >= 1
 
 
-def test_the_default_window_is_conservative():
-    """Guessing high re-creates the bug: the server truncates and nobody is
-    told. Guessing low only costs some avoidable compaction."""
-    assert DEFAULT_CONTEXT_TOKENS <= 4096
+def test_the_default_window_suits_the_hardware_this_targets():
+    """The fallback for when a provider can't say what window it has. It was
+    4096 — Ollama's own default — on the reasoning that guessing high would
+    re-create the silent truncation this module prevents. That was the wrong
+    fix: CoBirb now states num_ctx on every request, so the server serves what
+    is asked for, and 4096 was simply an under-estimate of the hardware."""
+    assert DEFAULT_CONTEXT_TOKENS >= 32768
+
+
+def test_the_reserve_does_not_scale_absurdly_with_the_window():
+    """It was a flat 40%, which reserves 51k tokens of a 128k window for a
+    system prompt and a reply. Clamped at both ends now: a large window is not
+    made to waste a fifth of itself, and a small one still keeps enough back
+    to answer from."""
+    assert history_budget(131072) > 100_000
+    assert history_budget(8192) >= 4096
+    # Whatever the window, something is always held back for the reply.
+    for window in (4096, 8192, 32768, 131072):
+        assert history_budget(window) < window

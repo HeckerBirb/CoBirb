@@ -278,8 +278,10 @@ class _RoutingResponses:
     can't exercise the interesting part any more.
     """
 
-    def __init__(self, system: str | None = None, chat_payload: dict | None = None):
+    def __init__(self, system: str | None = None, chat_payload: dict | None = None,
+                 model_info: dict | None = None):
         self.system = system
+        self.model_info = model_info
         self.chat_payload = chat_payload or {"message": {"role": "assistant", "content": "ok"}}
         self.requests: list[tuple[str, dict]] = []
 
@@ -288,7 +290,12 @@ class _RoutingResponses:
         body = json.loads(request.data.decode("utf-8"))
         self.requests.append((url, body))
         if url.endswith("/api/show"):
-            return _FakeResponse({} if self.system is None else {"system": self.system})
+            shown: dict = {}
+            if self.system is not None:
+                shown["system"] = self.system
+            if self.model_info is not None:
+                shown["model_info"] = self.model_info
+            return _FakeResponse(shown)
         return _FakeResponse(self.chat_payload)
 
     @property
@@ -318,15 +325,19 @@ def test_no_system_message_is_sent_when_cobirb_has_nothing_to_add(monkeypatch):
     assert all(m["role"] != "system" for m in responses.chat_messages)
 
 
-def test_no_lookup_is_made_when_there_is_nothing_to_compose(monkeypatch):
-    """Sending nothing needs no knowledge of the model's prompt, so the
-    default path costs no extra round trip."""
+def test_the_model_is_described_once_however_much_is_wanted_from_it(monkeypatch):
+    """The Modelfile's SYSTEM directive and its context window both live in
+    the same /api/show payload, so it is fetched once per model and shared.
+    A turn that sends no system prompt still needs the window, so this is no
+    longer zero — but it must not be two."""
     responses = _RoutingResponses(system="You are Karen Gemmason.")
     monkeypatch.setattr("urllib.request.urlopen", responses)
 
-    LocalModelProvider(model="gemma4-unchained").chat("", "[]")
+    provider = LocalModelProvider(model="gemma4-unchained")
+    provider.chat("", "[]")
+    provider.chat("with a persona this time", "[]")
 
-    assert responses.show_calls == 0
+    assert responses.show_calls == 1
 
 
 def test_the_models_own_prompt_leads_when_cobirb_adds_a_persona(monkeypatch):
@@ -520,15 +531,38 @@ def test_context_window_reads_num_ctx(monkeypatch):
     assert LocalModelProvider(model="m").context_window() == 32768
 
 
-def test_context_window_ignores_the_advertised_context_length(monkeypatch):
-    """The model says 131072; Ollama will serve 4096 unless told otherwise.
-    Trusting the advertisement is how the request gets silently truncated."""
+def test_the_advertised_context_length_is_used_when_no_num_ctx_is_set(monkeypatch):
+    """CoBirb asks for a window rather than discovering one. Ollama serves
+    4096 by default, but /api/chat takes options.num_ctx — so what the model
+    says it can do is what to request, not something to distrust."""
     monkeypatch.setattr(
         "urllib.request.urlopen",
         _ShowResponses(parameters="stop \"x\"", model_info={"llama.context_length": 131072}),
     )
 
-    assert LocalModelProvider(model="m").context_window() is None
+    assert LocalModelProvider(model="m").context_window() == 131072
+
+
+def test_an_explicit_num_ctx_outranks_the_advertised_length(monkeypatch):
+    """A Modelfile naming num_ctx is a deliberate choice by whoever built the
+    model."""
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _ShowResponses(parameters="num_ctx 32768", model_info={"llama.context_length": 131072}),
+    )
+
+    assert LocalModelProvider(model="m").context_window() == 32768
+
+
+def test_the_window_is_stated_on_every_chat_request(monkeypatch):
+    """Without this Ollama serves its own default however large the model is,
+    and a long conversation is truncated from the front with nobody told."""
+    responses = _RoutingResponses(model_info={"llama.context_length": 65536})
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+
+    LocalModelProvider(model="m").chat("", "[]")
+
+    assert responses.chat_request["options"]["num_ctx"] == 65536
 
 
 def test_context_window_is_none_when_the_endpoint_cannot_answer(monkeypatch):

@@ -320,18 +320,20 @@ Read from (repo overrides user): ~/.cobirb/config.json, then ./cobirb.json
                                  default: a file in your own repo saying how
                                  you want an agent to behave is a clear
                                  enough signal not to need asking twice.
-  "instructions_max_chars"       How much of it to send (default 2000).
-                                 It rides on every request, so a long guide
-                                 crowds out the conversation on a small
-                                 window.
-  "context_tokens"               How many tokens your endpoint actually
-                                 serves. Ollama uses its own num_ctx default
-                                 (4096) unless the Modelfile says otherwise,
-                                 no matter how large a window the model
-                                 advertises — so CoBirb only trusts num_ctx,
-                                 and assumes 4096 when it can't find one.
-                                 Raise this if you start Ollama with more;
-                                 /context shows what is in use.
+  "instructions_max_chars"       How much of it to send (default 32000 —
+                                 most projects' conventions fit whole).
+  "repo_map"                     false to stop putting an outline of the
+                                 codebase in the system prompt at session
+                                 start. The repo_map tool stays either way.
+  "repo_map_max_chars"           How large that outline may be (default
+                                 16000).
+  "context_tokens"               Override the context window. CoBirb asks
+                                 the server for one on every request, using
+                                 the Modelfile's num_ctx if it sets one and
+                                 otherwise what the model says it can do —
+                                 so this is only needed to cap a window your
+                                 VRAM would rather not hold. /context shows
+                                 what is in use.
   "allow_read_dirs"              Directories CoBirb may read without asking,
                                  as a list. Covers subdirectories.
   "allow_write_dirs"             Directories CoBirb may change files in

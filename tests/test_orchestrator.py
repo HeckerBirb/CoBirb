@@ -1050,12 +1050,12 @@ def test_a_provider_without_the_hook_falls_back_to_the_conservative_default():
     assert orchestrator._context_budget() == history_budget(DEFAULT_CONTEXT_TOKENS)
 
 
-def test_project_instructions_reach_the_model_even_with_no_persona():
+def test_project_context_reach_the_model_even_with_no_persona():
     """The empty-system-prompt rule is about not *inventing* a system message,
     not about withholding what the project explicitly asked to be told."""
     model = _WindowedModel(window=8192)
     orchestrator = Orchestrator(
-        model=model, tools={}, policy=Policy(), project_instructions="Always run pytest."
+        model=model, tools={}, policy=Policy(), project_context="Always run pytest."
     )
 
     orchestrator.run("hello", "", cwd="/tmp")

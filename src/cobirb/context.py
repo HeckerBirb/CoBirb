@@ -28,17 +28,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-# Ollama's own default when a Modelfile doesn't say otherwise. Deliberately
-# conservative: guessing *high* re-creates the exact bug this module exists to
-# fix (the server truncates and nobody is told), while guessing low only costs
-# some avoidable compaction. See LocalModelProvider.context_window.
-DEFAULT_CONTEXT_TOKENS = 4096
+# Used only when the provider cannot say what window it has. Ollama's own
+# default is 4096, and an earlier version of this used that — reasoning that
+# guessing high would re-create the silent truncation this module exists to
+# prevent. That was the wrong fix for the right worry: CoBirb now *states*
+# `num_ctx` on every request (see `LocalModelProvider.context_window`), so the
+# server serves what is asked for and there is nothing to be timid about.
+# 32k is a floor for the rare case where nothing is discoverable, not an
+# expectation — the target hardware runs 128k comfortably.
+DEFAULT_CONTEXT_TOKENS = 32768
 
-# How much of the window the conversation history may occupy. The rest holds
-# the system prompt, the tool schemas — eight tools with JSON schemas is not
-# nothing — and, most importantly, room for the model to actually reply. A
-# history that fills the window leaves nowhere to answer from.
-HISTORY_FRACTION = 0.6
+# What the history must leave room for: the system prompt and project context,
+# the tool schemas, and the model's reply. An *absolute* allowance rather than
+# a fraction — the old 40% reserved 51k tokens on a 128k window, which is
+# absurd, while on a small one a fraction reserves too little to answer from.
+_RESERVE_MIN_TOKENS = 2048
+_RESERVE_MAX_TOKENS = 16384
+_RESERVE_FRACTION = 0.2
 
 # Tokens per character, near enough. A real tokenizer would mean a new
 # dependency and a per-model vocabulary, and would still only sharpen an
@@ -62,8 +68,14 @@ def estimate_tokens(text: str) -> int:
 
 
 def history_budget(context_tokens: int) -> int:
-    """How many tokens of conversation history a window of this size allows."""
-    return max(512, int(context_tokens * HISTORY_FRACTION))
+    """How many tokens of conversation history a window of this size allows.
+
+    The reserve scales but is clamped at both ends, so a large window is not
+    made to waste a fifth of itself and a small one still keeps enough back to
+    hold a reply.
+    """
+    reserve = min(max(int(context_tokens * _RESERVE_FRACTION), _RESERVE_MIN_TOKENS), _RESERVE_MAX_TOKENS)
+    return max(512, context_tokens - reserve)
 
 
 @dataclass

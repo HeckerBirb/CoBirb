@@ -20,7 +20,9 @@
   "redact_secrets": true,
   "checkpoints": true,
   "instructions": true,
-  "instructions_max_chars": 2000,
+  "instructions_max_chars": 32000,
+  "repo_map": true,
+  "repo_map_max_chars": 16000,
   "context_tokens": null,
   "plan_mode": false,
   "audit_log": false

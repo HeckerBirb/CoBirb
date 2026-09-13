@@ -22,9 +22,7 @@ secret redaction and an opt-in verification loop.
    layer may touch the network, only when the user configures a provider, and CoBirb will never
    package or bless one. Decided September 2026: local models only, forever. The SPI still lets a
    third party write a remote provider; that is their choice to make and ours to not make for
-   them. **This shapes engineering everywhere else:** everything must work well against a 7B model
-   on a 4096-token window, which is why compaction, grounding and small clean contexts matter more
-   here than they would in a tool aimed at frontier models.
+   them.
 3. **Never echo the password.** `-w` with no value reads stdin without echo; never logged, stored,
    or retained past the call that needs it.
 4. **Sessions encrypted at rest.** Plaintext never hits disk. No PQ-KEM — §7.
@@ -33,6 +31,23 @@ secret redaction and an opt-in verification loop.
 6. **Everything local.** No cloud sessions, remote control, or background agents.
 
 Feature ideas conflicting with these are out of scope. Park them.
+
+## 2b. The hardware this targets
+
+**Assume at least 16 GB of VRAM and that a 128k context window is fine.** CoBirb's users have
+capable machines or rent high-end GPUs; it is explicitly not built for low- or mid-end consumer
+hardware. Running two models at once, or several subagents concurrently, is a reasonable thing to
+expect of it.
+
+This is written down because getting it wrong is expensive and has happened. A context-compaction
+feature was built around a 4,096-token window — Ollama's own default, mistaken for what a local
+model gets — and that single assumption then sized the project-instructions budget, the repo map,
+and the decision not to inject a map at all. All four were wrong, and none of them looked wrong
+from inside.
+
+The standing rule: **performance, memory and model-size figures are observations, never
+arguments.** Noting that something is slow or large today is useful; letting it quietly pick a
+default, narrow a feature or rule an approach out is not. Raise it with the user as a decision.
 
 ## 3. Working here
 

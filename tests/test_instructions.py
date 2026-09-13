@@ -7,7 +7,7 @@ from cobirb.runtime.instructions import (
     find_instructions_file,
     load_instructions,
 )
-from cobirb.runtime.wiring import _project_instructions
+from cobirb.runtime.wiring import _project_context
 
 
 def test_agents_md_in_the_working_directory_is_found(tmp_path):
@@ -59,26 +59,87 @@ def test_an_unreadable_instructions_file_is_not_fatal(tmp_path):
     assert load_instructions(str(tmp_path)) == ""
 
 
+def _instructions_only(tmp_path):
+    """Config that leaves the instructions on and the repo map off, so these
+    tests assert on the half they are about."""
+    (tmp_path / "cobirb.json").write_text('{"repo_map": false}')
+    return Config(cwd=str(tmp_path))
+
+
 def test_instructions_are_on_by_default(tmp_path):
     """Opt-out, not opt-in. A file the user put in their own repo saying how
     they want an agent to behave is about as clear an intent signal as there
     is; making them ask for it twice would be silly."""
     (tmp_path / "AGENTS.md").write_text("the house style")
 
-    assert "the house style" in _project_instructions(str(tmp_path), Config(cwd=str(tmp_path)))
+    assert "the house style" in _project_context(str(tmp_path), _instructions_only(tmp_path))
 
 
 def test_config_can_turn_instructions_off(tmp_path):
     (tmp_path / "AGENTS.md").write_text("the house style")
-    (tmp_path / "cobirb.json").write_text('{"instructions": false}')
+    (tmp_path / "cobirb.json").write_text('{"instructions": false, "repo_map": false}')
 
-    assert _project_instructions(str(tmp_path), Config(cwd=str(tmp_path))) == ""
+    assert _project_context(str(tmp_path), Config(cwd=str(tmp_path))) == ""
 
 
 def test_config_can_raise_the_budget(tmp_path):
     (tmp_path / "AGENTS.md").write_text("y" * (DEFAULT_MAX_CHARS + 500))
-    (tmp_path / "cobirb.json").write_text('{"instructions_max_chars": 99999}')
+    (tmp_path / "cobirb.json").write_text('{"instructions_max_chars": 999999, "repo_map": false}')
 
-    text = _project_instructions(str(tmp_path), Config(cwd=str(tmp_path)))
+    text = _project_context(str(tmp_path), Config(cwd=str(tmp_path)))
 
     assert "truncated" not in text
+
+
+# --------------------------------------------------------------------------- #
+# The repo map in the project context.
+#
+# It used to be tool-only, on the reasoning that a permanent map would crowd a
+# small window. That came from an assumed 4,096-token budget the target
+# hardware does not have.
+# --------------------------------------------------------------------------- #
+def test_the_codebase_outline_is_in_the_project_context_by_default(tmp_path):
+    (tmp_path / "engine.py").write_text("class Engine:\n    def start(self): pass\n")
+
+    context = _project_context(str(tmp_path), Config(cwd=str(tmp_path)))
+
+    assert "engine.py" in context
+    assert "class Engine" in context
+
+
+def test_instructions_and_the_map_are_both_present(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("run pytest before committing")
+    (tmp_path / "engine.py").write_text("def start(): pass\n")
+
+    context = _project_context(str(tmp_path), Config(cwd=str(tmp_path)))
+
+    assert "run pytest before committing" in context
+    assert "engine.py" in context
+
+
+def test_the_map_can_be_turned_off(tmp_path):
+    (tmp_path / "engine.py").write_text("def start(): pass\n")
+    (tmp_path / "cobirb.json").write_text('{"repo_map": false}')
+
+    assert "engine.py" not in _project_context(str(tmp_path), Config(cwd=str(tmp_path)))
+
+
+def test_a_zero_budget_also_turns_the_map_off(tmp_path):
+    (tmp_path / "engine.py").write_text("def start(): pass\n")
+    (tmp_path / "cobirb.json").write_text('{"repo_map_max_chars": 0}')
+
+    assert "engine.py" not in _project_context(str(tmp_path), Config(cwd=str(tmp_path)))
+
+
+def test_an_unmappable_project_costs_orientation_not_the_session(tmp_path, monkeypatch):
+    """Guarded: walking a project that cannot be walked must not stop CoBirb
+    starting."""
+    from cobirb.runtime import wiring
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("unreadable")
+
+    monkeypatch.setattr(wiring, "render_map", boom)
+    (tmp_path / "AGENTS.md").write_text("still here")
+
+    assert "still here" in _project_context(str(tmp_path), Config(cwd=str(tmp_path)))

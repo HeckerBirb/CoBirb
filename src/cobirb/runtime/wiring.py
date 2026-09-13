@@ -16,6 +16,7 @@ from ..orchestrator import Orchestrator, build_default_policy
 from ..plugins.core import LocalModelProvider, TerminalIO
 from ..session import SessionManager
 from ..typing import spi as cobirb_typing
+from ..plugins.core.repomap import DEFAULT_BUDGET_CHARS, render_map
 from .instructions import DEFAULT_MAX_CHARS, load_instructions
 from .personas import persona_key
 from .plugins import build_crypto, discover_plugins, report_plugin_issues, resolve_slot
@@ -82,16 +83,46 @@ def parse_allow_tools(specs: "str | list[str] | None") -> dict[str, str]:
     return allowed
 
 
-def _project_instructions(cwd: str, config: Config) -> str:
-    """This project's instructions, unless config turned them off.
+def _project_context(cwd: str, config: Config) -> str:
+    """What the model is told about this project before it is asked anything.
 
-    Opt-out rather than opt-in: a file the user put in their own repo saying
-    how they want an agent to behave is about as clear a signal of intent as
-    there is, and making them ask for it twice would be silly.
+    Two parts, both opt-out rather than opt-in. The project's own
+    instructions, because a file the user put in their repo saying how they
+    want an agent to behave is about as clear a signal of intent as there is
+    and making them ask twice would be silly. And an outline of the codebase,
+    because a model that knows where things live stops guessing at filenames.
+
+    The map used to be available only as a tool, on the reasoning that a
+    permanent one would crowd a small context window. That reasoning does not
+    apply to the hardware CoBirb targets: a few thousand tokens of orientation
+    against a 128k window is cheap, and having it there from the first turn is
+    most of why this kind of grounding works. The tool stays, for a subtree or
+    a refresh after the layout changes.
     """
-    if config.get("instructions") is False:
+    parts = []
+    if config.get("instructions") is not False:
+        parts.append(
+            load_instructions(cwd, int(config.get("instructions_max_chars", default=DEFAULT_MAX_CHARS)))
+        )
+    if config.get("repo_map") is not False:
+        parts.append(_startup_map(cwd, config))
+    return "\n\n".join(part for part in parts if part)
+
+
+def _startup_map(cwd: str, config: Config) -> str:
+    """An outline of the codebase, or nothing if it can't be produced.
+
+    Guarded: an unreadable project costs the model its orientation, never the
+    session. Walking a very large tree is the one slow thing that happens
+    before the first turn, which is why the budget is bounded here too.
+    """
+    budget = int(config.get("repo_map_max_chars", default=DEFAULT_BUDGET_CHARS))
+    if budget <= 0:
         return ""
-    return load_instructions(cwd, int(config.get("instructions_max_chars", default=DEFAULT_MAX_CHARS)))
+    try:
+        return render_map(cwd, budget)
+    except Exception:  # noqa: BLE001 - orientation is worth nothing at this price
+        return ""
 
 
 def _verify_settings(cwd: str, config: Config) -> VerifySettings | None:
@@ -196,7 +227,7 @@ def build_orchestrator(
         # num_ctx regardless of what a model advertises, so this is how
         # someone who has raised the window tells CoBirb about it.
         context_tokens=config.get("context_tokens"),
-        project_instructions=_project_instructions(cwd, config),
+        project_context=_project_context(cwd, config),
         # On by default. The cost is that an agent asked to edit a
         # credentials file can't do it through a redacted read; the benefit is
         # that reading one doesn't put a live key in three places at once.

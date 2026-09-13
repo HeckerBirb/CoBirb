@@ -67,6 +67,25 @@ def _num_ctx(parameters: Any) -> int | None:
     return None
 
 
+def _advertised_context(model_info: Any) -> int | None:
+    """The context length the model itself declares.
+
+    Stored under an architecture-prefixed key — ``llama.context_length``,
+    ``qwen2.context_length`` — so the suffix is what identifies it rather than
+    any fixed name.
+    """
+    if not isinstance(model_info, dict):
+        return None
+    for key, value in model_info.items():
+        if str(key).endswith(".context_length"):
+            try:
+                length = int(value)
+            except (TypeError, ValueError):
+                return None
+            return length if length > 0 else None
+    return None
+
+
 def _build_messages(system: str, context: str) -> list[dict[str, Any]]:
     """Turn the orchestrator's JSON-encoded turn history into a proper
     multi-turn Ollama ``messages`` array, instead of flattening the whole
@@ -147,9 +166,11 @@ class LocalModelProvider(ModelProvider):
         # model rather than on every turn. Only successes are cached: a
         # failed lookup returns "" without being remembered, so a transient
         # blip doesn't permanently drop the user's own prompt.
-        self._model_system_cache: dict[str, str] = {}
-        # Same one-lookup-per-model reasoning as the system cache above.
-        self._context_window_cache: dict[str, int] = {}
+        # One /api/show payload per model, shared by everything that needs
+        # something out of it — the Modelfile SYSTEM directive and the context
+        # window both live there, and fetching it twice for one model would be
+        # two round trips to learn one thing.
+        self._show_cache: dict[str, dict[str, Any]] = {}
 
     def name(self) -> str:
         return f"ollama/{self._model}" if self._model else "(unconfigured)"
@@ -198,62 +219,59 @@ class LocalModelProvider(ModelProvider):
         """The ``SYSTEM`` directive baked into this model's own Modelfile.
 
         Returns ``""`` for a model that declares none — which is most of
-        them — and for any lookup that fails. This is best-effort context,
-        never a precondition for chatting: if the endpoint can't answer,
-        the turn still runs, it just can't prepend a prompt it couldn't
-        read. The real error surfaces from ``chat`` a moment later anyway,
-        with a message about the thing the user actually asked for.
+        them — and for any lookup that fails. Best-effort context, never a
+        precondition for chatting: if the endpoint can't answer, the turn
+        still runs, it just can't prepend a prompt it couldn't read.
         """
-        if not self._model:
-            return ""
-        if self._model in self._model_system_cache:
-            return self._model_system_cache[self._model]
-        try:
-            payload = self._post("/api/show", {"model": self._model})
-            system = payload.get("system") or ""
-        except Exception:  # noqa: BLE001 - best-effort context, never fatal
-            # Covers an unreachable endpoint, a model the endpoint doesn't
-            # know, and a payload that isn't the shape documented. None of
-            # those should stop the turn the user actually asked for: they
-            # only mean this request can't carry a prompt it couldn't read.
-            return ""
-        if not isinstance(system, str):
-            return ""
-        self._model_system_cache[self._model] = system
-        return system
+        system = self._show().get("system") or ""
+        return system if isinstance(system, str) else ""
 
     def context_window(self) -> int | None:
-        """How many tokens this endpoint will actually serve, or ``None``.
+        """The context window to use with this model, or ``None`` if unknown.
 
-        Optional and duck-typed, the same way ``list_models`` is — the
-        orchestrator reaches for it via ``getattr`` and falls back to a
-        conservative default, so a ``plugins.model`` provider that lacks it
-        breaks nothing.
+        Optional and duck-typed, the same way ``list_models`` is.
 
-        **The trap this exists to avoid:** a model's advertised
-        ``context_length`` is nearly always far larger than what Ollama will
-        actually serve. Unless the Modelfile sets ``num_ctx``, Ollama uses its
-        own default (4096 at the time of writing) no matter what the model
-        claims it can do. Believing the advertised 131072 would mean packing a
-        request the server then silently truncates — precisely the failure
+        **CoBirb asks for a window rather than guessing at one.** Ollama uses
+        its own modest default (4096) when a Modelfile doesn't set ``num_ctx``,
+        and an earlier version of this therefore refused to believe a model's
+        advertised ``context_length`` — packing a request against 131072 that
+        the server would then silently truncate is exactly the failure
         ``cobirb.context`` exists to prevent.
 
-        So only ``num_ctx`` is trusted here. When it isn't set, this returns
-        ``None`` and the caller uses its conservative default; a user who has
-        raised the window can say so with ``"context_tokens"`` in config.
+        That was solving the wrong problem. ``/api/chat`` accepts
+        ``options.num_ctx``, so the window is not something to discover
+        passively: ``chat`` states it on every request and the server honours
+        it. What this resolves is therefore what to *ask for* — the Modelfile's
+        own ``num_ctx`` if its author chose one, otherwise what the model says
+        it can do.
+        """
+        payload = self._show()
+        # A Modelfile naming num_ctx is a deliberate choice by whoever built
+        # the model, and outranks the architecture's maximum.
+        return _num_ctx(payload.get("parameters")) or _advertised_context(payload.get("model_info"))
+
+    def _show(self) -> dict[str, Any]:
+        """This model's ``/api/show`` payload, fetched once and remembered.
+
+        Returns ``{}`` for anything that goes wrong — an unreachable endpoint,
+        a model the server doesn't know, a payload of an unexpected shape.
+        None of those should stop the turn the user actually asked for; they
+        only mean this request can't carry information it couldn't read. A
+        failure is deliberately *not* cached, so a transient blip doesn't
+        permanently cost the session its context window and system prompt.
         """
         if not self._model:
-            return None
-        if self._model in self._context_window_cache:
-            return self._context_window_cache[self._model]
+            return {}
+        if self._model in self._show_cache:
+            return self._show_cache[self._model]
         try:
             payload = self._post("/api/show", {"model": self._model})
-        except Exception:  # noqa: BLE001 - best-effort, never blocks a turn
-            return None
-        window = _num_ctx(payload.get("parameters"))
-        if window is not None:
-            self._context_window_cache[self._model] = window
-        return window
+        except Exception:  # noqa: BLE001 - best-effort, never fatal
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        self._show_cache[self._model] = payload
+        return payload
 
     def compose_system(self, system: str) -> str:
         """Combine CoBirb's own system prompt with the model's, if any.
@@ -304,6 +322,13 @@ class LocalModelProvider(ModelProvider):
             "messages": _build_messages(self.compose_system(system), context),
             "stream": stream,
         }
+        # State the window rather than hoping the server's default is
+        # generous. Without this, Ollama serves 4096 regardless of what the
+        # model can do, and a long conversation is truncated from the front
+        # with nobody told.
+        window = self.context_window()
+        if window:
+            payload["options"] = {"num_ctx": window}
         if tools:
             payload["tools"] = [_tool_schema(t) for t in tools]
 
