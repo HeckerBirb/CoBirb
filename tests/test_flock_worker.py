@@ -90,7 +90,8 @@ def test_the_brief_states_the_boundaries_the_policy_enforces():
     """))
 
     assert "may change: a.py" in text
-    assert "must not change: types.py" in text
+    assert "read anything else" in text  # reads are open; writes are the boundary
+    assert "types.py" in text  # named as an interface to fit
     assert "pytest -q" in text
 
 
@@ -137,13 +138,15 @@ def test_a_worker_is_refused_a_file_outside_its_brief(monkeypatch, tmp_path):
     assert report.denied == ("write_file",)
 
 
-def test_reaching_outside_scope_is_reported_as_a_finding_about_the_charter(
+def test_trying_to_write_outside_scope_is_reported_as_a_finding_about_the_charter(
     monkeypatch, tmp_path
 ):
-    """A worker that tried to open something it could not is usually telling
-    you the brief was incomplete, not misbehaving."""
+    """A worker that tried to *change* something it could not is usually
+    telling you the brief was incomplete — a file it needs to write was left
+    off its list — not misbehaving. (Reads are open now, so only a write can
+    reach outside scope.)"""
     _scripted(monkeypatch, _ScriptedWorker([
-        ToolCall(name="read_file", arguments={"path": "somewhere_else.py"}),
+        ToolCall(name="write_file", arguments={"path": "somewhere_else.py", "content": "x"}),
     ]))
     worker = _brief("""
         objective = "x"
@@ -156,6 +159,26 @@ def test_reaching_outside_scope_is_reported_as_a_finding_about_the_charter(
     report = run_worker(worker, str(tmp_path))
 
     assert "outside its scope" in report.describe()
+
+
+def test_a_worker_may_read_a_sibling_without_being_denied(monkeypatch, tmp_path):
+    """The fix for the flailing: reading to orient is normal work, not a
+    boundary violation, so it must not show up as one."""
+    (tmp_path / "elsewhere.py").write_text("x = 1\n")
+    _scripted(monkeypatch, _ScriptedWorker([
+        ToolCall(name="read_file", arguments={"path": "elsewhere.py"}),
+    ]))
+    worker = _brief("""
+        objective = "x"
+        [[workers]]
+        id = "a"
+        writes = ["mine.py"]
+        brief = "go"
+    """)
+
+    report = run_worker(worker, str(tmp_path))
+
+    assert report.denied == ()
 
 
 def test_a_worker_is_told_nothing_about_the_project(monkeypatch, tmp_path):

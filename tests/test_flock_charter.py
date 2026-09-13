@@ -366,21 +366,27 @@ def test_a_seam_is_readable_but_never_writable(tmp_path):
     assert not policy.is_allowed("write_file", {"path": "types.py"})
 
 
-def test_a_worker_cannot_read_a_file_outside_its_brief(tmp_path):
-    policy = _worker_policy(tmp_path, reads='["types.py"]')
-
-    assert not policy.is_allowed("read_file", {"path": "secrets.py"})
-
-
-def test_a_worker_cannot_enumerate_its_surroundings(tmp_path):
-    """Not an oversight. "Does not know the other files exist" is only true if
-    it cannot list, glob or grep the tree it sits in."""
+def test_a_worker_may_read_anything_in_the_project(tmp_path):
+    """Writes are the isolation, not reads. A worker that cannot orient itself
+    — cannot list, glob or read a sibling — flails against "permission denied"
+    and gets no work done, which is what the first real run showed."""
     policy = _worker_policy(tmp_path)
 
-    assert not policy.is_allowed("list_dir", {"path": "."})
-    assert not policy.is_allowed("glob", {"pattern": "**/*.py"})
-    assert not policy.is_allowed("grep", {"pattern": "def "})
-    assert not policy.is_allowed("repo_map", {})
+    assert policy.is_allowed("read_file", {"path": "someone_elses_module.py"})
+    assert policy.is_allowed("list_dir", {"path": "."})
+    assert policy.is_allowed("glob", {"pattern": "**/*.py"})
+    assert policy.is_allowed("grep", {"pattern": "def "})
+    assert policy.is_allowed("repo_map", {})
+
+
+def test_a_worker_cannot_read_outside_the_working_directory(tmp_path):
+    """Project-wide read is not machine-wide read. The one boundary that stays
+    is the working directory itself — a worker has no more business in your
+    home directory than any other CoBirb run does."""
+    policy = _worker_policy(tmp_path)
+
+    assert not policy.is_allowed("read_file", {"path": "/etc/passwd"})
+    assert not policy.is_allowed("read_file", {"path": "../outside.py"})
 
 
 def test_a_worker_cannot_run_shell(tmp_path):

@@ -108,6 +108,14 @@ find. Their work is reviewed afterwards against the skeleton you wrote, so \
 weakened assertions and vacuous tests are caught — you do not need to defend \
 against them in the brief.
 
+A worker can READ the whole project but may only CHANGE the files in its \
+`writes` list, and it cannot run shell commands. So two things are on you: \
+put EVERY file a worker must create or modify in its `writes` — a file it \
+needs to change but you did not list will be refused, and it will have to \
+stop and report instead of doing its job; and make sure its acceptance check \
+(`accept`) is something that can be judged by running it, since the worker \
+cannot run anything itself.
+
 WHEN YOU ARE READY
 Build the skeleton with your file tools first, then call `propose_charter` \
 once with the whole charter as TOML. Do not write the charter to a file in \

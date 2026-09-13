@@ -52,9 +52,11 @@ yourself would silently break work you cannot see.
 weakening what they assert. You may and should ADD tests for anything you \
 find while implementing — edge cases, error paths, whatever the skeleton did \
 not anticipate.
-3. You can only open the files listed below. Everything else in this project \
-is invisible to you, on purpose. You do not need it, and asking for it will \
-be refused.
+3. You may READ any file in this project to understand it — list directories, \
+grep, read whatever helps. You may only CHANGE the files listed below. A write \
+anywhere else is refused, so do not attempt it; if you believe you need to \
+change another file, that is a shortcoming to report (see 4), not something to \
+work around. You cannot run shell commands.
 4. If you cannot finish something, do not improvise around it. Say plainly: \
 what you could not do, why, where it breaks, and either a proposed change to \
 the design or a question for Brainy Birb. Being stuck is a normal outcome and \
@@ -125,9 +127,14 @@ def compose_brief(worker: WorkerBrief) -> str:
     """
     parts = [WORKER_RULES, "", "--- Your ticket ---", "", worker.brief.strip(), ""]
     parts.append(f"Files you may change: {', '.join(worker.writes)}")
+    parts.append(
+        "You may read anything else in the project to understand it, but change "
+        "only the files above."
+    )
     if worker.reads:
         parts.append(
-            f"Files you may read but must not change: {', '.join(worker.reads)}"
+            "Pay particular attention to these — they are the interfaces your work "
+            f"has to fit: {', '.join(worker.reads)}"
         )
     if worker.accept:
         parts.append(
@@ -144,6 +151,7 @@ def run_worker(
     config: Config | None = None,
     max_turns: int = DEFAULT_MAX_TURNS,
     io=None,
+    canceller=None,
 ) -> WorkerReport:
     """Run one brief to completion and report on it.
 
@@ -162,6 +170,11 @@ def run_worker(
     config = config or Config()
     policy = policy_for(worker, cwd, audit_log_enabled=bool(config.get("audit_log")))
     orchestrator = build_subagent(cwd, policy, accept=worker.accept, config=config, io=io)
+    # Registered so a force-stop can reach this worker while it is blocked on
+    # the model; a plain graceful stop never gets a chance to, because the
+    # thread is not checking anything.
+    if canceller is not None:
+        canceller.register(orchestrator)
 
     logger.info("worker %s starting; writes=%s", worker.id, ", ".join(worker.writes))
     try:
@@ -176,6 +189,8 @@ def run_worker(
         logger.warning("worker %s failed: %s", worker.id, exc)
         return WorkerReport(worker_id=worker.id, ok=False, error=f"{type(exc).__name__}: {exc}")
     finally:
+        if canceller is not None:
+            canceller.unregister(orchestrator)
         orchestrator.close()
 
     calls = list(orchestrator.last_run_tool_calls)

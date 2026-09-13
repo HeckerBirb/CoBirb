@@ -387,36 +387,44 @@ def describe_conflicts(conflicts: list[Conflict]) -> str:
 def policy_for(
     worker: WorkerBrief, cwd: str, *, audit_log_enabled: bool = False
 ) -> Policy:
-    """The ``Policy`` a Worker Birb runs under. Its whole isolation.
+    """The ``Policy`` a Worker Birb runs under.
 
-    Built from a default-deny policy that permits *nothing*, then granted
-    exactly the paths its brief names. Everything else — every other file, the
-    repo map, ``shell``, listing a directory — is denied by the same code that
-    denies anything else, which is the point: a worker's lane is a fact about
-    the process rather than a sentence in a prompt asking it to stay put.
+    **Writes are strict; reads are open across the project.** A worker may
+    change only the files its charter named — that is the isolation that
+    matters, and the reason two workers can run at once without clobbering each
+    other. But it may *read* anything under the working directory: every read
+    tool (``read_file``, ``list_dir``, ``glob``, ``grep``, ``repo_map``) works,
+    and nothing outside ``cwd`` does.
 
-    **File-level scope out of directory-level machinery.** ``Policy`` grants by
-    prefix, and ``_within`` matches a path that *is* the granted one or sits
-    beneath it. Granting a file therefore matches that file and nothing else —
-    no sibling starts with ``<file>/``. Nothing in ``Policy`` needed changing,
-    and the file-rather-than-symbol granularity is what keeps this working in
-    languages CoBirb cannot parse.
+    This was not the first design. Reads were once scoped to the exact files in
+    the brief too, on the theory that a worker "does not know the other files
+    exist". In the first real run that theory met reality: the workers could
+    not orient themselves at all — denied on every ``list_dir`` and ``glob`` —
+    and spent their turns flailing against a wall of "permission denied". The
+    knowledge isolation it was supposed to protect never depended on the read
+    permission anyway. The plan (the charter) is never written to disk, and the
+    brief deliberately omits it, so a worker reading a sibling file sees *code*,
+    not the plan. Read isolation bought almost nothing and broke the work.
 
-    Two consequences worth knowing rather than rediscovering:
+    What survives is the part that was always doing the isolating: the brief
+    says only what this worker must do, and the write scope keeps it in its
+    lane. The charter approval is what authorises project-wide read — the user
+    saw exactly what would run before any of it did.
 
-    - **A writable path is also readable.** ``edit_file`` reads before it
-      writes, and a worker that could change a file it could not open would be
-      working blind.
-    - **``list_dir``, ``glob`` and ``grep`` resolve to a directory**, which is
-      never granted here, so they are all denied. That is not an oversight: a
-      Worker Birb gets nothing but its brief, and being unable to enumerate its
-      surroundings is what "does not know the other files exist" means in
-      practice.
+    Writes stay file-level out of directory-level machinery: ``Policy`` grants
+    by prefix and ``_within`` matches a path that *is* the granted one or sits
+    beneath it, so granting a file matches that file and nothing else. That
+    granularity is also what keeps this working in languages CoBirb cannot
+    parse — it owns files, not symbols. ``shell`` is granted to no worker;
+    running commands unattended is the one capability the charter approval does
+    not extend, and the acceptance check is run *for* the worker instead.
     """
     policy = build_default_policy(audit_log_enabled=audit_log_enabled, cwd=cwd)
     for path in worker.writes:
         policy.allow_write_dir(path)
         policy.allow_read_dir(path)
-    for path in worker.reads:
-        policy.allow_read_dir(path)
+    # Read the whole project. The declared ``reads`` are now a subset of this
+    # and kept only for the conflict check and the brief; the grant that makes
+    # a worker able to orient itself is the working directory.
+    policy.allow_read_dir(cwd)
     return policy
