@@ -20,6 +20,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
+from ..plugins.core import render
+
 
 class ApprovalModal(ModalScreen[str]):
     """Ask whether to allow a tool call the policy hasn't already permitted.
@@ -36,10 +38,21 @@ class ApprovalModal(ModalScreen[str]):
         Binding("escape", "decide('deny')", "Deny", show=False),
     ]
 
-    def __init__(self, tool_name: str, arguments: dict[str, Any], scope: str | None = None) -> None:
+    def __init__(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        scope: str | None = None,
+        preview: str = "",
+    ) -> None:
         super().__init__()
         self._tool_name = tool_name
         self._arguments = arguments
+        # The change this call would make, where the tool can say in advance
+        # (a diff for an edit, the patch for apply_patch). Approving a write
+        # you have not seen is approving the tool, not the change — and the
+        # change is the thing that matters.
+        self._preview = preview
         # What "always" would actually grant (Policy.describe_grant). Shown
         # on the Always button and spelled out in the body, because approving
         # a read widens access to a whole directory tree — agreeing to that
@@ -61,6 +74,11 @@ class ApprovalModal(ModalScreen[str]):
             body.append(" for the rest of this session.", style="dim")
         with VerticalScroll(id="approval-dialog"):
             yield Static(body, id="approval-body")
+            if self._preview:
+                yield Static(
+                    render.build_preview_panel(self._tool_name, self._preview),
+                    id="approval-preview",
+                )
             with Horizontal(id="approval-buttons"):
                 yield Button("Once (y)", variant="primary", id="approve-once")
                 yield Button("Always (a)", variant="warning", id="approve-always")

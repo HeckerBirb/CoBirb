@@ -108,6 +108,22 @@ def build_tool_call_panel(
     return Panel(body, title=f"tool: {tool_name}", title_align="left", border_style=style)
 
 
+def build_preview_panel(tool_name: str, preview: str) -> Panel:
+    """What a tool call is about to do, shown while it is still a question.
+
+    Diffs are syntax-highlighted, because approving a change you can read is
+    the entire point of showing it — a wall of unhighlighted +/- lines is
+    something people learn to click past.
+    """
+    looks_like_a_diff = preview.lstrip().startswith(("---", "@@", "diff "))
+    body: Any = (
+        Syntax(preview, "diff", theme="ansi_dark", background_color="default")
+        if looks_like_a_diff
+        else Text(preview)
+    )
+    return Panel(body, title=f"{tool_name} would change", title_align="left", border_style="yellow")
+
+
 def build_error_panel(persona_name: str, text: str) -> Panel:
     """An error notice (a blocked tool call, a provider that fell over)
     shown in the conversation flow rather than on stderr.

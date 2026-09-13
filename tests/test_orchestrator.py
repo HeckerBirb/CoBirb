@@ -7,7 +7,7 @@ import os
 from cobirb.context import DEFAULT_CONTEXT_TOKENS, history_budget
 from cobirb.orchestrator import Orchestrator, _materialize, build_default_policy
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
-from cobirb.plugins.core.tools import ToolRegistry
+from cobirb.plugins.core.tools import ReadFileTool, ToolRegistry
 from cobirb.policy import Policy
 from cobirb.session import SessionManager, Turn
 from cobirb.typing.spi import ToolCall
@@ -1098,3 +1098,49 @@ def test_an_unknown_tool_with_no_tools_registered_says_so_plainly(tmp_path):
     session = orchestrator.run("go", "sys", cwd=str(tmp_path))
 
     assert "No tools are available" in _tool_turn(session).content
+
+
+def test_the_approval_request_carries_the_diff_the_call_would_make(tmp_path):
+    """The whole point: the user is asked about the change, not the tool."""
+    (tmp_path / "a.py").write_text("return 1\n")
+    seen: list = []
+
+    class _ScopedIO(_RecordingIO):
+        def confirm_scoped(self, request):
+            seen.append(request)
+            return "deny"
+
+    registry = ToolRegistry(str(tmp_path))
+    Orchestrator(
+        model=_ToolCallModel("edit_file", {"path": "a.py", "old_str": "1", "new_str": "2"}),
+        tools=registry.tools,
+        policy=Policy(),
+        io=_ScopedIO(),
+    ).run("edit it", "sys", cwd=str(tmp_path))
+
+    assert seen and "-return 1" in seen[0].preview
+    assert seen[0].tool_name == "edit_file"
+
+
+def test_a_broken_preview_does_not_cost_the_user_the_prompt(tmp_path):
+    """Fail-closed applies to chrome too: no diff is a worse outcome than no
+    question, so the question survives."""
+    class _Exploding(ReadFileTool):
+        def preview(self, arguments):
+            raise RuntimeError("boom")
+
+    asked: list = []
+
+    class _ScopedIO(_RecordingIO):
+        def confirm_scoped(self, request):
+            asked.append(request)
+            return "deny"
+
+    Orchestrator(
+        model=_ToolCallModel("read_file", {"path": "a.txt"}),
+        tools={"read_file": _Exploding(str(tmp_path))},
+        policy=Policy(),
+        io=_ScopedIO(),
+    ).run("read it", "sys", cwd=str(tmp_path))
+
+    assert asked and asked[0].preview == ""

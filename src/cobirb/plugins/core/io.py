@@ -57,14 +57,16 @@ class TerminalIO(I_OAdapter):
     def confirm(self, tool_name: str, arguments: dict[str, Any]) -> str:
         return self._ask(tool_name, arguments, None)
 
-    def confirm_scoped(self, tool_name: str, arguments: dict[str, Any], scope: str) -> str:
-        """``confirm``, but able to say what "always" would actually grant.
+    def confirm_scoped(self, request: Any) -> str:
+        """``confirm``, with everything needed to ask the question properly.
 
-        Optional hook (see ``Orchestrator._request_approval``). It matters
-        most for reads, where "always" approves a whole directory tree rather
-        than the one file named in the question.
+        Optional hook (see ``Orchestrator._request_approval``). Shows what
+        "always" would grant — for a read, a whole directory tree rather than
+        the one file named — and, for a change, the diff it would make.
         """
-        return self._ask(tool_name, arguments, scope)
+        if request.preview:
+            self._console.print(render.build_preview_panel(request.tool_name, request.preview))
+        return self._ask(request.tool_name, request.arguments, request.scope)
 
     def _ask(self, tool_name: str, arguments: dict[str, Any], scope: str | None) -> str:
         detail = arguments.get("command") or arguments.get("path") or arguments.get("pattern") or ""

@@ -515,3 +515,69 @@ def test_grep_stops_at_the_match_cap_and_says_so(tmp_path):
     assert result.ok
     assert len(result.content.splitlines()) < 900
     assert "stopped at" in result.content
+
+
+# --------------------------------------------------------------------------- #
+# Change previews.
+#
+# Approving a write you have not seen is approving the *tool*, not the
+# change — and the change is the thing that matters. These run before
+# approval, so by contract they must never raise and never alter anything.
+# --------------------------------------------------------------------------- #
+def test_edit_file_previews_the_diff_it_would_make(tmp_path):
+    (tmp_path / "a.py").write_text("def f():\n    return 1\n")
+
+    preview = EditFileTool(str(tmp_path)).preview(
+        {"path": "a.py", "old_str": "return 1", "new_str": "return 2"}
+    )
+
+    assert "-    return 1" in preview
+    assert "+    return 2" in preview
+
+
+def test_write_file_previews_a_diff_against_what_is_there(tmp_path):
+    (tmp_path / "a.txt").write_text("old\n")
+
+    preview = WriteFileTool(str(tmp_path)).preview({"path": "a.txt", "content": "new\n"})
+
+    assert "-old" in preview and "+new" in preview
+
+
+def test_write_file_previews_a_new_file_as_a_new_file(tmp_path):
+    preview = WriteFileTool(str(tmp_path)).preview({"path": "fresh.txt", "content": "a\nb\n"})
+
+    assert "new file" in preview
+
+
+def test_a_preview_never_touches_the_file(tmp_path):
+    """It runs while the answer is still 'maybe'."""
+    target = tmp_path / "a.txt"
+    target.write_text("original\n")
+
+    WriteFileTool(str(tmp_path)).preview({"path": "a.txt", "content": "replaced\n"})
+
+    assert target.read_text() == "original\n"
+
+
+def test_edit_preview_says_so_when_the_edit_would_not_apply(tmp_path):
+    """Better to learn the old_str doesn't match while deciding than after."""
+    (tmp_path / "a.py").write_text("something else\n")
+
+    preview = EditFileTool(str(tmp_path)).preview(
+        {"path": "a.py", "old_str": "not here", "new_str": "x"}
+    )
+
+    assert "will fail" in preview
+
+
+def test_previews_do_not_raise_on_nonsense_arguments(tmp_path):
+    """Contract: a broken preview costs the user a diff, never the ability to
+    answer the approval question."""
+    for tool in (WriteFileTool(str(tmp_path)), EditFileTool(str(tmp_path)), ApplyPatchTool(str(tmp_path))):
+        assert isinstance(tool.preview({}), str)
+
+
+def test_tools_that_have_nothing_to_preview_say_nothing(tmp_path):
+    """read_file and shell already say everything in their arguments."""
+    assert ReadFileTool(str(tmp_path)).preview({"path": "a"}) == ""
+    assert ShellTool(str(tmp_path)).preview({"command": "ls"}) == ""

@@ -332,7 +332,11 @@ class CoBirbApp(App[None]):
         self.query_one(StatusBar).busy = label
 
     async def request_approval(
-        self, tool_name: str, arguments: dict[str, Any], scope: str | None = None
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        scope: str | None = None,
+        preview: str = "",
     ) -> str:
         """Show the approval modal and resolve to the user's decision.
 
@@ -342,7 +346,7 @@ class CoBirbApp(App[None]):
         an active worker context, which is exactly what that caller has — so
         this must not be called from anywhere else.
         """
-        return await self.push_screen_wait(ApprovalModal(tool_name, arguments, scope))
+        return await self.push_screen_wait(ApprovalModal(tool_name, arguments, scope, preview))
 
     # ------------------------------------------------------------------ #
     # Input handling

@@ -179,6 +179,8 @@ class I_OAdapter(abc.ABC):
     def listen(self) -> Optional[str]: ...
     def view(self, data: bytes, mime: str | None = None) -> None: ...
     def confirm(self, tool_name: str, arguments: dict[str, Any]) -> str: ...
+    # optional: confirm_scoped(ApprovalRequest) -> str, for adapters that can
+    # show what "always" grants and what the call would change.
 
 class SessionCrypto(abc.ABC):
     def name(self) -> str: ...                                  # "aes256gcm-scrypt"
@@ -318,6 +320,14 @@ a project does not want to re-approve each file, and reading is where that trade
 Writing and executing get no equivalent — they're approved per call or by an explicit rule. Paths
 are compared after `realpath`, so `..` and symlinks can't name a file outside an approved tree, and
 the separator check stops a grant on `/x` covering `/x-secrets`.
+
+**The approval question carries a preview.** Tools that change files implement an optional
+`preview(arguments)` (`CobirbTool.preview`) returning a unified diff of what the call *would* do;
+the orchestrator puts it in the `ApprovalRequest` and both adapters show it before asking.
+Approving a write you have not seen is approving the tool rather than the change, and the change
+is the thing that matters. By contract a preview runs before approval, so it must never raise and
+never alter anything — the orchestrator guards it anyway, because no diff is a much better outcome
+than no question.
 
 **`Policy.grant()` decides what an "always" answer widens to** — a read to its directory, a shell
 call to its invocation, anything else to the tool name — so the orchestrator doesn't have to know.

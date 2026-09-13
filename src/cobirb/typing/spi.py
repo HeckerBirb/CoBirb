@@ -21,6 +21,27 @@ DECISION_ONCE = "once"
 DECISION_ALWAYS = "always"
 DECISION_DENY = "deny"
 DECISIONS = frozenset({DECISION_ONCE, DECISION_ALWAYS, DECISION_DENY})
+
+
+@dataclass
+class ApprovalRequest:
+    """Everything an adapter needs to ask "may I run this?" well.
+
+    A dataclass rather than more positional arguments: what a user needs to
+    see before approving has grown twice already (the scope an "always" would
+    grant, then a preview of the change), and each growth would otherwise be
+    another incompatible signature for the optional ``confirm_scoped`` hook.
+    """
+
+    tool_name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
+    # Plain-language description of what "always" would permit, from
+    # Policy.describe_grant — approving a read widens to a whole directory.
+    scope: str = ""
+    # What the call would actually do, where that can be shown before doing
+    # it: a unified diff for an edit, the patch for apply_patch. Empty for
+    # tools whose arguments already say everything (read_file, shell).
+    preview: str = ""
 @dataclass
 class ToolCall:
     """A structured tool invocation emitted by the model.

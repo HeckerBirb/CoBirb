@@ -38,6 +38,19 @@ class CobirbTool(Tool):
     def name(self) -> str:
         return self.NAME
 
+    def preview(self, arguments: dict[str, Any]) -> str:
+        """What this call would do, shown before it is approved.
+
+        Optional and duck-typed, like the I/O adapter's rendering hooks. The
+        tools that change files override it; for the rest the arguments
+        already say everything there is to say, and an empty string means the
+        approval prompt shows nothing extra.
+
+        Best-effort by contract: this runs *before* approval, so it must never
+        raise and must never change anything.
+        """
+        return ""
+
     def _resolve(self, path: str) -> str:
         """Resolve ``path`` against this tool's configured working
         directory when it's relative. Without this, a relative path (which
@@ -63,6 +76,23 @@ class CobirbTool(Tool):
 # always announced so the model knows it is looking at part of something.
 _MAX_READ_BYTES = 256 * 1024
 _MAX_GREP_MATCHES = 500
+# A preview is for a human to read before saying yes; past a point a longer
+# diff makes the decision harder rather than better informed.
+_MAX_PREVIEW_BYTES = 8 * 1024
+
+
+def _unified(path: str, old: str, new: str) -> str:
+    """A unified diff of a pending change, for the approval prompt."""
+    import difflib
+
+    diff = difflib.unified_diff(
+        old.splitlines(keepends=True),
+        new.splitlines(keepends=True),
+        fromfile=f"{path} (current)",
+        tofile=f"{path} (proposed)",
+        n=3,
+    )
+    return _truncated("".join(diff), _MAX_PREVIEW_BYTES, "this diff")
 
 
 def _truncated(text: str, limit: int, what: str) -> str:
@@ -104,6 +134,17 @@ class ReadFileTool(CobirbTool):
 class WriteFileTool(CobirbTool):
     NAME = "write_file"
 
+    def preview(self, arguments: dict[str, Any]) -> str:
+        path = self._resolve(str(arguments.get("path", "")))
+        new = str(arguments.get("content", ""))
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                old = fh.read()
+        except OSError:
+            lines = new.count("\n") + 1
+            return f"new file: {path} ({lines} line{'s' if lines != 1 else ''})"
+        return _unified(path, old, new) or f"no change to {path}"
+
     def description(self) -> str:
         return "Create or overwrite a file at a path with the given content."
 
@@ -130,6 +171,18 @@ class WriteFileTool(CobirbTool):
 
 class EditFileTool(CobirbTool):
     NAME = "edit_file"
+
+    def preview(self, arguments: dict[str, Any]) -> str:
+        path = self._resolve(str(arguments.get("path", "")))
+        old_str, new_str = str(arguments.get("old_str", "")), str(arguments.get("new_str", ""))
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                old = fh.read()
+        except OSError as exc:
+            return f"cannot read {path}: {exc}"
+        if old_str not in old:
+            return f"old_str does not appear in {path} — this edit will fail"
+        return _unified(path, old, old.replace(old_str, new_str, 1)) or f"no change to {path}"
 
     def description(self) -> str:
         return "Replace a region of a file: old_str must match exactly, new_str is the replacement."
@@ -234,6 +287,9 @@ def _apply_patch_hunks(original_lines: list[str], hunks: list[tuple[int, list[tu
 
 class ApplyPatchTool(CobirbTool):
     NAME = "apply_patch"
+
+    def preview(self, arguments: dict[str, Any]) -> str:
+        return str(arguments.get("patch", ""))
 
     def description(self) -> str:
         return "Apply a structured diff patch to a file (unified diff format)."

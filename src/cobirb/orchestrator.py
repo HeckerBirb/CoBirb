@@ -522,7 +522,12 @@ class Orchestrator:
             confirm_scoped = getattr(self.io, "confirm_scoped", None)
             if callable(confirm_scoped):
                 decision = confirm_scoped(
-                    tool_name, arguments, self.policy.describe_grant(tool_name, arguments)
+                    cobirb_typing.ApprovalRequest(
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        scope=self.policy.describe_grant(tool_name, arguments),
+                        preview=self._preview(tool_name, arguments),
+                    )
                 )
             else:
                 decision = self.io.confirm(tool_name, arguments)
@@ -587,6 +592,21 @@ class Orchestrator:
             return
         session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
         self._render_tool_call(tool_name, arguments, result)
+
+    def _preview(self, tool_name: str, arguments: dict[str, Any]) -> str:
+        """What this call would do, if the tool can say before doing it.
+
+        Optional and duck-typed. Guarded because this runs on the path to an
+        approval prompt: a tool whose preview raises must cost the user a
+        diff, never the ability to answer the question.
+        """
+        preview = getattr(self.tools.get(tool_name), "preview", None)
+        if not callable(preview):
+            return ""
+        try:
+            return str(preview(arguments) or "")
+        except Exception:  # noqa: BLE001 - a broken preview is not worth the prompt
+            return ""
 
     def _unknown_tool_message(self, tool_name: str) -> str:
         """Tell the model which tools actually exist.

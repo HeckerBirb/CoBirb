@@ -101,17 +101,19 @@ class TuiIO(I_OAdapter):
         mid-question, most likely): there is then no one to ask, and the
         safe answer to "may I run this?" is no.
         """
-        return self._ask(tool_name, arguments, None)
+        return self._ask(tool_name, arguments, None, "")
 
-    def confirm_scoped(self, tool_name: str, arguments: dict[str, Any], scope: str) -> str:
-        """``confirm``, plus what "always" would grant — shown in the modal so
-        a directory-wide read approval says so before it is given."""
-        return self._ask(tool_name, arguments, scope)
+    def confirm_scoped(self, request: Any) -> str:
+        """``confirm``, plus what "always" would grant and what the call would
+        change — both shown in the modal, so neither is agreed to blind."""
+        return self._ask(request.tool_name, request.arguments, request.scope, request.preview)
 
-    def _ask(self, tool_name: str, arguments: dict[str, Any], scope: str | None) -> str:
+    def _ask(
+        self, tool_name: str, arguments: dict[str, Any], scope: str | None, preview: str = ""
+    ) -> str:
         try:
             decision = self._app.call_from_thread(
-                self._app.request_approval, tool_name, arguments, scope
+                self._app.request_approval, tool_name, arguments, scope, preview
             )
         except Exception:  # noqa: BLE001 - no one to ask means deny, never guess yes
             return DECISION_DENY
