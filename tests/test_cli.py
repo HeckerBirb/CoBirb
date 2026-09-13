@@ -277,6 +277,8 @@ def test_persona_key_is_none_for_the_plain_default():
 
 class _StubOrchestrator:
     last_turn_streamed = False
+    last_run_tool_calls: list = []
+    last_compaction = None
 
     def __init__(self, run_result=None, run_raises=None, with_session_manager=False):
         self.session = StubSessionManager() if with_session_manager else None
@@ -429,7 +431,7 @@ def test_main_one_shot_mode_routes_prompt_and_options(monkeypatch):
     captured = {}
 
     def fake_run_one_shot(
-        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False
+        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
     ):
         captured.update(
             prompt=prompt,
@@ -459,7 +461,7 @@ def test_main_plan_mode_flag_routes_through_to_run_one_shot(monkeypatch):
     captured = {}
 
     def fake_run_one_shot(
-        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False
+        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
     ):
         captured["plan_mode"] = plan_mode
         return 0
@@ -487,7 +489,7 @@ def test_main_persona_flag_selects_the_requested_persona(monkeypatch):
     captured = {}
 
     def fake_run_one_shot(
-        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False
+        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
     ):
         captured["persona_name"] = persona.name
         return 0
@@ -502,7 +504,7 @@ def test_main_defaults_cwd_to_current_directory(monkeypatch):
     captured = {}
 
     def fake_run_one_shot(
-        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False
+        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
     ):
         captured["cwd"] = cwd
         return 0
@@ -534,7 +536,7 @@ def test_main_one_shot_with_session_prompts_for_a_password(monkeypatch, tmp_path
     captured = {}
 
     def fake_run_one_shot(
-        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False
+        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
     ):
         captured["password"] = password
         return 0
@@ -640,7 +642,7 @@ def test_password_alone_starts_a_session_in_one_shot_mode_too(monkeypatch, tmp_p
     captured = {}
 
     def fake_run_one_shot(
-        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False
+        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
     ):
         captured.update(session_path=session_path, password=password)
         return 0

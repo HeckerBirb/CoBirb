@@ -40,6 +40,11 @@ COBIRB_MODEL_NAME="llama3.1" cobirb
 # One-shot: plain stdout, pipes and scripts like any CLI.
 COBIRB_MODEL_NAME="llama3.1" cobirb -p "list the files in this directory" --allow-tool=list_dir
 
+# Unattended, for CI: never prompts, refuses anything not permitted up front.
+# Exit 0 clean, 1 failed, 2 completed but something was refused.
+cobirb -p "check the tests pass" --headless --output json \
+  --allow-tool='shell(python -m pytest)'
+
 # In an encrypted session: -w starts one under ~/.cobirb/sessions and the
 # command to resume it is printed when you exit. Give the password inline
 # (visible in shell history) or leave it off to be prompted without echo.

@@ -399,6 +399,15 @@ Nothing is written and no file created until enabled.
 
 ## 9. CLI & interactive surface
 
+**Headless** (`--headless`, usually with `--output json`) never prompts: anything not permitted by
+`allow_tools`/`--allow-tool` is refused outright, because in a pipeline the terminal prompt blocks
+on a question nobody will answer. Exit codes are what CI consumes — 0 clean, 1 failed, 2 completed
+but something was refused. **The 2 is headless-only**: a person who answered "no" themselves got
+what they asked for, and reporting that as non-zero would make an ordinary decision look like a
+broken script. There is deliberately **no flag that approves everything** — a policy file is a
+decision someone made once, reviewably; a blanket flag is a decision nobody made. A test asserts
+that flag's absence so the argument can't be lost by accident.
+
 **One-shot** (`cobirb -p`) is plain stdout via `TerminalIO` so it pipes and scripts — deliberately
 *not* the full-screen app, since that can't be piped. `--allow-tool` takes `name` or `name(arg)`,
 repeatable.

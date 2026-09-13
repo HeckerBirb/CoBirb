@@ -13,6 +13,9 @@ MODES
                          line, a boxed input, tool approval as a dialog.
   One-shot:              cobirb -p "your task" --allow-tool='shell(git)'
                          Plain stdout, so it pipes and scripts like any CLI.
+  Headless (CI):         cobirb -p "task" --headless --output json
+                         Never prompts; refuses anything not permitted up
+                         front. Exit 0 clean, 1 failed, 2 refused something.
   Session:               cobirb -w                 (new encrypted session)
                          cobirb --session <path> -w
 
@@ -50,6 +53,12 @@ OPTIONS
   --plan-mode on|off  Plan, then act, then validate with references, as 3
                       separate model phases (default: off, or "plan_mode"
                       in config). See 'cobirb help plan'.
+  --headless          Never prompt: refuse anything not already permitted
+                      by --allow-tool or "allow_tools". For CI. There is
+                      deliberately no flag that approves everything.
+  --output text|json  json prints one machine-readable object on stdout and
+                      nothing else. Exit 0 clean, 1 failed, 2 refused
+                      something (the last only with --headless).
   --cwd DIR           Working directory.
 
 INTERACTIVE COMMANDS

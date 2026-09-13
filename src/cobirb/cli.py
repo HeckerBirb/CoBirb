@@ -31,6 +31,8 @@ from .orchestrator import render_through
 from .policy import PermissionError
 from .plugins.core import render
 from .runtime import commands, personas, plugins, sessions, wiring
+from .plugins.core import TerminalIO
+from .runtime.headless import EXIT_ERROR, HeadlessIO, HeadlessResult, describe_context
 from .runtime.personas import NO_PERSONA
 from .runtime.plugins import PluginsSummary, ToolInfo
 from .typing import spi as cobirb_typing
@@ -106,39 +108,83 @@ def _run_one_shot(
     cwd: str,
     model_name: str | None = None,
     plan_mode: bool = False,
+    headless: bool = False,
+    output: str = "text",
 ) -> int:
+    """Run one prompt and exit.
+
+    ``headless`` refuses every unpermitted call instead of prompting — in a
+    pipeline the terminal prompt would block on a question nobody will answer.
+    ``output="json"`` replaces the rendered transcript with one machine-
+    readable object on stdout, and nothing else goes there.
+    """
+    as_json = output == "json"
+    io_factory = HeadlessIO if headless else TerminalIO
+    report = HeadlessResult(ok=False, summary="")
+
     # Wiring first, echo second: a prompt echoed before the session failed to
     # open reads as though the task was attempted, when nothing ran at all.
     try:
         orchestrator = wiring.build_orchestrator(
-            cwd, persona, allow_overrides, session_path, password, model_name
+            cwd, persona, allow_overrides, session_path, password, model_name,
+            io_factory=io_factory,
         )
     except Exception as exc:  # noqa: BLE001 - a bad password must not traceback
         # Chiefly a session that wouldn't decrypt. Wiring failures used to
         # escape here as an unhandled traceback, which for the commonest
         # cause (a mistyped password) is a terrible way to be told.
-        print(f"cobirb: could not open {session_path} — {sessions.session_open_error(exc)}", file=sys.stderr)
-        return 1
+        message = f"could not open {session_path} — {sessions.session_open_error(exc)}"
+        if as_json:
+            report.error = message
+            print(report.to_json())
+            return report.exit_code(unattended=headless)
+        print(f"cobirb: {message}", file=sys.stderr)
+        return EXIT_ERROR
 
-    _render_user_prompt(prompt)
+    if not as_json:
+        _render_user_prompt(prompt)
     try:
         session = orchestrator.run(
             prompt, system, cwd=cwd, persona=persona.name, session_path=session_path, plan_mode=plan_mode
         )
     except PermissionError as exc:
+        report.error = f"blocked — {exc}"
+        if as_json:
+            print(report.to_json())
+            return report.exit_code(unattended=headless)
         _render(f"{persona.name}: blocked — {exc}\n")
-        return 1
+        return EXIT_ERROR
     except Exception as exc:  # noqa: BLE001 - surface provider/tool errors cleanly
+        report.error = f"could not complete — {exc}"
+        if as_json:
+            print(report.to_json())
+            return report.exit_code(unattended=headless)
         _render(f"{persona.name}: could not complete — {exc}\n")
-        return 1
+        return EXIT_ERROR
+
+    if session_path is not None and orchestrator.session is not None:
+        orchestrator.session.save(password)
+
+    calls = orchestrator.last_run_tool_calls
+    report = HeadlessResult(
+        ok=True,
+        summary=session.summary or "",
+        validation=session.validation,
+        turns=len(session.turns),
+        tool_calls=calls,
+        denied=[call["name"] for call in calls if call["denied"]],
+        session_path=session_path,
+        context=describe_context(orchestrator),
+    )
+    if as_json:
+        print(report.to_json())
+        return report.exit_code(unattended=headless)
 
     # If the final answer already streamed live via the I/O adapter, printing
     # session.summary again here would just show it a second time.
     if not orchestrator.last_turn_streamed:
         _render_final_answer(orchestrator, persona.name, session.summary)
-    if session_path is not None and orchestrator.session is not None:
-        orchestrator.session.save(password)
-    return 0
+    return report.exit_code(unattended=headless)
 
 
 def _run_tui(
@@ -301,6 +347,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "retrying a denied tool call. Either way, a persona (if you adopt "
         "one) is added after your model's own prompt, never instead of it.",
     )
+    opts.add_argument(
+        "--headless",
+        action="store_true",
+        help="Never prompt. Anything not already permitted by --allow-tool or "
+        "the 'allow_tools' config key is refused outright, so a run can go "
+        "unattended in CI. There is deliberately no flag that approves "
+        "everything: say what is allowed, in a file someone can review.",
+    )
+    opts.add_argument(
+        "--output",
+        choices=["text", "json"],
+        default="text",
+        help="'json' prints one machine-readable object on stdout and nothing "
+        "else — summary, tool calls, what was refused, context usage. Exit "
+        "code 0 completed, 1 failed, 2 completed with something refused.",
+    )
     opts.add_argument("--cwd", help="Working directory.")
     return parser
 
@@ -337,11 +399,18 @@ def main(argv: list[str] | None = None) -> int:
             args.cwd or ".",
             args.model,
             plan_mode,
+            headless=args.headless,
+            output=args.output,
         )
         # Only on success: the hint is about a session this run actually
         # wrote to. Printing it after a failure ("could not open …" followed
         # by "Session saved") claims something that didn't happen.
-        if status == 0 and session_path is not None and os.path.isfile(session_path):
+        if (
+            status == 0
+            and args.output != "json"
+            and session_path is not None
+            and os.path.isfile(session_path)
+        ):
             # stderr, not stdout: one-shot mode is meant to pipe, and this
             # hint is for the human, not for whatever is reading the output.
             print(sessions.resume_hint(session_path), file=sys.stderr)

@@ -175,6 +175,10 @@ class Orchestrator:
         # The model's usable context window. None means "ask the provider on
         # first use, then remember" — see _context_budget.
         self.context_tokens = context_tokens
+        # What the tools did during the most recent run, for the headless
+        # report. Derived here rather than sniffed out of turn text later,
+        # because "was this denied?" should be a fact and not a string match.
+        self.last_run_tool_calls: list[dict[str, Any]] = []
         # What the last _build_context had to throw away, for /context.
         self.last_compaction: CompactionReport | None = None
         # Whether the most recent run()'s final answer was already streamed
@@ -230,6 +234,7 @@ class Orchestrator:
         that post-``run()`` print becomes a no-op rather than a duplicate.
         """
         session = self._open_session(prompt, system, cwd, persona, session_path)
+        self.last_run_tool_calls = []
         if self.checkpoints is not None:
             self.checkpoints.begin_turn()
 
@@ -557,6 +562,7 @@ class Orchestrator:
         # in the request the model just replied to.
         tool = self.tools.get(tool_name)
         if tool is None:
+            self._record_call(tool_name, ok=False, denied=False)
             result = cobirb_typing.ToolResult(ok=False, content=self._unknown_tool_message(tool_name))
             session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
             self._render_tool_call(tool_name, arguments, result)
@@ -569,6 +575,7 @@ class Orchestrator:
         if not self.policy.is_allowed(tool_name, arguments):
             decision = self._request_approval(tool_name, arguments)
             if decision == cobirb_typing.DECISION_DENY:
+                self._record_call(tool_name, ok=False, denied=True)
                 result = cobirb_typing.ToolResult(
                     ok=False, content=f"Permission denied: tool '{tool_name}' is not permitted."
                 )
@@ -592,14 +599,19 @@ class Orchestrator:
             # Report it as a failed tool result so the model can see what
             # went wrong and correct itself on the next turn, rather than
             # tearing down the whole run over a recoverable mistake.
+            self._record_call(tool_name, ok=False, denied=False)
             result = cobirb_typing.ToolResult(
                 ok=False, content=_tool_failure_message(tool_name, tool, exc)
             )
             session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
             self._render_tool_call(tool_name, arguments, result)
             return
+        self._record_call(tool_name, ok=result.ok, denied=False)
         session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
         self._render_tool_call(tool_name, arguments, result)
+
+    def _record_call(self, tool_name: str, *, ok: bool, denied: bool) -> None:
+        self.last_run_tool_calls.append({"name": tool_name, "ok": ok, "denied": denied})
 
     def _snapshot_before(self, tool: Any, arguments: dict[str, Any]) -> None:
         """Save whatever this call is about to change, so it can be undone.
