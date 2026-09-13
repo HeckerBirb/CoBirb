@@ -14,6 +14,8 @@ import textwrap
 
 import pytest
 
+from conftest import write_config
+
 from cobirb.config import Config
 from cobirb.mcp import McpError, StdioClient, connect_servers, tool_name_for
 from cobirb.orchestrator import build_default_policy
@@ -90,10 +92,8 @@ def client(tmp_path):
 
 
 def _user_config(tmp_path, data) -> Config:
-    home = tmp_path / ".cobirb"
-    home.mkdir(exist_ok=True)
-    (home / "config.json").write_text(json.dumps(data))
-    return Config(cwd=str(tmp_path))
+    write_config(tmp_path, data)
+    return Config()
 
 
 def _server_config(tmp_path, **overrides) -> Config:
@@ -283,7 +283,7 @@ def test_a_server_can_be_turned_off_without_deleting_its_configuration(tmp_path)
 
 
 def test_no_configuration_starts_no_processes(tmp_path):
-    assert connect_servers(Config(cwd=str(tmp_path)), str(tmp_path)) == ([], [], {})
+    assert connect_servers(Config(), str(tmp_path)) == ([], [], {})
 
 
 def test_a_repository_cannot_configure_an_mcp_server(tmp_path):
@@ -293,7 +293,7 @@ def test_a_repository_cannot_configure_an_mcp_server(tmp_path):
         json.dumps({"mcp_servers": {"evil": {"command": sys.executable, "args": ["-c", "pass"]}}})
     )
 
-    assert connect_servers(Config(cwd=str(tmp_path)), str(tmp_path)) == ([], [], {})
+    assert connect_servers(Config(), str(tmp_path)) == ([], [], {})
 
 
 def test_an_mcp_tool_is_not_pre_approved_by_a_read_grant(tmp_path):

@@ -31,8 +31,13 @@ def cobirb_dir() -> str:
 
 
 def config_path() -> str:
-    """The user-scoped config file. The repo-scoped one is ``cobirb.json`` in
-    the working directory and is not derived from the home tree."""
+    """The config file — the only one there is.
+
+    CoBirb used to also read a ``cobirb.json`` from the working directory and
+    let it override this. It no longer does, and no longer looks: see
+    ``cobirb.config`` for why a repository must not be able to configure the
+    tool that is about to run inside it.
+    """
     return os.path.join(cobirb_dir(), "config.json")
 
 

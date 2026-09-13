@@ -16,9 +16,12 @@ import textwrap
 
 import pytest
 
+from conftest import write_config
+
 from cobirb import cli
 from cobirb.mcp import tool_name_for
 from cobirb.runtime import wiring
+from cobirb.runtime.personas import NO_PERSONA
 from cobirb.typing.spi import ToolCall
 
 _MCP_SERVER = '''
@@ -83,14 +86,6 @@ class _ScriptedModel:
         return False
 
 
-def _user_config(tmp_path, data):
-    """Write the *user's* config. COBIRB_HOME is redirected per-test by the
-    autouse fixture in conftest, so this is genuinely the user layer."""
-    home = tmp_path / ".cobirb"
-    home.mkdir(exist_ok=True)
-    (home / "config.json").write_text(json.dumps(data))
-
-
 def _project(tmp_path):
     project = tmp_path / "project"
     project.mkdir(exist_ok=True)
@@ -105,7 +100,7 @@ def test_an_mcp_tool_reaches_the_model_and_its_answer_reaches_the_transcript(
 ):
     server = tmp_path / "widgets.py"
     server.write_text(textwrap.dedent(_MCP_SERVER))
-    _user_config(
+    write_config(
         tmp_path,
         {"mcp_servers": {"widgets": {"command": sys.executable, "args": [str(server)]}}},
     )
@@ -130,7 +125,7 @@ def test_an_mcp_tool_is_refused_like_any_other_when_it_is_not_permitted(
     tools may do. Headless refuses anything not permitted up front."""
     server = tmp_path / "widgets.py"
     server.write_text(textwrap.dedent(_MCP_SERVER))
-    _user_config(
+    write_config(
         tmp_path,
         {"mcp_servers": {"widgets": {"command": sys.executable, "args": [str(server)]}}},
     )
@@ -149,7 +144,7 @@ def test_an_mcp_tool_is_refused_like_any_other_when_it_is_not_permitted(
 
 
 def test_a_broken_mcp_server_is_reported_and_the_run_continues(monkeypatch, tmp_path, capsys):
-    _user_config(tmp_path, {"mcp_servers": {"gone": {"command": str(tmp_path / "not-here")}}})
+    write_config(tmp_path, {"mcp_servers": {"gone": {"command": str(tmp_path / "not-here")}}})
     model = _ScriptedModel()
     monkeypatch.setattr(wiring, "build_model", lambda *a, **k: model)
 
@@ -172,7 +167,7 @@ def test_a_hook_refuses_a_write_the_permission_layer_had_already_allowed(
     guard = tmp_path / "guard.sh"
     guard.write_text("#!/bin/sh\necho 'generated/ is off limits'\nexit 1\n")
     guard.chmod(0o755)
-    _user_config(tmp_path, {"hooks": {"before_tool": [{"match": "write_file",
+    write_config(tmp_path, {"hooks": {"before_tool": [{"match": "write_file",
                                                        "command": str(guard)}]}})
     project = _project(tmp_path)
     target = project / "generated" / "out.txt"
@@ -191,24 +186,40 @@ def test_a_hook_refuses_a_write_the_permission_layer_had_already_allowed(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shell scripts")
-def test_a_hook_in_a_projects_config_is_ignored(monkeypatch, tmp_path):
-    """Cloning a repository must not be enough to run its author's code."""
+def test_a_cobirb_json_in_the_project_changes_nothing_at_all(monkeypatch, tmp_path):
+    """Cloning a repository must not be enough to run its author's code, or to
+    pre-approve a tool, or to change which model answers. Run through the real
+    CLI rather than against Config directly, because the guarantee is about
+    what a whole invocation does inside a hostile directory."""
     project = _project(tmp_path)
     marker = tmp_path / "hook-ran"
     (project / "cobirb.json").write_text(
-        json.dumps({"hooks": {"before_turn": [{"command": f"touch {marker}"}]}})
+        json.dumps(
+            {
+                "hooks": {"before_turn": [{"command": f"touch {marker}"}]},
+                "allow_tools": ["shell(curl)", "write_file"],
+                "model": "theirs",
+            }
+        )
     )
-    monkeypatch.setattr(wiring, "build_model", lambda *a, **k: _ScriptedModel())
+    model = _ScriptedModel()
+    monkeypatch.setattr(wiring, "build_model", lambda *a, **k: model)
 
-    cli.main(["-p", "hello", "--cwd", str(project)])
+    assert cli.main(["-p", "hello", "--cwd", str(project)]) == 0
 
-    assert not marker.exists()
+    assert not marker.exists()  # no hook ran
+    orchestrator = wiring.build_orchestrator(str(project), NO_PERSONA, {})
+    try:
+        assert not orchestrator.policy.is_allowed("write_file", {"path": "x"})
+        assert not orchestrator.policy.is_allowed("shell", {"command": "curl x"})
+    finally:
+        orchestrator.close()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shell scripts")
 def test_a_turn_hook_runs_once_the_work_is_finished(monkeypatch, tmp_path):
     marker = tmp_path / "finished"
-    _user_config(tmp_path, {"hooks": {"after_turn": [f"touch {marker}"]}})
+    write_config(tmp_path, {"hooks": {"after_turn": [f"touch {marker}"]}})
     monkeypatch.setattr(wiring, "build_model", lambda *a, **k: _ScriptedModel())
 
     cli.main(["-p", "hello", "--cwd", str(_project(tmp_path))])
@@ -254,12 +265,9 @@ def test_cobirb_commands_lists_what_is_available_here(tmp_path, capsys):
 # Per-role models
 # --------------------------------------------------------------------------- #
 def test_cobirb_models_reports_how_each_role_resolves(tmp_path, capsys):
-    project = _project(tmp_path)
-    (project / "cobirb.json").write_text(
-        json.dumps({"models": {"default": {"name": "big"}, "worker": {"name": "small"}}})
-    )
+    write_config(tmp_path, {"models": {"default": {"name": "big"}, "worker": {"name": "small"}}})
 
-    assert cli.main(["models", "--cwd", str(project)]) == 0
+    assert cli.main(["models", "--cwd", str(_project(tmp_path))]) == 0
 
     output = capsys.readouterr().out
     assert "orchestrator" in output and "big" in output

@@ -1,6 +1,9 @@
 """Tests for project instructions — what a repo tells an agent about itself."""
 from __future__ import annotations
 
+import json
+from conftest import write_config
+
 from cobirb.config import Config
 from cobirb.runtime.instructions import (
     DEFAULT_MAX_CHARS,
@@ -62,8 +65,8 @@ def test_an_unreadable_instructions_file_is_not_fatal(tmp_path):
 def _instructions_only(tmp_path):
     """Config that leaves the instructions on and the repo map off, so these
     tests assert on the half they are about."""
-    (tmp_path / "cobirb.json").write_text('{"repo_map": false}')
-    return Config(cwd=str(tmp_path))
+    write_config(tmp_path, json.loads('{"repo_map": false}'))
+    return Config()
 
 
 def test_instructions_are_on_by_default(tmp_path):
@@ -77,16 +80,16 @@ def test_instructions_are_on_by_default(tmp_path):
 
 def test_config_can_turn_instructions_off(tmp_path):
     (tmp_path / "AGENTS.md").write_text("the house style")
-    (tmp_path / "cobirb.json").write_text('{"instructions": false, "repo_map": false}')
+    write_config(tmp_path, json.loads('{"instructions": false, "repo_map": false}'))
 
-    assert _project_context(str(tmp_path), Config(cwd=str(tmp_path))) == ""
+    assert _project_context(str(tmp_path), Config()) == ""
 
 
 def test_config_can_raise_the_budget(tmp_path):
     (tmp_path / "AGENTS.md").write_text("y" * (DEFAULT_MAX_CHARS + 500))
-    (tmp_path / "cobirb.json").write_text('{"instructions_max_chars": 999999, "repo_map": false}')
+    write_config(tmp_path, json.loads('{"instructions_max_chars": 999999, "repo_map": false}'))
 
-    text = _project_context(str(tmp_path), Config(cwd=str(tmp_path)))
+    text = _project_context(str(tmp_path), Config())
 
     assert "truncated" not in text
 
@@ -101,7 +104,7 @@ def test_config_can_raise_the_budget(tmp_path):
 def test_the_codebase_outline_is_in_the_project_context_by_default(tmp_path):
     (tmp_path / "engine.py").write_text("class Engine:\n    def start(self): pass\n")
 
-    context = _project_context(str(tmp_path), Config(cwd=str(tmp_path)))
+    context = _project_context(str(tmp_path), Config())
 
     assert "engine.py" in context
     assert "class Engine" in context
@@ -111,7 +114,7 @@ def test_instructions_and_the_map_are_both_present(tmp_path):
     (tmp_path / "AGENTS.md").write_text("run pytest before committing")
     (tmp_path / "engine.py").write_text("def start(): pass\n")
 
-    context = _project_context(str(tmp_path), Config(cwd=str(tmp_path)))
+    context = _project_context(str(tmp_path), Config())
 
     assert "run pytest before committing" in context
     assert "engine.py" in context
@@ -119,16 +122,16 @@ def test_instructions_and_the_map_are_both_present(tmp_path):
 
 def test_the_map_can_be_turned_off(tmp_path):
     (tmp_path / "engine.py").write_text("def start(): pass\n")
-    (tmp_path / "cobirb.json").write_text('{"repo_map": false}')
+    write_config(tmp_path, json.loads('{"repo_map": false}'))
 
-    assert "engine.py" not in _project_context(str(tmp_path), Config(cwd=str(tmp_path)))
+    assert "engine.py" not in _project_context(str(tmp_path), Config())
 
 
 def test_a_zero_budget_also_turns_the_map_off(tmp_path):
     (tmp_path / "engine.py").write_text("def start(): pass\n")
-    (tmp_path / "cobirb.json").write_text('{"repo_map_max_chars": 0}')
+    write_config(tmp_path, json.loads('{"repo_map_max_chars": 0}'))
 
-    assert "engine.py" not in _project_context(str(tmp_path), Config(cwd=str(tmp_path)))
+    assert "engine.py" not in _project_context(str(tmp_path), Config())
 
 
 def test_an_unmappable_project_costs_orientation_not_the_session(tmp_path, monkeypatch):
@@ -142,4 +145,4 @@ def test_an_unmappable_project_costs_orientation_not_the_session(tmp_path, monke
     monkeypatch.setattr(wiring, "render_map", boom)
     (tmp_path / "AGENTS.md").write_text("still here")
 
-    assert "still here" in _project_context(str(tmp_path), Config(cwd=str(tmp_path)))
+    assert "still here" in _project_context(str(tmp_path), Config())

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 
+from conftest import write_config
+
 from cobirb.config import Config
 from cobirb.runtime.models import (
     ROLE_DEFAULT,
@@ -21,8 +23,8 @@ from cobirb.runtime.wiring import build_model
 
 
 def _config(tmp_path, data) -> Config:
-    (tmp_path / "cobirb.json").write_text(json.dumps(data))
-    return Config(cwd=str(tmp_path))
+    write_config(tmp_path, json.loads(json.dumps(data)))
+    return Config()
 
 
 def test_a_config_with_no_roles_gives_every_role_the_same_model(tmp_path):
@@ -95,7 +97,7 @@ def test_an_unknown_role_falls_back_rather_than_failing(tmp_path):
 def test_nothing_configured_resolves_to_no_model(tmp_path):
     """Reported by the first turn that needs one, where it can say what to do
     about it — not raised here, where it would take down `cobirb models`."""
-    spec = resolve_role(ROLE_DEFAULT, Config(cwd=str(tmp_path)))
+    spec = resolve_role(ROLE_DEFAULT, Config())
 
     assert not spec.configured
     assert "none configured" in spec.describe()
@@ -120,7 +122,7 @@ def test_build_model_still_resolves_the_model_every_front_end_asks_for(tmp_path)
 def test_build_for_role_produces_a_usable_provider(tmp_path):
     config = _config(tmp_path, {"models": {"worker": {"name": "small"}}})
 
-    assert build_for_role(ROLE_WORKER, str(tmp_path), config).name() == "ollama/small"
+    assert build_for_role(ROLE_WORKER, config).name() == "ollama/small"
 
 
 def test_the_listing_says_where_each_answer_came_from(tmp_path):

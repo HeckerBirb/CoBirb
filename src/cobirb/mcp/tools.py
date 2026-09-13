@@ -102,13 +102,15 @@ class McpTool(Tool):
 
 
 def _server_specs(config: Config) -> dict[str, dict[str, Any]]:
-    """The configured servers, from the **user's** config only.
+    """The configured servers.
 
-    Not from a repository's ``cobirb.json``: a server entry is a command line,
-    so honouring one from a cloned directory would make cloning it sufficient
-    to run its author's code. See ``Config.user_get``.
+    There is only one config file and it lives in the user's home directory
+    (see ``cobirb.config``), so a repository cannot name a server here. That
+    matters more for this key than most: a server entry is a command line, and
+    honouring one from a cloned directory would make cloning it sufficient to
+    run its author's code.
     """
-    block = config.user_get("mcp_servers", default={}) or {}
+    block = config.get("mcp_servers", default={}) or {}
     if not isinstance(block, dict):
         logger.warning('ignoring "mcp_servers": expected an object of name -> server')
         return {}

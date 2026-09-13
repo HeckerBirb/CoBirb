@@ -35,6 +35,11 @@ def build_model(model_name: str | None, cwd: str | None = None, config: Config |
     resolving through its own key and then the default — see
     ``runtime.models``, which also explains why a role rather than a name.
 
+    ``cwd`` is accepted and unused: configuration comes from the user's home
+    directory and nothing else (see ``cobirb.config``), so the working
+    directory no longer selects anything here. The parameter stays because
+    every front-end passes it and removing it buys nothing.
+
     No models are embedded by default; the provider talks to a local Ollama
     (or other OpenAI-compatible) server once a model name is supplied.
     Interactive mode additionally *validates* whatever name this resolves
@@ -42,8 +47,7 @@ def build_model(model_name: str | None, cwd: str | None = None, config: Config |
     working one if it can't — see ``tui.app.CoBirbApp``. This function
     itself does no such validation; one-shot mode uses it exactly as before.
     """
-    config = config or Config(cwd=cwd)
-    return build_for_role(ROLE_ORCHESTRATOR, cwd, config, override=model_name)
+    return build_for_role(ROLE_ORCHESTRATOR, config or Config(), override=model_name)
 
 
 def parse_allow_tools(specs: "str | list[str] | None") -> dict[str, str]:
@@ -167,7 +171,7 @@ def build_orchestrator(
     explicitly selected via ``plugins.<slot>`` in config. Discovery/merge
     problems are reported to stderr and never fatal.
     """
-    config = Config(cwd=cwd)
+    config = Config()
     registry, discovered, discovery_issues = discover_plugins(cwd, config)
     report_plugin_issues(discovery_issues)
 
@@ -238,9 +242,7 @@ def build_orchestrator(
         # On by default: an agent that edits real files without an undo is a
         # worse deal than one that spends a little disk.
         checkpoints=None if config.get("checkpoints") is False else Checkpoints(cwd),
-        # The user's own commands at the lifecycle points. Read from the user's
-        # config file only — see Config.user_get for why a repository must not
-        # be able to add one.
+        # The user's own commands at the lifecycle points.
         hooks=HookRunner.from_config(config, cwd),
         mcp_clients=mcp_clients,
     )

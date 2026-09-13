@@ -165,22 +165,23 @@ Being straight about the edges, since the rest of this page makes strong claims:
   tokens for unrelated services), and its tools are pre-approved by nothing. Read
   `cobirb help mcp` before adding one; it also has a worked example of writing your own
   offline server, which is the case worth building for.
-- **A repository's `cobirb.json` can currently pre-approve tools.** Cloning a repo and running
-  CoBirb inside it honours the `allow_tools` in its config, with no prompt. `hooks` and
-  `mcp_servers` are deliberately exempt — those are read from your own config only — but
-  `allow_tools` predates that rule. Read a project's `cobirb.json` before working in it. See
-  §12.1 of [`AGENTS.md`](./AGENTS.md) for the fix under consideration.
 
 ## Configuration
 
-Copy [`cobirb.json.example`](./cobirb.json.example) to `cobirb.json` (repo-scoped) or
-`~/.cobirb/config.json` (user-scoped) and edit it — nothing here is loaded until you do, and
-nothing defaults to a networked provider. See `cobirb help config` for what each key does.
+Copy [`config.json.example`](./config.json.example) to `~/.cobirb/config.json` and edit it —
+nothing in it is loaded until you do, and nothing defaults to a networked provider. See
+`cobirb help config` for what each key does.
 
-Two keys — `hooks` and `mcp_servers` — are read from `~/.cobirb/config.json` **only**. Both can
-execute code with no approval prompt in the way, so honouring them from a project's file would
-make cloning a repository enough to run its author's code. Putting them in a repo config does
-nothing.
+**That is the only config file CoBirb reads.** It does not read a `cobirb.json` from the
+directory you are working in, does not merge one over yours, and does not look for one — so a
+repository cannot pre-approve a tool, install a hook, or start a server. Configuration here is
+not preference: it decides what runs without asking, and a project able to contribute to it
+would mean cloning a project is enough to influence the permission model.
+
+A project can still *describe itself*: `AGENTS.md`, the repo map, and prompt files in
+`<project>/.cobirb/commands/` are all read. Those are content for the model rather than
+capability granted to it, and every tool call they lead to still goes through the permission
+layer.
 
 ## Documentation
 

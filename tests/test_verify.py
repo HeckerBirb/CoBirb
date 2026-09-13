@@ -1,7 +1,10 @@
 """Tests for running the project's own check after the agent changes things."""
 from __future__ import annotations
 
+import json
 import sys
+
+from conftest import write_config
 
 from cobirb.config import Config
 from cobirb.orchestrator import Orchestrator
@@ -191,13 +194,13 @@ def test_the_fix_loop_is_bounded(tmp_path):
 def test_verification_is_off_unless_a_command_is_named(tmp_path):
     """No guessing from the project layout: guessing wrong means running an
     arbitrary command the user never asked for, after every turn."""
-    assert _verify_settings(str(tmp_path), Config(cwd=str(tmp_path))) is None
+    assert _verify_settings(str(tmp_path), Config()) is None
 
 
 def test_a_configured_command_turns_it_on(tmp_path):
-    (tmp_path / "cobirb.json").write_text('{"verify_command": "pytest -q", "verify_timeout": 30}')
+    write_config(tmp_path, json.loads('{"verify_command": "pytest -q", "verify_timeout": 30}'))
 
-    settings = _verify_settings(str(tmp_path), Config(cwd=str(tmp_path)))
+    settings = _verify_settings(str(tmp_path), Config())
 
     assert settings is not None
     assert settings.command == "pytest -q"
@@ -205,6 +208,6 @@ def test_a_configured_command_turns_it_on(tmp_path):
 
 
 def test_a_blank_command_is_the_same_as_none(tmp_path):
-    (tmp_path / "cobirb.json").write_text('{"verify_command": "   "}')
+    write_config(tmp_path, json.loads('{"verify_command": "   "}'))
 
-    assert _verify_settings(str(tmp_path), Config(cwd=str(tmp_path))) is None
+    assert _verify_settings(str(tmp_path), Config()) is None

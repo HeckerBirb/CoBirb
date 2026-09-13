@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-from conftest import DummyModel, StubSession, StubSessionManager
+from conftest import DummyModel, StubSession, StubSessionManager, write_config
 
 from cobirb import cli, help_text, session
 from cobirb.runtime import commands, personas, plugins, sessions, wiring
@@ -70,7 +70,7 @@ def test_parse_allow_tools_accepts_a_list():
 def test_config_allow_tools_permits_a_tool_without_a_prompt(tmp_path):
     """The user's own standing rules are the escape hatch from a policy that
     otherwise permits nothing — a tool named in config must run unprompted."""
-    (tmp_path / "cobirb.json").write_text('{"allow_tools": ["read_file", "shell(git)"]}')
+    write_config(tmp_path, json.loads('{"allow_tools": ["read_file", "shell(git)"]}'))
     orchestrator = wiring.build_orchestrator(str(tmp_path), personas.load_persona(None), {})
 
     assert orchestrator.policy.is_allowed("read_file", {"path": "anything.txt"})
@@ -81,17 +81,17 @@ def test_config_allow_tools_permits_a_tool_without_a_prompt(tmp_path):
 
 
 def test_resolve_plan_mode_defaults_off(tmp_path):
-    assert _resolve_plan_mode(None, Config(cwd=str(tmp_path))) is False
+    assert _resolve_plan_mode(None, Config()) is False
 
 
 def test_resolve_plan_mode_reads_the_config_key(tmp_path):
-    (tmp_path / "cobirb.json").write_text('{"plan_mode": true}')
-    assert _resolve_plan_mode(None, Config(cwd=str(tmp_path))) is True
+    write_config(tmp_path, json.loads('{"plan_mode": true}'))
+    assert _resolve_plan_mode(None, Config()) is True
 
 
 def test_resolve_plan_mode_cli_flag_overrides_config(tmp_path):
-    (tmp_path / "cobirb.json").write_text('{"plan_mode": true}')
-    config = Config(cwd=str(tmp_path))
+    write_config(tmp_path, json.loads('{"plan_mode": true}'))
+    config = Config()
     assert _resolve_plan_mode("off", config) is False
     assert _resolve_plan_mode("on", config) is True
 
@@ -138,7 +138,7 @@ def test_build_orchestrator_audit_log_is_off_by_default(tmp_path):
 
 
 def test_build_orchestrator_audit_log_can_be_turned_on_via_config(tmp_path):
-    (tmp_path / "cobirb.json").write_text('{"audit_log": true}')
+    write_config(tmp_path, json.loads('{"audit_log": true}'))
     persona = Persona(name="Noah")
     orchestrator = wiring.build_orchestrator(str(tmp_path), persona, {})
     assert orchestrator.policy.audit.enabled is True
@@ -885,7 +885,7 @@ def test_the_harness_block_leads_when_both_are_on():
 def test_resolve_harness_prompt_prefers_the_flag_then_config_then_off(
     cli_value, config_value, expected, tmp_path
 ):
-    config = Config(user_path=str(tmp_path / "none.json"), repo_path=str(tmp_path / "none.json"))
+    config = Config(user_path=str(tmp_path / "none.json"))
     if config_value is not None:
         config._data = {"system_prompt": config_value}
 
@@ -1075,7 +1075,7 @@ def test_merge_tool_plugins_ignores_non_tool_kinds(tmp_path):
 
 
 def test_select_plugin_returns_none_when_unconfigured(tmp_path):
-    config = Config(cwd=str(tmp_path))
+    config = Config()
     cls, issue = plugins.select_plugin("model", {"model:custom": object}, config)
     assert cls is None
     assert issue is None
@@ -1084,8 +1084,8 @@ def test_select_plugin_returns_none_when_unconfigured(tmp_path):
 def test_select_plugin_treats_the_core_default_name_as_unconfigured(tmp_path):
     """Selecting 'core-<kind>' explicitly must not try to bare-construct the
     core class (which needs its normal constructor arguments elsewhere)."""
-    (tmp_path / "cobirb.json").write_text('{"plugins": {"model": "core-model"}}')
-    config = Config(cwd=str(tmp_path))
+    write_config(tmp_path, json.loads('{"plugins": {"model": "core-model"}}'))
+    config = Config()
 
     cls, issue = plugins.select_plugin("model", {"model:core-model": object}, config)
 
@@ -1094,8 +1094,8 @@ def test_select_plugin_treats_the_core_default_name_as_unconfigured(tmp_path):
 
 
 def test_select_plugin_reports_an_unknown_selection(tmp_path):
-    (tmp_path / "cobirb.json").write_text('{"plugins": {"model": "does-not-exist"}}')
-    config = Config(cwd=str(tmp_path))
+    write_config(tmp_path, json.loads('{"plugins": {"model": "does-not-exist"}}'))
+    config = Config()
 
     cls, issue = plugins.select_plugin("model", {}, config)
 
@@ -1104,8 +1104,8 @@ def test_select_plugin_reports_an_unknown_selection(tmp_path):
 
 
 def test_select_plugin_resolves_a_configured_selection(tmp_path):
-    (tmp_path / "cobirb.json").write_text('{"plugins": {"io": "my-io"}}')
-    config = Config(cwd=str(tmp_path))
+    write_config(tmp_path, json.loads('{"plugins": {"io": "my-io"}}'))
+    config = Config()
 
     cls, issue = plugins.select_plugin("io", {"io:my-io": TerminalIO}, config)
 
@@ -1142,7 +1142,7 @@ def test_build_orchestrator_uses_a_configured_io_plugin(monkeypatch, tmp_path):
     class _CustomIO(TerminalIO):
         pass
 
-    (tmp_path / "cobirb.json").write_text('{"plugins": {"io": "custom-io"}}')
+    write_config(tmp_path, json.loads('{"plugins": {"io": "custom-io"}}'))
     monkeypatch.setattr(plugins, "load_plugins", lambda: ({"io:custom-io": _CustomIO}, {}))
     persona = Persona(name="Noah")
 
@@ -1152,7 +1152,7 @@ def test_build_orchestrator_uses_a_configured_io_plugin(monkeypatch, tmp_path):
 
 
 def test_build_orchestrator_reports_an_unknown_configured_model_plugin(monkeypatch, tmp_path, capsys):
-    (tmp_path / "cobirb.json").write_text('{"plugins": {"model": "ghost"}}')
+    write_config(tmp_path, json.loads('{"plugins": {"model": "ghost"}}'))
     monkeypatch.setattr(plugins, "load_plugins", lambda: ({}, {}))
     persona = Persona(name="Noah")
 
@@ -1166,32 +1166,32 @@ def test_build_orchestrator_reports_an_unknown_configured_model_plugin(monkeypat
 # and simplest of its three equivalent config keys (see cobirb help config).
 # --------------------------------------------------------------------------- #
 def test_build_model_prefers_the_explicit_argument_over_everything(tmp_path):
-    (tmp_path / "cobirb.json").write_text('{"model": "from-model-key", "default_model": "from-default-model"}')
+    write_config(tmp_path, json.loads('{"model": "from-model-key", "default_model": "from-default-model"}'))
     provider = wiring.build_model("from-argument", str(tmp_path))
     assert provider.name() == "ollama/from-argument"
 
 
 def test_build_model_falls_back_to_the_model_key(tmp_path):
-    (tmp_path / "cobirb.json").write_text('{"model": "from-model-key"}')
+    write_config(tmp_path, json.loads('{"model": "from-model-key"}'))
     assert wiring.build_model(None, str(tmp_path)).name() == "ollama/from-model-key"
 
 
 def test_build_model_falls_back_to_models_default_name(tmp_path):
-    (tmp_path / "cobirb.json").write_text('{"models": {"default": {"name": "from-models-default"}}}')
+    write_config(tmp_path, json.loads('{"models": {"default": {"name": "from-models-default"}}}'))
     assert wiring.build_model(None, str(tmp_path)).name() == "ollama/from-models-default"
 
 
 def test_build_model_falls_back_to_default_model_key(tmp_path):
-    (tmp_path / "cobirb.json").write_text('{"default_model": "from-default-model"}')
+    write_config(tmp_path, json.loads('{"default_model": "from-default-model"}'))
     assert wiring.build_model(None, str(tmp_path)).name() == "ollama/from-default-model"
 
 
 def test_build_model_default_model_is_the_lowest_priority_fallback(tmp_path):
     """All three name the same setting; "default_model" only kicks in once
     the older, more specific keys have nothing to say."""
-    (tmp_path / "cobirb.json").write_text(
+    write_config(tmp_path, json.loads(
         '{"model": "from-model-key", "default_model": "from-default-model"}'
-    )
+    ))
     assert wiring.build_model(None, str(tmp_path)).name() == "ollama/from-model-key"
 
 
@@ -1241,7 +1241,7 @@ def test_describe_plugins_names_configured_mcp_servers_without_starting_them(tmp
 
 
 def test_describe_plugins_reports_a_misconfigured_slot_without_crashing(tmp_path):
-    (tmp_path / "cobirb.json").write_text('{"plugins": {"model": "ghost"}}')
+    write_config(tmp_path, json.loads('{"plugins": {"model": "ghost"}}'))
 
     summary = plugins.describe_plugins(str(tmp_path))
 
@@ -1261,7 +1261,7 @@ def test_describe_plugins_reports_a_discovered_tool_plugin_and_its_issues(monkey
 
 
 def test_describe_plugins_reports_a_configured_model_plugin_by_name(monkeypatch, tmp_path):
-    (tmp_path / "cobirb.json").write_text('{"plugins": {"model": "custom"}}')
+    write_config(tmp_path, json.loads('{"plugins": {"model": "custom"}}'))
 
     class _FakeModelPlugin(cobirb_typing.ModelProvider):
         def name(self):

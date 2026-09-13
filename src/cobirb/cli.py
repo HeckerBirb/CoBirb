@@ -229,7 +229,7 @@ def _run_export(destination: str, session_path: str | None, password: str | None
         print("cobirb: --export needs --session to say which one.", file=sys.stderr)
         return EXIT_ERROR
     try:
-        config = Config(cwd=cwd)
+        config = Config()
         _, discovered, _ = plugins.discover_plugins(cwd, config)
         crypto, _ = plugins.build_crypto(config, discovered)
         manager = SessionManager.load(session_path, crypto, password, cwd)
@@ -461,7 +461,7 @@ def main(argv: list[str] | None = None) -> int:
         print(HELP_TOPICS[args.topic] if args.topic else HELP_TEXT)
         return 0
 
-    config = Config(cwd=args.cwd)
+    config = Config()
 
     if args.subcommand == "models":
         return _run_models(config, args.model)

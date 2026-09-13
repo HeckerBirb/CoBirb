@@ -103,9 +103,9 @@ EXTENDING IT
                  permission layer as everything else. A server you add can
                  make its own network calls: READ 'help mcp' first.
 
-  Hooks and MCP servers are read from ~/.cobirb/config.json only, never from
-  a project's cobirb.json — both execute code with no approval prompt, and a
-  repository must not be able to install one.
+  All of it is configured in ~/.cobirb/config.json. CoBirb reads no config
+  from the directory you are working in — a repository cannot pre-approve a
+  tool, install a hook, or start a server. See 'cobirb help config'.
 
 TOPICS
   Run 'cobirb help <topic>' for more: session, persona, plan, model,
@@ -282,10 +282,11 @@ infra/, always run the formatter after an edit, tell me when a turn finishes.
 Asking a human to re-enact a policy twenty times a session is how people end
 up approving things unread.
 
-Hooks live in ~/.cobirb/config.json ONLY — never in a project's cobirb.json.
-A hook runs without an approval prompt, so honouring one from a repository
-would make cloning that repository enough to run its author's code. This
-costs per-project hooks, deliberately.
+Hooks live in ~/.cobirb/config.json, like everything else — CoBirb reads no
+config from a working directory, so a repository cannot install one. That
+costs per-project hooks, deliberately: a hook runs with no approval prompt in
+the way, and a repository able to define one would make cloning it enough to
+run its author's code.
 
   {
     "hooks": {
@@ -409,9 +410,9 @@ READ THIS BEFORE ADDING ONE
 
 CONFIGURING ONE
 
-  ~/.cobirb/config.json ONLY, never a project's cobirb.json: a server entry
-  is a command line, so honouring one from a repository would make cloning
-  it enough to run its author's code.
+  In ~/.cobirb/config.json, like everything else. A repository cannot name a
+  server — which matters more for this key than most, since a server entry is
+  a command line.
 
   {
     "mcp_servers": {
@@ -570,10 +571,28 @@ rather than guessed at. Third-party tool plugins extend this list and are
 gated identically — see 'cobirb help plugins'.
 """,
     "config": """\
-CONFIG — user + repo scoped settings
+CONFIG — one file, in your home directory
 
-Read from (repo overrides user): ~/.cobirb/config.json, then ./cobirb.json
-(relative to --cwd). See cobirb.json.example for a starting point. Keys:
+  ~/.cobirb/config.json
+
+That is the only config file CoBirb reads. It does not read a cobirb.json
+from the directory you are working in, does not merge one over this, and
+does not look for one — so a repository cannot configure CoBirb at all.
+
+That is deliberate, and it is the reason there is no project layer. Config
+here is not preference: it decides what is pre-approved, which directories
+may be read or written, what runs at lifecycle points, and which
+subprocesses start. A repository able to contribute any of that would mean
+cloning it and running CoBirb inside it lets its author influence the
+permission model — before the model is asked anything, and with no prompt
+able to intervene.
+
+What a project may still do is describe itself: AGENTS.md instructions, the
+repo map, and prompt files in <project>/.cobirb/commands/ are all still read.
+Those are content for the model, not capability granted to it, and every
+tool call they lead to still goes through the permission layer.
+
+See config.json.example for a starting point. Keys:
 
   "default_model"                Model to use by default (or --model/
                                  COBIRB_MODEL_NAME). Validated at
@@ -656,13 +675,6 @@ Read from (repo overrides user): ~/.cobirb/config.json, then ./cobirb.json
                                  plain text, not encrypted — only turn it
                                  on if you want that trail and understand
                                  what ends up in it.
-
-USER-CONFIG ONLY
-
-Two keys are read from ~/.cobirb/config.json and nowhere else. Both can
-execute code with no approval prompt in the way, so honouring them from a
-project's cobirb.json would make cloning a repository enough to run its
-author's code. Putting them in a project file does nothing at all.
 
   "hooks"                        Your own commands at CoBirb's decision
                                  points; a before_tool hook can refuse a

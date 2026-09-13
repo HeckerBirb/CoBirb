@@ -1,7 +1,32 @@
-"""User + repo scoped config, with model/provider settings opt-in.
+"""Configuration, read from the user's home directory and nowhere else.
 
-Config is read-only for the core. Model/provider settings are opt-in and never
-default to any networked provider.
+**There is exactly one config file: `~/.cobirb/config.json`.** CoBirb does not
+read a `cobirb.json` from the working directory, does not merge one over this
+one, and does not look for one. A repository cannot configure CoBirb at all.
+
+That used to be a two-layer merge with repo-overrides-user precedence, which is
+the conventional shape and was the wrong one here. Configuration is not
+preference in this tool — it decides what is pre-approved, which directories
+may be read or written, which commands run at lifecycle points, and which
+subprocesses start. A repository able to contribute any of that means cloning a
+repository and running CoBirb inside it lets its author influence the
+permission model, before the model is asked anything and with no prompt able to
+intervene. That was not hypothetical: a committed `cobirb.json` naming
+``allow_tools`` pre-approved those tools silently.
+
+The narrower fixes — exempting the dangerous keys, or prompting once to trust a
+directory — both leave the same shape in place and rely on the list of
+dangerous keys staying correct forever. Removing the layer is the version with
+no ongoing obligation attached.
+
+**What a repository may still do is describe itself.** `AGENTS.md` project
+instructions, the repo map, and prompt files under `<project>/.cobirb/commands/`
+are all still read, because those are content for the model rather than
+capability granted to it, and every tool call they lead to still goes through
+the permission layer. The line is: a project may tell CoBirb about itself, never
+tell CoBirb what it is allowed to do.
+
+Model/provider settings remain opt-in and never default to anything networked.
 """
 from __future__ import annotations
 
@@ -14,18 +39,17 @@ from . import paths
 
 
 def _load(path: str | None) -> dict[str, Any]:
-    """Read one config layer, reporting and skipping anything unreadable.
+    """Read the config file, reporting and skipping anything unreadable.
 
     A stray comma used to escape as a raw ``JSONDecodeError`` from whichever
     command happened to construct a ``Config`` — which is all of them,
     including ``cobirb help``, which never reads a config key. Everywhere else
-    in this codebase a broken input is reported and stepped over; these two
-    layers were the exception.
+    in this codebase a broken input is reported and stepped over; this was the
+    exception.
 
-    Reported to stderr and skipped, rather than exiting: the other layer may
-    be perfectly good, and losing a run because the *user-scoped* file has a
-    typo in it would be a worse trade. The message names the file so the typo
-    is findable.
+    Reported to stderr and skipped, rather than exiting: losing a run because
+    the config has a typo in it would be a worse trade than running with
+    defaults, and the message names the file so the typo is findable.
     """
     if not path or not os.path.isfile(path):
         return {}
@@ -36,46 +60,19 @@ def _load(path: str | None) -> dict[str, Any]:
         print(f"cobirb: ignoring {path} — {exc}", file=sys.stderr)
         return {}
     if not isinstance(data, dict):
-        # Valid JSON, wrong shape: a list or a bare string would break the
-        # merge below in a much less obvious place.
+        # Valid JSON, wrong shape: a list or a bare string would break every
+        # `get` below in a much less obvious place.
         print(f"cobirb: ignoring {path} — expected a JSON object", file=sys.stderr)
         return {}
     return data
 
 
-def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged: dict[str, Any] = dict(base)
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _merge(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
-
-
 class Config:
-    """A simple, layered configuration reader."""
+    """The user's configuration. One file, one layer, no project overrides."""
 
-    def __init__(
-        self,
-        user_path: str | None = None,
-        repo_path: str | None = None,
-        cwd: str | None = None,
-    ) -> None:
-        # The repo-scoped config belongs to the directory CoBirb is working
-        # *on* (``--cwd``), not the directory the process happened to be
-        # launched from — otherwise `cd ~ && cobirb --cwd /project` silently
-        # ignores /project/cobirb.json, the same class of mistake the tools
-        # layer already had with relative paths.
-        self.user_path = user_path or paths.config_path()
-        self.repo_path = repo_path or os.path.join(cwd or ".", "cobirb.json")
-        user = _load(self.user_path)
-        repo = _load(self.repo_path)
-        # Kept separately as well as merged: a few settings are deliberately
-        # readable only from the user's own file. See `user_get`.
-        self._user_data = user
-        # Repo config overrides user config.
-        self._data = _merge(user, repo)
+    def __init__(self, user_path: str | None = None) -> None:
+        self.path = user_path or paths.config_path()
+        self._data = _load(self.path)
 
     @property
     def data(self) -> dict[str, Any]:
@@ -84,33 +81,6 @@ class Config:
     def get(self, *keys: str, default: Any = None) -> Any:
         """Return a nested value, e.g. ``config.get("models", "default", "name")``."""
         value: Any = self._data
-        for key in keys:
-            if isinstance(value, dict) and key in value:
-                value = value[key]
-            else:
-                return default
-        return value
-
-    def user_get(self, *keys: str, default: Any = None) -> Any:
-        """Read a setting from the **user's own** config file only.
-
-        Repo-scoped ``cobirb.json`` normally overrides the user file, which is
-        what you want for "which model does this project use" and emphatically
-        not what you want for anything that can execute code. Two settings can:
-        ``hooks`` runs shell commands at lifecycle points, and ``mcp_servers``
-        launches long-lived subprocesses. Read through ``get()`` those would
-        mean that cloning a repository and running CoBirb in it hands that
-        repository's author a shell — before the model is ever asked anything,
-        and with no approval prompt in the way, because the prompt is a thing
-        CoBirb decides to show and this would be code deciding whether to show
-        it.
-
-        So those two are read from here instead: a file only the user writes,
-        outside any repository. It costs per-project hooks, which is a real
-        loss and a deliberate one — the alternative is a permission model that
-        the contents of a downloaded directory can rewrite.
-        """
-        value: Any = self._user_data
         for key in keys:
             if isinstance(value, dict) and key in value:
                 value = value[key]

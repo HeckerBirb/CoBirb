@@ -140,7 +140,7 @@ def resolve_role(role: str, config: Config, override: str | None = None) -> Mode
 
 
 def build_for_role(
-    role: str, cwd: str | None = None, config: Config | None = None, override: str | None = None
+    role: str, config: Config | None = None, override: str | None = None
 ) -> LocalModelProvider:
     """A provider for ``role``.
 
@@ -148,7 +148,7 @@ def build_for_role(
     "no model configured" error belongs to the first turn that actually needs
     one, where it can say what to do about it, not to wiring.
     """
-    config = config or Config(cwd=cwd)
+    config = config or Config()
     spec = resolve_role(role, config, override)
     return LocalModelProvider(model=spec.name, base_url=spec.base_url)
 

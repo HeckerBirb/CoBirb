@@ -36,8 +36,6 @@
   "plan_mode": false,
   "audit_log": false,
 
-  "//user-only": "The two keys below are read ONLY from ~/.cobirb/config.json, never from a repo's cobirb.json. Both can execute code without an approval prompt, so honouring them from a cloned directory would make cloning it enough to run its author's code. Putting them here does nothing.",
-
   "//hooks": "Your own commands at CoBirb's decision points. Events: before_tool, after_tool, before_turn, after_turn. The event arrives as JSON on stdin. A non-zero exit from a before_tool hook BLOCKS the call and its output becomes the reason the model is given. See 'cobirb help hooks'.",
   "hooks": {
     "before_tool": [

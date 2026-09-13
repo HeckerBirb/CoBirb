@@ -6,6 +6,9 @@ backend (the vetted ``cryptography`` library) so the round-trip is genuine.
 """
 from __future__ import annotations
 
+import json
+import os
+
 import pytest
 
 
@@ -14,6 +17,24 @@ def _isolated_cobirb_home(tmp_path, monkeypatch):
     """Redirect ``COBIRB_HOME`` so no test ever writes to the real home dir
     (e.g. the default audit log path)."""
     monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+
+
+def write_config(home, data) -> str:
+    """Write CoBirb's config file under ``home`` and return its path.
+
+    There is one config file — ``<home>/.cobirb/config.json`` — and no repo
+    layer, so tests that want a setting in force write it here. Worth a shared
+    helper because the location is a *rule* now rather than one of two options
+    (see ``cobirb.config``): a test that reached for a project-local file would
+    be asserting on something CoBirb deliberately no longer reads, and would
+    pass for the wrong reason if that ever came back.
+    """
+    directory = os.path.join(str(home), ".cobirb")
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, "config.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh)
+    return path
 
 
 @pytest.fixture

@@ -186,7 +186,7 @@ def describe_plugins(cwd: str) -> PluginsSummary:
     ``build_orchestrator``'s own call to plugin discovery); the caller
     decides how to show them.
     """
-    config = Config(cwd=cwd)
+    config = Config()
     registry, discovered, issues = discover_plugins(cwd, config)
 
     slots: dict[str, str] = {}
@@ -213,7 +213,7 @@ def describe_plugins(cwd: str) -> PluginsSummary:
 
 def configured_mcp_servers(config: Config) -> list[str]:
     """Names of the MCP servers the user has configured, without starting any."""
-    block = config.user_get("mcp_servers", default={}) or {}
+    block = config.get("mcp_servers", default={}) or {}
     if not isinstance(block, dict):
         return []
     return sorted(

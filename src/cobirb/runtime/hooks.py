@@ -26,10 +26,12 @@ adapts, rather than being told a flat no it will simply retry. This is the one
 event whose result changes what CoBirb does; every other event is an
 observation, where a failing hook is reported and stepped over.
 
-**Hooks are read from the user's own config only** (``Config.user_get``), never
-from a repository's ``cobirb.json``. A hook is arbitrary code that runs without
-an approval prompt, so honouring one from a cloned directory would mean cloning
-a repository is enough to execute its author's code. See ``Config.user_get``.
+**Hooks come from `~/.cobirb/config.json`, like every other setting**, and a
+repository cannot supply one — CoBirb reads no config from a working directory
+at all (see ``cobirb.config``). That is worth stating here rather than leaving
+implicit: a hook is arbitrary code that runs with no approval prompt in the way,
+so a repository able to define one would mean cloning a repository is enough to
+execute its author's code.
 
 **The contract.** The hook is run through the shell, with the event as JSON on
 stdin:
@@ -114,14 +116,14 @@ def _clip(text: str) -> str:
 
 
 def load_hooks(config: Config) -> list[Hook]:
-    """Read the ``hooks`` block from the user's own config file.
+    """Read the ``hooks`` block from the configuration.
 
     Malformed entries are skipped with a log line rather than raising: this
     runs during wiring, and a stray key in one hook should not cost the
     session. An entry with no ``command`` is the common typo and is silently
     the same as not writing it.
     """
-    block = config.user_get("hooks", default={}) or {}
+    block = config.get("hooks", default={}) or {}
     if not isinstance(block, dict):
         logger.warning("ignoring \"hooks\": expected an object of event -> list")
         return []

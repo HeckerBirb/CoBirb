@@ -822,7 +822,7 @@ class CoBirbApp(App[None]):
             return
         self.call_from_thread(self.query_one(SessionsPane).set_status, "Unlocking…")
         try:
-            config = Config(cwd=self.cwd)
+            config = Config()
             _, discovered, _ = plugins.discover_plugins(self.cwd, config)
             crypto, _ = plugins.build_crypto(config, discovered)
             manager = session.SessionManager.load(
