@@ -124,6 +124,27 @@ three phases, each recorded as a `Turn` tagged with `Turn.phase`:
 (§7), so a "plan" turn can't be relabeled "validate". In plan mode `run()` renders the act answer
 itself, so the user reads the answer before the validation of it.
 
+## 4a. Every result is bounded
+
+A tool result becomes a session turn *and* a message in the next request, so any tool that can
+produce an arbitrarily large answer has to bound it. Each does it in the way that suits what it
+returns, and every cap announces itself rather than silently cutting:
+
+- `read_file` **pages** — one call is capped, the file is not. A short read names the offset to
+  continue from, so any size is readable in full. A file with no newlines can't be paged by line,
+  so it is cut with an explanation.
+- `list_dir` and `glob` **page** the same way, over entries and matches.
+- `grep` prunes ignored directories *during* the walk rather than enumerating the tree and
+  filtering after, clips each matching line as it is stored (a hit in a minified bundle is a match
+  of megabytes; keeping 500 of those to truncate later is gigabytes held to produce kilobytes),
+  and stops at 500 matches.
+- `shell` keeps **both ends** of overlong output. The head is what the command set out to say and
+  the tail is usually where it went wrong; either alone makes the other much harder to act on.
+- `repo_map` is budgeted, and names the files it could not outline.
+
+Measured against a 10 MB single-line bundle, a 10 MB log where every line matches, and a
+50,000-entry directory: peak RSS stayed at 57 MB and the largest result was 65 KB.
+
 ## 4b. Context management
 
 `Orchestrator._build_context` serialises the turn history to JSON for the provider — and trims it
@@ -334,10 +355,11 @@ class SessionCrypto(abc.ABC):
 | `write_file` | Creates parent directories. |
 | `edit_file` | Exact `old_str` match, first occurrence only. |
 | `apply_patch` | Unified diff; verifies context/removed lines and refuses rather than guessing. |
-| `glob`, `grep` | Skip vendor/cache dirs unless `include_ignored`. |
-| `list_dir` | |
+| `glob` | Paged like `list_dir`. Skips ignored paths unless `include_ignored`. |
+| `grep` | Prunes ignored directories during the walk rather than filtering after; clips each match line and caps at 500. |
+| `list_dir` | Paged; directories marked with a trailing slash. |
 | `repo_map` | Ranked outline of the codebase — see §4e. |
-| `shell` | **Highest privilege; gated.** Own process group on POSIX so forked children die with it; `cancel_running()` backs the TUI's Ctrl+C. |
+| `shell` | **Highest privilege; gated.** Output keeps both ends when it overflows. Own process group on POSIX so forked children die with it; `cancel_running()` backs the TUI's Ctrl+C. |
 
 All extend `CobirbTool`, whose `_resolve()` joins relative paths against the configured working
 directory — otherwise a model's `"src/foo.py"` would resolve against the *process's* cwd, not

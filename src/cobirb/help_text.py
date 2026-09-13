@@ -250,12 +250,13 @@ TOOLS — what the agent can do
   write_file     Create/overwrite a file.
   edit_file      Replace an exact old_str with new_str in a file.
   apply_patch    Apply a unified-diff patch to a file.
-  glob           Find files matching a glob pattern.
+  glob           Find files matching a glob pattern, a page at a time.
   grep           Search file contents by regex.
-  list_dir       List a directory's contents.
+  list_dir       List a directory's contents, a page at a time.
   repo_map       Outline the codebase: which files matter and what is
                  defined in them, most-referenced first.
-  shell          Run a shell command. Highest privilege; gated.
+  shell          Run a shell command. Highest privilege; gated. Very long
+                 output keeps its start and end, dropping the middle.
 
 Before a tool changes a file, CoBirb copies the current version aside, so
 /undo can put it back. This covers write_file, edit_file and apply_patch —

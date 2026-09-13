@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Iterator
 
 from ...typing.spi import Tool, ToolResult
 from .ignores import IgnoreRules
@@ -90,6 +90,22 @@ class CobirbTool(Tool):
 # and never finished.
 _MAX_READ_BYTES = 256 * 1024
 _MAX_GREP_MATCHES = 500
+
+# Entries returned by one list_dir or glob call. A directory with a hundred
+# thousand files is not rare — node_modules, a build output, a mail spool —
+# and dumping all of them was the same unbounded-result bug read_file had,
+# without even a truncation message.
+_MAX_LIST_ENTRIES = 1000
+
+# One matching line, clipped. A grep hit in a minified bundle is a single line
+# of megabytes; the useful part is that it matched and where.
+_MAX_MATCH_CHARS = 300
+
+# Bytes of combined stdout and stderr one shell call may return. Both ends are
+# kept when it overflows: the head is what the command set out to say and the
+# tail is usually where it went wrong, and losing either makes the other much
+# harder to act on.
+_MAX_SHELL_OUTPUT = 64 * 1024
 # A preview is for a human to read before saying yes; past a point a longer
 # diff makes the decision harder rather than better informed.
 _MAX_PREVIEW_BYTES = 8 * 1024
@@ -107,6 +123,44 @@ def _unified(path: str, old: str, new: str) -> str:
         n=3,
     )
     return _truncated("".join(diff), _MAX_PREVIEW_BYTES, "this diff")
+
+
+def _page(items: list[str], offset: int, limit: int, what: str, path: str) -> ToolResult:
+    """One page of a long list, with the offset that continues it.
+
+    Shared by ``list_dir`` and ``glob`` so paging feels the same wherever the
+    agent meets it — and the same as ``read_file``'s, which is the one it will
+    meet first.
+    """
+    total = len(items)
+    start = max(0, offset - 1)
+    end = total if limit <= 0 else min(total, start + limit)
+    end = min(end, start + _MAX_LIST_ENTRIES)
+    page = items[start:end]
+
+    if not page:
+        return ToolResult(
+            ok=True,
+            content=f"(no {what} at offset {offset}; {path} has {total})",
+            meta={"total": total, "at_end": True},
+        )
+    body = "\n".join(page)
+    if end >= total:
+        if start == 0:
+            return ToolResult(ok=True, content=body, meta={"total": total, "at_end": True})
+        return ToolResult(
+            ok=True,
+            content=f"{body}\n[{what} {offset}-{end} of {total}; end of list]",
+            meta={"total": total, "next_offset": end + 1, "at_end": True},
+        )
+    return ToolResult(
+        ok=True,
+        content=(
+            f"{body}\n[{what} {offset}-{end} of {total}; more follow — "
+            f"call again with offset={end + 1}]"
+        ),
+        meta={"total": total, "next_offset": end + 1, "at_end": False},
+    )
 
 
 def _as_int(value: Any, default: int) -> int:
@@ -160,6 +214,53 @@ def _read_range(path: str, offset: int, limit: int) -> tuple[list[str], int, boo
             collected_bytes += len(line)
     next_offset = offset + len(lines)
     return lines, next_offset, at_end
+
+
+def _clip(line: str, limit: int = _MAX_MATCH_CHARS) -> str:
+    """One matching line, cut to something readable.
+
+    A match in a minified bundle is a single line of megabytes. Nobody — model
+    or person — reads that, and storing it whole to truncate later is how a
+    grep over a large tree turns into gigabytes of memory.
+    """
+    return line if len(line) <= limit else line[:limit] + f"…[+{len(line) - limit} chars]"
+
+
+def _walk_files(root: str, rules: "IgnoreRules | None") -> "Iterator[str]":
+    """Every file under ``root``, skipping ignored directories entirely.
+
+    ``glob("**/*")`` builds a list of every path first and filters afterwards,
+    so a tree with a large `node_modules` is fully enumerated before any of it
+    is discarded. Pruning during the walk means those directories are never
+    descended into at all, and nothing holds the whole tree in memory.
+    """
+    if os.path.isfile(root):
+        yield root
+        return
+    for directory, subdirectories, filenames in os.walk(root):
+        if rules is not None:
+            subdirectories[:] = [
+                name for name in subdirectories
+                if not rules.is_ignored(os.path.join(directory, name), is_dir=True)
+            ]
+        for filename in sorted(filenames):
+            path = os.path.join(directory, filename)
+            if rules is None or not rules.is_ignored(path, is_dir=False):
+                yield path
+
+
+def _both_ends(text: str, limit: int) -> str:
+    """Keep the start and the end of an overlong output, dropping the middle.
+
+    Neither end alone is enough for command output: the head is what the
+    command set out to say and the tail is usually where it went wrong, and a
+    build log truncated to its first half hides the error that matters.
+    """
+    if len(text) <= limit:
+        return text
+    half = limit // 2
+    dropped = len(text) - (half * 2)
+    return f"{text[:half]}\n[…{dropped} characters of output omitted…]\n{text[-half:]}"
 
 
 def _truncated(text: str, limit: int, what: str) -> str:
@@ -472,6 +573,12 @@ class GlobTool(CobirbTool):
                     ),
                     "default": False,
                 },
+                "offset": {
+                    "type": "number",
+                    "description": "First match to return, 1-indexed, for continuing a long list.",
+                    "default": 1,
+                },
+                "limit": {"type": "number", "description": "Maximum matches to return."},
             },
             "required": ["pattern"],
         }
@@ -486,7 +593,12 @@ class GlobTool(CobirbTool):
             if not include_ignored:
                 rules = _ignore_rules(self)
                 results = [r for r in results if not rules.is_ignored(r)]
-            return ToolResult(ok=True, content="\n".join(sorted(results)) if results else "(no matches)")
+            if not results:
+                return ToolResult(ok=True, content="(no matches)", meta={"total": 0, "at_end": True})
+            return _page(
+                sorted(results), max(1, _as_int(arguments.get("offset"), 1)),
+                _as_int(arguments.get("limit"), 0), "matches", pattern,
+            )
         except OSError as exc:
             return ToolResult(ok=False, content=f"glob failed: {exc}", error=str(exc))
 
@@ -511,71 +623,84 @@ class GrepTool(CobirbTool):
                     ),
                     "default": False,
                 },
+                "offset": {
+                    "type": "number",
+                    "description": "First match to return, 1-indexed, for continuing a long list.",
+                    "default": 1,
+                },
+                "limit": {"type": "number", "description": "Maximum matches to return."},
             },
             "required": ["pattern"],
         }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        import glob as glob_module
-        import os
-
         pattern = arguments["pattern"]
         include_ignored = arguments.get("include_ignored", False)
+        root = self._resolve(arguments.get("path", "."))
+
+        # Compiled once, up front, so an invalid pattern is reported as what
+        # it is. Left to re.search it would raise re.error on the first line
+        # of the first file, escape the handler below (which only catches
+        # OSError), and reach the model as a generic tool failure with
+        # nothing actionable in it.
         try:
-            root = self._resolve(arguments.get("path", "."))
-            paths = [p for p in glob_module.glob(root + "/**/*", recursive=True)]
-            if not include_ignored:
-                rules = _ignore_rules(self)
-                paths = [p for p in paths if not rules.is_ignored(p)]
-            # Compiled once, up front, so an invalid pattern is reported as
-            # what it is. Left to re.search it would raise re.error on the
-            # first line of the first file, escape this handler (which only
-            # catches OSError), and reach the model as a generic tool failure
-            # with nothing actionable in it.
-            try:
-                expression = re.compile(pattern)
-            except re.error as exc:
-                return ToolResult(
-                    ok=False, content=f"Not a valid regex: {pattern!r} — {exc}", error="bad_pattern"
-                )
-            matches: list[str] = []
-            capped = False
-            for p in paths:
+            expression = re.compile(pattern)
+        except re.error as exc:
+            return ToolResult(
+                ok=False, content=f"Not a valid regex: {pattern!r} — {exc}", error="bad_pattern"
+            )
+
+        rules = None if include_ignored else _ignore_rules(self)
+        matches: list[str] = []
+        capped = False
+        try:
+            for path in _walk_files(root, rules):
                 if capped:
                     break
-                if not os.path.isfile(p):
-                    continue
                 try:
-                    with open(p, "r", encoding="utf-8", errors="ignore") as fh:
+                    with open(path, "r", encoding="utf-8", errors="ignore") as fh:
                         for lineno, line in enumerate(fh, 1):
-                            if expression.search(line):
-                                matches.append(f"{p}:{lineno}: {line.strip()}")
-                                if len(matches) >= _MAX_GREP_MATCHES:
-                                    capped = True
-                                    break
+                            if not expression.search(line):
+                                continue
+                            # Clipped as it is stored, not at the end. A
+                            # minified file is one line of several megabytes;
+                            # keeping five hundred of those and truncating
+                            # afterwards would mean holding gigabytes to
+                            # produce a few kilobytes of answer.
+                            matches.append(f"{path}:{lineno}: {_clip(line.strip())}")
+                            if len(matches) >= _MAX_GREP_MATCHES:
+                                capped = True
+                                break
                 except (OSError, UnicodeDecodeError):
                     continue
-            if not matches:
-                return ToolResult(ok=True, content="(no matches)")
-            content = "\n".join(matches)
-            if capped:
-                content += f"\n\n[stopped at {_MAX_GREP_MATCHES} matches; narrow the pattern or path]"
-            return ToolResult(ok=True, content=_truncated(content, _MAX_READ_BYTES, "this result"))
         except OSError as exc:
             return ToolResult(ok=False, content=f"grep failed: {exc}", error=str(exc))
+
+        if not matches:
+            return ToolResult(ok=True, content="(no matches)")
+        content = "\n".join(matches)
+        if capped:
+            content += f"\n\n[stopped at {_MAX_GREP_MATCHES} matches; narrow the pattern or path]"
+        return ToolResult(ok=True, content=_truncated(content, _MAX_READ_BYTES, "this result"))
 
 
 class ListDirTool(CobirbTool):
     NAME = "list_dir"
 
     def description(self) -> str:
-        return "List the contents of a directory."
+        return "List a directory's contents. Directories are marked with a trailing slash."
 
     def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Directory path."},
+                "offset": {
+                    "type": "number",
+                    "description": "First entry to return, 1-indexed, for continuing a long listing.",
+                    "default": 1,
+                },
+                "limit": {"type": "number", "description": "Maximum entries to return."},
             },
             "required": ["path"],
         }
@@ -583,31 +708,22 @@ class ListDirTool(CobirbTool):
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
         path = self._resolve(arguments["path"])
         try:
-            entries = sorted(os.listdir(path))
-            return ToolResult(ok=True, content="\n".join(entries))
+            # scandir rather than listdir: it reports whether each entry is a
+            # directory without a stat() per name, which on a directory of a
+            # hundred thousand files is the difference between instant and not.
+            with os.scandir(path) as entries:
+                names = sorted(
+                    entry.name + ("/" if entry.is_dir(follow_symlinks=False) else "")
+                    for entry in entries
+                )
         except OSError as exc:
             return ToolResult(ok=False, content=f"Could not list {path}: {exc}", error=str(exc))
-
-
-_DEFAULT_SHELL_TIMEOUT = 300
-# A ceiling as well as a default. The timeout used to be read straight out of
-# the arguments with no declared parameter and no bound, so it was invisible
-# to the model that might set it and unbounded if one guessed at it — a large
-# enough value would have made a hung command effectively unkillable except
-# by cancelling the turn.
-_MAX_SHELL_TIMEOUT = 600
-
-
-def _shell_timeout(value: Any) -> float:
-    """Clamp a caller-supplied timeout into something survivable, falling
-    back to the default for anything that isn't a usable number."""
-    try:
-        seconds = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return float(_DEFAULT_SHELL_TIMEOUT)
-    if seconds != seconds or seconds <= 0:  # NaN or nonsense
-        return float(_DEFAULT_SHELL_TIMEOUT)
-    return min(seconds, float(_MAX_SHELL_TIMEOUT))
+        if not names:
+            return ToolResult(ok=True, content=f"({path} is empty)", meta={"total": 0, "at_end": True})
+        return _page(
+            names, max(1, _as_int(arguments.get("offset"), 1)),
+            _as_int(arguments.get("limit"), 0), "entries", path,
+        )
 
 
 class RepoMapTool(CobirbTool):
@@ -659,6 +775,27 @@ class RepoMapTool(CobirbTool):
             return ToolResult(ok=True, content=render_map(root, budget))
         except OSError as exc:
             return ToolResult(ok=False, content=f"Could not map {root}: {exc}", error=str(exc))
+
+
+_DEFAULT_SHELL_TIMEOUT = 300
+# A ceiling as well as a default. The timeout used to be read straight out of
+# the arguments with no declared parameter and no bound, so it was invisible
+# to the model that might set it and unbounded if one guessed at it — a large
+# enough value would have made a hung command effectively unkillable except
+# by cancelling the turn.
+_MAX_SHELL_TIMEOUT = 600
+
+
+def _shell_timeout(value: Any) -> float:
+    """Clamp a caller-supplied timeout into something survivable, falling
+    back to the default for anything that isn't a usable number."""
+    try:
+        seconds = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return float(_DEFAULT_SHELL_TIMEOUT)
+    if seconds != seconds or seconds <= 0:  # NaN or nonsense
+        return float(_DEFAULT_SHELL_TIMEOUT)
+    return min(seconds, float(_MAX_SHELL_TIMEOUT))
 
 
 class ShellTool(CobirbTool):
@@ -747,7 +884,7 @@ class ShellTool(CobirbTool):
             return ToolResult(ok=False, content="Command cancelled.", error="cancelled")
         if timed_out:
             return ToolResult(ok=False, content="Command timed out.", error="timeout")
-        content = f"exit={process.returncode}\n{stdout}{stderr}"
+        content = f"exit={process.returncode}\n{_both_ends(f'{stdout}{stderr}', _MAX_SHELL_OUTPUT)}"
         return ToolResult(ok=process.returncode == 0, content=content, meta={"returncode": process.returncode})
 
     @staticmethod

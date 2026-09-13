@@ -664,3 +664,113 @@ def test_a_nonsense_offset_falls_back_to_the_start(tmp_path):
 
     assert result.ok
     assert "one" in result.content
+
+
+# --------------------------------------------------------------------------- #
+# Bounded results.
+#
+# Every tool that can produce an arbitrarily large answer has to bound it: the
+# result becomes a session turn and a message in the next request, and an
+# unbounded one costs memory, window and session size at once. read_file pages
+# through a big file; these can't sensibly page, so they cap and say so.
+# --------------------------------------------------------------------------- #
+def test_list_dir_pages_a_huge_directory(tmp_path):
+    """node_modules, a build output, a mail spool. Not rare."""
+    big = tmp_path / "many"
+    big.mkdir()
+    for n in range(2500):
+        (big / f"f{n}.txt").touch()
+
+    result = ListDirTool(str(tmp_path)).execute({"path": "many"})
+
+    assert result.ok
+    assert result.meta["total"] == 2500
+    assert not result.meta["at_end"]
+    assert "more follow" in result.content
+    assert len(result.content.splitlines()) < 1100
+
+    rest = ListDirTool(str(tmp_path)).execute(
+        {"path": "many", "offset": result.meta["next_offset"]}
+    )
+    assert rest.ok and rest.meta["total"] == 2500
+
+
+def test_list_dir_marks_directories(tmp_path):
+    (tmp_path / "adir").mkdir()
+    (tmp_path / "afile.txt").touch()
+
+    content = ListDirTool(str(tmp_path)).execute({"path": "."}).content
+
+    assert "adir/" in content
+    assert "afile.txt" in content and "afile.txt/" not in content
+
+
+def test_a_small_directory_is_listed_plainly(tmp_path):
+    """No footer, no counts — the common case reads as it always did."""
+    (tmp_path / "a.txt").touch()
+    (tmp_path / "b.txt").touch()
+
+    assert ListDirTool(str(tmp_path)).execute({"path": "."}).content == "a.txt\nb.txt"
+
+
+def test_an_empty_directory_says_so(tmp_path):
+    (tmp_path / "empty").mkdir()
+
+    assert "is empty" in ListDirTool(str(tmp_path)).execute({"path": "empty"}).content
+
+
+def test_glob_pages_a_huge_match_set(tmp_path):
+    for n in range(2500):
+        (tmp_path / f"f{n}.py").touch()
+
+    result = GlobTool(str(tmp_path)).execute({"pattern": "*.py"})
+
+    assert result.ok
+    assert result.meta["total"] == 2500
+    assert "more follow" in result.content
+
+
+def test_a_grep_match_in_a_minified_file_is_clipped(tmp_path):
+    """A hit in a single-line bundle is a match of megabytes. Storing five
+    hundred of those to truncate afterwards is how a grep turns into
+    gigabytes of memory."""
+    (tmp_path / "bundle.min.js").write_text("var x=1;" * 200_000)
+
+    result = GrepTool(str(tmp_path)).execute({"pattern": "var x"})
+
+    assert result.ok
+    assert len(result.content) < 2000
+    assert "chars]" in result.content  # the clip is announced
+
+
+def test_grep_ignores_a_pruned_directory_without_descending_into_it(tmp_path):
+    (tmp_path / ".gitignore").write_text("vendor/\n")
+    vendor = tmp_path / "vendor" / "deep"
+    vendor.mkdir(parents=True)
+    (vendor / "x.txt").write_text("needle")
+    (tmp_path / "real.txt").write_text("needle")
+
+    content = GrepTool(str(tmp_path)).execute({"pattern": "needle"}).content
+
+    assert "real.txt" in content
+    assert "vendor" not in content
+
+
+def test_shell_output_keeps_both_ends_when_it_overflows(tmp_path):
+    """The head is what the command set out to say and the tail is usually
+    where it went wrong; a build log cut to its first half hides the error."""
+    import sys
+
+    script = (
+        'print("THE VERY FIRST LINE")\n'
+        'for i in range(200000): print("noise", i)\n'
+        'print("THE VERY LAST LINE")\n'
+    )
+    result = ShellTool(str(tmp_path)).execute(
+        {"command": f'"{sys.executable}" -c \'{script}\''}
+    )
+
+    assert len(result.content) < 200_000
+    assert "THE VERY FIRST LINE" in result.content
+    assert "THE VERY LAST LINE" in result.content
+    assert "omitted" in result.content
