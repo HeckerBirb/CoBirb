@@ -24,14 +24,14 @@ opt a capability in.**
 
 ## Status
 
-🚧 **v0.3.0, with v0.4.0 landing.** The core loop, built-in tools, the permission model,
+🚧 **v0.4.0.** The core loop, built-in tools, the permission model,
 encrypted sessions and a local Ollama provider — plus the things that make it usable on real
 work: context compaction so long sessions don't degrade, project instructions, `.gitignore`
 awareness, a `repo_map` tool so it can find its way around, a diff shown before any write,
 `/undo` and `/diff`, credential redaction, an opt-in "run my tests after you change something"
 loop, and a headless mode for CI.
 
-Newly in: **one model per role** (`cobirb models`), **hooks** that can refuse a tool call before
+New in 0.4: **one model per role** (`cobirb models`), **hooks** that can refuse a tool call before
 you are even asked about it, **custom commands** — a prompt you wrote down, invoked by name — and
 an **MCP client** over stdio, so tools from a local server become CoBirb tools under the same
 permission layer as everything else. See [`AGENTS.md`](./AGENTS.md) for the architecture, the
@@ -142,8 +142,13 @@ Being straight about the edges, since the rest of this page makes strong claims:
   the socket. Ollama binds an *unauthenticated* local port — any process running as you can
   read what you send it or issue its own requests — fetches weights from a registry, and
   makes outbound requests on its own schedule. None of that is malicious; all of it is trust
-  rather than enforcement. `llama-server`, LM Studio and vLLM have the same shape. The fix is
-  not a better server but no server at all: an embedded GGUF runtime is planned for v0.4.0.
+  rather than enforcement. `llama-server`, LM Studio and vLLM have the same shape. **CoBirb will
+  not close this itself** — it is a client of an OpenAI-compatible endpoint and deliberately does
+  not run models (an embedded GGUF runtime was designed and dropped; see §12.1 of
+  [`AGENTS.md`](./AGENTS.md)). Where inference happens is yours to choose, including an endpoint
+  you wrote. If the endpoint's trustworthiness matters to you, that is a property to fix in the
+  endpoint, and it is fixable — `llama-server` will bind a Unix socket instead of a port
+  (`--host /path/to.sock`), which removes the port any local process can reach.
 - **An approved shell command runs with your full user privileges.** CoBirb decides
   *whether* a command runs, not what it can reach once it does. Approve `npm test` and
   that command can read `~/.ssh` and open a socket like any other program you'd run.

@@ -10,10 +10,14 @@
 A **privacy-first, Copilot-like agentic CLI**: Copilot CLI behavior, minus every default
 network/telemetry behavior, plus a hard boundary around the rest. **No data leaves the process
 unless the user opts a capability in.** Noah the African Grey is the mascot and an *opt-in* persona,
-not the default voice. Status: **v0.3.0.** Loop, tools, permissions, encrypted sessions, Ollama provider and
+not the default voice. Status: **v0.4.0.** Loop, tools, permissions, encrypted sessions, Ollama provider and
 the interactive app, plus context compaction, project instructions, `.gitignore` awareness,
 diff-before-write, `/undo`, `/diff`, `/export`, a headless CI mode, the `repo_map` tool,
-secret redaction and an opt-in verification loop.
+secret redaction, an opt-in verification loop, per-role models, hooks, custom commands and an MCP
+client over stdio.
+
+**CoBirb is a client, not a model runtime.** It speaks to an OpenAI-compatible endpoint and does
+not run weights — see §12.1.
 
 ## 2. Ironclad constraints (never violate)
 
@@ -607,9 +611,13 @@ adapter, or one that can't ask, fails closed.
 **What CoBirb does not enforce: anything past the model socket.** Every prompt, file and diff
 goes to a long-lived server nobody here wrote, over an unauthenticated local port other processes
 can also use, by a program that fetches from a registry and makes its own outbound requests. That
-is trust, not enforcement, and it is the largest remaining gap between the pitch and the code. The
-answer is the embedded GGUF runtime at v0.4.0 (`libllama` in-process — no daemon, no socket, no
-registry), which lands as a `ModelProvider` plugin behind an optional extra. Until then, say so
+is trust, not enforcement, and it is the largest remaining gap between the pitch and the code.
+
+**Decided September 2026: CoBirb does not close that gap itself.** An embedded GGUF runtime was
+designed and then withdrawn mid-design — see §12.1. CoBirb is the *client* of an OpenAI-compatible
+endpoint and does not run models; where inference happens is the user's business, and they are free
+to point it at an endpoint they wrote. So this gap is documented honestly (README has a "What
+CoBirb does not protect you from" section) and not treated as a defect awaiting a fix. Say so
 plainly rather than implying the promise reaches further than it does.
 
 **What the policy layer does not do: sandbox.** It decides *whether* a command runs, never what
@@ -737,14 +745,12 @@ they are shaped around, deliberately.
   *Parallel read-only tools was dropped from the milestone — see §12.1.*
 - **v0.3.0 (done)** — `repo_map`, `/diff`, self-verification loop, secret redaction. Write-scope
   grants and session export landed early in 0.2. *Git auto-commit deferred — see §12.1.*
-- **v0.4.0 "Extensible"** — per-role model selection (§4h), hooks (§4i), custom commands (§4j),
-  MCP client over stdio (§4k) — all done. **Embedded GGUF runtime** is the remaining item and is
-  being designed with the user before any of it is written: it adds a compiled dependency, changes
-  the install story, and needs tool calling at the grammar level rather than borrowing Ollama's.
+- **v0.4.0 "Extensible" (done)** — per-role model selection (§4h), hooks (§4i), custom commands
+  (§4j), MCP client over stdio (§4k). *The embedded GGUF runtime was cut from this milestone and
+  from the project — see §12.1.*
 - **v0.5.0 "The Flock"** — subagent orchestration: charter → scaffold → fan-out → integrate.
 - **v0.6.0–0.9.0** — plugin distribution, cross-session memory, vision, mid-turn steering,
   session branching, SPI freeze and session migrations.
-- **v1.1.0+** — runtime isolation for the embedded model (subprocess, no network namespace).
 
 **Time horizon.** CoBirb is built for the hardware of the next few years, not this one — local
 models on ordinary machines will be considerably more capable in one to three years than they are
@@ -767,11 +773,32 @@ I/O, is the bottleneck — while the cost is real: turn ordering, and `ShellTool
 process state. Per §12's time-horizon rule that is a decision to take deliberately rather than one
 for an estimate to make quietly, so it is parked rather than dropped.
 
-**Settled decisions.** *Local models only, forever* — no shipped remote provider, ever (§2), and
-from 0.4 not even a local *server*: CoBirb runs the weights itself. The shell privilege gap is
-documented rather than sandboxed (§8). Speech I/O is deliberately deferred past 1.0 — a large
-platform-specific dependency for a workflow almost nobody uses on a coding agent. No
-embedding-based RAG: a repo map plus grep beats it for code at a fraction of the machinery.
+**Settled decisions.** *Local models only, forever* — no shipped remote provider, ever (§2).
+**CoBirb is a client and never a model runtime** — it speaks to an OpenAI-compatible endpoint and
+does not run weights; see the GGUF entry below. The shell privilege gap is documented rather than
+sandboxed (§8). Speech I/O is deliberately deferred past 1.0 — a large platform-specific
+dependency for a workflow almost nobody uses on a coding agent. No embedding-based RAG: a repo map
+plus grep beats it for code at a fraction of the machinery.
+
+**Embedded GGUF runtime — designed, then cut. Do not reopen.** The motivation was real: CoBirb's
+guarantees stop at the model socket (§8), and Ollama binds an unauthenticated local port, fetches
+from a registry and makes its own outbound requests. Two shapes were costed. *In-process*
+(`llama-cpp-python`) means a compiled dependency whose GPU support needs a CUDA-version-specific
+wheel index or a compiler, plus reimplementing chat templating, GBNF grammar construction and
+tool-call parsing inside CoBirb — and its own server component is semi-deprecated, with upstream
+pointing at `llama-server`. *Supervised subprocess* was the better of the two and is worth writing
+down, because the finding survives the decision: **`llama-server --host <path>.sock` binds a Unix
+domain socket, not a TCP port**, and `--jinja` (on by default) makes it do templates, grammars and
+tool-call parsing itself. A `0600` socket in a directory CoBirb owns is a stronger boundary than
+`--api-key`, and a CoBirb-spawned child has none of the four daemon properties that made Ollama
+uncomfortable.
+
+It was cut anyway, and correctly: **CoBirb is the interface that speaks to an OpenAI-compatible
+endpoint, and a user can point it at one they wrote themselves.** The trust problem belongs to the
+endpoint, and solving it there — as a separate privacy-first Ollama replacement, perhaps a future
+CoBirb-family project — fixes it once for everything that speaks the protocol instead of once for
+one client. Running weights is not what this tool is for. When the flock arrives, workers get an
+endpoint like everything else; there is no "just for subagents" exception.
 
 **Omitted forever:** cloud sessions, remote control, background agents, telemetry. They contradict
 the founding principle. (Subagents are not background agents — they are local, in-process, and
