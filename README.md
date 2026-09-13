@@ -12,6 +12,8 @@ opt a capability in.**
 - 🔒 No telemetry. No analytics. No pings.
 - 🔒 No outbound network by default. Models are yours to configure.
 - 🔒 Sessions are encrypted at rest (AES-256-GCM, keyed via scrypt).
+- 🔒 Credentials are stripped from tool output before the model, the session or the
+  audit log ever see them — private keys, `AKIA…`, `ghp_…`, `sk-…` and friends.
 - 🔒 Nothing is pre-approved. No tool reads, writes, or runs anything until you say so.
   Approving a read covers that directory and below; writing and running ask every time,
   unless you allow them yourself in config.

@@ -296,6 +296,12 @@ Read from (repo overrides user): ~/.cobirb/config.json, then ./cobirb.json
       "name": "...", "base_url": "..."}}  Model name/endpoint (local Ollama
                                  by default; any OpenAI-compatible server
                                  works).
+  "redact_secrets"               false to stop stripping credentials from
+                                 tool output before it reaches the model,
+                                 the session and the audit log. On by
+                                 default. Turn it off if you need the agent
+                                 to edit a credentials file — it cannot do
+                                 that through a redacted read.
   "checkpoints"                  false to stop snapshotting files before
                                  the agent changes them, which is what
                                  /undo restores from. On by default.

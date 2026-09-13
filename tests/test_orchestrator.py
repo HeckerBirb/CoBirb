@@ -1191,3 +1191,70 @@ def test_a_denied_edit_leaves_no_snapshot(tmp_path):
 def test_shell_declares_no_writes_because_it_cannot_know(tmp_path):
     """The honest gap, pinned down so it isn't quietly assumed away later."""
     assert ShellTool(str(tmp_path)).writes({"command": "rm -rf build"}) == []
+
+
+def test_a_credential_in_a_tool_result_never_reaches_the_model(tmp_path):
+    """End to end, and the point of the whole feature: one read_file on a
+    .env used to put a live key in the prompt, the session and the audit log
+    at once."""
+    (tmp_path / ".env").write_text("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n")
+    policy = Policy()
+    policy.allow("read_file")
+    model = _WindowedModel(window=8192)
+    model._tool_call = ToolCall("read_file", {"path": ".env"})
+
+    class _Once(_WindowedModel):
+        def __init__(self):
+            super().__init__(8192)
+            self.done = False
+
+        def supports_tool_calling(self):
+            return True
+
+        def parse_tool_calls(self, reply):
+            if self.done:
+                return []
+            self.done = True
+            return [ToolCall("read_file", {"path": ".env"})]
+
+    used = _Once()
+    session = Orchestrator(
+        model=used, tools=ToolRegistry(str(tmp_path)).tools, policy=policy
+    ).run("read the env file", "sys", cwd=str(tmp_path))
+
+    tool_turn = _tool_turn(session)
+    assert "AKIAIOSFODNN7EXAMPLE" not in tool_turn.content
+    assert "[redacted:" in tool_turn.content
+    # And it never made it into the context sent on the following turn either.
+    assert all("AKIAIOSFODNN7EXAMPLE" not in context for context in used.contexts)
+
+
+def test_redaction_can_be_turned_off_for_editing_a_credentials_file(tmp_path):
+    """The honest cost: an agent asked to edit a .env cannot do it through a
+    redacted read, so there has to be a way out."""
+    (tmp_path / ".env").write_text("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n")
+    policy = Policy()
+    policy.allow("read_file")
+
+    class _Once(_WindowedModel):
+        def __init__(self):
+            super().__init__(8192)
+            self.done = False
+
+        def supports_tool_calling(self):
+            return True
+
+        def parse_tool_calls(self, reply):
+            if self.done:
+                return []
+            self.done = True
+            return [ToolCall("read_file", {"path": ".env"})]
+
+    session = Orchestrator(
+        model=_Once(),
+        tools=ToolRegistry(str(tmp_path)).tools,
+        policy=policy,
+        redact_secrets=False,
+    ).run("read the env file", "sys", cwd=str(tmp_path))
+
+    assert "AKIAIOSFODNN7EXAMPLE" in _tool_turn(session).content

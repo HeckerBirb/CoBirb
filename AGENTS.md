@@ -187,6 +187,24 @@ regardless, and tests are pushed down because "where does this behave" is rarely
 question. Output is budgeted; files that don't fit are still named, because knowing a file exists
 is most of what orientation is.
 
+## 4f. Secret redaction
+
+`redaction.py` strips credentials from every tool result, at one chokepoint in the orchestrator so
+a plugin tool gets the same treatment as a built-in, and from the audit log's recorded arguments.
+A tool result becomes a session turn, a message in the next request and possibly a plaintext log
+line, so one `read_file` on a `.env` used to put a live key in three places at once.
+
+**Only high-confidence patterns**: formats with a distinctive prefix or structure (`AKIA…`,
+`ghp_…`, `sk-…`, PEM blocks, JWTs). Nothing matches on a *name* — no `password=`, no `SECRET=`, no
+entropy heuristics — because those fire on documentation, fixtures, declarations and prose, and a
+redactor that eats real content is worse than none. The trade is deliberate and stated: this will
+miss a bespoke format, and it will very rarely destroy something that wasn't a credential. The
+false-positive tests are load-bearing; don't loosen a rule without adding to them.
+
+Redaction is **visible** (`[redacted: github token]`) so a model can say a key was there rather
+than working from a value it never received, and it can be turned off (`"redact_secrets": false`)
+because an agent asked to *edit* a credentials file cannot do it through a redacted read.
+
 ## 5. Plugin SPI
 
 Core imports only these interfaces; plugins import only the SPI and never each other; core never

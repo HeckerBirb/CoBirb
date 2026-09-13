@@ -19,6 +19,7 @@ from typing import Any, Callable, Iterable
 from .checkpoints import Checkpoints
 from .context import DEFAULT_CONTEXT_TOKENS, CompactionReport, compact, history_budget
 from .policy import AuditLog, Policy
+from .redaction import redact
 from .session import PHASE_ACT, PHASE_PLAN, PHASE_VALIDATE, Session, SessionManager, Turn
 from .typing import spi as cobirb_typing
 
@@ -157,6 +158,7 @@ class Orchestrator:
         crypto: Any = None,
         context_tokens: int | None = None,
         project_instructions: str = "",
+        redact_secrets: bool = True,
         checkpoints: "Checkpoints | None" = None,
     ) -> None:
         self.model = model
@@ -165,6 +167,9 @@ class Orchestrator:
         self.io = io
         self.crypto = crypto
         self.session = session
+        # Whether tool output is scanned for credentials before it reaches
+        # the model, the session or the audit log. See cobirb.redaction.
+        self.redact_secrets = redact_secrets
         # Snapshots taken before the agent changes a file, backing /undo.
         # None disables it entirely (`"checkpoints": false`).
         self.checkpoints = checkpoints
@@ -606,9 +611,28 @@ class Orchestrator:
             session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
             self._render_tool_call(tool_name, arguments, result)
             return
+        result = self._redacted(result)
         self._record_call(tool_name, ok=result.ok, denied=False)
         session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
         self._render_tool_call(tool_name, arguments, result)
+
+    def _redacted(self, result: cobirb_typing.ToolResult) -> cobirb_typing.ToolResult:
+        """Strip credentials from a tool result before it goes anywhere.
+
+        Done here, once, rather than in each tool: a result is about to become
+        a session turn, a message in the next request and possibly an audit
+        line, and a plugin tool that never heard of this gets the same
+        treatment as a built-in.
+        """
+        if not self.redact_secrets or not result.content:
+            return result
+        redaction = redact(result.content)
+        if not redaction.changed:
+            return result
+        logger.info("%s in a tool result", redaction.describe())
+        return cobirb_typing.ToolResult(
+            ok=result.ok, content=redaction.text, error=result.error, meta=result.meta
+        )
 
     def _record_call(self, tool_name: str, *, ok: bool, denied: bool) -> None:
         self.last_run_tool_calls.append({"name": tool_name, "ok": ok, "denied": denied})

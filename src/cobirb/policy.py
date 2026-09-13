@@ -35,6 +35,7 @@ import time
 from typing import Any
 
 from . import paths
+from .redaction import redact_arguments
 
 # Tokens made only of these characters are shell operators rather than words.
 _PUNCTUATION = set("();<>|&")
@@ -407,10 +408,18 @@ class Policy:
         self._denied.add(tool_name)
 
     def log(self, tool_name: str, arguments: dict[str, Any] | None = None, cwd: str | None = None) -> None:
+        """Record a tool call, with credentials stripped from its arguments.
+
+        This log's whole problem is that it stores arguments verbatim —
+        ``write_file``'s full content, ``shell``'s full command — in a
+        plaintext file that outlives the session. Redacting here means turning
+        it on no longer means accepting a second copy of every key the agent
+        happened to handle.
+        """
         entry = {
             "ts": time.time(),
             "tool": tool_name,
-            "args": arguments,
+            "args": redact_arguments(arguments or {}),
             "cwd": cwd or self.cwd,
         }
         self.audit.append(entry)

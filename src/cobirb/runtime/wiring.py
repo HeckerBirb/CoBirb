@@ -179,6 +179,10 @@ def build_orchestrator(
         # someone who has raised the window tells CoBirb about it.
         context_tokens=config.get("context_tokens"),
         project_instructions=_project_instructions(cwd, config),
+        # On by default. The cost is that an agent asked to edit a
+        # credentials file can't do it through a redacted read; the benefit is
+        # that reading one doesn't put a live key in three places at once.
+        redact_secrets=config.get("redact_secrets") is not False,
         # On by default: an agent that edits real files without an undo is a
         # worse deal than one that spends a little disk.
         checkpoints=None if config.get("checkpoints") is False else Checkpoints(cwd),
