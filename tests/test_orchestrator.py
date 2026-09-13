@@ -7,7 +7,7 @@ import os
 from cobirb.context import DEFAULT_CONTEXT_TOKENS, history_budget
 from cobirb.orchestrator import Orchestrator, _materialize, build_default_policy
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
-from cobirb.plugins.core.tools import ReadFileTool, ToolRegistry
+from cobirb.plugins.core.tools import ReadFileTool, ShellTool, ToolRegistry
 from cobirb.policy import Policy
 from cobirb.session import SessionManager, Turn
 from cobirb.typing.spi import ToolCall
@@ -1144,3 +1144,50 @@ def test_a_broken_preview_does_not_cost_the_user_the_prompt(tmp_path):
     ).run("read it", "sys", cwd=str(tmp_path))
 
     assert asked and asked[0].preview == ""
+
+
+def test_an_approved_edit_is_snapshotted_and_can_be_undone(tmp_path):
+    """End to end: the orchestrator saves the file before the tool changes
+    it, so undo has something to put back."""
+    from cobirb.checkpoints import Checkpoints
+
+    target = tmp_path / "a.py"
+    target.write_text("original\n")
+    policy = Policy()
+    policy.allow("edit_file")
+    checkpoints = Checkpoints(str(tmp_path), store=str(tmp_path / ".store"))
+    registry = ToolRegistry(str(tmp_path))
+
+    Orchestrator(
+        model=_ToolCallModel("edit_file", {"path": "a.py", "old_str": "original", "new_str": "changed"}),
+        tools=registry.tools,
+        policy=policy,
+        checkpoints=checkpoints,
+    ).run("edit it", "sys", cwd=str(tmp_path))
+
+    assert target.read_text() == "changed\n"
+    checkpoints.undo_last()
+    assert target.read_text() == "original\n"
+
+
+def test_a_denied_edit_leaves_no_snapshot(tmp_path):
+    """The snapshot is taken after approval, so refusing a call costs
+    nothing — otherwise every denied write would litter the store."""
+    from cobirb.checkpoints import Checkpoints
+
+    (tmp_path / "a.py").write_text("original\n")
+    checkpoints = Checkpoints(str(tmp_path), store=str(tmp_path / ".store"))
+
+    Orchestrator(
+        model=_ToolCallModel("edit_file", {"path": "a.py", "old_str": "a", "new_str": "b"}),
+        tools=ToolRegistry(str(tmp_path)).tools,
+        policy=Policy(),   # default-deny, no io to ask
+        checkpoints=checkpoints,
+    ).run("edit it", "sys", cwd=str(tmp_path))
+
+    assert checkpoints.undoable_turns == 0
+
+
+def test_shell_declares_no_writes_because_it_cannot_know(tmp_path):
+    """The honest gap, pinned down so it isn't quietly assumed away later."""
+    assert ShellTool(str(tmp_path)).writes({"command": "rm -rf build"}) == []

@@ -16,6 +16,7 @@ import logging
 from difflib import get_close_matches
 from typing import Any, Callable, Iterable
 
+from .checkpoints import Checkpoints
 from .context import DEFAULT_CONTEXT_TOKENS, CompactionReport, compact, history_budget
 from .policy import AuditLog, Policy
 from .session import PHASE_ACT, PHASE_PLAN, PHASE_VALIDATE, Session, SessionManager, Turn
@@ -156,6 +157,7 @@ class Orchestrator:
         crypto: Any = None,
         context_tokens: int | None = None,
         project_instructions: str = "",
+        checkpoints: "Checkpoints | None" = None,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -163,6 +165,9 @@ class Orchestrator:
         self.io = io
         self.crypto = crypto
         self.session = session
+        # Snapshots taken before the agent changes a file, backing /undo.
+        # None disables it entirely (`"checkpoints": false`).
+        self.checkpoints = checkpoints
         # What this project's AGENTS.md/CoBirb.md asks of an agent, resolved
         # at wiring time (see runtime/instructions.py) because reading project
         # files is not core's job. Composed into every turn's system prompt.
@@ -225,6 +230,8 @@ class Orchestrator:
         that post-``run()`` print becomes a no-op rather than a duplicate.
         """
         session = self._open_session(prompt, system, cwd, persona, session_path)
+        if self.checkpoints is not None:
+            self.checkpoints.begin_turn()
 
         # cwd is per-run metadata, not conversation history, so it rides on
         # the system prompt rather than being spliced into the turn history.
@@ -574,6 +581,7 @@ class Orchestrator:
                 # grants its invocation, everything else grants the tool.
                 self.policy.grant(tool_name, arguments)
 
+        self._snapshot_before(tool, arguments)
         self.policy.log(tool_name, arguments, cwd=self.session.working_dir)
         try:
             result = tool.execute(arguments)
@@ -592,6 +600,26 @@ class Orchestrator:
             return
         session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
         self._render_tool_call(tool_name, arguments, result)
+
+    def _snapshot_before(self, tool: Any, arguments: dict[str, Any]) -> None:
+        """Save whatever this call is about to change, so it can be undone.
+
+        Runs after approval and before execution: a denied call leaves no
+        snapshot behind, and an approved one always has something to restore.
+        Guarded, because failing to take a snapshot must never stop the edit
+        the user just approved — the cost is one file that cannot be undone,
+        which /undo reports rather than hiding.
+        """
+        if self.checkpoints is None:
+            return
+        writes = getattr(tool, "writes", None)
+        if not callable(writes):
+            return
+        try:
+            for path in writes(arguments) or []:
+                self.checkpoints.record(str(path))
+        except Exception:  # noqa: BLE001 - never block an approved edit
+            return
 
     def _preview(self, tool_name: str, arguments: dict[str, Any]) -> str:
         """What this call would do, if the tool can say before doing it.

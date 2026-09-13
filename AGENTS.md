@@ -56,6 +56,8 @@ style by hand.
 | `session.py` | `Turn`/`Session`, encrypted `SessionManager`, session discovery. |
 | `config.py` | Layered user + repo config reader. |
 | `typing/spi.py` | **The plugin contract.** All SPI interfaces and shared dataclasses. |
+| `checkpoints.py` | Pre-edit snapshots behind `/undo`. |
+| `context.py` | Fitting the history into the model's window. |
 | `paths.py` | Every path under `~/.cobirb`. Derived in one place, on purpose. |
 | `plugins/loader.py` | Discovery (entry points + local dirs), fail-closed. |
 | `plugins/core/` | Built-ins: `tools`, `model`, `io`, `crypto`, `persona`, `render`. |
@@ -125,6 +127,27 @@ Ollama's own default (4096) unless its Modelfile sets `num_ctx`. So `LocalModelP
 trusts *only* `num_ctx`, returns `None` otherwise, and the caller falls back to a conservative
 4096. Guessing high recreates the exact bug; guessing low only costs some avoidable compaction.
 `"context_tokens"` in config is how a user who runs a bigger window says so. `/context` shows it.
+
+## 4c. Undo
+
+`checkpoints.py` copies a file aside before the agent changes it, and `/undo` puts the last
+changing turn's files back. Only paths a tool declares via the optional `CobirbTool.writes()` are
+saved, and only the first time each is touched in a turn — undo restores the state at the *start*
+of the turn, so a second edit must not overwrite the copy taken before the first. Turns that
+changed nothing leave no directory behind, and `/undo` reaches past them.
+
+Snapshots are taken **after** approval and **before** execution: a denied call litters nothing, an
+approved one always has something to restore. Both the snapshot and the tool's `writes()` are
+guarded — failing to snapshot must never block an edit the user just approved.
+
+**`shell` is the honest gap.** It cannot declare what it will change, so anything a command does
+is outside undo. That is why `UndoReport.describe()` names the files it actually restored instead
+of reporting success: a user told "undone" who then finds otherwise is worse off than one told
+exactly what came back.
+
+Snapshots are plaintext, unlike sessions. A copy of `src/app.py` exposes nothing that
+`src/app.py` did not already expose in the directory it came from, so encrypting it would be
+ceremony; the store is 0700 and pruned to the last 20 changing turns.
 
 ## 5. Plugin SPI
 

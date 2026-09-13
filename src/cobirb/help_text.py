@@ -58,6 +58,8 @@ INTERACTIVE COMMANDS
   /persona           Pick a persona from a list (including "none", the
                      default, which hands the voice back to the model).
   /persona <name>    Switch to a named persona directly.
+  /undo              Put back the files the last turn changed. Cannot
+                     undo what a shell command did — see 'help tools'.
   /context           Show how much of the model's context window this
                      session is using, and what has been compacted away.
   /plan on|off       Toggle plan mode mid-conversation.
@@ -237,6 +239,10 @@ TOOLS — what the agent can do
   list_dir       List a directory's contents.
   shell          Run a shell command. Highest privilege; gated.
 
+Before a tool changes a file, CoBirb copies the current version aside, so
+/undo can put it back. This covers write_file, edit_file and apply_patch —
+not shell, which cannot say in advance what it will touch.
+
 Nothing is permitted up front. Every tool call you haven't already allowed
 prompts you to permit it once, always, or not at all — and what "always"
 covers depends on the tool:
@@ -272,6 +278,9 @@ Read from (repo overrides user): ~/.cobirb/config.json, then ./cobirb.json
       "name": "...", "base_url": "..."}}  Model name/endpoint (local Ollama
                                  by default; any OpenAI-compatible server
                                  works).
+  "checkpoints"                  false to stop snapshotting files before
+                                 the agent changes them, which is what
+                                 /undo restores from. On by default.
   "instructions"                 false to stop reading the project's
                                  AGENTS.md / CoBirb.md from the working
                                  directory into the system prompt. On by

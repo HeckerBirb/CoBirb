@@ -442,6 +442,22 @@ class CoBirbApp(App[None]):
             render.build_notice(report.describe() if report else "Nothing sent to the model yet.")
         )
 
+    def _cmd_undo(self, argument: str) -> None:
+        """Put back the files the last changing turn altered.
+
+        Reports what it actually restored rather than saying "done": `shell`
+        cannot declare what it writes, so anything a command did is outside
+        this, and a user told "undone" who then finds otherwise is worse off
+        than one told exactly which files came back.
+        """
+        checkpoints = getattr(self.orchestrator, "checkpoints", None)
+        if checkpoints is None:
+            self.write_transcript(
+                render.build_notice("Undo is off for this session (\"checkpoints\": false).")
+            )
+            return
+        self.write_transcript(render.build_notice(checkpoints.undo_last().describe()))
+
     def _cmd_plan(self, argument: str) -> None:
         self.plan_mode, message = commands.apply_plan_toggle(argument, self.plan_mode)
         self.query_one(StatusBar).plan_mode = self.plan_mode
@@ -453,6 +469,7 @@ class CoBirbApp(App[None]):
         "/persona": _cmd_persona,
         "/plan": _cmd_plan,
         "/context": _cmd_context,
+        "/undo": _cmd_undo,
     }
 
     def _on_turn_finished(self) -> None:

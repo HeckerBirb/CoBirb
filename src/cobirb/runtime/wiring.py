@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from typing import Callable
 
+from ..checkpoints import Checkpoints
 from ..config import Config
 from ..orchestrator import Orchestrator, build_default_policy
 from ..plugins.core import LocalModelProvider, TerminalIO
@@ -171,6 +172,9 @@ def build_orchestrator(
         # someone who has raised the window tells CoBirb about it.
         context_tokens=config.get("context_tokens"),
         project_instructions=_project_instructions(cwd, config),
+        # On by default: an agent that edits real files without an undo is a
+        # worse deal than one that spends a little disk.
+        checkpoints=None if config.get("checkpoints") is False else Checkpoints(cwd),
     )
 
 

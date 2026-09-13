@@ -38,6 +38,15 @@ class CobirbTool(Tool):
     def name(self) -> str:
         return self.NAME
 
+    def writes(self, arguments: dict[str, Any]) -> list[str]:
+        """Paths this call may change, for the undo snapshot to save first.
+
+        Optional and duck-typed. An empty list means "nothing, or nothing
+        knowable" — which for ``shell`` is the honest answer and the reason
+        undo cannot cover what a command does.
+        """
+        return []
+
     def preview(self, arguments: dict[str, Any]) -> str:
         """What this call would do, shown before it is approved.
 
@@ -134,6 +143,10 @@ class ReadFileTool(CobirbTool):
 class WriteFileTool(CobirbTool):
     NAME = "write_file"
 
+    def writes(self, arguments: dict[str, Any]) -> list[str]:
+        path = arguments.get("path")
+        return [self._resolve(str(path))] if path else []
+
     def preview(self, arguments: dict[str, Any]) -> str:
         path = self._resolve(str(arguments.get("path", "")))
         new = str(arguments.get("content", ""))
@@ -171,6 +184,10 @@ class WriteFileTool(CobirbTool):
 
 class EditFileTool(CobirbTool):
     NAME = "edit_file"
+
+    def writes(self, arguments: dict[str, Any]) -> list[str]:
+        path = arguments.get("path")
+        return [self._resolve(str(path))] if path else []
 
     def preview(self, arguments: dict[str, Any]) -> str:
         path = self._resolve(str(arguments.get("path", "")))
@@ -287,6 +304,10 @@ def _apply_patch_hunks(original_lines: list[str], hunks: list[tuple[int, list[tu
 
 class ApplyPatchTool(CobirbTool):
     NAME = "apply_patch"
+
+    def writes(self, arguments: dict[str, Any]) -> list[str]:
+        path = arguments.get("path")
+        return [self._resolve(str(path))] if path else []
 
     def preview(self, arguments: dict[str, Any]) -> str:
         return str(arguments.get("patch", ""))

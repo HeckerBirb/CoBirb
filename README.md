@@ -130,8 +130,10 @@ Being straight about the edges, since the rest of this page makes strong claims:
   that command can read `~/.ssh` and open a socket like any other program you'd run.
   There is no sandbox. Approve narrowly, and prefer `shell(git status)`-style rules over
   trusting a bare binary.
-- **The model can be wrong, and it edits real files.** Sessions are encrypted and tool
-  calls are gated, but nothing yet snapshots your working tree — keep your work in git.
+- **`/undo` does not cover what a shell command did.** CoBirb copies a file aside before
+  `write_file`, `edit_file` or `apply_patch` changes it, so `/undo` puts those back. A
+  shell command cannot say in advance what it will touch, so anything it does is outside
+  that. Keep your work in git as well.
 - **Context is finite.** Long sessions are compacted to fit the model's window (see
   `/context`); old tool results are summarised away first. Nothing is lost from your
   session file, only from what the model is shown.

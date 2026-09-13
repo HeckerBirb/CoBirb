@@ -14,6 +14,7 @@
     "crypto": "core-crypto"
   },
   "allow_tools": [],
+  "checkpoints": true,
   "instructions": true,
   "instructions_max_chars": 2000,
   "context_tokens": null,
