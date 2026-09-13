@@ -130,6 +130,32 @@ def test_verification_does_not_run_when_nothing_changed(tmp_path):
     assert orchestrator.last_verification is None
 
 
+def test_an_acceptance_check_runs_even_when_nothing_changed(tmp_path):
+    """A subagent's check is the *definition of done* for its ticket, not a
+    regression guard — so a worker that changed nothing has definitively not
+    finished and has to be told, rather than reported as unverified.
+
+    The user's own ``verify_command`` keeps the opposite default; this is the
+    one setting that separates the two meanings.
+    """
+    orchestrator = Orchestrator(
+        model=_AnsweringModel("a.txt"),
+        tools=ToolRegistry(str(tmp_path)).tools,
+        policy=Policy(),
+        verify=VerifySettings(
+            command=f'"{sys.executable}" -c "raise SystemExit(1)"',
+            cwd=str(tmp_path),
+            max_fix_attempts=0,
+            only_after_changes=False,
+        ),
+    )
+
+    orchestrator.run("do the ticket", "sys", cwd=str(tmp_path))
+
+    assert orchestrator.last_verification is not None
+    assert not orchestrator.last_verification.ok
+
+
 def test_a_failure_is_handed_back_for_the_model_to_fix(tmp_path):
     """The point of the loop: the model gets told, in the same turn, that its
     change broke the project's own check."""

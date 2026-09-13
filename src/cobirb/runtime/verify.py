@@ -43,6 +43,17 @@ class VerifySettings:
     cwd: str = "."
     timeout: int = DEFAULT_TIMEOUT_SECONDS
     max_fix_attempts: int = DEFAULT_MAX_FIX_ATTEMPTS
+    # Whether to skip the check when the turn changed nothing. True for the
+    # user's own `verify_command`, which is a regression guard: running a test
+    # suite because somebody asked a question would be absurd, and on a slow
+    # suite hostile.
+    #
+    # False for a subagent's acceptance check, which is a different thing
+    # wearing the same clothes — it is the *definition of done* for that
+    # ticket, so a worker that changed nothing has definitively not finished
+    # and must be told so. Skipping it there would report "nobody said what
+    # done looks like" for a worker that simply did nothing.
+    only_after_changes: bool = True
     # The turn budget for one fix attempt — smaller than a normal run's,
     # because fixing a named failure is a narrower job than the original task.
     max_turns: int = 4

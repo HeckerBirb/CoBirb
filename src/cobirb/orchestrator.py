@@ -350,7 +350,9 @@ class Orchestrator:
         usually one more turn away, and every extra round is model time
         nobody asked for.
         """
-        if self.verify is None or not self._changed_anything():
+        if self.verify is None:
+            return content, streamed
+        if self.verify.only_after_changes and not self._changed_anything():
             return content, streamed
 
         for attempt in range(self.verify.max_fix_attempts + 1):

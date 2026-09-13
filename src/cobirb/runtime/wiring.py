@@ -14,13 +14,15 @@ from ..checkpoints import Checkpoints
 from ..config import Config
 from ..mcp import connect_servers
 from ..orchestrator import Orchestrator, build_default_policy
-from ..plugins.core import LocalModelProvider, TerminalIO
+from ..plugins.core import LocalModelProvider, TerminalIO, ToolRegistry
+from ..policy import Policy
 from ..session import SessionManager
 from ..typing import spi as cobirb_typing
 from ..plugins.core.repomap import DEFAULT_BUDGET_CHARS, render_map
+from .headless import HeadlessIO
 from .hooks import HookRunner
 from .instructions import DEFAULT_MAX_CHARS, load_instructions
-from .models import ROLE_ORCHESTRATOR, build_for_role
+from .models import ROLE_ORCHESTRATOR, ROLE_WORKER, build_for_role
 from .personas import persona_key
 from .plugins import build_crypto, discover_plugins, report_plugin_issues, resolve_slot
 from .verify import DEFAULT_MAX_FIX_ATTEMPTS, DEFAULT_TIMEOUT_SECONDS, VerifySettings
@@ -245,6 +247,80 @@ def build_orchestrator(
         # The user's own commands at the lifecycle points.
         hooks=HookRunner.from_config(config, cwd),
         mcp_clients=mcp_clients,
+    )
+
+
+def build_subagent(
+    cwd: str,
+    policy: Policy,
+    *,
+    accept: str = "",
+    config: Config | None = None,
+    io: cobirb_typing.I_OAdapter | None = None,
+) -> Orchestrator:
+    """Wire an agent that takes its instructions from another agent.
+
+    A subagent — a Worker Birb, in the Flock — is **not a special kind of
+    run**. It is an ordinary CoBirb agent that received its prompt from
+    Brainy Birb instead of from a person, so this composes the same parts
+    ``build_orchestrator`` does and differs in exactly four places, each for a
+    reason:
+
+    - **Its policy is handed in, not read from config.** The charter's scopes
+      *are* the isolation; config's ``allow_tools`` would widen them behind the
+      user's back, and the user approved the charter rather than the config.
+    - **It gets no project context at all.** No ``AGENTS.md``, no repo map.
+      Need-to-know is the whole design: a worker that can read the codebase
+      outline knows the shape of everyone else's work. Conventions reach it
+      instead through the skeleton it is filling in, which was already written
+      in house style.
+    - **Its I/O is headless.** There is nobody to ask — the single approval
+      already happened, at the charter. ``HeadlessIO`` refuses anything not
+      pre-permitted rather than reaching for a prompt no one will answer, which
+      is also what stops concurrent workers racing for the same modal.
+    - **Its verification is its own scoped check**, so it never runs the full
+      suite and therefore never meets a colleague's failing test to helpfully
+      fix.
+
+    Everything else it inherits *because it is an ordinary run*: checkpoints,
+    secret redaction, and the user's own lifecycle hooks. Those rules should
+    apply to every agent working in someone's tree, not only the ones they
+    prompted themselves.
+
+    No plugin discovery and no MCP servers. Not a restriction on principle —
+    the policy denies those tools anyway, since the charter grants file paths
+    and nothing else — but starting a user's database proxy once per worker
+    would be actively wrong, and the built-ins are what a brief can actually
+    use.
+    """
+    config = config or Config()
+    registry = ToolRegistry(cwd)
+    return Orchestrator(
+        model=build_for_role(ROLE_WORKER, config),
+        tools=registry.tools,
+        policy=policy,
+        io=io or HeadlessIO(),
+        session=None,
+        context_tokens=config.get("context_tokens"),
+        project_context="",
+        redact_secrets=config.get("redact_secrets") is not False,
+        verify=(
+            VerifySettings(
+                command=accept,
+                cwd=cwd,
+                timeout=int(config.get("verify_timeout", default=DEFAULT_TIMEOUT_SECONDS)),
+                max_fix_attempts=int(
+                    config.get("verify_fix_attempts", default=DEFAULT_MAX_FIX_ATTEMPTS)
+                ),
+                # Always, even if the worker changed nothing: this is the
+                # ticket's definition of done, not a regression guard.
+                only_after_changes=False,
+            )
+            if accept.strip()
+            else None
+        ),
+        checkpoints=None if config.get("checkpoints") is False else Checkpoints(cwd),
+        hooks=HookRunner.from_config(config, cwd),
     )
 
 
