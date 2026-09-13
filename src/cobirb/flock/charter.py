@@ -120,6 +120,21 @@ class WorkerBrief:
     writes: tuple[str, ...]
     reads: tuple[str, ...] = ()
     accept: str = ""
+    # Which of ``writes`` hold the acceptance tests. A subset, never a separate
+    # set — a worker must be able to edit its own tests, because implementing
+    # something turns up edge cases the skeleton did not anticipate and those
+    # deserve tests.
+    #
+    # Declared rather than guessed from filenames. Review needs to put the
+    # *implementation* back to its stub while keeping the worker's tests, and
+    # a naming heuristic that works for `test_*.py` and fails for `*_test.go`
+    # would quietly turn the strongest check in the design into a no-op.
+    tests: tuple[str, ...] = ()
+
+    @property
+    def implementation(self) -> tuple[str, ...]:
+        """The files a worker writes that are not its tests."""
+        return tuple(path for path in self.writes if path not in set(self.tests))
 
     @property
     def touches(self) -> tuple[str, ...]:
@@ -231,12 +246,20 @@ def _worker(entry: Any, index: int) -> WorkerBrief:
             f"worker {worker_id!r} writes nothing — a Worker Birb with no files to change "
             "has no work to do, and probably means the partition is wrong"
         )
+    tests = _paths(entry.get("tests"), f"worker {worker_id!r} tests")
+    stray = [path for path in tests if path not in writes]
+    if stray:
+        raise CharterError(
+            f"worker {worker_id!r} lists {', '.join(stray)} under tests but does not write "
+            "them — a worker's acceptance tests are its own files, so that they can be added to"
+        )
     return WorkerBrief(
         id=worker_id,
         brief=_text(entry.get("brief"), f"worker {worker_id!r} brief"),
         writes=writes,
         reads=_paths(entry.get("reads"), f"worker {worker_id!r} reads"),
         accept=_text(entry.get("accept"), f"worker {worker_id!r} accept", required=False),
+        tests=tests,
     )
 
 
