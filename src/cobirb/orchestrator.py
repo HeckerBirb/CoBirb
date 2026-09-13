@@ -20,6 +20,7 @@ from .checkpoints import Checkpoints
 from .context import DEFAULT_CONTEXT_TOKENS, CompactionReport, compact, history_budget
 from .policy import AuditLog, Policy
 from .redaction import redact
+from .runtime.verify import VerifySettings, run_verification
 from .session import PHASE_ACT, PHASE_PLAN, PHASE_VALIDATE, Session, SessionManager, Turn
 from .typing import spi as cobirb_typing
 
@@ -28,6 +29,12 @@ logger = logging.getLogger("cobirb")
 # Sentinel distinguishing "no chunk yet" from a real (possibly empty-string)
 # streamed chunk when peeking the first item of a model's stream in _chat().
 _STREAM_EMPTY = object()
+
+# Tools whose success means the workspace is not what it was, and therefore
+# that the project's own check is worth running. `shell` is included because
+# it very often is the thing that changed something, even though it cannot say
+# so in advance the way the file tools can.
+_CHANGING_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "shell"})
 
 # System-prompt addenda for plan mode's three phases (Orchestrator.run,
 # plan_mode=True). Off by default — the model plans, acts and validates
@@ -159,6 +166,7 @@ class Orchestrator:
         context_tokens: int | None = None,
         project_instructions: str = "",
         redact_secrets: bool = True,
+        verify: "VerifySettings | None" = None,
         checkpoints: "Checkpoints | None" = None,
     ) -> None:
         self.model = model
@@ -167,6 +175,9 @@ class Orchestrator:
         self.io = io
         self.crypto = crypto
         self.session = session
+        # The project's own check, run after a turn that changed files. None
+        # unless the user nominated a command — CoBirb never guesses one.
+        self.verify = verify
         # Whether tool output is scanned for credentials before it reaches
         # the model, the session or the audit log. See cobirb.redaction.
         self.redact_secrets = redact_secrets
@@ -184,6 +195,8 @@ class Orchestrator:
         # report. Derived here rather than sniffed out of turn text later,
         # because "was this denied?" should be a fact and not a string match.
         self.last_run_tool_calls: list[dict[str, Any]] = []
+        # The last verification run, for the headless report and /verify.
+        self.last_verification = None
         # What the last _build_context had to throw away, for /context.
         self.last_compaction: CompactionReport | None = None
         # Whether the most recent run()'s final answer was already streamed
@@ -276,6 +289,9 @@ class Orchestrator:
             _join_system(system_with_cwd, _ACT_PHASE_INSTRUCTIONS) if plan_mode else system_with_cwd
         )
         content, streamed = self._loop(act_system, session, max_turns, PHASE_ACT if plan_mode else None)
+        content, streamed = self._verify_and_fix(
+            act_system, session, content, streamed, plan_mode
+        )
         session.summary = content
         self.last_turn_streamed = streamed
 
@@ -297,6 +313,45 @@ class Orchestrator:
                 self._render_phase(PHASE_VALIDATE, persona, validation_text)
 
         return session
+
+    def _verify_and_fix(
+        self, system: str, session: Session, content: str, streamed: bool, plan_mode: bool
+    ) -> tuple[str, bool]:
+        """Run the project's own check, and let the model react if it fails.
+
+        Only after a turn that actually changed something — running a test
+        suite because someone asked a question would be absurd. Bounded hard:
+        a model that cannot fix a failing suite in one focused attempt is not
+        usually one more turn away, and every extra round is model time
+        nobody asked for.
+        """
+        if self.verify is None or not self._changed_anything():
+            return content, streamed
+
+        for attempt in range(self.verify.max_fix_attempts + 1):
+            result = run_verification(self.verify.command, self.verify.cwd, self.verify.timeout)
+            self.last_verification = result
+            render_through(
+                self.io, "render_notice", result.describe(),
+                fallback=lambda: self.io.render(f"\n[verify] {result.describe()}\n"),
+            )
+            if result.ok or result.error or attempt == self.verify.max_fix_attempts:
+                return content, streamed
+            # Handed to the model as a user turn: it is a fact about the world
+            # that arrived after its last answer, which is exactly what a user
+            # turn is for.
+            session.add(Turn(role="user", content=result.as_turn()))
+            content, streamed = self._loop(
+                system, session, self.verify.max_turns, phase=PHASE_ACT if plan_mode else None
+            )
+        return content, streamed
+
+    def _changed_anything(self) -> bool:
+        """Whether this run has actually modified the workspace."""
+        return any(
+            call["ok"] and call["name"] in _CHANGING_TOOLS
+            for call in self.last_run_tool_calls
+        )
 
     def _render_answer(self, persona_name: str, text: str) -> bool:
         """Show a finished answer live, via ``io``'s ``render_answer`` hook

@@ -19,6 +19,7 @@ from ..typing import spi as cobirb_typing
 from .instructions import DEFAULT_MAX_CHARS, load_instructions
 from .personas import persona_key
 from .plugins import build_crypto, discover_plugins, report_plugin_issues, resolve_slot
+from .verify import DEFAULT_MAX_FIX_ATTEMPTS, DEFAULT_TIMEOUT_SECONDS, VerifySettings
 
 
 def build_model(model_name: str | None, cwd: str | None = None, config: Config | None = None) -> LocalModelProvider:
@@ -91,6 +92,23 @@ def _project_instructions(cwd: str, config: Config) -> str:
     if config.get("instructions") is False:
         return ""
     return load_instructions(cwd, int(config.get("instructions_max_chars", default=DEFAULT_MAX_CHARS)))
+
+
+def _verify_settings(cwd: str, config: Config) -> VerifySettings | None:
+    """The project's check, if the user nominated one.
+
+    No guessing from the project layout: guessing wrong means running an
+    arbitrary command the user never asked for, after every turn.
+    """
+    command = config.get("verify_command")
+    if not command or not str(command).strip():
+        return None
+    return VerifySettings(
+        command=str(command),
+        cwd=cwd,
+        timeout=int(config.get("verify_timeout", default=DEFAULT_TIMEOUT_SECONDS)),
+        max_fix_attempts=int(config.get("verify_fix_attempts", default=DEFAULT_MAX_FIX_ATTEMPTS)),
+    )
 
 
 def build_orchestrator(
@@ -183,6 +201,7 @@ def build_orchestrator(
         # credentials file can't do it through a redacted read; the benefit is
         # that reading one doesn't put a live key in three places at once.
         redact_secrets=config.get("redact_secrets") is not False,
+        verify=_verify_settings(cwd, config),
         # On by default: an agent that edits real files without an undo is a
         # worse deal than one that spends a little disk.
         checkpoints=None if config.get("checkpoints") is False else Checkpoints(cwd),

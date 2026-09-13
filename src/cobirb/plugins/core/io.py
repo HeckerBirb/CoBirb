@@ -143,6 +143,11 @@ class TerminalIO(I_OAdapter):
             return
         self._console.print(render.build_validation_panel(persona_name, text))
 
+    def render_notice(self, text: str) -> None:
+        """A one-line note about the session rather than content from the
+        model — a verification result, say."""
+        self._console.print(render.build_notice(text))
+
     def render_tool_call(self, tool_name: str, arguments: dict[str, Any], result: Any) -> None:
         """A tool call and its result, set apart from the conversation so
         the flow of "assistant reasons → calls a tool → sees the result" is

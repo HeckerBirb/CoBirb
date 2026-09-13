@@ -180,6 +180,15 @@ class TuiIO(I_OAdapter):
             return
         self._write(render.build_validation_panel(persona_name, text))
 
+    def render_notice(self, text: str) -> None:
+        """A note about the session, into the transcript.
+
+        There is deliberately no equivalent for slash commands — those are
+        handled on the main thread and the app writes them directly. This one
+        exists because verification runs inside the orchestrator, on a worker.
+        """
+        self._write(render.build_notice(text))
+
     def render_tool_call(self, tool_name: str, arguments: dict[str, Any], result: Any) -> None:
         self._write(render.build_tool_call_panel(tool_name, arguments, result))
 
@@ -192,10 +201,6 @@ class TuiIO(I_OAdapter):
         """
         self._write(render.build_error_panel(persona_name, text))
 
-    # There is deliberately no ``write_notice`` here. Notices (a ``/plan``
-    # toggle, a persona switch) only ever come from a slash command, which is
-    # handled on the main thread — so the app writes those to the transcript
-    # directly rather than paying for a thread hop that is never needed.
 
     def _write(self, renderable: Any) -> None:
         """Put a finished renderable in the transcript.

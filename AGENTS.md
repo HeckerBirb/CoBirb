@@ -205,6 +205,24 @@ Redaction is **visible** (`[redacted: github token]`) so a model can say a key w
 than working from a value it never received, and it can be turned off (`"redact_secrets": false`)
 because an agent asked to *edit* a credentials file cannot do it through a redacted read.
 
+## 4g. Verification
+
+`runtime/verify.py` runs the project's own check (`"verify_command"`, e.g. `pytest -q`) after any
+turn that changed files, and hands a failure back to the model as a user turn — it is a fact about
+the world that arrived after its last answer, which is what a user turn is for. Plan mode's
+validate phase asks the *model* whether the work is right; this reads an exit code.
+
+Off unless a command is named: no guessing from project layout, because guessing wrong means
+running an arbitrary command the user never asked for after every turn. Only after a turn that
+actually changed something (`_CHANGING_TOOLS`) — running a suite because someone asked a question
+would be absurd, and on a slow suite hostile. The fix loop is bounded to one attempt by default: a
+model that can't fix a failing suite in one focused try usually isn't one more turn away.
+
+**It runs outside the permission layer, deliberately.** The command comes from the user's own
+config — a more explicit authorization than `allow_tools`, which is a pattern rather than a literal
+command — and CoBirb runs it, not the model. The model can neither choose it nor change it
+mid-session. Documented rather than quietly assumed.
+
 ## 5. Plugin SPI
 
 Core imports only these interfaces; plugins import only the SPI and never each other; core never

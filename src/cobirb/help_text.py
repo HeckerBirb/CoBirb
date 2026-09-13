@@ -296,6 +296,15 @@ Read from (repo overrides user): ~/.cobirb/config.json, then ./cobirb.json
       "name": "...", "base_url": "..."}}  Model name/endpoint (local Ollama
                                  by default; any OpenAI-compatible server
                                  works).
+  "verify_command"               A command that decides whether the project
+                                 is still healthy, e.g. "pytest -q". Run
+                                 after any turn that changed files; if it
+                                 fails, the model is told and gets one
+                                 attempt to fix it. Off unless you name one
+                                 — CoBirb never guesses a test command.
+  "verify_timeout"               Seconds to allow it (default 120).
+  "verify_fix_attempts"          How many times the model may react to a
+                                 failure (default 1).
   "redact_secrets"               false to stop stripping credentials from
                                  tool output before it reaches the model,
                                  the session and the audit log. On by

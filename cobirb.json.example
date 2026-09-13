@@ -16,6 +16,7 @@
   "allow_tools": [],
   "allow_read_dirs": [],
   "allow_write_dirs": [],
+  "verify_command": "",
   "redact_secrets": true,
   "checkpoints": true,
   "instructions": true,
