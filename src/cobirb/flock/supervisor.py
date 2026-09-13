@@ -114,6 +114,7 @@ def run_flock(
     concurrency: int | None = None,
     stop: threading.Event | None = None,
     on_event=None,
+    io_for=None,
 ) -> FlockOutcome:
     """Run one round of a charter and report on it.
 
@@ -125,6 +126,11 @@ def run_flock(
     ``on_event`` is an optional callback taking ``(kind, payload)``, so a
     front-end can show progress without this module knowing what a pane is.
     Kinds: ``"started"``, ``"finished"``, ``"reviewed"``.
+
+    ``io_for(worker)`` optionally supplies each Worker Birb with its own I/O
+    adapter — how the TUI gives each one a pane to draw into. Coarse events say
+    *that* a worker started; this is what makes its work visible while it
+    happens.
     """
     config = config or Config()
     stop = stop or threading.Event()
@@ -149,7 +155,9 @@ def run_flock(
         if stop.is_set():
             return WorkerReport(worker_id=worker.id, ok=False, error="stopped before it started")
         announce("started", worker)
-        report = run_worker(worker, cwd, config=config)
+        report = run_worker(
+            worker, cwd, config=config, io=io_for(worker) if io_for else None
+        )
         announce("finished", report)
         return report
 

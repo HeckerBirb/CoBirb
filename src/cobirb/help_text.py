@@ -10,7 +10,8 @@ CoBirb — a privacy-first, local agentic CLI.
 
 MODES
   Interactive (default): a full-screen terminal app — tabs, a live status
-                         line, a boxed input, tool approval as a dialog.
+                         line, a boxed input, tool approval as a dialog, and
+                         a Flock tab with a pane per agent.
   One-shot:              cobirb -p "your task" --allow-tool='shell(git)'
                          Plain stdout, so it pipes and scripts like any CLI.
   Headless (CI):         cobirb -p "task" --headless --output json
@@ -81,6 +82,9 @@ INTERACTIVE COMMANDS
   /plan              Show whether plan mode is currently on.
   /commands          List your own prompt files, invocable by name. Any
                      other /word is one of them — see 'help commands'.
+  /flock <what>      Divide a piece of work between several agents. Opens
+                     the Flock tab; you approve the charter before anything
+                     runs. See 'help flock'.
   ? or /help         Open this help. '/help <topic>' opens one topic.
 
 INTERACTIVE KEYS
@@ -278,7 +282,14 @@ repeating the endpoint it is served from. --model outranks all of them.
     "flock": """\
 THE FLOCK — dividing work between agents that cannot see each other
 
-  cobirb flock -p "add CSV export to the reporting tool"
+  cobirb flock -p "add CSV export to the reporting tool"     (one-shot)
+  /flock add CSV export to the reporting tool                (interactive)
+
+Interactively this opens the Flock tab: one pane per Worker Birb, showing
+what each is allowed to touch and what it is doing, updating as they work.
+Ctrl+C asks before interrupting — no further workers start, and any already
+talking to a model finish that turn, because a model call in flight cannot be
+cut off. Whatever has been written to your files stays written; use git.
 
 One Brainy Birb (the lead) plans the work, designs the interfaces, builds the
 skeleton, and writes one ticket per Worker Birb. The workers then fill those

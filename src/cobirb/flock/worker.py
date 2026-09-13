@@ -143,8 +143,16 @@ def run_worker(
     *,
     config: Config | None = None,
     max_turns: int = DEFAULT_MAX_TURNS,
+    io=None,
 ) -> WorkerReport:
     """Run one brief to completion and report on it.
+
+    ``io`` lets a front-end watch the work happen — the TUI gives each worker
+    an adapter bound to its own pane, so tool calls appear as they are made
+    rather than arriving in one lump at the end. Whatever is passed must still
+    refuse rather than prompt: the single approval happened at the charter, and
+    two workers racing for the same modal is exactly what that decision avoids.
+    Default is ``HeadlessIO``, which does refuse.
 
     Never raises. A worker that blows up is a fact Brainy Birb needs in order
     to plan the next round, and taking down the whole flock because one ticket
@@ -153,7 +161,7 @@ def run_worker(
     """
     config = config or Config()
     policy = policy_for(worker, cwd, audit_log_enabled=bool(config.get("audit_log")))
-    orchestrator = build_subagent(cwd, policy, accept=worker.accept, config=config)
+    orchestrator = build_subagent(cwd, policy, accept=worker.accept, config=config, io=io)
 
     logger.info("worker %s starting; writes=%s", worker.id, ", ".join(worker.writes))
     try:

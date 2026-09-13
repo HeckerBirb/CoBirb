@@ -185,7 +185,9 @@ async def test_app_boots_with_the_three_tabs_and_current_active():
     async with app.run_test() as pilot:
         await pilot.pause()
         tabs = app.query_one(TabbedContent)
-        assert [pane.id for pane in app.query("TabPane")] == ["current", "sessions", "plugins"]
+        assert [pane.id for pane in app.query("TabPane")] == [
+            "current", "flock", "sessions", "plugins",
+        ]
         assert tabs.active == "current"
 
 
@@ -237,7 +239,7 @@ async def test_next_tab_cycles_through_every_tab_and_wraps():
     async with app.run_test() as pilot:
         await pilot.pause()
         tabs = app.query_one(TabbedContent)
-        for expected in ("sessions", "plugins", "current"):
+        for expected in ("flock", "sessions", "plugins", "current"):
             app.action_next_tab()
             await pilot.pause()
             assert tabs.active == expected
@@ -1160,8 +1162,7 @@ async def test_plugins_pane_shows_the_registered_tools_and_active_slots():
         # RichLog only wraps its buffered content into readable `.lines` once
         # it has an actual on-screen width, which an inactive tab's content
         # never gets — so the pane has to be switched to before checking it.
-        await _switch_tab(pilot, app)
-        await _switch_tab(pilot, app)
+        await _switch_tab(pilot, app, "plugins")
         await _until(pilot, lambda: "read_file" in _plugins_log_text(app))
 
         text = _plugins_log_text(app)
@@ -1194,8 +1195,7 @@ async def test_plugins_pane_shows_an_error_instead_of_crashing_on_discovery_fail
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        await _switch_tab(pilot, app)
-        await _switch_tab(pilot, app)
+        await _switch_tab(pilot, app, "plugins")
         await _until(pilot, lambda: "boom" in _plugins_log_text(app))
 
 
@@ -1211,9 +1211,8 @@ def _sessions_status(app: CoBirbApp) -> str:
     return str(app.query_one(SessionsPane).query_one("#sessions-status").content)
 
 
-async def _switch_tab(pilot, app: CoBirbApp) -> None:
-    """Switch tabs and wait for the newly-active pane to actually be laid
-    out before returning.
+async def _switch_tab(pilot, app: CoBirbApp, name: str | None = None) -> None:
+    """Show a tab and wait for it to actually be laid out before returning.
 
     ``TabbedContent`` flips its child's ``display`` reactive synchronously,
     but the compositor needs a few idle cycles to give that child a real
@@ -1221,15 +1220,22 @@ async def _switch_tab(pilot, app: CoBirbApp) -> None:
     that (0, 0) position (in practice, the Header's app icon, which opens
     the command palette). A fixed pause count flakes; this polls the actual
     geometry instead.
+
+    ``name`` selects a tab outright. Cycling with ``action_next_tab`` instead
+    silently couples every caller to the tab *order*, which is how adding the
+    Flock tab broke eight tests that had nothing to do with tabs.
     """
     tabs = app.query_one(TabbedContent)
-    app.action_next_tab()
+    if name is None:
+        app.action_next_tab()
+    else:
+        tabs.active = name
     await _until(pilot, lambda: app.query_one(f"#{tabs.active}").region.height > 0)
 
 
 async def _open_sessions_tab(pilot, app: CoBirbApp) -> None:
     await pilot.pause()
-    await _switch_tab(pilot, app)
+    await _switch_tab(pilot, app, "sessions")
 
 
 async def test_sessions_pane_lists_no_saved_sessions_when_the_directory_is_empty():
@@ -1365,7 +1371,7 @@ async def test_resuming_discards_an_already_built_orchestrator(monkeypatch):
         assert app.orchestrator is orchestrator
         assert [(c["prompt"], c["persona"]) for c in orchestrator.calls] == [("hello", "CoBirb")]
 
-        await _switch_tab(pilot, app)
+        await _switch_tab(pilot, app, "sessions")
         await pilot.click("#sessions-new")
         await _until(pilot, lambda: isinstance(app.screen, TextPromptModal))
         app.screen.query_one("#prompt-value", Input).value = "fresh"
@@ -1525,7 +1531,7 @@ async def test_activating_the_sessions_tab_refreshes_its_listing(tmp_path, monke
         os.makedirs(sessions_dir)
         open(os.path.join(sessions_dir, "late.json"), "w").close()
 
-        await _switch_tab(pilot, app)
+        await _switch_tab(pilot, app, "sessions")
         options = app.query_one("#sessions-list", OptionList)
         assert options.get_option_at_index(0).id == os.path.join(sessions_dir, "late.json")
 

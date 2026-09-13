@@ -399,6 +399,7 @@ map; conventions reach a worker through the stub it is filling in, which doubles
 | `probe.py` | Does this endpoint answer two requests at once? |
 | `branch.py` | The GUID pairing a flock session to its main one. |
 | `run.py` | The five stages, including the one approval. |
+| `tui/flock_bridge.py` | `TuiAsker` (modals answer the flock's questions) and `WorkerPaneIO`. |
 
 **File-level ownership needed no change to `Policy`.** `_within(path, base)` is
 `path == base or path.startswith(base + sep)`, so granting a *file* matches that file and nothing
@@ -729,12 +730,19 @@ polish) and is imported lazily, so one-shot never loads it. Three live tabs:
   can't use `getpass`) or starts a new one. Resuming validates the password, reads persona/turn
   count, sets `self.orchestrator = None`, and lets the *next* message rebuild through the same
   load-or-create path `--session` uses — so **only one code path ever opens a session file**.
+- **Flock** — one pane per Worker Birb (§4m), laid out from the approved charter and updated live
+  from the supervisor's `started`/`finished`/`reviewed` events, plus a `WorkerPaneIO` per worker so
+  its tool calls appear as it makes them. Each pane keeps its *scope* on screen rather than letting
+  it scroll away with the log: what a worker may touch is the whole of its isolation, and a person
+  watching should be able to see it at any moment. `ctrl+c` mid-flock asks first (`ConfirmModal`)
+  — a flock is several agents deep in a working tree, and an accidental keypress that silently
+  abandoned one would leave it in a state nobody chose.
 - **Plugins** — `cli.describe_plugins()`'s live snapshot: registered tools with source, active
   implementation per slot, discovery problems. It exists because a full-screen app's stderr is
   invisible, and that's where CLI modes report the same issues.
 
 Commands `/model`, `/persona [name]`, `/plan [on|off]`, `/context`, `/undo`, `/diff`, `/export`,
-`/commands`, `?`/`/help [topic]`. Anything else beginning with `/` is looked up as a custom command
+`/commands`, `/flock <objective>`, `?`/`/help [topic]`. Anything else beginning with `/` is looked up as a custom command
 (§4j) and otherwise goes to the model unchanged. Non-interactive: `cobirb models` (§4h) and
 `cobirb commands`. Keys: `f1` help, `f2`
 next tab, `ctrl+q` quit, `up`/`down` recall the last 100 prompts (memory only), `ctrl+c` copies a
@@ -819,7 +827,7 @@ they are shaped around, deliberately.
   (§4j), MCP client over stdio (§4k). *The embedded GGUF runtime was cut from this milestone and
   from the project — see §12.1.*
 - **v0.5.0 "The Flock" (done)** — subagent orchestration: charter → scaffold → fan-out →
-  review → report. See §4m. *The TUI's Flock tab is not built; `cobirb flock` is the surface.*
+  review → report, with a Flock tab showing a pane per Worker Birb. See §4m.
 - **v0.6.0–0.9.0** — plugin distribution, cross-session memory, vision, mid-turn steering,
   session branching, SPI freeze and session migrations.
 

@@ -239,3 +239,52 @@ class TextPromptModal(ModalScreen[Optional[str]]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class ConfirmModal(ModalScreen[bool]):
+    """A yes/no question, for decisions that are not tool approvals.
+
+    Distinct from ``ApprovalModal`` on purpose. That one answers a
+    three-valued permission question and is bound to ``y``/``a``/``n``; this
+    one answers "are you sure?" for the Flock — approving a charter, carrying
+    on past an overlapping partition, interrupting a run in progress.
+
+    Fails closed like everything else: escape means no. The Flock's charter
+    approval is the single place a person sees what the Worker Birbs will be
+    allowed to touch, so a dialog that could be dismissed into a *yes* would
+    be the one bug worth avoiding above all others here.
+    """
+
+    # Two actions rather than one taking a parameter. Textual parses action
+    # arguments out of a string, and a yes/no dialog guarding a permission
+    # decision is the last place to rely on that round-tripping a bool.
+    BINDINGS = [
+        Binding("y", "yes", "Yes", show=True),
+        Binding("n", "no", "No", show=True),
+        Binding("escape", "no", "No", show=False),
+    ]
+
+    def __init__(self, question: str, detail: str = "", confirm_label: str = "Yes") -> None:
+        super().__init__()
+        self._question = question
+        self._detail = detail
+        self._confirm_label = confirm_label
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="confirm-box"):
+            yield Static(Text(self._question, style="bold"), id="confirm-question")
+            if self._detail:
+                yield Static(Text(self._detail), id="confirm-detail")
+            with Horizontal(id="confirm-actions"):
+                yield Button(self._confirm_label, id="confirm-yes", variant="primary")
+                yield Button("No", id="confirm-no")
+
+    def action_yes(self) -> None:
+        self.dismiss(True)
+
+    def action_no(self) -> None:
+        self.dismiss(False)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.dismiss(event.button.id == "confirm-yes")

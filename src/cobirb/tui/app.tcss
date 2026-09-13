@@ -196,3 +196,77 @@ TextPromptModal {
 #prompt-buttons Button {
     margin: 0 1;
 }
+
+/* ---------------------------------------------------------------- */
+/* The Flock tab: one column per Worker Birb.                        */
+/* ---------------------------------------------------------------- */
+FlockPane {
+    height: 1fr;
+}
+
+#flock-status {
+    height: auto;
+    padding: 1 1 0 1;
+}
+
+#flock-workers {
+    height: 1fr;
+    padding: 1;
+}
+
+.worker-pane {
+    width: 1fr;
+    min-width: 24;
+    height: 1fr;
+    margin: 0 1 0 0;
+    border: round $primary-darken-2;
+    padding: 0 1;
+}
+
+.worker-title {
+    height: auto;
+}
+
+/* The scope is the whole of a worker's isolation, so it stays on screen
+   rather than scrolling away with the log — a person watching should be
+   able to see what a pane is allowed to touch at any moment. */
+.worker-scope {
+    height: auto;
+    color: $text-muted;
+    padding-bottom: 1;
+}
+
+.worker-log {
+    height: 1fr;
+    background: transparent;
+}
+
+ConfirmModal {
+    align: center middle;
+}
+
+#confirm-box {
+    width: 76;
+    max-width: 90%;
+    height: auto;
+    max-height: 80%;
+    padding: 1 2;
+    border: round $warning;
+    background: $surface;
+}
+
+#confirm-detail {
+    height: auto;
+    padding-top: 1;
+    color: $text-muted;
+}
+
+#confirm-actions {
+    height: auto;
+    padding-top: 1;
+    align-horizontal: center;
+}
+
+#confirm-actions Button {
+    margin: 0 1;
+}

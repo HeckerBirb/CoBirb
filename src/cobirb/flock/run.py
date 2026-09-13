@@ -107,6 +107,8 @@ def run_flock_session(
     plan_turns: int = DEFAULT_PLAN_TURNS,
     probe: bool = True,
     password: str | None = None,
+    io_for: Callable[[Any], Any] | None = None,
+    on_charter: Callable[[Charter], None] | None = None,
 ) -> FlockRun:
     """Engage flock mode for one objective, and come back with a report.
 
@@ -129,7 +131,7 @@ def run_flock_session(
 
     try:
         return _drive(run, orchestrator, objective, cwd, ask, config, stop, on_event,
-                      plan_turns, probe)
+                      plan_turns, probe, io_for, on_charter)
     finally:
         _close_branch(main, flock_session, run, password)
 
@@ -145,6 +147,8 @@ def _drive(
     on_event: Callable[[str, Any], None] | None,
     plan_turns: int,
     probe: bool,
+    io_for: Callable[[Any], Any] | None = None,
+    on_charter: Callable[[Charter], None] | None = None,
 ) -> FlockRun:
     """The five stages. Split out so the branch above closes on every path."""
     # ---- 1. Plan and scaffold ------------------------------------------- #
@@ -157,6 +161,15 @@ def _drive(
         # a correct answer, and the narration is where it says so.
         return run
     run.charter = charter
+    if on_charter is not None:
+        # Before the partition check and before approval, so a front-end can
+        # lay out its display while the user is still reading the charter —
+        # panes that appear one at a time as workers start would never show
+        # what is waiting to run.
+        try:
+            on_charter(charter)
+        except Exception:  # noqa: BLE001 - a display is not worth the run
+            logger.debug("a charter handler raised", exc_info=True)
 
     # ---- 2. Does the partition hold together? --------------------------- #
     disjoint, partition = check_partition(charter)
@@ -205,7 +218,8 @@ def _drive(
     # ---- 5. Fan out, review, report ------------------------------------- #
     ask.show(f"Fanning out {len(charter.workers)} ticket(s), {concurrency} at a time…")
     outcome = run_flock(
-        charter, cwd, config=config, concurrency=concurrency, stop=stop, on_event=on_event
+        charter, cwd, config=config, concurrency=concurrency, stop=stop,
+        on_event=on_event, io_for=io_for,
     )
     run.outcome = outcome
     ask.show(outcome.describe())

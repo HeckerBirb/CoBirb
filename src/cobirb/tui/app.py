@@ -45,9 +45,11 @@ from ..plugins.core import persona_shapes_voice, render
 from ..policy import PermissionError
 from ..typing import spi as cobirb_typing
 from .io_bridge import TuiIO
-from .panes import PluginsPane, SessionsPane
+from .flock_bridge import TuiAsker, WorkerPaneIO
+from .panes import FlockPane, PluginsPane, SessionsPane
 from .screens import (
     ApprovalModal,
+    ConfirmModal,
     HelpModal,
     ModelPickerModal,
     PersonaPickerModal,
@@ -55,7 +57,7 @@ from .screens import (
 )
 from .widgets import PromptInput, StatusBar, StreamPreview, TranscriptLog
 
-_TAB_ORDER = ["current", "sessions", "plugins"]
+_TAB_ORDER = ["current", "flock", "sessions", "plugins"]
 
 
 def _session_turns(orchestrator: Any) -> list[Any]:
@@ -126,6 +128,10 @@ class CoBirbApp(App[None]):
         # for the rest of the session instead of each turn forgetting what
         # was approved during the previous one.
         self.orchestrator: Orchestrator | None = None
+        # Set for the duration of a flock engagement. The Event is what
+        # ctrl+c sets: a model call in flight cannot be interrupted, so
+        # stopping means no further Worker Birbs start.
+        self._flock_stop: threading.Event | None = None
         # Resolved once, for the status bar — the orchestrator that would
         # know the real name doesn't exist yet at mount time.
         self.resolved_model_name = wiring.resolve_model_name(model_name, cwd)
@@ -149,6 +155,8 @@ class CoBirbApp(App[None]):
                 yield StreamPreview(id="streaming-preview")
                 with Container(id="prompt-box"):
                     yield PromptInput(id="prompt-input", placeholder="Message CoBirb…")
+            with TabPane("Flock", id="flock"):
+                yield FlockPane()
             with TabPane("Sessions", id="sessions"):
                 yield SessionsPane()
             with TabPane("Plugins", id="plugins"):
@@ -551,6 +559,37 @@ class CoBirbApp(App[None]):
         self.query_one(StatusBar).plan_mode = self.plan_mode
         self.write_transcript(render.build_notice(message))
 
+    def _cmd_flock(self, argument: str) -> None:
+        """``/flock <objective>`` — divide a piece of work between several agents.
+
+        Refused while an ordinary turn is running, and while another flock is:
+        both would put two agents into the same working tree with no partition
+        between them, which is the one thing the whole design exists to
+        prevent.
+        """
+        if not argument.strip():
+            self.write_transcript(
+                render.build_notice(
+                    "Usage: /flock <objective>, e.g. /flock add CSV export to the reporting "
+                    "tool. Brainy Birb plans it and you approve the charter before anything "
+                    "runs. See /help flock."
+                )
+            )
+            return
+        if self._turn_in_progress:
+            self.write_transcript(
+                render.build_notice("Wait for the current turn to finish before starting a flock.")
+            )
+            return
+        if self._flock_stop is not None:
+            self.write_transcript(render.build_notice("A flock is already running."))
+            return
+        self.query_one(TabbedContent).active = "flock"
+        self._turn_in_progress = True
+        self.query_one("#prompt-input", Input).disabled = True
+        self._flock_stop = threading.Event()
+        self._run_flock(argument.strip())
+
     def _cmd_commands(self, argument: str) -> None:
         """List the prompt files that are available as commands here."""
         self.write_transcript(
@@ -567,6 +606,7 @@ class CoBirbApp(App[None]):
         "/export": _cmd_export,
         "/diff": _cmd_diff,
         "/commands": _cmd_commands,
+        "/flock": _cmd_flock,
     }
 
     def _on_turn_finished(self) -> None:
@@ -783,6 +823,117 @@ class CoBirbApp(App[None]):
     def refresh_plugins_pane(self) -> None:
         self._describe_plugins_worker()
 
+    # ------------------------------------------------------------------ #
+    # The Flock
+    # ------------------------------------------------------------------ #
+    @work(thread=True, exclusive=True, group="flock")
+    def _run_flock(self, objective: str) -> None:
+        """Run a whole flock engagement on a thread worker.
+
+        Same shape as ``_run_turn``: the flock is synchronous and blocking, so
+        it lives off the event loop and every callback it makes bridges back
+        (see ``flock_bridge``). Building the orchestrator here rather than
+        reusing ``self.orchestrator`` would lose this session's approvals, so
+        it uses the same lazily-built one every turn uses.
+        """
+        from ..flock.run import run_flock_session
+
+        try:
+            if self.orchestrator is None:
+                self.orchestrator = wiring.build_orchestrator(
+                    self.cwd, self.persona, self.allow_overrides,
+                    self.session_path, self.password, self.model_name,
+                    io_factory=lambda: TuiIO(self),
+                )
+            run = run_flock_session(
+                self.orchestrator,
+                objective,
+                self.cwd,
+                ask=TuiAsker(self),
+                stop=self._flock_stop,
+                on_event=self._on_flock_event,
+                io_for=lambda worker: WorkerPaneIO(self, worker.id),
+                on_charter=lambda charter: self.call_from_thread(
+                    self.prepare_flock_panes, charter
+                ),
+                password=self.password,
+            )
+        except Exception as exc:  # noqa: BLE001 - a failed flock is a message, not a crash
+            self.call_from_thread(
+                self.write_transcript, render.build_error_panel("Brainy Birb", str(exc))
+            )
+            self.call_from_thread(self._on_flock_finished, None)
+            return
+        self.call_from_thread(self._on_flock_finished, run)
+
+    def _on_flock_event(self, kind: str, payload) -> None:
+        """Route one supervisor event to the Flock tab. Called off-thread."""
+        self.call_from_thread(self._apply_flock_event, kind, payload)
+
+    def _apply_flock_event(self, kind: str, payload) -> None:
+        pane = self.query_one(FlockPane)
+        if kind == "started":
+            worker = pane.pane(payload.id)
+            if worker is not None:
+                worker.set_state("running")
+        elif kind == "finished":
+            worker = pane.pane(payload.worker_id)
+            if worker is not None:
+                worker.set_state("done" if payload.complete else "failed")
+                worker.write(render.build_notice(payload.describe()))
+        elif kind == "reviewed":
+            worker = pane.pane(payload.worker_id)
+            if worker is not None:
+                # A clean review leaves a "done" alone; an unclean one demotes
+                # it, because an acceptance check passing is not the same as
+                # the work standing up to review.
+                if not payload.clean:
+                    worker.set_state("flagged")
+                worker.write(render.build_notice(payload.describe()))
+
+    def flock_progress(self, text: str) -> None:
+        """Progress from the flock itself. Main thread only."""
+        self.query_one(FlockPane).set_status(text.splitlines()[0][:120])
+        self.write_transcript(render.build_notice(text))
+
+    def flock_write(self, worker_id: str, renderable) -> None:
+        """One renderable into one Worker Birb's pane. Main thread only."""
+        worker = self.query_one(FlockPane).pane(worker_id)
+        if worker is not None:
+            worker.write(renderable)
+
+    async def request_confirmation(self, question: str, detail: str = "") -> bool:
+        """Show a yes/no modal and resolve to the answer.
+
+        Awaited on the event loop on behalf of the flock's thread, exactly as
+        ``request_approval`` is for a tool call.
+        """
+        return await self.push_screen_wait(ConfirmModal(question, detail))
+
+    async def prepare_flock_panes(self, charter) -> None:
+        """Lay out a pane per Worker Birb once the charter is approved."""
+        await self.query_one(FlockPane).begin(charter)
+
+    def _on_flock_finished(self, run) -> None:
+        self._flock_stop = None
+        self._turn_in_progress = False
+        pane = self.query_one(FlockPane)
+        if run is None:
+            pane.set_status("The flock did not finish.", "bold red")
+        elif run.stopped_at:
+            pane.set_status(f"Stopped at {run.stopped_at}.", "bold yellow")
+        elif run.outcome is not None:
+            done = len(run.outcome.complete)
+            pane.set_status(
+                f"{done} of {len(run.outcome.reports)} ticket(s) complete.",
+                "bold green" if run.outcome.all_done else "bold yellow",
+            )
+        if run is not None and run.report:
+            self.write_transcript(render.build_assistant_message(run.report))
+        prompt_input = self.query_one("#prompt-input", Input)
+        prompt_input.disabled = False
+        prompt_input.focus()
+
     @work(thread=True, exclusive=True, group="plugins")
     def _describe_plugins_worker(self) -> None:
         try:
@@ -943,6 +1094,12 @@ class CoBirbApp(App[None]):
         """
         if self.action_copy_selection():
             return
+        if self._flock_stop is not None:
+            # A flock is several agents deep in somebody's working tree, so
+            # this asks first. An accidental Ctrl+C that silently abandoned a
+            # run halfway would leave the tree in a state nobody chose.
+            self._confirm_flock_stop()
+            return
         if not self._turn_in_progress:
             self.action_help_quit()
             return
@@ -953,6 +1110,35 @@ class CoBirbApp(App[None]):
                 "Still waiting on the model — there's no running command to stop yet.",
                 title="Cancel",
             )
+
+    @work
+    async def _confirm_flock_stop(self) -> None:
+        """Ask whether to interrupt a running flock, and stop it if so.
+
+        Stopping means no *further* Worker Birbs start; the ones already
+        talking to a model finish their turn, because a model call in flight
+        has no handle to interrupt — which is already true of an ordinary
+        turn. The dialog says so rather than promising an instant halt it
+        cannot deliver.
+        """
+        stop = self._flock_stop
+        if stop is None:
+            return
+        confirmed = await self.push_screen_wait(
+            ConfirmModal(
+                "Interrupt the flock?",
+                "No further Worker Birbs will start. Any already working will finish "
+                "their current turn — a model call in flight cannot be cut off.\n\n"
+                "Whatever has already been written to your files stays written; use git "
+                "to put it back.",
+                confirm_label="Interrupt",
+            )
+        )
+        if not confirmed:
+            return
+        stop.set()
+        self.query_one(FlockPane).set_status("Interrupting — waiting for workers to finish…", "bold yellow")
+        self.notify("Stopping the flock after the current workers finish.", title="Flock")
 
     def action_copy_selection(self) -> bool:
         """Copy whatever is selected in the transcript, if anything.
@@ -1000,6 +1186,10 @@ class CoBirbApp(App[None]):
         the same bug from the user's side either way (Ctrl+C or Ctrl+Q both
         looked like the whole app had frozen); this fixes it for both.
         """
+        if self._flock_stop is not None:
+            # Same reasoning as unsticking a shell command below: without
+            # this, quitting waits for every remaining Worker Birb to run.
+            self._flock_stop.set()
         if self._turn_in_progress:
             self._attempt_cancel()
         await super().action_quit()

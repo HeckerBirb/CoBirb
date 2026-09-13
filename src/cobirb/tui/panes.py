@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, cast
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
+from rich.text import Text
 from textual.widgets import Button, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
 
@@ -110,3 +111,81 @@ class SessionsPane(Vertical):
             app.begin_new_session()
         elif event.button.id == "sessions-refresh":
             app.refresh_sessions_pane()
+
+
+class WorkerPane(Vertical):
+    """One Worker Birb's own column: who it is, what it owns, what it is doing.
+
+    A pane each rather than one interleaved transcript. Two workers writing
+    into a single log produce a stream where neither is followable — and
+    following one worker is the only way to tell whether it is stuck, which
+    is the thing a person watching actually wants to know.
+    """
+
+    def __init__(self, worker_id: str, scope: str) -> None:
+        super().__init__(id=f"worker-{worker_id}", classes="worker-pane")
+        self._worker_id = worker_id
+        self._scope = scope
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._title("waiting"), classes="worker-title")
+        yield Static(self._scope, classes="worker-scope")
+        yield RichLog(
+            id=f"worker-log-{self._worker_id}", markup=False, highlight=False, wrap=True,
+            classes="worker-log",
+        )
+
+    def _title(self, state: str) -> Text:
+        colours = {
+            "waiting": "dim",
+            "running": "bold yellow",
+            "done": "bold green",
+            "failed": "bold red",
+            "flagged": "bold yellow",
+        }
+        return Text(f"[{self._worker_id}] {state}", style=colours.get(state, "bold"))
+
+    def set_state(self, state: str) -> None:
+        self.query_one(".worker-title", Static).update(self._title(state))
+
+    def write(self, renderable) -> None:
+        self.query_one(RichLog).write(renderable)
+
+
+class FlockPane(Vertical):
+    """The Flock tab: one column per Worker Birb, filled in as they work.
+
+    Rebuilt at the start of each engagement rather than reused, because the
+    workers differ every time — a pane left over from the last flock showing a
+    ticket that no longer exists is worse than an empty tab.
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Static(
+            Text("No flock running. Type /flock <objective> to start one.", style="dim"),
+            id="flock-status",
+        )
+        yield Horizontal(id="flock-workers")
+
+    def set_status(self, text: str, style: str = "") -> None:
+        self.query_one("#flock-status", Static).update(Text(text, style=style or "bold"))
+
+    async def begin(self, charter) -> None:
+        """Lay out one pane per worker in the approved charter."""
+        row = self.query_one("#flock-workers", Horizontal)
+        await row.remove_children()
+        for worker in charter.workers:
+            scope = "writes " + ", ".join(worker.writes)
+            if worker.reads:
+                scope += "\nreads  " + ", ".join(worker.reads)
+            await row.mount(WorkerPane(worker.id, scope))
+
+    def pane(self, worker_id: str) -> "WorkerPane | None":
+        try:
+            return self.query_one(f"#worker-{worker_id}", WorkerPane)
+        except Exception:  # noqa: BLE001 - a pane that is gone is not an error
+            return None
+
+    async def clear(self) -> None:
+        await self.query_one("#flock-workers", Horizontal).remove_children()
+        self.set_status("No flock running. Type /flock <objective> to start one.", "dim")
