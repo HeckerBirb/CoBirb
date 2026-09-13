@@ -149,8 +149,9 @@ Being straight about the edges, since the rest of this page makes strong claims:
   shell command cannot say in advance what it will touch, so anything it does is outside
   that. Keep your work in git as well.
 - **Context is finite.** Long sessions are compacted to fit the model's window (see
-  `/context`); old tool results are summarised away first. Nothing is lost from your
-  session file, only from what the model is shown.
+  `/context`); old tool results are summarised away first, and a large file is read a
+  range at a time rather than whole. Nothing is lost from your session file, only from
+  what the model is shown at once.
 
 ## Configuration
 

@@ -79,11 +79,15 @@ class CobirbTool(Tool):
 # Built-in tools
 # --------------------------------------------------------------------------- #
 # A tool result is not just shown to the user: it becomes a turn in the
-# encrypted session *and* a message in the next model request. An unbounded
-# read therefore costs memory, context window and session size at once, and a
-# single stray large file could exhaust all three. These caps are generous
-# enough that ordinary source files are never touched, and truncation is
-# always announced so the model knows it is looking at part of something.
+# encrypted session *and* a message in the next model request. So one *call*
+# is bounded — a single read taking half the context window is rarely what
+# anyone wanted, whatever the hardware allows.
+#
+# The *file* is not bounded. read_file pages: a call that stops early says
+# which lines it returned and what offset continues from, so an arbitrarily
+# large file can be read in full, in pieces the window can hold. An earlier
+# version only truncated, which meant a large file could be read from the top
+# and never finished.
 _MAX_READ_BYTES = 256 * 1024
 _MAX_GREP_MATCHES = 500
 # A preview is for a human to read before saying yes; past a point a longer
@@ -105,6 +109,59 @@ def _unified(path: str, old: str, new: str) -> str:
     return _truncated("".join(diff), _MAX_PREVIEW_BYTES, "this diff")
 
 
+def _as_int(value: Any, default: int) -> int:
+    """A model-supplied number, or the default if it isn't one."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _read_range(path: str, offset: int, limit: int) -> tuple[list[str], int, bool]:
+    """Read from line ``offset``, stopping at ``limit`` lines or the byte cap.
+
+    Returns ``(lines, next_offset, at_end)``. Streamed rather than read whole
+    and sliced, so asking for line 40,000 of a very large file costs the
+    memory of the lines returned rather than of the file.
+
+    Paginating rather than simply truncating is the point. A cap on its own
+    meant a large file could only ever be read from the top and never
+    finished — the agent got the first 256 KB and had no way to ask for the
+    rest, which is not a "large file" limitation but a missing feature.
+    """
+    lines: list[str] = []
+    collected_bytes = 0
+    line_number = 0
+    at_end = True
+    with open(path, "r", encoding="utf-8") as fh:
+        for line_number, line in enumerate(fh, 1):
+            if line_number < offset:
+                continue
+            if limit > 0 and len(lines) >= limit:
+                at_end = False
+                break
+            if collected_bytes + len(line) > _MAX_READ_BYTES:
+                if lines:
+                    at_end = False
+                    break
+                # One line, on its own, larger than the whole budget: a
+                # minified bundle or single-line JSON. Line offsets cannot
+                # page through that, so it is cut and said so — reading such
+                # a file whole into a model is rarely the useful thing
+                # anyway, and grep or shell are better tools for it.
+                lines.append(
+                    line[:_MAX_READ_BYTES]
+                    + f"\n[line {line_number} is {len(line)} characters and was cut here; "
+                    "line offsets cannot page within a single line]"
+                )
+                at_end = False
+                break
+            lines.append(line)
+            collected_bytes += len(line)
+    next_offset = offset + len(lines)
+    return lines, next_offset, at_end
+
+
 def _truncated(text: str, limit: int, what: str) -> str:
     """``text`` cut to ``limit`` bytes, with a note saying so if it was."""
     encoded = text.encode("utf-8")
@@ -121,24 +178,55 @@ class ReadFileTool(CobirbTool):
     NAME = "read_file"
 
     def description(self) -> str:
-        return "Read the contents of a file at a path."
+        return (
+            "Read a file. Returns the whole file unless it is large, in which case it "
+            "returns a range of lines and says how to ask for the next one."
+        )
 
     def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Absolute or relative path to read."},
+                "offset": {
+                    "type": "number",
+                    "description": "First line to return, 1-indexed. Use this to continue a "
+                    "read that reported more lines follow.",
+                    "default": 1,
+                },
+                "limit": {
+                    "type": "number",
+                    "description": "Maximum number of lines to return. Omit for as many as fit.",
+                },
             },
             "required": ["path"],
         }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
         path = self._resolve(arguments["path"])
+        offset = max(1, _as_int(arguments.get("offset"), 1))
+        limit = _as_int(arguments.get("limit"), 0)
+
         try:
-            with open(path, "r", encoding="utf-8") as fh:
-                return ToolResult(ok=True, content=_truncated(fh.read(), _MAX_READ_BYTES, path))
+            lines, next_offset, at_end = _read_range(path, offset, limit)
         except OSError as exc:
             return ToolResult(ok=False, content=f"Could not read {path}: {exc}", error=str(exc))
+
+        body = "".join(lines)
+        if offset == 1 and at_end:
+            return ToolResult(ok=True, content=body)  # the whole file, unadorned
+
+        last = next_offset - 1
+        note = f"[lines {offset}-{last} of {path}"
+        if at_end:
+            note += "; end of file]"
+        else:
+            note += f"; more follow — call read_file with offset={next_offset} to continue]"
+        return ToolResult(
+            ok=True,
+            content=f"{body}\n{note}",
+            meta={"offset": offset, "next_offset": next_offset, "at_end": at_end},
+        )
 
 
 class WriteFileTool(CobirbTool):

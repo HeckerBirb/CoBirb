@@ -330,7 +330,7 @@ class SessionCrypto(abc.ABC):
 
 | Name | Notes |
 |---|---|
-| `read_file` | |
+| `read_file` | Paged. One *call* is capped so a single read can't take half the window; the *file* is not — a short read reports the offset to continue from. |
 | `write_file` | Creates parent directories. |
 | `edit_file` | Exact `old_str` match, first occurrence only. |
 | `apply_patch` | Unified diff; verifies context/removed lines and refuses rather than guessing. |

@@ -245,7 +245,8 @@ what was discovered, what's active, and any such problems live.
     "tools": """\
 TOOLS — what the agent can do
 
-  read_file      Read a file's contents.
+  read_file      Read a file. Large ones come back a range at a time,
+                 with the offset to continue from — any size is readable.
   write_file     Create/overwrite a file.
   edit_file      Replace an exact old_str with new_str in a file.
   apply_patch    Apply a unified-diff patch to a file.

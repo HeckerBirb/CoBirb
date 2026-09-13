@@ -486,17 +486,71 @@ def test_audit_log_failure_does_not_take_down_the_tool_call(tmp_path, capsys):
     assert "could not write the audit log" in capsys.readouterr().err
 
 
-def test_read_file_truncates_a_very_large_file_and_says_so(tmp_path):
-    """A tool result becomes a session turn and a model message, so an
-    unbounded read costs memory, context and session size at once."""
+def test_a_large_file_is_paged_rather_than_merely_cut_off(tmp_path):
+    """One *call* is bounded, because a single read taking half the context
+    window is rarely what anyone wanted. The *file* is not: a call that stops
+    early says what offset continues from, so an arbitrarily large file can be
+    read in full. An earlier version only truncated, which meant a large file
+    could be read from the top and never finished."""
     big = tmp_path / "big.txt"
-    big.write_text("x" * (300 * 1024))
+    big.write_text("".join(f"line {n}\n" for n in range(60_000)))
+    tool = ReadFileTool(str(tmp_path))
 
-    result = ReadFileTool(str(tmp_path)).execute({"path": "big.txt"})
+    first = tool.execute({"path": "big.txt"})
+
+    assert first.ok
+    assert "line 0" in first.content
+    assert "more follow" in first.content
+    assert first.meta["next_offset"] > 1
+
+    # ...and the offset it gave actually continues from where it stopped.
+    second = tool.execute({"path": "big.txt", "offset": first.meta["next_offset"]})
+    assert second.ok
+    assert f"line {first.meta['next_offset'] - 1}\n" in second.content
+    assert "line 0\n" not in second.content
+
+
+def test_paging_reaches_the_end_of_a_large_file(tmp_path):
+    """The whole point: not just "you can ask for more", but "you can finish"."""
+    big = tmp_path / "big.txt"
+    big.write_text("".join(f"line {n}\n" for n in range(60_000)))
+    tool = ReadFileTool(str(tmp_path))
+
+    offset, calls, saw_last = 1, 0, False
+    while calls < 20:
+        calls += 1
+        result = tool.execute({"path": "big.txt", "offset": offset})
+        if "line 59999" in result.content:
+            saw_last = True
+        if result.meta.get("at_end", True):
+            break
+        offset = result.meta["next_offset"]
+
+    assert saw_last
+    assert calls < 20  # it terminates rather than paging forever
+
+
+def test_an_explicit_line_range_is_honoured(tmp_path):
+    (tmp_path / "a.py").write_text("".join(f"line {n}\n" for n in range(100)))
+
+    result = ReadFileTool(str(tmp_path)).execute({"path": "a.py", "offset": 10, "limit": 3})
+
+    assert "line 9\n" in result.content and "line 11\n" in result.content
+    assert "line 12\n" not in result.content
+    assert "lines 10-12" in result.content
+
+
+def test_a_file_of_one_enormous_line_is_cut_and_says_why(tmp_path):
+    """A minified bundle or single-line JSON cannot be paged by line offset,
+    so it is cut with an explanation rather than silently returned whole —
+    which would blow the budget the cap exists to protect."""
+    (tmp_path / "bundle.js").write_text("x" * (300 * 1024))
+
+    result = ReadFileTool(str(tmp_path)).execute({"path": "bundle.js"})
 
     assert result.ok
-    assert len(result.content.encode()) < 300 * 1024
-    assert "truncated" in result.content
+    assert len(result.content) < 300 * 1024
+    assert "cannot page within a single line" in result.content
 
 
 def test_read_file_leaves_an_ordinary_file_alone(tmp_path):
@@ -581,3 +635,32 @@ def test_tools_that_have_nothing_to_preview_say_nothing(tmp_path):
     """read_file and shell already say everything in their arguments."""
     assert ReadFileTool(str(tmp_path)).preview({"path": "a"}) == ""
     assert ShellTool(str(tmp_path)).preview({"command": "ls"}) == ""
+
+
+def test_an_ordinary_file_comes_back_whole_with_no_decoration(tmp_path):
+    """The common case must be exactly what it was: no header, no footer, no
+    line-range note to confuse an exact-match edit_file later."""
+    (tmp_path / "small.py").write_text("print('hi')\n")
+
+    result = ReadFileTool(str(tmp_path)).execute({"path": "small.py"})
+
+    assert result.content == "print('hi')\n"
+
+
+def test_reading_past_the_end_returns_nothing_rather_than_failing(tmp_path):
+    (tmp_path / "a.py").write_text("one\ntwo\n")
+
+    result = ReadFileTool(str(tmp_path)).execute({"path": "a.py", "offset": 99})
+
+    assert result.ok
+    assert "end of file" in result.content
+
+
+def test_a_nonsense_offset_falls_back_to_the_start(tmp_path):
+    """Models supply the wrong type constantly; that shouldn't cost a turn."""
+    (tmp_path / "a.py").write_text("one\ntwo\n")
+
+    result = ReadFileTool(str(tmp_path)).execute({"path": "a.py", "offset": "somewhere"})
+
+    assert result.ok
+    assert "one" in result.content
