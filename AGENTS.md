@@ -465,6 +465,14 @@ they are shaped around, deliberately.
   session branching, SPI freeze and session migrations.
 - **v1.1.0+** — runtime isolation for the embedded model (subprocess, no network namespace).
 
+**Time horizon.** CoBirb is built for the hardware of the next few years, not this one — local
+models on ordinary machines will be considerably more capable in one to three years than they are
+now. So **performance, memory and model-size figures are observations, never arguments.** Noting
+that something is slow or large today is useful; letting that quietly pick a default, narrow a
+feature, or rule an approach out is not. When a hardware consideration looks like it should change
+the design, raise it with the user as a decision rather than resolving it in an estimate.
+Designing to this year's ceiling is how a tool arrives obsolete.
+
 **Settled decisions.** *Local models only, forever* — no shipped remote provider, ever (§2), and
 from 0.4 not even a local *server*: CoBirb runs the weights itself. The shell privilege gap is
 documented rather than sandboxed (§8). Speech I/O is deliberately deferred past 1.0 — a large
