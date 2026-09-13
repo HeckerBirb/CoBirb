@@ -102,6 +102,8 @@ EXTENDING IT
   MCP            Tools from a local server over stdio, subject to the same
                  permission layer as everything else. A server you add can
                  make its own network calls: READ 'help mcp' first.
+  The Flock      cobirb flock -p "..." divides a piece of work between
+                 several agents that cannot see each other. See 'help flock'.
 
   All of it is configured in ~/.cobirb/config.json. CoBirb reads no config
   from the directory you are working in — a repository cannot pre-approve a
@@ -109,7 +111,7 @@ EXTENDING IT
 
 TOPICS
   Run 'cobirb help <topic>' for more: session, persona, plan, model,
-  commands, hooks, mcp, plugins, tools, config.
+  commands, hooks, mcp, flock, plugins, tools, config.
 """
 
 HELP_TOPICS: dict[str, str] = {
@@ -272,6 +274,88 @@ repeating the endpoint it is served from. --model outranks all of them.
   cobirb models    Print how each role resolves and where each answer came
                    from. A role you typo'd is listed too, so it is visible
                    rather than a silent fallback to the default.
+""",
+    "flock": """\
+THE FLOCK — dividing work between agents that cannot see each other
+
+  cobirb flock -p "add CSV export to the reporting tool"
+
+One Brainy Birb (the lead) plans the work, designs the interfaces, builds the
+skeleton, and writes one ticket per Worker Birb. The workers then fill those
+tickets in — each knowing only its own part, with no idea what the feature is,
+how many others there are, or what they are building.
+
+That works because the skeleton IS the communication channel. Everything the
+workers would have had to agree on is already written down in the one place
+all of them can see, so they never coordinate. Two engineers whose work meets
+in the middle do not need to talk if their lead designed the interface they
+meet at.
+
+HOW A RUN GOES
+
+  1. Brainy Birb plans, designs the seams, and writes the skeleton into your
+     project: interfaces, typed stubs, docstrings that state semantics, and
+     unit tests that fail.
+  2. CoBirb checks the partition is disjoint — no two workers writing one file.
+  3. YOU APPROVE THE CHARTER. The only decision you make. You see the plan,
+     every seam, and every worker's exact read and write scope before anything
+     runs. Approving it is what lets the workers run unattended, which is why
+     there are no tool prompts afterwards.
+  4. The workers fan out, two at a time by default.
+  5. Brainy Birb reviews the result and reports. A second round is a new
+     decision you make with that in front of you.
+
+WHAT A WORKER CAN TOUCH
+
+Its scope is a Policy, not a request. A Worker Birb cannot open, list or even
+discover a file outside its ticket — list_dir, glob and grep all resolve to a
+directory it was not granted, so it cannot enumerate its surroundings. It gets
+no AGENTS.md and no repo map either: conventions reach it through the skeleton
+it is filling in, which was already written in your project's style.
+
+It CAN edit its own tests, and should add more for whatever it finds. That is
+not a gap — see below.
+
+TRUST, THEN VERIFY
+
+Locking a worker out of its test file would ship under-tested code to prevent
+a cheat that review catches anyway. Because Brainy Birb wrote the skeleton and
+still has it, there is a baseline to compare against and a stub to put back:
+
+  • The diff is read for assertions that vanished, tests turned off, and
+    declarations that changed — the last being the one action that breaks
+    colleagues a worker cannot see.
+  • The implementation is put back to its stub and the worker's tests are run
+    again. They MUST fail. A suite that passes against an unimplemented
+    function is testing nothing.
+  • Each behaviour a docstring claims is mutated in turn, and each must be
+    caught. A surviving mutant is a promise nothing is holding — usually
+    Brainy Birb's omission rather than the worker's.
+
+WHEN A WORKER GETS STUCK
+
+It never halts and never improvises. It implements what the contract allows,
+leaves the rest visibly unfinished, and writes up what it could not do, where
+it breaks, and either a proposed design change or a question. Changing the
+contract itself is the one thing it must not do — that is what silently breaks
+four colleagues it cannot see.
+
+WHAT THIS CANNOT DO
+
+  • Fan out work that will not partition into disjoint files. "This is a
+    single person's job" is a correct answer and Brainy Birb will say it.
+  • Survive a weak skeleton. An under-specified contract produces confident,
+    plausible, incompatible code — and every worker's tests pass.
+  • Refactor across the partition, or let workers catch each other's bugs.
+
+Flock mode cannot run with --headless. The charter approval is the only place
+you see what the workers will be allowed to touch, and a flock that approved
+its own charter would be an agent granting itself permissions.
+
+Undo is git's job here: a flock run touches many files across several agents,
+and CoBirb does not try to own reverting that. Each engagement gets its own
+session file beside the main one, paired by a token, so you can see where the
+conversation branched and what the workers actually did.
 """,
     "hooks": """\
 HOOKS — your own commands at CoBirb's decision points

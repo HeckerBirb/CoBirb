@@ -24,16 +24,24 @@ opt a capability in.**
 
 ## Status
 
-🚧 **v0.4.0.** The core loop, built-in tools, the permission model,
+🚧 **v0.5.0.** The core loop, built-in tools, the permission model,
 encrypted sessions and a local Ollama provider — plus the things that make it usable on real
 work: context compaction so long sessions don't degrade, project instructions, `.gitignore`
 awareness, a `repo_map` tool so it can find its way around, a diff shown before any write,
 `/undo` and `/diff`, credential redaction, an opt-in "run my tests after you change something"
 loop, and a headless mode for CI.
 
-New in 0.4: **one model per role** (`cobirb models`), **hooks** that can refuse a tool call before
-you are even asked about it, **custom commands** — a prompt you wrote down, invoked by name — and
-an **MCP client** over stdio, so tools from a local server become CoBirb tools under the same
+**New in 0.5 — the Flock.** `cobirb flock -p "add CSV export"` divides a piece of work between
+several agents that cannot see each other. One *Brainy Birb* plans it, designs the interfaces and
+writes the skeleton — typed stubs, semantic docstrings, failing tests — then hands one ticket to
+each *Worker Birb*. A worker knows only its own part: not what the feature is, not how many others
+there are, not what they are building. It works because the skeleton is the communication channel,
+so nobody has to coordinate. You approve the charter once, see every worker's exact scope before
+anything runs, and the work is reviewed against the skeleton afterwards. See `cobirb help flock`.
+
+In 0.4: **one model per role** (`cobirb models`), **hooks** that can refuse a tool call before you
+are even asked about it, **custom commands** — a prompt you wrote down, invoked by name — and an
+**MCP client** over stdio, so tools from a local server become CoBirb tools under the same
 permission layer as everything else. See [`AGENTS.md`](./AGENTS.md) for the architecture, the
 plugin SPI, and the reasoning behind all of it.
 

@@ -147,6 +147,14 @@ class Session:
     # the model's own validate-phase report on whether/how the request was
     # actually fulfilled, with references. None for a normal run.
     validation: str | None = None
+    # The flock this session *is*, when it is a flock session rather than a
+    # main one. Pairs with a `flock_engaged` turn in the main session carrying
+    # the same token, which is what makes the branch and the rejoin both
+    # findable months later — you can see where the conversation handed off,
+    # follow the token to read what the workers actually did, and see where it
+    # came back. One engagement is one flock session; a second round continues
+    # it rather than starting another.
+    flock: str | None = None
 
     def add(self, turn: Turn) -> None:
         self.turns.append(turn)
@@ -164,6 +172,7 @@ class Session:
             "turns": [t.to_dict() for t in self.turns],
             "summary": self.summary,
             "validation": self.validation,
+            "flock": self.flock,
         }
 
     @classmethod
@@ -176,6 +185,7 @@ class Session:
             turns=[Turn.from_dict(t) for t in data.get("turns", [])],
             summary=data.get("summary"),
             validation=data.get("validation"),
+            flock=data.get("flock"),
         )
 
 

@@ -26,6 +26,7 @@ the charter, the partition check, the fan-out, and the verification passes.
 """
 from __future__ import annotations
 
+from . import branch
 from .brainy import BRAINY_RULES, ProposeCharterTool, plan_prompt, round_summary
 from .charter import (
     Charter,
@@ -45,6 +46,7 @@ from .worker import WorkerReport, run_worker
 
 __all__ = [
     "BRAINY_RULES",
+    "branch",
     "Baseline",
     "Charter",
     "CharterError",

@@ -28,6 +28,7 @@ from typing import Any, Callable
 
 from ..config import Config
 from ..orchestrator import Orchestrator
+from . import branch
 from .brainy import PROPOSE_CHARTER, ProposeCharterTool, plan_prompt, round_summary
 from .charter import Charter
 from .probe import ProbeResult, probe_concurrency
@@ -64,6 +65,9 @@ class FlockRun:
     probe: ProbeResult | None = None
     report: str = ""
     stopped_at: str = ""
+    # The token pairing this engagement's own session file with the point in
+    # the main session where the conversation branched.
+    token: str = ""
 
     @property
     def ran(self) -> bool:
@@ -102,12 +106,47 @@ def run_flock_session(
     on_event: Callable[[str, Any], None] | None = None,
     plan_turns: int = DEFAULT_PLAN_TURNS,
     probe: bool = True,
+    password: str | None = None,
 ) -> FlockRun:
-    """Engage flock mode for one objective, and come back with a report."""
+    """Engage flock mode for one objective, and come back with a report.
+
+    The branch is opened before anything runs and closed however this ends,
+    including the three ways it stops early. A history that only records the
+    flocks that succeeded is a history missing the interesting parts — "we
+    tried this and the partition did not hold" is exactly the thing someone
+    wants to find later.
+    """
     ask = ask or Asker()
     config = config or Config()
     run = FlockRun()
 
+    main = getattr(orchestrator, "session", None)
+    run.token = branch.mint()
+    flock_session = None
+    if main is not None:
+        branch.engage(main.session, objective, run.token)
+        flock_session = branch.open_flock_session(main, run.token, objective, password)
+
+    try:
+        return _drive(run, orchestrator, objective, cwd, ask, config, stop, on_event,
+                      plan_turns, probe)
+    finally:
+        _close_branch(main, flock_session, run, password)
+
+
+def _drive(
+    run: FlockRun,
+    orchestrator: Orchestrator,
+    objective: str,
+    cwd: str,
+    ask: Asker,
+    config: Config,
+    stop: threading.Event | None,
+    on_event: Callable[[str, Any], None] | None,
+    plan_turns: int,
+    probe: bool,
+) -> FlockRun:
+    """The five stages. Split out so the branch above closes on every path."""
     # ---- 1. Plan and scaffold ------------------------------------------- #
     ask.show("Brainy Birb is planning and building the skeleton…")
     charter, narration = _plan(orchestrator, objective, cwd, plan_turns)
@@ -177,3 +216,26 @@ def run_flock_session(
     )
     run.report = verdict.summary or outcome.describe()
     return run
+
+
+def _close_branch(main, flock_session, run: FlockRun, password: str | None) -> None:
+    """Record where the conversation rejoined, and save the flock's own file.
+
+    Guarded, because traceability is worth less than the work it describes: a
+    session file that cannot be written should cost a record, never the report
+    the user is waiting for.
+    """
+    if main is None:
+        return
+    branch.rejoin(main.session, run.token, run.report or "The flock returned with no report.")
+    if flock_session is None:
+        return
+    try:
+        for report in (run.outcome.reports if run.outcome else []):
+            flock_session.session.add_text(report.worker_id, report.describe())
+        for review in (run.outcome.reviews if run.outcome else []):
+            flock_session.session.add_text(f"review:{review.worker_id}", review.describe())
+        flock_session.session.summary = run.report
+        flock_session.save(password)
+    except Exception:  # noqa: BLE001 - a lost record must not cost the round
+        logger.warning("could not write the flock session file", exc_info=True)

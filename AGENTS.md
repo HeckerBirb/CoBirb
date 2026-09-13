@@ -10,11 +10,11 @@
 A **privacy-first, Copilot-like agentic CLI**: Copilot CLI behavior, minus every default
 network/telemetry behavior, plus a hard boundary around the rest. **No data leaves the process
 unless the user opts a capability in.** Noah the African Grey is the mascot and an *opt-in* persona,
-not the default voice. Status: **v0.4.0.** Loop, tools, permissions, encrypted sessions, Ollama provider and
+not the default voice. Status: **v0.5.0.** Loop, tools, permissions, encrypted sessions, Ollama provider and
 the interactive app, plus context compaction, project instructions, `.gitignore` awareness,
 diff-before-write, `/undo`, `/diff`, `/export`, a headless CI mode, the `repo_map` tool,
 secret redaction, an opt-in verification loop, per-role models, hooks, custom commands and an MCP
-client over stdio.
+client over stdio, and the Flock (§4m).
 
 **CoBirb is a client, not a model runtime.** It speaks to an OpenAI-compatible endpoint and does
 not run weights — see §12.1.
@@ -83,6 +83,7 @@ style by hand.
 | `plugins/loader.py` | Discovery (entry points + local dirs), fail-closed. |
 | `plugins/core/` | Built-ins: `tools`, `model`, `io`, `crypto`, `persona`, `render`. |
 | `personas/*.json` | `professional`, `neighbor`, `kawaii`. Noah is built in code. |
+| `flock/` | The Flock (§4m): charter, worker, review, supervisor, brainy, probe, branch, run. |
 | `tui/` | `app`, `widgets`, `screens`, `panes`, `io_bridge`, `app.tcss`. |
 | `tests/` | One file per module; `conftest.py` isolates `COBIRB_HOME` everywhere. |
 
@@ -376,6 +377,75 @@ a project may tell CoBirb about itself, never tell CoBirb what it is allowed to 
 The cost is per-project settings of any kind, including a reviewed `cobirb.json` in a CI checkout.
 Accepted: `--allow-tool` covers that case on the command line, where it is visible in the job
 definition rather than in a file that travels with the code.
+
+## 4m. The Flock
+
+`flock/`. One **Brainy Birb** (the lead) divides work between several **Worker Birbs** that cannot
+see each other. Shipped in v0.5.0; `cobirb flock -p "..."`.
+
+**The skeleton is the communication channel.** Brainy Birb plans, designs the seams, and writes the
+interfaces, typed stubs, semantic docstrings and failing tests into the project *before* fanning
+out. Workers never coordinate because everything they would have had to agree on is already written
+down where all of them can see it. Each gets one brief and nothing else — no `AGENTS.md`, no repo
+map; conventions reach a worker through the stub it is filling in, which doubles as the style guide.
+
+| Module | Responsibility |
+|---|---|
+| `charter.py` | TOML in, scopes and seams out. `find_conflicts`, `policy_for`. |
+| `worker.py` | One brief → one ordinary agent run → one report. |
+| `review.py` | The three verification passes and the baseline. |
+| `supervisor.py` | Fan out, join, review, account for the round. |
+| `brainy.py` | The lead's guidance, and `propose_charter`. |
+| `probe.py` | Does this endpoint answer two requests at once? |
+| `branch.py` | The GUID pairing a flock session to its main one. |
+| `run.py` | The five stages, including the one approval. |
+
+**File-level ownership needed no change to `Policy`.** `_within(path, base)` is
+`path == base or path.startswith(base + sep)`, so granting a *file* matches that file and nothing
+else. The "cannot list it, does not know it exists" property falls out of the same mechanism:
+`list_dir`, `glob` and `repo_map` all resolve to a directory, which is never granted.
+
+**A Worker Birb is not special** (§4n). `wiring.build_subagent` composes an ordinary run and
+differs in four places: policy handed in rather than read from config, no project context,
+`HeadlessIO`, and a scoped acceptance check. It inherits checkpoints, redaction and the user's hooks
+because it *is* an ordinary run.
+
+**Trust, then verify.** Workers may edit their own tests and should add more — locking them out
+would ship under-tested code to prevent a cheat review catches anyway. Three passes, cheapest
+first: read the diff for vanished assertions, disabled tests and changed declarations; put the stub
+back and confirm the worker's tests go red; mutate each behaviour the docstring claims and confirm
+each is caught. A surviving mutant is usually *Brainy Birb's* omission — a behaviour specified with
+no acceptance test behind it.
+
+⚠️ **Review runs after the join, never during it.** Reviewing puts an implementation back to its
+stub for a moment; a colleague still running whose check imports that file would fail for a reason
+unrelated to its own work.
+
+**Dependency Inversion is hardcoded into `BRAINY_RULES` on purpose.** It is not a style preference
+here: if worker A needs worker B's concrete implementation the work is serial however many workers
+exist, and hoisting the abstraction into a Brainy-Birb-owned file turns one dependency edge into
+two independent ones. The prompt carries it as a check to run over its own partition. Seams are
+declared `formal` (the type system holds them up) or `loose` (nothing does, so a test must).
+
+**Flock mode cannot run headless.** The charter approval is the only place a person sees what the
+workers will be allowed to touch; a flock approving its own charter would be an agent granting
+itself permissions. An overlapping partition is reported and the user asked — carrying on drops
+concurrency to 1, since honouring the choice means removing what made it unsafe.
+
+Undo is git's, deliberately (§12.1). Each engagement gets its own session file beside the main one,
+paired by a GUID; a new *round* continues that session rather than starting another.
+
+## 4n. Subagents are ordinary runs
+
+A Worker Birb "is not special — it just got its instructions from another agent instead of a
+human". That is a design rule, not a description: it keeps rejecting machinery that would otherwise
+seem reasonable. Mutation testing edits files in place with no sentinel and no crash-recovery,
+because a kill mid-edit is the same situation as any agent killed mid-edit and is version
+control's problem. There is no worker runtime, no sandbox, no special execution mode — those would
+all drift from the real agent within a month.
+
+The generalisation worth keeping: **do not reach for access control to solve what is a review
+problem**, and do not build a parallel path for an agent that can use the existing one.
 
 ## 5. Plugin SPI
 
@@ -748,7 +818,8 @@ they are shaped around, deliberately.
 - **v0.4.0 "Extensible" (done)** — per-role model selection (§4h), hooks (§4i), custom commands
   (§4j), MCP client over stdio (§4k). *The embedded GGUF runtime was cut from this milestone and
   from the project — see §12.1.*
-- **v0.5.0 "The Flock"** — subagent orchestration: charter → scaffold → fan-out → integrate.
+- **v0.5.0 "The Flock" (done)** — subagent orchestration: charter → scaffold → fan-out →
+  review → report. See §4m. *The TUI's Flock tab is not built; `cobirb flock` is the surface.*
 - **v0.6.0–0.9.0** — plugin distribution, cross-session memory, vision, mid-turn steering,
   session branching, SPI freeze and session migrations.
 
