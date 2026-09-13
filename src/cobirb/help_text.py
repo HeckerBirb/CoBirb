@@ -250,6 +250,8 @@ TOOLS — what the agent can do
   glob           Find files matching a glob pattern.
   grep           Search file contents by regex.
   list_dir       List a directory's contents.
+  repo_map       Outline the codebase: which files matter and what is
+                 defined in them, most-referenced first.
   shell          Run a shell command. Highest privilege; gated.
 
 Before a tool changes a file, CoBirb copies the current version aside, so

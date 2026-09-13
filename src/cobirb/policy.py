@@ -66,7 +66,7 @@ WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch"})
 # Tools that only ever read. These are the ones a *directory* approval
 # covers; everything else (write_file, edit_file, apply_patch, shell, and any
 # plugin tool) is approved per call or by an explicit rule.
-READ_TOOLS = frozenset({"read_file", "list_dir", "glob", "grep"})
+READ_TOOLS = frozenset({"read_file", "list_dir", "glob", "grep", "repo_map"})
 
 # Glob metacharacters — everything before the first component containing one
 # is the fixed directory prefix a pattern searches under.
@@ -212,8 +212,8 @@ def _read_target(tool_name: str, arguments: dict[str, Any]) -> str | None:
         pattern = arguments.get("pattern")
         return _glob_base(pattern) if isinstance(pattern, str) and pattern else None
     target = arguments.get("path")
-    if target is None and tool_name == "grep":
-        target = "."  # GrepTool's own default
+    if target is None and tool_name in ("grep", "repo_map"):
+        target = "."  # matching those tools' own defaults
     return target if isinstance(target, str) and target else None
 
 

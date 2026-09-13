@@ -161,6 +161,26 @@ be neither, so this is the one place CoBirb writes a conversation unprotected. I
 does, never picks the destination itself, and still writes 0600 — sharing it is the user's next
 decision, not the file mode's.
 
+## 4e. The repo map
+
+`plugins/core/repomap.py` outlines a codebase: which files matter, what is defined in them,
+most-referenced first. Python symbols come from `ast` (exact, stdlib); other languages get a small
+set of regexes, which is crude next to tree-sitter but avoids a compiled dependency for a job that
+is orientation rather than analysis.
+
+**It is a tool, not something injected into every request.** Aider-style tools put their map in
+every system prompt, which works at 128k and would be ruinous at the 4096 a local model is usually
+served — a permanent map would consume the conversation it exists to help, and fight the
+compaction in §4b. As a tool it costs nothing until asked for, and the model can ask about a
+subtree. If that turns out to be the wrong call and it should be injected at session start
+instead, that is a deliberate decision to take, not a default to drift into.
+
+Ranking: imports carry the most weight (the closest thing to an objective measure of what a
+codebase considers central), entry points are boosted because they are where a reader starts
+regardless, and tests are pushed down because "where does this behave" is rarely the first
+question. Output is budgeted; files that don't fit are still named, because knowing a file exists
+is most of what orientation is.
+
 ## 5. Plugin SPI
 
 Core imports only these interfaces; plugins import only the SPI and never each other; core never
@@ -258,6 +278,7 @@ class SessionCrypto(abc.ABC):
 | `apply_patch` | Unified diff; verifies context/removed lines and refuses rather than guessing. |
 | `glob`, `grep` | Skip vendor/cache dirs unless `include_ignored`. |
 | `list_dir` | |
+| `repo_map` | Ranked outline of the codebase — see §4e. |
 | `shell` | **Highest privilege; gated.** Own process group on POSIX so forked children die with it; `cancel_running()` backs the TUI's Ctrl+C. |
 
 All extend `CobirbTool`, whose `_resolve()` joins relative paths against the configured working

@@ -12,6 +12,7 @@ from typing import Any, ClassVar
 
 from ...typing.spi import Tool, ToolResult
 from .ignores import IgnoreRules
+from .repomap import DEFAULT_BUDGET_CHARS, render_map
 
 
 # --------------------------------------------------------------------------- #
@@ -521,6 +522,56 @@ def _shell_timeout(value: Any) -> float:
     return min(seconds, float(_MAX_SHELL_TIMEOUT))
 
 
+class RepoMapTool(CobirbTool):
+    """A ranked outline of the codebase, for orientation.
+
+    A tool rather than something injected into every request: see
+    ``plugins.core.repomap`` for why that matters on a small window.
+    """
+
+    NAME = "repo_map"
+
+    def description(self) -> str:
+        return (
+            "Outline the codebase: which files matter and what is defined in them, "
+            "most-referenced first. Use this to find your way around before searching."
+        )
+
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Directory to map. Defaults to the working directory.",
+                    "default": ".",
+                },
+                "budget_chars": {
+                    "type": "number",
+                    "description": (
+                        f"Roughly how much outline to return "
+                        f"(default {DEFAULT_BUDGET_CHARS}). Raise it for a large repository."
+                    ),
+                    "default": DEFAULT_BUDGET_CHARS,
+                },
+            },
+        }
+
+    def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        root = self._resolve(str(arguments.get("path") or "."))
+        try:
+            budget = int(arguments.get("budget_chars") or DEFAULT_BUDGET_CHARS)
+        except (TypeError, ValueError):
+            budget = DEFAULT_BUDGET_CHARS
+        budget = max(500, min(budget, _MAX_READ_BYTES))
+        if not os.path.isdir(root):
+            return ToolResult(ok=False, content=f"Not a directory: {root}", error="not_a_directory")
+        try:
+            return ToolResult(ok=True, content=render_map(root, budget))
+        except OSError as exc:
+            return ToolResult(ok=False, content=f"Could not map {root}: {exc}", error=str(exc))
+
+
 class ShellTool(CobirbTool):
     """Highest-privilege tool. Gated behind the permission layer.
 
@@ -652,6 +703,7 @@ BUILTIN_TOOLS: list[type[Tool]] = [
     GlobTool,
     GrepTool,
     ListDirTool,
+    RepoMapTool,
     ShellTool,
 ]
 
