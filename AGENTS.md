@@ -10,9 +10,10 @@
 A **privacy-first, Copilot-like agentic CLI**: Copilot CLI behavior, minus every default
 network/telemetry behavior, plus a hard boundary around the rest. **No data leaves the process
 unless the user opts a capability in.** Noah the African Grey is the mascot and an *opt-in* persona,
-not the default voice. Status: **v0.2.0, the beta.** Loop, tools, permissions, encrypted sessions, Ollama provider and
+not the default voice. Status: **v0.3.0.** Loop, tools, permissions, encrypted sessions, Ollama provider and
 the interactive app, plus context compaction, project instructions, `.gitignore` awareness,
-diff-before-write, `/undo`, `/export` and a headless CI mode.
+diff-before-write, `/undo`, `/diff`, `/export`, a headless CI mode, the `repo_map` tool,
+secret redaction and an opt-in verification loop.
 
 ## 2. Ironclad constraints (never violate)
 
@@ -576,8 +577,8 @@ they are shaped around, deliberately.
 - **v0.2.0 (done)** — context compaction, project instructions, `.gitignore` awareness,
   diff-before-write, checkpoint + `/undo`, headless/CI mode, actionable tool-failure messages.
   *Parallel read-only tools was dropped from the milestone — see §12.1.*
-- **v0.3.0 "Grounded"** — repo map, git integration, self-verification loop, secret redaction.
-  Write-scope grants *(done, 0.2)* and session export *(done, 0.2)* landed early.
+- **v0.3.0 (done)** — `repo_map`, `/diff`, self-verification loop, secret redaction. Write-scope
+  grants and session export landed early in 0.2. *Git auto-commit deferred — see §12.1.*
 - **v0.4.0 "Extensible"** — MCP client (stdio only), **embedded GGUF runtime**, per-role model
   selection, hooks, custom commands/skills.
 - **v0.5.0 "The Flock"** — subagent orchestration: charter → scaffold → fan-out → integrate.
@@ -594,6 +595,11 @@ the design, raise it with the user as a decision rather than resolving it in an 
 Designing to this year's ceiling is how a tool arrives obsolete.
 
 ### 12.1 Deferred, needing a decision
+
+**Git auto-commit** — a commit per completed task, with a written message. Deferred because it
+writes to someone's repository history, which is not a default to drift into: it needs decisions
+about when to commit, what to do with pre-existing uncommitted work, and whether to touch the
+user's branch at all. `/diff` covers the reviewing half without any of that.
 
 **Parallel read-only tool calls** was on the 0.2 list and is not built. Executing several reads
 concurrently is a performance change whose benefit here is unproven — the model, not local disk

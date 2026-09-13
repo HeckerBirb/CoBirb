@@ -24,10 +24,12 @@ opt a capability in.**
 
 ## Status
 
-🚧 **v0.2.0 — beta.** The core loop, built-in tools, the permission model, encrypted
-sessions and a local Ollama provider, plus the things that make it usable for real work:
-context compaction so long sessions don't degrade, project instructions, `.gitignore`
-awareness, a diff shown before any write, `/undo`, and a headless mode for CI. See [`AGENTS.md`](./AGENTS.md) for the architecture, the plugin SPI, and the
+🚧 **v0.3.0.** The core loop, built-in tools, the permission model, encrypted sessions and
+a local Ollama provider — plus the things that make it usable on real work: context
+compaction so long sessions don't degrade, project instructions, `.gitignore` awareness,
+a `repo_map` tool so it can find its way around, a diff shown before any write, `/undo`
+and `/diff`, credential redaction, an opt-in "run my tests after you change something"
+loop, and a headless mode for CI. See [`AGENTS.md`](./AGENTS.md) for the architecture, the plugin SPI, and the
 reasoning behind both.
 
 ## Quick start
