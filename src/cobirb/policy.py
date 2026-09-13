@@ -6,11 +6,13 @@ permits nothing at all, and every capability is granted either by the user
 answering an approval prompt or by their own config/``--allow-tool``.
 
 - Approval granularity: per-tool-name, or per-tool-with-narrow-args.
-- Reading is scoped by *directory* rather than by file. Approving a read
-  grants the read-only tools access to that directory and everything under
-  it, because being asked again for every file in a tree the user already
-  said yes to is noise rather than safety. Writing and executing are never
-  granted this way — they are approved per call, or by an explicit rule.
+- Reading and writing are each scoped by *directory* rather than by file, in
+  two separate sets that never imply one another. Approving a read grants the
+  read-only tools that directory and everything under it; approving a write
+  grants the file-changing tools the same, and neither grants the other —
+  agreeing that CoBirb may read a project is a far smaller thing than
+  agreeing it may rewrite one. Executing is never granted this way: ``shell``
+  cannot say what it touches.
 - The ``shell`` tool's scope is narrowed per *command segment*: a shell
   command may chain several invocations (``git status; rm -rf /``), and the
   shell runs all of them, so **every** segment must be permitted — not just
@@ -55,6 +57,11 @@ _REDIRECT_CHARS = set("<>")
 # these is refused outright, on the same principle as command substitution:
 # what this scan cannot read, it cannot approve.
 _EXEC_FLAGS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
+
+# Tools that change files. A directory approval covers these the same way it
+# covers reads — but they are a separate set, and a read grant never implies a
+# write one. `shell` is in neither: it cannot say what it touches.
+WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch"})
 
 # Tools that only ever read. These are the ones a *directory* approval
 # covers; everything else (write_file, edit_file, apply_patch, shell, and any
@@ -218,13 +225,14 @@ class Policy:
     ``allow_tools``, or they pass ``--allow-tool``. There is no pre-approved
     set — the tool asks before it reads, writes, or runs anything.
 
-    Reads are scoped by directory (``allow_read_dir``): approving one read
-    grants every tool in ``READ_TOOLS`` access to that directory and its
-    subdirectories. This is the one place breadth is granted on a single
-    "yes", and it is deliberate — a user who has agreed to CoBirb reading a
-    project does not want to re-approve each of its files, and reading is the
-    capability where that trade is worth making. Writing and executing get no
-    equivalent.
+    Reads and writes are each scoped by directory (``allow_read_dir``,
+    ``allow_write_dir``): approving one grants the matching tool set that
+    directory and everything beneath it, so a user who has agreed that CoBirb
+    may work on a project is not asked again for every file in it. The two
+    sets are deliberately separate and one never implies the other — agreeing
+    that it may *read* a project is a far smaller thing than agreeing it may
+    rewrite one. ``shell`` is in neither set, because it cannot say what it
+    touches.
 
     Two kinds of ``shell`` allow rules exist:
 
@@ -253,6 +261,7 @@ class Policy:
         self._allowed = set(allowed or set())
         self._allowed_prefixes: set[tuple[str, ...]] = set()
         self._allowed_read_dirs: set[str] = set()
+        self._allowed_write_dirs: set[str] = set()
         self._denied = set(denied or set())
         self.audit = audit or AuditLog()
 
@@ -280,7 +289,10 @@ class Policy:
             return True
 
         if tool_name in READ_TOOLS and arguments is not None:
-            return self._read_allowed(tool_name, arguments)
+            return self._scoped_allowed(tool_name, arguments, self._allowed_read_dirs)
+
+        if tool_name in WRITE_TOOLS and arguments is not None:
+            return self._scoped_allowed(tool_name, arguments, self._allowed_write_dirs)
 
         return False
 
@@ -299,27 +311,29 @@ class Policy:
             path = os.path.join(self.cwd, path)
         return os.path.realpath(path)
 
-    def _read_allowed(self, tool_name: str, arguments: dict[str, Any]) -> bool:
-        """Whether a read-only call falls inside an approved directory."""
+    def _scoped_allowed(
+        self, tool_name: str, arguments: dict[str, Any], approved: set[str]
+    ) -> bool:
+        """Whether a path-scoped call falls inside one of ``approved``."""
         target = _read_target(tool_name, arguments)
         if target is None:
             return False
         resolved = self._resolve(target)
-        return any(_within(resolved, directory) for directory in self._allowed_read_dirs)
+        return any(_within(resolved, directory) for directory in approved)
 
-    def read_scope(self, tool_name: str, arguments: dict[str, Any]) -> str | None:
-        """The directory an "always" answer to this read call would approve.
+    def path_scope(self, tool_name: str, arguments: dict[str, Any]) -> str | None:
+        """The directory an "always" answer to this call would approve.
 
-        For ``read_file`` that is the file's parent; for the tools that
-        already name a directory it is the target itself. ``None`` when the
-        call names nothing resolvable, in which case there is no scope to
-        offer and the answer can only apply to this one call.
+        For a call naming a file that is its parent directory; for one already
+        naming a directory it is the target itself. ``None`` when the call
+        names nothing resolvable, in which case there is no scope to offer and
+        the answer can only apply to this one call.
         """
         target = _read_target(tool_name, arguments)
         if target is None:
             return None
         resolved = self._resolve(target)
-        if tool_name == "read_file":
+        if tool_name in WRITE_TOOLS or tool_name == "read_file":
             return os.path.dirname(resolved) or os.sep
         return resolved
 
@@ -327,10 +341,23 @@ class Policy:
         """Approve reading ``directory`` and everything beneath it."""
         self._allowed_read_dirs.add(self._resolve(directory))
 
+    def allow_write_dir(self, directory: str) -> None:
+        """Approve changing files in ``directory`` and everything beneath it.
+
+        Kept separate from the read set on purpose: agreeing that CoBirb may
+        *read* a project is a much smaller thing than agreeing it may rewrite
+        it, and one should never quietly imply the other.
+        """
+        self._allowed_write_dirs.add(self._resolve(directory))
+
     @property
     def allowed_read_dirs(self) -> set[str]:
         """The approved read directories — a copy, for display and tests."""
         return set(self._allowed_read_dirs)
+
+    @property
+    def allowed_write_dirs(self) -> set[str]:
+        return set(self._allowed_write_dirs)
 
     def _shell_allowed(self, arguments: dict[str, Any]) -> bool:
         """Whether every command in a ``shell`` invocation is permitted.
@@ -406,9 +433,17 @@ class Policy:
             self.allow(tool_name, arguments.get("command"))
             return
         if tool_name in READ_TOOLS:
-            directory = self.read_scope(tool_name, arguments)
+            directory = self.path_scope(tool_name, arguments)
             if directory is not None:
                 self.allow_read_dir(directory)
+                return
+        if tool_name in WRITE_TOOLS:
+            # Narrower than it used to be: "always" on an edit used to hand
+            # over write_file everywhere, which is a great deal more than the
+            # question appeared to be asking.
+            directory = self.path_scope(tool_name, arguments)
+            if directory is not None:
+                self.allow_write_dir(directory)
                 return
         self.allow(tool_name)
 
@@ -430,9 +465,13 @@ class Policy:
                 return f"run '{words[0]}' commands"
             return "run shell commands"
         if tool_name in READ_TOOLS:
-            directory = self.read_scope(tool_name, arguments)
+            directory = self.path_scope(tool_name, arguments)
             if directory is not None:
                 return f"read files in {directory} and its subdirectories"
+        if tool_name in WRITE_TOOLS:
+            directory = self.path_scope(tool_name, arguments)
+            if directory is not None:
+                return f"change files in {directory} and its subdirectories"
         return f"use '{tool_name}'"
 
 

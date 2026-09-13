@@ -336,13 +336,14 @@ password never reaches scrollback.
 user answers a prompt, they list rules in config's `allow_tools`, or they pass `--allow-tool`. Both
 rule forms take the same syntax — `name` or `name(arg)`, e.g. `shell(python -m pytest)`.
 
-**Reads are scoped by directory** (`Policy.allow_read_dir`, `READ_TOOLS`). Approving one read grants
-`read_file`, `list_dir`, `glob` and `grep` that directory *and everything beneath it*. This is the
-only place breadth is granted on one "yes", and it's deliberate: a user who agreed to CoBirb reading
-a project does not want to re-approve each file, and reading is where that trade is worth making.
-Writing and executing get no equivalent — they're approved per call or by an explicit rule. Paths
-are compared after `realpath`, so `..` and symlinks can't name a file outside an approved tree, and
-the separator check stops a grant on `/x` covering `/x-secrets`.
+**Reads and writes are each scoped by directory** (`allow_read_dir`/`READ_TOOLS`,
+`allow_write_dir`/`WRITE_TOOLS`), in **two separate sets that never imply one another** — agreeing
+CoBirb may read a project is a far smaller thing than agreeing it may rewrite one. Approving one
+call grants the matching tool set that directory and everything beneath it, so a user who agreed
+CoBirb may work somewhere isn't asked again per file. `shell` is in neither set: it can't say what
+it touches. Paths are compared after `realpath`, so `..` and symlinks can't name a file outside an
+approved tree, and the separator check stops a grant on `/x` covering `/x-secrets`.
+`allow_read_dirs`/`allow_write_dirs` in config state standing scopes.
 
 **The approval question carries a preview.** Tools that change files implement an optional
 `preview(arguments)` (`CobirbTool.preview`) returning a unified diff of what the call *would* do;
@@ -464,6 +465,7 @@ deeply. Nothing defaults to a networked provider. See `cobirb.json.example`.
 | `default_model` | Default model. Validated at interactive startup; unavailable is ignored, not an error. |
 | `model`, `models.default.name` / `.base_url` | Equivalent older keys; endpoint URL. Any OpenAI-compatible server works. |
 | `instructions` / `instructions_max_chars` | Read `AGENTS.md`/`CoBirb.md` from the working directory into the system prompt (on by default, capped at 2000 chars). |
+| `allow_read_dirs` / `allow_write_dirs` | Directories CoBirb may read from / change files in without asking. Separate lists on purpose. |
 | `allow_tools` | List of permission rules in `--allow-tool` syntax, e.g. `["read_file", "shell(git)"]`. The user's standing exemptions from the prompt. |
 | `persona` | Default persona. Unset or `"none"` means none. |
 | `system_prompt` | `"off"` (default) or `"harness"` — §6. |

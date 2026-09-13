@@ -259,8 +259,9 @@ covers depends on the tool:
   read_file, list_dir,   The directory the call names, and everything under
   glob, grep             it. Say yes once for a project and CoBirb can read
                          it without asking again.
-  write_file, edit_file, The tool itself, for the rest of the run. There is
-  apply_patch            no directory shortcut for changing files.
+  write_file, edit_file, The directory the file is in, and everything under
+  apply_patch            it — a separate grant from the read one, so
+                         allowing reading never allows rewriting.
   shell                  Exactly the invocation you approved — 'git' if you
                          approved a bare binary, 'python -m pytest' if you
                          approved that. Never more.
@@ -308,6 +309,11 @@ Read from (repo overrides user): ~/.cobirb/config.json, then ./cobirb.json
                                  and assumes 4096 when it can't find one.
                                  Raise this if you start Ollama with more;
                                  /context shows what is in use.
+  "allow_read_dirs"              Directories CoBirb may read without asking,
+                                 as a list. Covers subdirectories.
+  "allow_write_dirs"             Directories CoBirb may change files in
+                                 without asking. Separate from the read
+                                 list on purpose.
   "allow_tools"                  Permission rules you always want, as a list
                                  in --allow-tool's syntax, e.g.
                                  ["read_file", "shell(git)",

@@ -131,10 +131,10 @@ def test_segments_of_blank_command_is_empty():
 # --------------------------------------------------------------------------- #
 # Directory-scoped reads.
 #
-# Approving one read grants the read-only tools that directory and everything
-# under it — the single place the policy widens on one "yes". Writing and
-# executing get no equivalent, and neither does a sibling directory that
-# merely shares a name prefix.
+# Approving one call grants the matching tool set that directory and
+# everything under it. Reads and writes are separate sets that never imply one
+# another, executing gets no equivalent at all, and neither does a sibling
+# directory that merely shares a name prefix.
 # --------------------------------------------------------------------------- #
 def test_read_is_denied_until_a_directory_is_approved(tmp_path):
     policy = Policy(cwd=str(tmp_path))
@@ -172,17 +172,31 @@ def test_read_grant_does_not_imply_write(tmp_path):
         assert not policy.is_allowed(name, {"path": "notes.txt"})
 
 
-def test_grant_widens_a_read_to_its_directory_but_a_write_only_to_itself(tmp_path):
-    """`grant` is what an "always" answer applies, and what it widens to has
-    to differ by tool: a read has a directory, a write has nothing narrower
-    than the tool itself."""
+def test_grant_widens_a_call_to_its_own_directory(tmp_path):
+    """`grant` is what an "always" answer applies. It used to hand a write
+    tool the entire filesystem, which is a great deal more than the question
+    appeared to be asking — now it grants the directory, like a read."""
     policy = Policy(cwd=str(tmp_path))
+
     policy.grant("read_file", {"path": "docs/a.txt"})
     assert policy.is_allowed("read_file", {"path": "docs/b.txt"})
     assert not policy.is_allowed("read_file", {"path": "elsewhere/c.txt"})
 
-    policy.grant("write_file", {"path": "docs/a.txt"})
-    assert policy.is_allowed("write_file", {"path": "anywhere/at/all.txt"})
+    policy.grant("write_file", {"path": "src/a.py"})
+    assert policy.is_allowed("write_file", {"path": "src/deep/b.py"})
+    assert not policy.is_allowed("write_file", {"path": "elsewhere/c.py"})
+
+
+def test_a_read_grant_and_a_write_grant_never_imply_each_other(tmp_path):
+    """Agreeing CoBirb may read a project is a far smaller thing than
+    agreeing it may rewrite one."""
+    policy = Policy(cwd=str(tmp_path))
+
+    policy.grant("read_file", {"path": "src/a.py"})
+    assert not policy.is_allowed("write_file", {"path": "src/a.py"})
+
+    policy.grant("edit_file", {"path": "other/b.py"})
+    assert not policy.is_allowed("read_file", {"path": "other/b.py"})
 
 
 def test_describe_grant_says_what_always_would_permit(tmp_path):
@@ -191,7 +205,8 @@ def test_describe_grant_says_what_always_would_permit(tmp_path):
     policy = Policy(cwd=str(tmp_path))
     assert "subdirectories" in policy.describe_grant("read_file", {"path": "docs/a.txt"})
     assert "git" in policy.describe_grant("shell", {"command": "git status"})
-    assert "write_file" in policy.describe_grant("write_file", {"path": "a.txt"})
+    assert "change files in" in policy.describe_grant("write_file", {"path": "a.txt"})
+    assert "use 'some_plugin_tool'" == policy.describe_grant("some_plugin_tool", {})
 
 
 # --------------------------------------------------------------------------- #
@@ -294,3 +309,25 @@ def test_missing_or_blank_command_is_denied():
     assert not policy.is_allowed("shell", {"command": ""})
     assert not policy.is_allowed("shell", {"command": "   "})
     assert not policy.is_allowed("shell", {"command": None})
+
+
+def test_a_write_directory_can_be_approved_up_front(tmp_path):
+    """The config equivalent of answering "always" to a write, for a project
+    the user has already decided CoBirb may work in."""
+    policy = Policy(cwd=str(tmp_path))
+    policy.allow_write_dir(str(tmp_path / "src"))
+
+    assert policy.is_allowed("edit_file", {"path": "src/deep/a.py"})
+    assert not policy.is_allowed("edit_file", {"path": "tests/b.py"})
+    assert str(tmp_path / "src") in policy.allowed_write_dirs
+
+
+def test_a_write_grant_does_not_escape_sideways(tmp_path):
+    """Same prefix trap as reads: /x must not cover /x-secrets."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src-vendor").mkdir()
+    policy = Policy(cwd=str(tmp_path))
+    policy.allow_write_dir(str(tmp_path / "src"))
+
+    assert not policy.is_allowed("write_file", {"path": "src-vendor/a.py"})
+    assert not policy.is_allowed("write_file", {"path": "../outside.py"})

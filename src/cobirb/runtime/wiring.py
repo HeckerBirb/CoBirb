@@ -147,6 +147,13 @@ def build_orchestrator(
     for rules in (parse_allow_tools(config.get("allow_tools")), allow_overrides):
         for name, arg in rules.items():
             policy.allow(name, arg)
+    # Standing directory scopes, for a project the user has already decided
+    # CoBirb may work in. Separate keys because reading and writing are
+    # separate decisions.
+    for directory in config.get("allow_read_dirs", default=[]) or []:
+        policy.allow_read_dir(os.path.expanduser(str(directory)))
+    for directory in config.get("allow_write_dirs", default=[]) or []:
+        policy.allow_write_dir(os.path.expanduser(str(directory)))
 
     crypto = None
     if session_path is not None:
