@@ -491,7 +491,7 @@ def test_no_io_denies_without_prompting():
     policy = Policy()
     orchestrator = Orchestrator(
         model=_ToolCallModel("read_file", {"path": "x"}),
-        tools={},
+        tools=ToolRegistry(".").tools,
         policy=policy,
     )
     session = orchestrator.run("read file", "sys", cwd="/tmp")
@@ -534,7 +534,11 @@ def test_tool_that_raises_is_reported_to_the_model_not_fatal(tmp_path):
 
     tool_turn = _tool_turn(session)
     assert "failed" in tool_turn.content
-    assert "KeyError" in tool_turn.content
+    # Actionable, not just accurate: the model is told which argument it
+    # missed and what the tool actually accepts, because a small model handed
+    # a bare "KeyError: 'path'" tends to guess the same wrong name again.
+    assert "path" in tool_turn.content
+    assert "accepts" in tool_turn.content
     # The run still reached a normal final answer afterwards.
     assert session.turns[-1].role == "assistant"
     assert not session.summary.startswith("Stopped after")
@@ -638,7 +642,10 @@ def test_successful_tool_call_is_rendered_via_the_render_tool_call_hook(tmp_path
 def test_denied_tool_call_is_still_rendered():
     io = _ToolRenderingIO(confirm_decision="deny")
     orchestrator = Orchestrator(
-        model=_ToolCallModel("read_file", {"path": "x"}), tools={}, policy=Policy(), io=io
+        model=_ToolCallModel("read_file", {"path": "x"}),
+        tools=ToolRegistry(".").tools,
+        policy=Policy(),
+        io=io,
     )
 
     orchestrator.run("read file", "sys", cwd="/tmp")
@@ -1065,3 +1072,29 @@ def test_nothing_is_sent_when_there_are_no_instructions_and_no_persona():
     orchestrator.run("hello", "", cwd="/tmp")
 
     assert model.systems[0] == ""
+
+
+def test_an_unknown_tool_name_comes_back_with_the_real_ones(tmp_path):
+    """A bare "Unknown tool 'read'" leaves a model to guess again, and small
+    ones guess the same wrong name repeatedly — burning the turn budget on a
+    mistake one line of text fixes."""
+    registry = ToolRegistry(str(tmp_path))
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("read", {"path": "a.txt"}), tools=registry.tools, policy=Policy()
+    )
+
+    session = orchestrator.run("read it", "sys", cwd=str(tmp_path))
+
+    content = _tool_turn(session).content
+    assert "read_file" in content       # the near-miss is offered
+    assert "Available tools" in content
+
+
+def test_an_unknown_tool_with_no_tools_registered_says_so_plainly(tmp_path):
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("anything", {}), tools={}, policy=Policy()
+    )
+
+    session = orchestrator.run("go", "sys", cwd=str(tmp_path))
+
+    assert "No tools are available" in _tool_turn(session).content

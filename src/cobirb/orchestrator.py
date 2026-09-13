@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from difflib import get_close_matches
 from typing import Any, Callable, Iterable
 
 from .context import DEFAULT_CONTEXT_TOKENS, CompactionReport, compact, history_budget
@@ -97,6 +98,36 @@ def render_through(
         fallback()
         return True
     return False
+
+
+def _tool_failure_message(tool_name: str, tool: Any, exc: Exception) -> str:
+    """Turn a tool's exception into something the model can act on.
+
+    A `KeyError: 'path'` is the single commonest failure in this loop: the
+    model invents an argument name, the tool subscripts a dict, and the
+    traceback names the key it wanted without saying what the tool actually
+    accepts. Restating the schema costs a few dozen tokens and usually turns a
+    repeated failure into a corrected call on the very next turn, which is
+    worth far more against a small local model than against a large one.
+    """
+    detail = f"{type(exc).__name__}: {exc}"
+    if isinstance(exc, KeyError):
+        detail = f"missing required argument {exc}"
+    elif isinstance(exc, TypeError):
+        detail = f"the arguments did not fit the tool: {exc}"
+    else:
+        return f"Tool '{tool_name}' failed: {detail}"
+
+    try:
+        schema = tool.parameters()
+        properties = ", ".join(sorted(schema.get("properties", {})))
+        required = ", ".join(schema.get("required", []))
+    except Exception:  # noqa: BLE001 - a broken schema must not mask the real error
+        return f"Tool '{tool_name}' failed: {detail}"
+    return (
+        f"Tool '{tool_name}' failed: {detail}. "
+        f"It accepts: {properties or '(none)'}. Required: {required or '(none)'}."
+    )
 
 
 def _materialize(reply: "str | Iterable[str]") -> str:
@@ -507,6 +538,18 @@ class Orchestrator:
         # a proper messages array can label the "tool" message accordingly.
         tool_use = [{"name": tool_name, "arguments": arguments}]
 
+        # Existence before permission. Asking a human to approve a tool that
+        # does not exist is a nonsense question, and the model gets "permission
+        # denied" for a typo — which tells it to give up rather than to fix the
+        # name. Nothing is leaked by answering first: the tool list is already
+        # in the request the model just replied to.
+        tool = self.tools.get(tool_name)
+        if tool is None:
+            result = cobirb_typing.ToolResult(ok=False, content=self._unknown_tool_message(tool_name))
+            session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
+            self._render_tool_call(tool_name, arguments, result)
+            return
+
         # Not already permitted: ask the user rather than silently denying,
         # so "default-deny" means "asks first," not "the model never finds
         # out it could have worked." Fails closed (denies) with no adapter,
@@ -526,13 +569,6 @@ class Orchestrator:
                 # grants its invocation, everything else grants the tool.
                 self.policy.grant(tool_name, arguments)
 
-        tool = self.tools.get(tool_name)
-        if tool is None:
-            result = cobirb_typing.ToolResult(ok=False, content=f"Unknown tool '{tool_name}'.")
-            session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
-            self._render_tool_call(tool_name, arguments, result)
-            return
-
         self.policy.log(tool_name, arguments, cwd=self.session.working_dir)
         try:
             result = tool.execute(arguments)
@@ -544,13 +580,28 @@ class Orchestrator:
             # went wrong and correct itself on the next turn, rather than
             # tearing down the whole run over a recoverable mistake.
             result = cobirb_typing.ToolResult(
-                ok=False, content=f"Tool '{tool_name}' failed: {type(exc).__name__}: {exc}"
+                ok=False, content=_tool_failure_message(tool_name, tool, exc)
             )
             session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
             self._render_tool_call(tool_name, arguments, result)
             return
         session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
         self._render_tool_call(tool_name, arguments, result)
+
+    def _unknown_tool_message(self, tool_name: str) -> str:
+        """Tell the model which tools actually exist.
+
+        A bare "Unknown tool 'read'" leaves a model to guess again, and small
+        local models guess the same wrong name repeatedly — which burns the
+        turn budget on a mistake one line of text can fix. Near-misses lead,
+        because the usual cause is a name that is close but not right.
+        """
+        available = sorted(self.tools)
+        if not available:
+            return f"Unknown tool '{tool_name}'. No tools are available in this session."
+        close = get_close_matches(tool_name, available, n=3, cutoff=0.6)
+        suffix = f" Did you mean: {', '.join(close)}?" if close else ""
+        return f"Unknown tool '{tool_name}'.{suffix} Available tools: {', '.join(available)}."
 
     def _render_tool_call(
         self, tool_name: str, arguments: dict[str, Any], result: cobirb_typing.ToolResult
