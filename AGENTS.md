@@ -828,6 +828,13 @@ they are shaped around, deliberately.
   from the project — see §12.1.*
 - **v0.5.0 "The Flock" (done)** — subagent orchestration: charter → scaffold → fan-out →
   review → report, with a Flock tab showing a pane per Worker Birb. See §4m.
+- **v0.5.1 "Field notes"** — fixes and polish from actually using the Flock. Collected here rather
+  than deferred: these are things found in the way of the work, and a list of them aging in a later
+  milestone is how a tool stays annoying.
+  - **Multi-line prompt input.** The box is one line and scrolls sideways for ever. It should wrap,
+    grow to at most 8 lines, then scroll vertically. Not cosmetic — a flock objective is a
+    paragraph, and composing one in a horizontally-scrolling single line is genuinely hard. Needs
+    two interaction decisions first; see §12.1.
 - **v0.6.0–0.9.0** — plugin distribution, cross-session memory, vision, mid-turn steering,
   session branching, SPI freeze and session migrations.
 
@@ -840,6 +847,24 @@ the design, raise it with the user as a decision rather than resolving it in an 
 Designing to this year's ceiling is how a tool arrives obsolete.
 
 ### 12.1 Deferred, needing a decision
+
+**Multi-line prompt input: two keys have to be reassigned.** `PromptInput` extends `Input`, and its
+docstring says why that worked: *"``Input`` is single-line, so it binds neither arrow key itself and
+both are free to mean 'walk the history'."* Going multi-line takes that back, and takes `enter`
+with it.
+
+- **Submit vs. newline.** Enter currently submits. In a multi-line box it conventionally inserts a
+  newline, so one of them needs another key. The usual answer is shift+enter for the newline — but
+  many terminals send an identical sequence for enter and shift+enter, so it cannot be relied on.
+  Real candidates are alt+enter, ctrl+j, or inverting it (enter inserts, ctrl+d submits). This is a
+  decision about which terminals the tool must work in, which is the user's to make.
+- **History vs. cursor movement.** Up/down currently walk the prompt history. In a multi-line box
+  they should move the cursor. The shell convention resolves it: recall history only when the
+  cursor is already on the first (or last) line, otherwise move. That keeps both without a new key.
+
+Also a rewrite rather than a tweak: `TextArea` has no `Submitted` event, so
+`CoBirbApp.on_input_submitted` needs replacing with key handling, and Textual's `TextArea` does not
+auto-grow, so the height has to be set from the wrapped line count on change and clamped at 8.
 
 **Git auto-commit** — a commit per completed task, with a written message. Deferred because it
 writes to someone's repository history, which is not a default to drift into: it needs decisions
