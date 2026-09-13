@@ -32,7 +32,9 @@ from .policy import PermissionError
 from .plugins.core import render
 from .runtime import commands, personas, plugins, sessions, wiring
 from .plugins.core import TerminalIO
-from .runtime.headless import EXIT_ERROR, HeadlessIO, HeadlessResult, describe_context
+from .runtime.export import write_export
+from .session import SessionManager
+from .runtime.headless import EXIT_ERROR, EXIT_OK, HeadlessIO, HeadlessResult, describe_context
 from .runtime.personas import NO_PERSONA
 from .runtime.plugins import PluginsSummary, ToolInfo
 from .typing import spi as cobirb_typing
@@ -185,6 +187,29 @@ def _run_one_shot(
     if not orchestrator.last_turn_streamed:
         _render_final_answer(orchestrator, persona.name, session.summary)
     return report.exit_code(unattended=headless)
+
+
+def _run_export(destination: str, session_path: str | None, password: str | None, cwd: str) -> int:
+    """Decrypt a session and write it out as markdown."""
+    if session_path is None:
+        print("cobirb: --export needs --session to say which one.", file=sys.stderr)
+        return EXIT_ERROR
+    try:
+        config = Config(cwd=cwd)
+        _, discovered, _ = plugins.discover_plugins(cwd, config)
+        crypto, _ = plugins.build_crypto(config, discovered)
+        manager = SessionManager.load(session_path, crypto, password, cwd)
+    except Exception as exc:  # noqa: BLE001 - a wrong password is routine
+        print(
+            f"cobirb: could not open {session_path} — {sessions.session_open_error(exc)}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    written = write_export(manager.session, destination, title=os.path.basename(session_path))
+    print(f"Exported {len(manager.session.turns)} turn(s) to {written}")
+    print("This file is plaintext — the session it came from stays encrypted.", file=sys.stderr)
+    return EXIT_OK
 
 
 def _run_tui(
@@ -348,6 +373,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "one) is added after your model's own prompt, never instead of it.",
     )
     opts.add_argument(
+        "--export",
+        metavar="PATH",
+        help="Decrypt the session named by --session and write it to PATH as "
+        "markdown, then exit. The output is plaintext — that is the point of "
+        "exporting — so CoBirb never picks the destination for you.",
+    )
+    opts.add_argument(
         "--headless",
         action="store_true",
         help="Never prompt. Anything not already permitted by --allow-tool or "
@@ -387,6 +419,9 @@ def main(argv: list[str] | None = None) -> int:
     # needs a password to encrypt to, and a password with no path gets a new
     # session under ~/.cobirb/sessions rather than being silently ignored.
     session_path, password = sessions.resolve_session(args.session, args.password)
+
+    if args.export:
+        return _run_export(args.export, session_path, password, args.cwd or ".")
 
     if args.prompt is not None:
         status = _run_one_shot(

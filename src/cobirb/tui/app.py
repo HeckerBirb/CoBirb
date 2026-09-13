@@ -37,6 +37,7 @@ from textual.widgets import Footer, Header, Input, RichLog, TabbedContent, TabPa
 from .. import session
 from ..help_text import HELP_TEXT, HELP_TOPICS
 from ..runtime import commands, personas, plugins, wiring
+from ..runtime.export import write_export
 from ..config import Config
 from ..orchestrator import Orchestrator, render_through
 from ..plugins.core import persona_shapes_voice, render
@@ -458,6 +459,31 @@ class CoBirbApp(App[None]):
             return
         self.write_transcript(render.build_notice(checkpoints.undo_last().describe()))
 
+    def _cmd_export(self, argument: str) -> None:
+        """Write this session out as markdown.
+
+        Says plainly that the result is plaintext. The session stays
+        encrypted; this is a copy the user asked for, and the whole reason to
+        ask for one is to give it to someone.
+        """
+        manager = getattr(self.orchestrator, "session", None)
+        session_data = getattr(manager, "session", None)
+        if session_data is None or not session_data.turns:
+            self.write_transcript(render.build_notice("Nothing to export yet."))
+            return
+        name = argument.strip() or f"cobirb-session-{time.strftime('%Y%m%d-%H%M%S')}.md"
+        try:
+            written = write_export(session_data, name)
+        except OSError as exc:
+            self.write_transcript(render.build_notice(f"Could not export — {exc}"))
+            return
+        self.write_transcript(
+            render.build_notice(
+                f"Exported {len(session_data.turns)} turn(s) to {written}. "
+                "That file is plaintext; the session itself stays encrypted."
+            )
+        )
+
     def _cmd_plan(self, argument: str) -> None:
         self.plan_mode, message = commands.apply_plan_toggle(argument, self.plan_mode)
         self.query_one(StatusBar).plan_mode = self.plan_mode
@@ -470,6 +496,7 @@ class CoBirbApp(App[None]):
         "/plan": _cmd_plan,
         "/context": _cmd_context,
         "/undo": _cmd_undo,
+        "/export": _cmd_export,
     }
 
     def _on_turn_finished(self) -> None:

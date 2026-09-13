@@ -149,6 +149,17 @@ Snapshots are plaintext, unlike sessions. A copy of `src/app.py` exposes nothing
 `src/app.py` did not already expose in the directory it came from, so encrypting it would be
 ceremony; the store is 0700 and pruned to the last 20 changing turns.
 
+## 4d. Export
+
+`runtime/export.py` renders a decrypted session as markdown: `--export PATH` alongside `--session`,
+or `/export [path]` in the app. Tool results are fenced rather than inlined — they are output, not
+prose, and the fence grows to contain any backticks in them.
+
+Deliberately explicit and deliberately plaintext: a "shareable" file that stayed encrypted would
+be neither, so this is the one place CoBirb writes a conversation unprotected. It says so when it
+does, never picks the destination itself, and still writes 0600 — sharing it is the user's next
+decision, not the file mode's.
+
 ## 5. Plugin SPI
 
 Core imports only these interfaces; plugins import only the SPI and never each other; core never

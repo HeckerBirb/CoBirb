@@ -51,6 +51,9 @@ cobirb -p "check the tests pass" --headless --output json \
 cobirb -w hunter2
 cobirb -w
 cobirb --session ~/.cobirb/sessions/session-20260912-185817.json -w
+
+# Read one back as markdown. Plaintext, deliberately — that's what sharing is.
+cobirb --session ~/.cobirb/sessions/session-20260912-185817.json -w --export out.md
 ```
 
 Run the test suite with `pytest`.

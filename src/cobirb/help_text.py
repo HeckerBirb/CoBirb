@@ -45,6 +45,8 @@ OPTIONS
                       prompts without echo; '-w hunter2' is visible in shell
                       history and process listings.
   --session PATH      Resume/continue the encrypted session at PATH.
+  --export PATH       Decrypt --session and write it to PATH as markdown,
+                      then exit. Plaintext, deliberately.
   --system-prompt     off (default) or harness. Off sends NO system message
                       at all, so the SYSTEM directive your model was built
                       with applies exactly as it does in Ollama. See
@@ -67,6 +69,8 @@ INTERACTIVE COMMANDS
   /persona           Pick a persona from a list (including "none", the
                      default, which hands the voice back to the model).
   /persona <name>    Switch to a named persona directly.
+  /export [PATH]     Write this session out as readable markdown. The
+                     file is plaintext; the session stays encrypted.
   /undo              Put back the files the last turn changed. Cannot
                      undo what a shell command did — see 'help tools'.
   /context           Show how much of the model's context window this
