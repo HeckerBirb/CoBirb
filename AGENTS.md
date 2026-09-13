@@ -10,8 +10,9 @@
 A **privacy-first, Copilot-like agentic CLI**: Copilot CLI behavior, minus every default
 network/telemetry behavior, plus a hard boundary around the rest. **No data leaves the process
 unless the user opts a capability in.** Noah the African Grey is the mascot and an *opt-in* persona,
-not the default voice. Status: v0.1.0 working prototype — loop, tools, permissions, encrypted
-sessions, Ollama provider and the interactive app are implemented and tested.
+not the default voice. Status: **v0.2.0, the beta.** Loop, tools, permissions, encrypted sessions, Ollama provider and
+the interactive app, plus context compaction, project instructions, `.gitignore` awareness,
+diff-before-write, `/undo`, `/export` and a headless CI mode.
 
 ## 2. Ironclad constraints (never violate)
 
@@ -509,11 +510,11 @@ they are shaped around, deliberately.
 ## 12. Roadmap
 
 - **v0.1.0 (now)** — core runtime, tools, permissions, encrypted sessions, personas, CLI + TUI.
-- **v0.2.0 "Trustworthy"** — the beta. Context compaction *(done)*, project instructions file,
-  `.gitignore` awareness, diff preview before write, checkpoint + `/undo`, headless/CI mode,
-  malformed-tool-call repair, parallel read-only tools.
-- **v0.3.0 "Grounded"** — repo map, git integration, self-verification loop, write-scope grants,
-  secret redaction, session export.
+- **v0.2.0 (done)** — context compaction, project instructions, `.gitignore` awareness,
+  diff-before-write, checkpoint + `/undo`, headless/CI mode, actionable tool-failure messages.
+  *Parallel read-only tools was dropped from the milestone — see §12.1.*
+- **v0.3.0 "Grounded"** — repo map, git integration, self-verification loop, secret redaction.
+  Write-scope grants *(done, 0.2)* and session export *(done, 0.2)* landed early.
 - **v0.4.0 "Extensible"** — MCP client (stdio only), **embedded GGUF runtime**, per-role model
   selection, hooks, custom commands/skills.
 - **v0.5.0 "The Flock"** — subagent orchestration: charter → scaffold → fan-out → integrate.
@@ -528,6 +529,14 @@ that something is slow or large today is useful; letting that quietly pick a def
 feature, or rule an approach out is not. When a hardware consideration looks like it should change
 the design, raise it with the user as a decision rather than resolving it in an estimate.
 Designing to this year's ceiling is how a tool arrives obsolete.
+
+### 12.1 Deferred, needing a decision
+
+**Parallel read-only tool calls** was on the 0.2 list and is not built. Executing several reads
+concurrently is a performance change whose benefit here is unproven — the model, not local disk
+I/O, is the bottleneck — while the cost is real: turn ordering, and `ShellTool` holding per-call
+process state. Per §12's time-horizon rule that is a decision to take deliberately rather than one
+for an estimate to make quietly, so it is parked rather than dropped.
 
 **Settled decisions.** *Local models only, forever* — no shipped remote provider, ever (§2), and
 from 0.4 not even a local *server*: CoBirb runs the weights itself. The shell privilege gap is

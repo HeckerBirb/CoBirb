@@ -22,9 +22,10 @@ opt a capability in.**
 
 ## Status
 
-🚧 **Early v0.1.0 — working prototype.** The core loop, built-in tools, the permission
-model, encrypted sessions, and a local Ollama model provider are implemented and
-tested. See [`AGENTS.md`](./AGENTS.md) for the architecture, the plugin SPI, and the
+🚧 **v0.2.0 — beta.** The core loop, built-in tools, the permission model, encrypted
+sessions and a local Ollama provider, plus the things that make it usable for real work:
+context compaction so long sessions don't degrade, project instructions, `.gitignore`
+awareness, a diff shown before any write, `/undo`, and a headless mode for CI. See [`AGENTS.md`](./AGENTS.md) for the architecture, the plugin SPI, and the
 reasoning behind both.
 
 ## Quick start
