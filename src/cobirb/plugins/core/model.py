@@ -17,9 +17,14 @@ addition supplements it instead of discarding it. See ``compose_system``.
 """
 from __future__ import annotations
 
+import http.client
+import io
 import json
 import os
+import socket
+import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Iterable, Optional
 
@@ -229,11 +234,78 @@ class LocalModelProvider(ModelProvider):
         # window both live there, and fetching it twice for one model would be
         # two round trips to learn one thing.
         self._show_cache: dict[str, dict[str, Any]] = {}
+        # In-flight streaming responses, so a run can be cut off from another
+        # thread — the Flock's force-stop. Closing the connection is also what
+        # tells Ollama to abort the generation it is part-way through: the
+        # server notices the client is gone and stops, rather than finishing a
+        # reply nobody is waiting for.
+        self._inflight: set = set()
+        self._inflight_lock = threading.Lock()
+        self._cancelled = False
 
     def name(self) -> str:
         return f"ollama/{self._model}" if self._model else "(unconfigured)"
 
+    def _connect(self) -> tuple[http.client.HTTPConnection, str]:
+        """A tracked connection to the endpoint, plus the URL's path prefix.
+
+        Used by ``_stream_chat`` only — not by ``_post``, which stays on
+        ``urllib`` (see its docstring for why). ``http.client`` rather than
+        ``urllib`` here for one reason: keeping a handle on the real socket, so
+        ``cancel()`` can shut it down from another thread. ``urllib`` hides the
+        socket, and closing a response from another thread does not wake a
+        blocked ``recv`` on Linux; only ``socket.shutdown()`` does.
+
+        Raises immediately if ``cancel()`` already fired, so a request that has
+        not opened yet does not sail on regardless.
+        """
+        split = urllib.parse.urlsplit(self._base_url)
+        connection_class = (
+            http.client.HTTPSConnection if split.scheme == "https"
+            else http.client.HTTPConnection
+        )
+        conn = connection_class(split.hostname, split.port, timeout=120)
+        with self._inflight_lock:
+            if self._cancelled:
+                raise RuntimeError("the model request was cancelled")
+            self._inflight.add(conn)
+        return conn, split.path
+
+    def _release(self, conn: http.client.HTTPConnection) -> None:
+        with self._inflight_lock:
+            self._inflight.discard(conn)
+        conn.close()
+
+    def _as_cancellation(self, exc: Exception) -> Exception:
+        """Whatever this failure actually was, report it as a cancellation if
+        ``cancel()`` is why it happened.
+
+        A shutdown socket fails in whatever way the code that was reading it
+        happens to fail — ``http.client`` hits EOF, nulls its file pointer, and
+        the next read raises ``AttributeError`` rather than a clean ``OSError``.
+        The type is not the interesting fact once we know we did this to
+        ourselves; the interesting fact is that we did it to ourselves.
+        """
+        return RuntimeError("the model request was cancelled") if self._cancelled else exc
+
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """A single request/response round trip — ``/api/show`` and the
+        non-streaming ``chat()``.
+
+        Deliberately still ``urllib``, and **not** part of ``cancel()``'s
+        reach. Moving it to the same tracked-socket scheme as ``_stream_chat``
+        would close a real but narrow gap — ``/api/show`` is called before
+        every ``chat()``, so a hang there is currently not force-stoppable —
+        at the cost of rewriting every one of this file's ~30 existing tests,
+        which all mock ``urllib.request.urlopen`` at this exact call. That is a
+        real trade, not an oversight: see AGENTS.md's Flock section for the
+        note this leaves for whoever picks it up. In practice this rarely
+        matters — every Worker Birb turn goes through ``_stream_chat`` (real
+        streaming is on whenever an ``io`` adapter is attached and the
+        provider supports it, which ``HeadlessIO`` plus this provider always
+        are), and ``/api/show`` is a fast local metadata call that only hangs
+        if the whole server is already wedged, not merely mid-generation.
+        """
         data = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             f"{self._base_url}{path}",
@@ -401,21 +473,36 @@ class LocalModelProvider(ModelProvider):
         has ``"done": true`` and carries any tool calls the model decided to
         make. ``_last_tool_calls`` is only accurate once the generator has
         been fully consumed.
-        """
-        data = json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(
-            f"{self._base_url}/api/chat",
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            response = urllib.request.urlopen(request, timeout=120)
-        except urllib.error.URLError as exc:
-            raise _unreachable(self._base_url, exc, self._model) from exc
 
+        Shares ``_connect``/``_release`` with ``_post`` — see ``_connect`` for
+        why a tracked ``http.client`` socket, rather than ``urllib``, is what
+        makes a stuck Worker Birb force-stoppable at all.
+        """
+        conn, prefix = self._connect()
         tool_calls: list[ToolCall] = []
-        with response:
+        try:
+            try:
+                conn.request(
+                    "POST",
+                    f"{prefix}/api/chat",
+                    body=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
+                response = conn.getresponse()
+            except OSError as exc:
+                if self._cancelled:
+                    raise self._as_cancellation(exc) from exc
+                raise _unreachable(self._base_url, urllib.error.URLError(exc), self._model) from exc
+            if response.status >= 400:
+                body = response.read()
+                raise _unreachable(
+                    self._base_url,
+                    urllib.error.HTTPError(
+                        self._base_url, response.status, response.reason, response.headers,
+                        io.BytesIO(body),
+                    ),
+                    self._model,
+                )
             for raw_line in response:
                 line = raw_line.strip()
                 if not line:
@@ -429,7 +516,47 @@ class LocalModelProvider(ModelProvider):
                     tool_calls = _extract_tool_calls(message)
                 if chunk.get("done"):
                     break
+        except Exception as exc:  # noqa: BLE001 - see _as_cancellation
+            raise self._as_cancellation(exc) from exc
+        finally:
+            self._release(conn)
         self._last_tool_calls = tool_calls
+
+    def cancel(self) -> None:
+        """Abort any request in flight, and refuse any that starts after.
+
+        Reaches every connection this provider has open — ``/api/show``, a
+        non-streaming ``/api/chat``, or the streaming one, whichever a stuck
+        Worker Birb happens to be blocked on; ``chat()`` calls the first before
+        either of the others, so a hung server can wedge a turn there just as
+        easily. Shutting the socket unblocks the reader waiting on it — it
+        raises there, which propagates as a failed turn — and drops the
+        connection, which is how Ollama is told to stop generating. There is no
+        per-request abort endpoint; the disconnect *is* the signal.
+
+        Latching ``_cancelled`` means a request that has not opened its socket
+        yet (between the decision to cancel and ``_connect()`` returning) is
+        refused rather than sailing on. This is a one-way switch: a cancelled
+        provider is a stopped one, which is exactly what a force-stop wants.
+        """
+        with self._inflight_lock:
+            self._cancelled = True
+            connections = list(self._inflight)
+        for conn in connections:
+            # shutdown(), not close(): closing a socket from another thread
+            # does not wake a blocked recv, but shutting it down does. This is
+            # the line that actually unsticks a worker waiting on the model —
+            # and, because the connection drops, tells the server to stop.
+            sock = getattr(conn, "sock", None)
+            if sock is not None:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 - already going; nothing to do
+                pass
 
     def parse_tool_calls(self, raw: str) -> list[ToolCall]:
         return self._last_tool_calls

@@ -15,7 +15,7 @@ from textual.widgets import Input, TabbedContent
 from cobirb.flock.charter import parse_charter
 from cobirb.flock.run import FlockRun
 from cobirb.flock.review import RedCheck, Review
-from cobirb.flock.supervisor import FlockOutcome
+from cobirb.flock.supervisor import Canceller, FlockOutcome
 from cobirb.flock.worker import WorkerReport
 from cobirb.tui.app import CoBirbApp
 from cobirb.tui.widgets import PromptInput
@@ -331,6 +331,97 @@ async def test_quitting_mid_flock_stops_it_rather_than_waiting_it_out():
         await app.action_quit()
 
         assert stop.is_set()
+
+
+# --------------------------------------------------------------------------- #
+# Force-stopping — the second Ctrl+C, for a worker blocked on the model.
+#
+# The graceful stop above only keeps *new* workers from starting; it cannot
+# reach one already blocked waiting on the model, because that thread is not
+# checking anything. This is the escalation the user actually needed: "the
+# worker is stuck waiting for Ollama... is there a way to force stop it?"
+# --------------------------------------------------------------------------- #
+async def test_a_second_ctrl_c_once_already_stopping_offers_the_force_stop():
+    """The first Ctrl+C is graceful and asks its own question; a second one,
+    once already stopping, has to ask a *different* question rather than
+    showing the same dialog again or doing nothing."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await _flock_tab(pilot, app)
+        app._flock_stop = threading.Event()
+        app._flock_stop.set()  # already stopping, from a first Ctrl+C
+        app._flock_canceller = Canceller()
+
+        app.action_cancel_turn()
+        await _settle(pilot, lambda: isinstance(app.screen, ConfirmModal))
+
+        assert "Force-stop" in _text(app, "#confirm-question")
+
+
+async def test_confirming_the_force_stop_cancels_every_live_worker():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await _flock_tab(pilot, app)
+        app._flock_stop = threading.Event()
+        app._flock_stop.set()
+        canceller = app._flock_canceller = Canceller()
+
+        class _FakeOrchestrator:
+            def __init__(self):
+                self.cancelled = False
+
+            def cancel(self):
+                self.cancelled = True
+
+        live = _FakeOrchestrator()
+        canceller.register(live)
+
+        app.action_cancel_turn()
+        await _settle(pilot, lambda: isinstance(app.screen, ConfirmModal))
+        await pilot.press("y")
+        await _settle(pilot, lambda: canceller.forced)
+
+        assert live.cancelled  # the actual model connection was told to drop
+
+
+async def test_declining_the_force_stop_leaves_workers_running():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await _flock_tab(pilot, app)
+        app._flock_stop = threading.Event()
+        app._flock_stop.set()
+        canceller = app._flock_canceller = Canceller()
+
+        app.action_cancel_turn()
+        await _settle(pilot, lambda: isinstance(app.screen, ConfirmModal))
+        await pilot.press("n")
+        await _settle(pilot, lambda: not isinstance(app.screen, ConfirmModal))
+
+        assert not canceller.forced
+
+
+async def test_quitting_mid_flock_force_stops_rather_than_asking():
+    """Quitting is unambiguous — there is no dialog to answer on the way out
+    — so it goes straight to the hard stop rather than leaving a worker
+    blocked on the model to hold the whole app open."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        app._flock_stop = threading.Event()
+        canceller = app._flock_canceller = Canceller()
+
+        class _FakeOrchestrator:
+            def __init__(self):
+                self.cancelled = False
+
+            def cancel(self):
+                self.cancelled = True
+
+        live = _FakeOrchestrator()
+        canceller.register(live)
+
+        await app.action_quit()
+
+        assert live.cancelled
 
 
 # --------------------------------------------------------------------------- #

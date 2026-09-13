@@ -102,6 +102,59 @@ class FlockOutcome:
         return "\n".join(lines)
 
 
+class Canceller:
+    """A handle for force-stopping workers that are stuck mid-model-call.
+
+    ``stop`` (the graceful ``Event`` the supervisor already respects) only
+    keeps *new* workers from starting — it cannot touch one that is blocked
+    waiting on the model, because that thread is not checking anything. This is
+    the harder stop: it holds the live workers' orchestrators and calls
+    ``cancel()`` on each, which drops their model connections and, with Ollama,
+    makes the server abort the generation.
+
+    Held by the front-end (so Ctrl+C can reach it) and passed into the run (so
+    the run can register each worker as it starts). Every method is safe to
+    call from another thread, which is the entire reason it exists.
+    """
+
+    def __init__(self) -> None:
+        self._live: set = set()
+        self._lock = threading.Lock()
+        self._forced = False
+
+    def register(self, orchestrator) -> None:
+        with self._lock:
+            self._live.add(orchestrator)
+            already = self._forced
+        # Forced before this worker even opened its connection: cancel it now,
+        # so a worker starting during a force-stop does not slip through.
+        if already:
+            self._cancel(orchestrator)
+
+    def unregister(self, orchestrator) -> None:
+        with self._lock:
+            self._live.discard(orchestrator)
+
+    def force(self) -> None:
+        """Cancel every worker in flight, now."""
+        with self._lock:
+            self._forced = True
+            live = list(self._live)
+        for orchestrator in live:
+            self._cancel(orchestrator)
+
+    @property
+    def forced(self) -> bool:
+        return self._forced
+
+    @staticmethod
+    def _cancel(orchestrator) -> None:
+        try:
+            orchestrator.cancel()
+        except Exception:  # noqa: BLE001 - one worker that will not die is not worth the rest
+            logger.debug("force-cancelling a worker raised", exc_info=True)
+
+
 class FlockStopped(Exception):
     """Raised by nothing; reserved so callers can tell a stop from a failure."""
 
@@ -115,6 +168,7 @@ def run_flock(
     stop: threading.Event | None = None,
     on_event=None,
     io_for=None,
+    canceller: "Canceller | None" = None,
 ) -> FlockOutcome:
     """Run one round of a charter and report on it.
 
@@ -156,7 +210,8 @@ def run_flock(
             return WorkerReport(worker_id=worker.id, ok=False, error="stopped before it started")
         announce("started", worker)
         report = run_worker(
-            worker, cwd, config=config, io=io_for(worker) if io_for else None
+            worker, cwd, config=config, io=io_for(worker) if io_for else None,
+            canceller=canceller,
         )
         announce("finished", report)
         return report

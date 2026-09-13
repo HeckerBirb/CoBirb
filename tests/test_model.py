@@ -153,24 +153,65 @@ def test_supports_streaming_is_true():
     assert LocalModelProvider(model="llama3.1").supports_streaming() is True
 
 
-def test_stream_chat_yields_content_incrementally(monkeypatch):
-    chunks = [
+def _streaming_server(chunks):
+    """A local NDJSON server, since streaming now uses http.client directly.
+
+    These tests used to monkeypatch ``urllib.request.urlopen``; the switch to
+    ``http.client`` (so a stuck read can be interrupted by shutting the socket)
+    means that mock is never reached, so they run against a real socket now —
+    which also exercises the chunked-transfer reading the mock never did.
+
+    ``chat()`` calls ``/api/show`` before *every* request, streaming or not —
+    so this answers that one plainly and reserves the given ``chunks`` for
+    ``/api/chat``. Without the split, ``/api/show`` gets the same NDJSON body
+    and its ``_post`` fails to parse it as one JSON object; ``_show()`` happens
+    to swallow that failure today, but a test relying on an unrelated method's
+    error-swallowing to pass is a trap for whoever changes that method next.
+    """
+    import http.server
+    import threading
+
+    class _Fake(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_POST(self):
+            if self.path.endswith("/api/show"):
+                body = json.dumps({"parameters": "", "model_info": {}}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.send_response(200)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            for chunk in chunks:
+                line = (json.dumps(chunk) + "\n").encode()
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(line), line))
+                self.wfile.flush()
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+
+        def log_message(self, *args):
+            return None
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Fake)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{server.server_address[1]}"
+
+
+def test_stream_chat_yields_content_incrementally():
+    url = _streaming_server([
         {"message": {"role": "assistant", "content": "Hel"}, "done": False},
         {"message": {"role": "assistant", "content": "lo"}, "done": False},
         {"message": {"role": "assistant", "content": ""}, "done": True},
-    ]
-
-    def fake_urlopen(request, timeout=None):
-        return _FakeStreamResponse(chunks)
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    provider = LocalModelProvider(model="llama3.1")
-    pieces = list(provider.chat("system", "context", stream=True))
-    assert pieces == ["Hel", "lo"]
+    ])
+    provider = LocalModelProvider(model="llama3.1", base_url=url)
+    assert list(provider.chat("system", "context", stream=True)) == ["Hel", "lo"]
 
 
-def test_stream_chat_captures_tool_calls_from_final_chunk(monkeypatch):
-    chunks = [
+def test_stream_chat_captures_tool_calls_from_final_chunk():
+    url = _streaming_server([
         {"message": {"role": "assistant", "content": ""}, "done": False},
         {
             "message": {
@@ -180,26 +221,96 @@ def test_stream_chat_captures_tool_calls_from_final_chunk(monkeypatch):
             },
             "done": True,
         },
-    ]
-
-    def fake_urlopen(request, timeout=None):
-        return _FakeStreamResponse(chunks)
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    provider = LocalModelProvider(model="llama3.1")
+    ])
+    provider = LocalModelProvider(model="llama3.1", base_url=url)
     reply = provider.chat("system", "context", [_StubTool()], stream=True)
     list(reply)  # fully consume the generator so tool calls are captured
     assert provider.parse_tool_calls("") == [ToolCall(name="read_file", arguments={"path": "a.txt"})]
 
 
 def test_stream_chat_wraps_connection_errors(monkeypatch):
-    def fake_urlopen(request, timeout=None):
-        raise urllib.error.URLError("connection refused")
+    """The transport failure keeps the "is it running?" message, which is the
+    right question when the socket is dead.
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    provider = LocalModelProvider(model="llama3.1")
+    Forced rather than aimed at a real closed port: an unbound low port is
+    "connection refused" (fast) on a normal machine, but this sandbox's
+    network silently drops the packets instead, so the connect blocks for the
+    full 120s timeout baked into ``_connect``. Monkeypatching ``connect``
+    itself makes the failure immediate and independent of what any given
+    machine's network does with an unbound port.
+    """
+    import http.client
+
+    def refuse(self):
+        raise ConnectionRefusedError("connection refused")
+
+    monkeypatch.setattr(http.client.HTTPConnection, "connect", refuse)
+    provider = LocalModelProvider(model="llama3.1", base_url="http://127.0.0.1:1")
     with pytest.raises(RuntimeError, match="Could not reach the model provider"):
         list(provider.chat("system", "context", stream=True))
+
+
+def test_a_stuck_stream_can_be_cancelled_from_another_thread():
+    """The force-stop's foundation: a worker blocked waiting for the next token
+    must be interruptible. Closing the response is not enough — a blocked recv
+    only wakes on socket shutdown — so this guards the http.client rewrite that
+    made it possible."""
+    import http.server
+    import threading
+    import time
+
+    class _Hang(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_POST(self):
+            # chat() calls /api/show before every request, streaming or not —
+            # answer that one immediately, exactly as a healthy Ollama would,
+            # and only hang the actual generation. A handler that hangs on
+            # every POST indiscriminately never reaches the streaming call at
+            # all, and "stuck in /api/show" is a real but different bug (see
+            # _connect's docstring) from the one this test is about.
+            if self.path.endswith("/api/show"):
+                body = json.dumps({"parameters": "", "model_info": {}}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.send_response(200)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            line = (json.dumps({"message": {"content": "one "}}) + "\n").encode()
+            self.wfile.write(b"%x\r\n%s\r\n" % (len(line), line))
+            self.wfile.flush()
+            time.sleep(30)  # then hang, like a stuck generation
+
+        def log_message(self, *args):
+            return None
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Hang)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    provider = LocalModelProvider(model="m", base_url=f"http://127.0.0.1:{server.server_address[1]}")
+
+    received, error = [], []
+
+    def consume():
+        try:
+            for chunk in provider.chat("", "hi", stream=True):
+                received.append(chunk)
+        except Exception as exc:  # noqa: BLE001
+            error.append(exc)
+
+    worker = threading.Thread(target=consume, daemon=True)
+    worker.start()
+    time.sleep(1.0)  # let the first token arrive and the read block
+
+    provider.cancel()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()  # actually unblocked, not merely asked to stop
+    assert received == ["one "]
+    assert isinstance(error[0], RuntimeError)
+    assert "cancelled" in str(error[0])
 
 
 # --------------------------------------------------------------------------- #
@@ -658,7 +769,22 @@ def test_an_openai_style_nested_error_is_also_read():
         _Provider(model="m", base_url=url).chat("", "hi")
 
 
-def test_a_server_that_is_genuinely_not_there_still_asks_the_right_question():
-    """The old message was correct for this case, and only this case."""
+def test_a_server_that_is_genuinely_not_there_still_asks_the_right_question(monkeypatch):
+    """The old message was correct for this case, and only this case.
+
+    Forced rather than aimed at a real closed port, for the same reason as the
+    streaming version of this test: an unbound low port is "connection
+    refused" (fast) on a normal machine, but this sandbox's network silently
+    drops the packets instead, so a real connection attempt blocks for the
+    full 120s timeout. ``urllib.request.urlopen`` builds an
+    ``http.client.HTTPConnection`` under the hood, so the same monkeypatch
+    used for the streaming path works here too.
+    """
+    import http.client
+
+    def refuse(self):
+        raise ConnectionRefusedError("connection refused")
+
+    monkeypatch.setattr(http.client.HTTPConnection, "connect", refuse)
     with _pytest.raises(RuntimeError, match="Is Ollama running?"):
         _Provider(model="m", base_url="http://127.0.0.1:1").chat("", "hi")

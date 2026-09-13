@@ -859,6 +859,30 @@ class Orchestrator:
     def session_path(self) -> str | None:
         return self.session.path if self.session else None
 
+    def cancel(self) -> None:
+        """Interrupt whatever this orchestrator is doing right now.
+
+        Best-effort and safe to call from another thread — which is the whole
+        point, since the thread running the turn is blocked. Two things can be
+        blocking: a ``shell`` command (already interruptible, the same handle
+        Ctrl+C uses on an ordinary turn) and a model request (closing its
+        connection unblocks the read and tells the server to stop). Neither is
+        present on every orchestrator, so both are probed rather than assumed.
+        """
+        shell = self.tools.get("shell")
+        stop_shell = getattr(shell, "cancel_running", None)
+        if callable(stop_shell):
+            try:
+                stop_shell()
+            except Exception:  # noqa: BLE001 - a stuck turn is not worth a crash on the way out
+                logger.debug("shell cancel raised", exc_info=True)
+        stop_model = getattr(self.model, "cancel", None)
+        if callable(stop_model):
+            try:
+                stop_model()
+            except Exception:  # noqa: BLE001
+                logger.debug("model cancel raised", exc_info=True)
+
     def close(self) -> None:
         """Release anything this orchestrator started.
 

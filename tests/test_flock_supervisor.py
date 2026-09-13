@@ -11,7 +11,7 @@ import threading
 import time
 
 from cobirb.flock.charter import parse_charter
-from cobirb.flock.supervisor import check_partition, run_flock
+from cobirb.flock.supervisor import Canceller, check_partition, run_flock
 from cobirb.flock.worker import WorkerReport
 
 
@@ -304,3 +304,103 @@ def test_an_overlapping_partition_is_explained_rather_than_refused():
     assert not ok
     assert "shared.py" in message
     assert "both write it" in message
+
+
+# --------------------------------------------------------------------------- #
+# Canceller — the force-stop handle for workers blocked mid-model-call.
+#
+# The graceful `stop` Event only keeps new workers from starting; a worker
+# already blocked waiting on the model never checks anything, so the only way
+# to reach it is to hold its live orchestrator and call cancel() on it
+# directly. The interesting case is the race: a worker that starts *after*
+# force() was called must not slip through un-cancelled.
+# --------------------------------------------------------------------------- #
+class _FakeOrchestrator:
+    def __init__(self):
+        self.cancelled = 0
+
+    def cancel(self):
+        self.cancelled += 1
+
+
+def test_force_cancels_every_registered_worker():
+    canceller = Canceller()
+    a, b = _FakeOrchestrator(), _FakeOrchestrator()
+    canceller.register(a)
+    canceller.register(b)
+
+    canceller.force()
+
+    assert a.cancelled == 1
+    assert b.cancelled == 1
+
+
+def test_a_worker_that_never_registered_is_unaffected():
+    canceller = Canceller()
+    canceller.force()  # nothing registered yet; must not raise
+
+    assert canceller.forced
+
+
+def test_a_worker_registered_after_force_is_cancelled_immediately():
+    """The race this exists to close: a worker starting during a force-stop
+    must not slip through un-cancelled just because it was not live yet when
+    force() ran."""
+    canceller = Canceller()
+    canceller.force()
+
+    late = _FakeOrchestrator()
+    canceller.register(late)
+
+    assert late.cancelled == 1
+
+
+def test_unregistering_stops_further_force_calls_reaching_it():
+    canceller = Canceller()
+    worker = _FakeOrchestrator()
+    canceller.register(worker)
+    canceller.unregister(worker)
+
+    canceller.force()
+
+    assert worker.cancelled == 0
+
+
+def test_a_worker_whose_cancel_raises_does_not_block_the_others():
+    """One worker that will not die is not worth losing the rest."""
+    class _Exploding(_FakeOrchestrator):
+        def cancel(self):
+            raise RuntimeError("boom")
+
+    canceller = Canceller()
+    exploding = _Exploding()
+    fine = _FakeOrchestrator()
+    canceller.register(exploding)
+    canceller.register(fine)
+
+    canceller.force()  # must not raise
+
+    assert fine.cancelled == 1
+
+
+def test_force_is_reflected_in_a_worker_started_and_reported_from_run_flock(monkeypatch, tmp_path):
+    """Wired all the way through run_flock: force() reaches a live worker's
+    real orchestrator, not just a Canceller used in isolation."""
+    from cobirb.flock import supervisor
+
+    seen_cancellers = []
+
+    def fake_run_worker(worker, cwd, *, config=None, io=None, canceller=None):
+        seen_cancellers.append(canceller)
+        if canceller is not None:
+            canceller.register(_FakeOrchestrator())
+        return WorkerReport(worker_id=worker.id, ok=True, accepted=True)
+
+    monkeypatch.setattr(supervisor, "run_worker", fake_run_worker)
+    canceller = Canceller()
+
+    run_flock(
+        _charter(_two_ticket_project(tmp_path)), str(tmp_path), canceller=canceller
+    )
+
+    assert all(c is canceller for c in seen_cancellers)

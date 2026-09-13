@@ -45,6 +45,7 @@ from ..plugins.core import persona_shapes_voice, render
 from ..policy import PermissionError
 from ..typing import spi as cobirb_typing
 from .io_bridge import TuiIO
+from ..flock.supervisor import Canceller
 from .flock_bridge import TuiAsker, WorkerPaneIO
 from .panes import FlockPane, PluginsPane, SessionsPane
 from .screens import (
@@ -132,6 +133,11 @@ class CoBirbApp(App[None]):
         # ctrl+c sets: a model call in flight cannot be interrupted, so
         # stopping means no further Worker Birbs start.
         self._flock_stop: threading.Event | None = None
+        # Force-stop handle for workers stuck mid-model-call — set alongside
+        # _flock_stop for the duration of an engagement. The graceful Event
+        # above only keeps new workers from starting; this drops the model
+        # connections of the ones already running.
+        self._flock_canceller: "Canceller | None" = None
         # Worker id -> state, for the activity line's roll-up. Reset per
         # engagement so a previous flock's workers do not linger in it.
         self._flock_states: dict[str, str] = {}
@@ -609,6 +615,7 @@ class CoBirbApp(App[None]):
         self._turn_in_progress = True
         self.query_one("#prompt-input", PromptInput).disabled = True
         self._flock_stop = threading.Event()
+        self._flock_canceller = Canceller()
         self._flock_states = {}
         self.set_activity("Brainy Birb is planning…")
         self._run_flock(argument.strip())
@@ -879,6 +886,7 @@ class CoBirbApp(App[None]):
                 on_charter=lambda charter: self.call_from_thread(
                     self.prepare_flock_panes, charter
                 ),
+                canceller=self._flock_canceller,
                 password=self.password,
             )
         except Exception as exc:  # noqa: BLE001 - a failed flock is a message, not a crash
@@ -969,6 +977,7 @@ class CoBirbApp(App[None]):
 
     def _on_flock_finished(self, run) -> None:
         self._flock_stop = None
+        self._flock_canceller = None
         self.set_activity("")
         self._turn_in_progress = False
         pane = self.query_one(FlockPane)
@@ -1152,7 +1161,17 @@ class CoBirbApp(App[None]):
             # A flock is several agents deep in somebody's working tree, so
             # this asks first. An accidental Ctrl+C that silently abandoned a
             # run halfway would leave the tree in a state nobody chose.
-            self._confirm_flock_stop()
+            #
+            # Two presses, escalating. The first sets the graceful stop — no
+            # new workers, in-flight ones finish. But an in-flight worker
+            # blocked waiting on the model will never finish, so a second
+            # Ctrl+C once we are already stopping offers the hard stop: drop
+            # the model connections, which unsticks the workers and tells
+            # Ollama to abort.
+            if self._flock_stop.is_set():
+                self._confirm_flock_force()
+            else:
+                self._confirm_flock_stop()
             return
         if not self._turn_in_progress:
             self.action_help_quit()
@@ -1191,8 +1210,45 @@ class CoBirbApp(App[None]):
         if not confirmed:
             return
         stop.set()
-        self.query_one(FlockPane).set_status("Interrupting — waiting for workers to finish…", "bold yellow")
-        self.notify("Stopping the flock after the current workers finish.", title="Flock")
+        self.query_one(FlockPane).set_status(
+            "Interrupting — waiting for workers to finish. Ctrl+C again to force-stop.",
+            "bold yellow",
+        )
+        self.notify(
+            "Stopping after the current workers finish. Ctrl+C again to force-stop a "
+            "worker stuck on the model.",
+            title="Flock",
+        )
+
+    @work
+    async def _confirm_flock_force(self) -> None:
+        """Second Ctrl+C: force-stop workers that will not finish on their own.
+
+        A worker blocked waiting on the model never reaches the graceful stop,
+        because its thread is not checking anything. This drops its connection
+        to the model — which unsticks the read and, with Ollama, makes the
+        server abort the half-finished generation. Sharper than the graceful
+        stop, so it asks separately rather than doing it on the first press.
+        """
+        canceller = self._flock_canceller
+        if canceller is None:
+            return
+        confirmed = await self.push_screen_wait(
+            ConfirmModal(
+                "Force-stop the flock now?",
+                "This drops the connection to the model for every worker still "
+                "running, which unsticks a worker waiting on Ollama and tells Ollama "
+                "to stop generating.\n\n"
+                "Those workers end as failed. Whatever was already written to your "
+                "files stays written; use git to put it back.",
+                confirm_label="Force stop",
+            )
+        )
+        if not confirmed:
+            return
+        canceller.force()
+        self.query_one(FlockPane).set_status("Force-stopping…", "bold red")
+        self.notify("Dropping the model connections now.", title="Flock")
 
     def action_copy_selection(self) -> bool:
         """Copy whatever is selected in the transcript, if anything.
@@ -1241,9 +1297,14 @@ class CoBirbApp(App[None]):
         looked like the whole app had frozen); this fixes it for both.
         """
         if self._flock_stop is not None:
-            # Same reasoning as unsticking a shell command below: without
-            # this, quitting waits for every remaining Worker Birb to run.
+            # Same reasoning as unsticking a shell command below: without this,
+            # quitting waits for every remaining Worker Birb to run. Quitting
+            # is unambiguous, so it goes straight to the force-stop rather than
+            # the graceful one — a worker stuck on the model would otherwise
+            # hold the whole app open on the way out.
             self._flock_stop.set()
+            if self._flock_canceller is not None:
+                self._flock_canceller.force()
         if self._turn_in_progress:
             self._attempt_cancel()
         await super().action_quit()

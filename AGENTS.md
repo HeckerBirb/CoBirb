@@ -401,10 +401,17 @@ map; conventions reach a worker through the stub it is filling in, which doubles
 | `run.py` | The five stages, including the one approval. |
 | `tui/flock_bridge.py` | `TuiAsker` (modals answer the flock's questions) and `WorkerPaneIO`. |
 
-**File-level ownership needed no change to `Policy`.** `_within(path, base)` is
-`path == base or path.startswith(base + sep)`, so granting a *file* matches that file and nothing
-else. The "cannot list it, does not know it exists" property falls out of the same mechanism:
-`list_dir`, `glob` and `repo_map` all resolve to a directory, which is never granted.
+**Writes are strict; reads are project-wide.** A worker may change only the files its charter
+named — that is the isolation that matters, and what lets two workers run at once without
+clobbering each other. Reads were scoped just as tightly in the first version, on the theory that a
+worker "does not know the other files exist." The first real run showed what that actually bought:
+workers denied on every `list_dir` and `glob`, unable to orient themselves, burning turns on
+"permission denied" instead of the ticket. The knowledge isolation never depended on the read grant
+— the charter is never written to disk and the brief omits it, so a worker reading a sibling sees
+code, not the plan. Reads are now open to the whole working directory; only writes stay file-level,
+out of the same directory-level `Policy` machinery (`_within(path, base)` matches a path that *is*
+the granted one or sits beneath it, so granting a file matches that file and nothing else).
+`shell` is granted to no worker; its acceptance check is run *for* it instead.
 
 **A Worker Birb is not special** (§4n). `wiring.build_subagent` composes an ordinary run and
 differs in four places: policy handed in rather than read from config, no project context,
@@ -435,6 +442,30 @@ concurrency to 1, since honouring the choice means removing what made it unsafe.
 
 Undo is git's, deliberately (§12.1). Each engagement gets its own session file beside the main one,
 paired by a GUID; a new *round* continues that session rather than starting another.
+
+**A stuck Worker Birb can be force-stopped.** The graceful stop (an `Event` the supervisor already
+checks) only keeps *new* workers from starting — it cannot reach one already blocked waiting on the
+model, because that thread is not checking anything, which is exactly the state a user hit ("stuck
+waiting for Ollama... Ctrl+C says it'll stop after the worker finishes"). `Canceller`
+(`supervisor.py`) holds every live worker's orchestrator and calls `Orchestrator.cancel()` on each,
+which reaches the model provider's `cancel()`. `LocalModelProvider._stream_chat` opens its
+connection through `http.client` rather than `urllib` for exactly this: `urllib` hides the socket,
+and closing an `HTTPResponse` from another thread does **not** wake a blocked `recv` on Linux — only
+`socket.shutdown()` does, and that needs the real socket. Dropping the connection is also the signal
+that tells Ollama to stop generating; there is no per-request abort endpoint. The TUI escalates:
+first Ctrl+C is the graceful stop, a second once already stopping offers the force-stop, and quitting
+goes straight to it (no dialog to answer on the way out).
+
+⚠️ **The force-stop does not reach a hang inside `/api/show`.** `chat()` calls it before every
+request — streaming or not — to resolve the context window, and `_post` (which serves it, and the
+non-streaming `chat()`) deliberately stayed on plain `urllib` rather than moving to the same tracked
+socket as `_stream_chat`. Doing so would close this gap completely, at the cost of rewriting roughly
+30 existing tests in `test_model.py` that mock `urllib.request.urlopen` at that exact call — a large,
+mostly-mechanical diff for a narrow case. In practice this rarely bites: every Worker Birb turn goes
+through `_stream_chat` (streaming is on whenever an `io` adapter is attached and the provider
+supports it, which `HeadlessIO` plus this provider always are), and `/api/show` is a fast local
+metadata call that only hangs if the whole server is already wedged, not merely mid-generation. Left
+here rather than fixed silently or fixed at the cost of that diff without asking.
 
 ## 4n. Subagents are ordinary runs
 

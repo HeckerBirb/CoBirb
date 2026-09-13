@@ -396,12 +396,8 @@ def _run_models(config: Config, override: str | None) -> int:
     """
     print("Model roles:\n")
     for spec in describe_roles(config, override):
-        print(f"  {spec.describe()}")
-    print(
-        "\nEvery role falls back to 'default'. 'worker' is reserved for subagents\n"
-        "(v0.5.0) and has no caller yet — it resolves now so the config can be\n"
-        "written and checked before then. See 'cobirb help model'."
-    )
+        print(f"  - {spec.describe()}")
+    print()
     return EXIT_OK
 
 

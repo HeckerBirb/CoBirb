@@ -1258,3 +1258,87 @@ def test_redaction_can_be_turned_off_for_editing_a_credentials_file(tmp_path):
     ).run("read the env file", "sys", cwd=str(tmp_path))
 
     assert "AKIAIOSFODNN7EXAMPLE" in _tool_turn(session).content
+
+
+# --------------------------------------------------------------------------- #
+# Orchestrator.cancel() — force-stopping a turn that is blocked on the model
+# or a shell command, from another thread.
+#
+# The Flock's force-stop is what actually reaches these: a Worker Birb stuck
+# waiting on the model has no other way out, since the graceful stop only
+# keeps *new* workers from starting. Both probes are duck-typed (getattr, not
+# isinstance) so an orchestrator with neither a shell tool nor a cancellable
+# model degrades to a no-op instead of raising.
+# --------------------------------------------------------------------------- #
+class _CancellableModel(_DummyModel):
+    """Records whether ``cancel()`` was called, without actually blocking —
+    the model side of the mechanism is exercised for real in
+    test_model.py::test_a_stuck_stream_can_be_cancelled_from_another_thread."""
+
+    def __init__(self):
+        super().__init__()
+        self.cancel_calls = 0
+
+    def cancel(self):
+        self.cancel_calls += 1
+
+
+def test_cancel_reaches_a_cancellable_model(tmp_path):
+    model = _CancellableModel()
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
+
+    orchestrator.cancel()
+
+    assert model.cancel_calls == 1
+
+
+def test_cancel_reaches_a_running_shell_command(tmp_path):
+    shell = ShellTool(str(tmp_path))
+    orchestrator = Orchestrator(
+        model=_DummyModel(), tools={"shell": shell}, policy=Policy()
+    )
+    stopped = []
+    shell.cancel_running = lambda: stopped.append(True) or True
+
+    orchestrator.cancel()
+
+    assert stopped == [True]
+
+
+def test_cancel_is_a_no_op_with_neither_a_shell_tool_nor_a_cancellable_model(tmp_path):
+    """The common case — a plain model, no shell registered. Must not raise:
+    a force-stop attempted against a turn that already finished, or against
+    a model/IO stub in a test, is not an error."""
+    orchestrator = Orchestrator(model=_DummyModel(), tools={}, policy=Policy())
+
+    orchestrator.cancel()  # must not raise
+
+
+def test_cancel_survives_a_shell_cancel_that_raises(tmp_path):
+    shell = ShellTool(str(tmp_path))
+    shell.cancel_running = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+    orchestrator = Orchestrator(
+        model=_CancellableModel(), tools={"shell": shell}, policy=Policy()
+    )
+
+    orchestrator.cancel()  # must not raise, and must still reach the model
+
+    assert orchestrator.model.cancel_calls == 1
+
+
+def test_cancel_survives_a_model_cancel_that_raises(tmp_path):
+    shell = ShellTool(str(tmp_path))
+    stopped = []
+    shell.cancel_running = lambda: stopped.append(True) or True
+
+    class _Exploding(_CancellableModel):
+        def cancel(self):
+            raise RuntimeError("boom")
+
+    orchestrator = Orchestrator(
+        model=_Exploding(), tools={"shell": shell}, policy=Policy()
+    )
+
+    orchestrator.cancel()  # must not raise, and must still reach the shell
+
+    assert stopped == [True]

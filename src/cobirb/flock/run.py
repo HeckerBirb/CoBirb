@@ -33,7 +33,7 @@ from .brainy import PROPOSE_CHARTER, ProposeCharterTool, plan_prompt, round_summ
 from .charter import Charter
 from .preflight import missing_models
 from .probe import ProbeResult, probe_concurrency
-from .supervisor import FlockOutcome, check_partition, run_flock
+from .supervisor import Canceller, FlockOutcome, check_partition, run_flock
 
 logger = logging.getLogger("cobirb")
 
@@ -114,6 +114,7 @@ def run_flock_session(
     password: str | None = None,
     io_for: Callable[[Any], Any] | None = None,
     on_charter: Callable[[Charter], None] | None = None,
+    canceller: Canceller | None = None,
 ) -> FlockRun:
     """Engage flock mode for one objective, and come back with a report.
 
@@ -136,7 +137,7 @@ def run_flock_session(
 
     try:
         return _drive(run, orchestrator, objective, cwd, ask, config, stop, on_event,
-                      plan_turns, probe, io_for, on_charter)
+                      plan_turns, probe, io_for, on_charter, canceller)
     finally:
         _close_branch(main, flock_session, run, password)
 
@@ -154,6 +155,7 @@ def _drive(
     probe: bool,
     io_for: Callable[[Any], Any] | None = None,
     on_charter: Callable[[Charter], None] | None = None,
+    canceller: Canceller | None = None,
 ) -> FlockRun:
     """The five stages. Split out so the branch above closes on every path."""
     # ---- 0. Can this run at all? ---------------------------------------- #
@@ -238,7 +240,7 @@ def _drive(
     ask.show(f"Fanning out {len(charter.workers)} ticket(s), {concurrency} at a time…")
     outcome = run_flock(
         charter, cwd, config=config, concurrency=concurrency, stop=stop,
-        on_event=on_event, io_for=io_for,
+        on_event=on_event, io_for=io_for, canceller=canceller,
     )
     run.outcome = outcome
     ask.show(outcome.describe())
