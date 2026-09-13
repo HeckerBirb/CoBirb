@@ -24,7 +24,7 @@ opt a capability in.**
 
 ## Status
 
-🚧 **v0.5.0.** The core loop, built-in tools, the permission model,
+🚧 **v0.5.1.** The core loop, built-in tools, the permission model,
 encrypted sessions and a local Ollama provider — plus the things that make it usable on real
 work: context compaction so long sessions don't degrade, project instructions, `.gitignore`
 awareness, a `repo_map` tool so it can find its way around, a diff shown before any write,

@@ -171,7 +171,7 @@ def _transcript_text(app: CoBirbApp) -> str:
 
 
 async def _submit(pilot, app: CoBirbApp, text: str) -> None:
-    prompt_input = app.query_one("#prompt-input", Input)
+    prompt_input = app.query_one("#prompt-input", PromptInput)
     prompt_input.value = text
     await pilot.press("enter")
     await pilot.pause()
@@ -269,7 +269,7 @@ async def test_submitting_a_prompt_disables_the_input_runs_the_turn_and_re_enabl
         await pilot.pause()
         await _submit(pilot, app, "hello there")
 
-        prompt_input = app.query_one("#prompt-input", Input)
+        prompt_input = app.query_one("#prompt-input", PromptInput)
         await _until(pilot, lambda: not prompt_input.disabled)
 
         assert [(c["prompt"], c["persona"]) for c in orchestrator.calls] == [("hello there", "CoBirb")]
@@ -288,7 +288,7 @@ async def test_a_blank_submission_never_builds_an_orchestrator(monkeypatch):
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "   ")
-        assert not app.query_one("#prompt-input", Input).disabled
+        assert not app.query_one("#prompt-input", PromptInput).disabled
 
 
 async def test_the_orchestrator_is_built_once_and_reused_across_turns(monkeypatch):
@@ -302,7 +302,7 @@ async def test_the_orchestrator_is_built_once_and_reused_across_turns(monkeypatc
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        prompt_input = app.query_one("#prompt-input", Input)
+        prompt_input = app.query_one("#prompt-input", PromptInput)
         for prompt in ("first", "second"):
             await _submit(pilot, app, prompt)
             await _until(pilot, lambda: not prompt_input.disabled)
@@ -322,7 +322,7 @@ async def test_the_tui_passes_its_own_io_bridge_into_the_orchestrator(monkeypatc
         await pilot.pause()
         await _submit(pilot, app, "hello")
         await _until(pilot, lambda: bool(builds))
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert builds[0]["io_factory"]() is app.io_bridge
 
@@ -335,7 +335,7 @@ async def test_a_permission_error_is_reported_and_the_input_comes_back(monkeypat
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "do it")
-        prompt_input = app.query_one("#prompt-input", Input)
+        prompt_input = app.query_one("#prompt-input", PromptInput)
         await _until(pilot, lambda: not prompt_input.disabled)
 
         assert "blocked" in _transcript_text(app)
@@ -349,7 +349,7 @@ async def test_an_unexpected_error_is_reported_and_the_input_comes_back(monkeypa
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "do it")
-        prompt_input = app.query_one("#prompt-input", Input)
+        prompt_input = app.query_one("#prompt-input", PromptInput)
         await _until(pilot, lambda: not prompt_input.disabled)
 
         text = _transcript_text(app)
@@ -371,7 +371,7 @@ async def test_a_failure_while_building_the_orchestrator_still_re_enables_the_in
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "hello")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
 
 async def test_the_session_is_saved_after_a_successful_turn(monkeypatch):
@@ -381,7 +381,7 @@ async def test_the_session_is_saved_after_a_successful_turn(monkeypatch):
     app = _make_app(session_path="/tmp/s.json", password="pw")
     async with app.run_test() as pilot:
         await pilot.pause()
-        prompt_input = app.query_one("#prompt-input", Input)
+        prompt_input = app.query_one("#prompt-input", PromptInput)
         for prompt in ("first", "second"):
             await _submit(pilot, app, prompt)
             await _until(pilot, lambda: not prompt_input.disabled)
@@ -397,7 +397,7 @@ async def test_nothing_is_saved_when_no_session_path_was_given(monkeypatch):
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "hello")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert orchestrator.session.saved_with == []
 
@@ -447,7 +447,7 @@ async def test_ctrl_c_cancels_a_stuck_turn_and_the_input_comes_back(monkeypatch)
         await _until(pilot, lambda: app._turn_in_progress)
 
         await pilot.press("ctrl+c")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert orchestrator.cancel_calls == 1
 
@@ -468,9 +468,9 @@ async def test_ctrl_c_with_nothing_cancellable_does_not_touch_the_turn(monkeypat
         await pilot.press("ctrl+c")
         await pilot.pause()
 
-        assert app.query_one("#prompt-input", Input).disabled  # still running
+        assert app.query_one("#prompt-input", PromptInput).disabled  # still running
         orchestrator._release.set()  # let it finish so the test cleans up promptly
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
 
 async def test_ctrl_c_with_no_turn_running_falls_back_to_the_quit_hint(monkeypatch):
@@ -567,7 +567,7 @@ async def test_persona_switch_updates_the_status_bar_and_later_turns(monkeypatch
 
         await _submit(pilot, app, "hello")
         await _until(pilot, lambda: bool(builds))
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         # The switch has to change the system prompt too, not just the label.
         assert builds[0]["persona"] == "Professional"
@@ -623,7 +623,7 @@ async def test_plan_on_reaches_orchestrator_run(monkeypatch):
         await pilot.pause()
         await _submit(pilot, app, "/plan on")
         await _submit(pilot, app, "hello")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert orchestrator.calls[0]["plan_mode"] is True
 
@@ -681,7 +681,7 @@ async def test_a_question_mark_inside_a_real_prompt_is_not_a_help_request(monkey
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "what is a bird?")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert not isinstance(app.screen, HelpModal)
         assert orchestrator.calls[0]["prompt"] == "what is a bird?"
@@ -718,7 +718,7 @@ async def test_the_approval_modal_returns_the_decision_to_the_worker(monkeypatch
 
         await pilot.press(key)
         await _until(pilot, lambda: bool(decisions))
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert decisions == [expected]
 
@@ -739,7 +739,7 @@ async def test_the_approval_modal_buttons_resolve_the_same_way(monkeypatch, butt
         await _until(pilot, lambda: isinstance(app.screen, ApprovalModal))
         await pilot.click(button)
         await _until(pilot, lambda: bool(decisions))
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert decisions == [expected]
 
@@ -777,7 +777,7 @@ async def test_streamed_tokens_preview_live_and_land_in_the_transcript(monkeypat
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "say hello")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert seen_mid_stream == ["Noah: hello "]
         assert "hello world" in _transcript_text(app)
@@ -799,7 +799,7 @@ async def test_a_panel_flushes_the_stream_first_so_ordering_is_preserved(monkeyp
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "read the note")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         text = _transcript_text(app)
         assert text.index("let me check.") < text.index("banana")
@@ -824,7 +824,7 @@ async def test_the_spinner_label_shows_and_clears_on_the_status_bar(monkeypatch)
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "think")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert observed == ["Noah is thinking…"]
         assert app.query_one(StatusBar).busy == ""
@@ -880,7 +880,7 @@ async def test_the_final_answer_falls_back_to_the_bridge_for_an_adapter_without_
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "hello")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert "ok" in _transcript_text(app)
 
@@ -995,7 +995,7 @@ async def test_selecting_a_model_updates_status_bar_and_writes_a_notice(monkeypa
         app.screen.query_one("#model-options", OptionList).focus()
         await pilot.press("enter")
         await _until(pilot, lambda: app.model_name == "llama3.1")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert "llama3.1" in str(app.query_one(StatusBar).render())
         assert "Model set to llama3.1." in _transcript_text(app)
@@ -1013,7 +1013,7 @@ async def test_selecting_a_model_hot_swaps_an_existing_orchestrators_model(monke
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "hello")  # builds the orchestrator
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
         assert app.orchestrator is orchestrator
 
         await _submit(pilot, app, "/model")
@@ -1035,7 +1035,7 @@ async def test_cancelling_the_picker_leaves_the_model_unchanged(monkeypatch):
         await _until(pilot, lambda: isinstance(app.screen, ModelPickerModal))
         await pilot.press("escape")
         await _until(pilot, lambda: not isinstance(app.screen, ModelPickerModal))
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert app.model_name == "gemma4"
 
@@ -1046,7 +1046,7 @@ async def test_model_command_with_an_empty_list_shows_a_message_and_no_picker(mo
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "/model")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert not isinstance(app.screen, ModelPickerModal)
         assert "no models available" in _transcript_text(app)
@@ -1058,7 +1058,7 @@ async def test_model_command_reports_a_fetch_failure(monkeypatch):
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "/model")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         text = _transcript_text(app)
         assert "could not list models" in text
@@ -1367,7 +1367,7 @@ async def test_resuming_discards_an_already_built_orchestrator(monkeypatch):
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "hello")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
         assert app.orchestrator is orchestrator
         assert [(c["prompt"], c["persona"]) for c in orchestrator.calls] == [("hello", "CoBirb")]
 
@@ -1692,19 +1692,26 @@ async def test_the_transcript_allows_text_selection():
 # --------------------------------------------------------------------------- #
 # Telling "you" and the assistant apart
 # --------------------------------------------------------------------------- #
-async def test_a_submitted_prompt_is_marked_and_fenced_by_blank_lines(monkeypatch):
+async def test_a_submitted_prompt_is_marked_and_closed_by_a_rule(monkeypatch):
+    """Open space above, a rule below.
+
+    The rule replaced a blank line, and does the job the blank line was doing
+    better: both halves of an exchange are a `>` in different colours, which
+    is enough to tell whose turn a line is and not enough to find the seam
+    when scrolling back. Closing the prompt says the answer follows.
+    """
     monkeypatch.setattr(wiring, "build_orchestrator", _stub_build())
 
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "hello there")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         lines = _transcript_text(app).splitlines()
         marked = next(i for i, line in enumerate(lines) if line.startswith("> hello there"))
         assert lines[marked - 1].strip() == ""
-        assert lines[marked + 1].strip() == ""
+        assert set(lines[marked + 1].strip()) == {"─"}
         assert "You:" not in _transcript_text(app)
 
 
@@ -1924,7 +1931,7 @@ async def test_prompts_and_replies_share_a_marker_in_different_colours(monkeypat
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "Hi")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         marked = _marker_colours(app)
         assert [body for _, body in marked] == ["Hi", "ok"]  # prompt, then the reply
@@ -2007,7 +2014,7 @@ async def test_a_streamed_reply_carries_no_persona_label(monkeypatch):
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "Hi")
-        await _until(pilot, lambda: not app.query_one("#prompt-input", Input).disabled)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         text = _transcript_text(app)
         assert "CoBirb:" not in text
@@ -2166,3 +2173,167 @@ async def test_a_command_prefix_is_matched_as_a_whole_word(monkeypatch):
         await _until(pilot, lambda: bool(orchestrator.calls))
 
         assert orchestrator.calls[0]["prompt"] == "/planned obsolescence"
+
+
+# --------------------------------------------------------------------------- #
+# The multi-line prompt box.
+#
+# It was an `Input`: one line, scrolling sideways for ever, which made
+# composing a paragraph — a flock objective, say — genuinely hard. Becoming a
+# `TextArea` took back both arrow keys and `enter`, so most of what is tested
+# here is that those still mean what they meant.
+# --------------------------------------------------------------------------- #
+async def test_the_box_grows_with_wrapped_text_and_stops_at_eight_lines():
+    """Wrapped lines, not newlines: one long paragraph should grow the box,
+    which is the case that made a single-line field painful."""
+    app = _make_app()
+    async with app.run_test(size=(60, 24)) as pilot:
+        await pilot.pause()
+        box = app.query_one("#prompt-input", PromptInput)
+
+        assert box.region.height == 1
+        box.text = "x" * 250
+        await pilot.pause()
+        await pilot.pause()
+        grew = box.region.height
+
+        box.text = "\n".join(f"line {n}" for n in range(30))
+        await pilot.pause()
+        await pilot.pause()
+
+        assert 1 < grew <= PromptInput.MAX_LINES
+        assert box.region.height == PromptInput.MAX_LINES  # then it scrolls
+
+
+async def test_the_box_shrinks_back_when_it_is_cleared():
+    app = _make_app()
+    async with app.run_test(size=(60, 24)) as pilot:
+        await pilot.pause()
+        box = app.query_one("#prompt-input", PromptInput)
+        box.text = "a\nb\nc"
+        await pilot.pause()
+        await pilot.pause()
+
+        box.clear()
+        await pilot.pause()
+
+        assert box.region.height == 1
+
+
+async def test_enter_submits_rather_than_inserting_a_newline(monkeypatch):
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build())
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        box = app.query_one("#prompt-input", PromptInput)
+        box.focus()
+        for character in "hello":
+            await pilot.press(character)
+
+        await pilot.press("enter")
+        await _until(pilot, lambda: not box.disabled)
+
+        assert box.text == ""
+        assert box.prompt_history.entries == ["hello"]
+
+
+@pytest.mark.parametrize("key", PromptInput.NEWLINE_KEYS)
+async def test_every_newline_key_inserts_a_newline(key):
+    """Three keys for one action. shift+enter is the one people reach for and
+    the one that cannot be relied on — many terminals send it identically to
+    enter — so there has to be another way to type a second line."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        box = app.query_one("#prompt-input", PromptInput)
+        box.focus()
+
+        await pilot.press("a")
+        await pilot.press(key)
+        await pilot.press("b")
+        await pilot.pause()
+
+        assert box.text == "a\nb"
+
+
+async def test_a_blank_box_submits_nothing():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        box = app.query_one("#prompt-input", PromptInput)
+        box.focus()
+        box.text = "   \n  "
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert box.prompt_history.entries == []
+
+
+async def test_up_moves_the_cursor_when_there_is_a_line_above_it():
+    """The shell convention: recall from the edges, move in the middle. Doing
+    it the other way would make a multi-line prompt uneditable."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        box = app.query_one("#prompt-input", PromptInput)
+        box.prompt_history.add("an older prompt")
+        box.focus()
+        box.text = "one\ntwo"
+        box.move_cursor(box.document.end)
+        await pilot.pause()
+
+        await pilot.press("up")
+        await pilot.pause()
+
+        assert box.text == "one\ntwo"  # not recalled
+        assert box.cursor_location[0] == 0  # moved
+
+
+async def test_up_recalls_once_the_cursor_is_on_the_first_line():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        box = app.query_one("#prompt-input", PromptInput)
+        box.prompt_history.add("an older prompt")
+        box.focus()
+        await pilot.pause()
+
+        await pilot.press("up")
+        await pilot.pause()
+
+        assert box.text == "an older prompt"
+
+
+async def test_down_moves_the_cursor_when_there_is_a_line_below_it():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        box = app.query_one("#prompt-input", PromptInput)
+        box.focus()
+        box.text = "one\ntwo"
+        box.move_cursor((0, 0))
+        await pilot.pause()
+
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert box.cursor_location[0] == 1
+        assert box.text == "one\ntwo"
+
+
+async def test_the_undo_stack_is_not_shadowed_by_the_prompt_history():
+    """`TextArea` already owns an attribute called `history` for its undo
+    stack. Shadowing it made simply focusing the widget raise — a collision
+    worth a test, because the failure lands nowhere near the assignment."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        box = app.query_one("#prompt-input", PromptInput)
+
+        box.focus()
+        await pilot.pause()
+
+        assert box.has_focus
+        assert hasattr(box.history, "checkpoint")  # TextArea's, intact
+        assert isinstance(box.prompt_history, PromptHistory)  # ours, alongside

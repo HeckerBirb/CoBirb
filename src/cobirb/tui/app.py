@@ -32,7 +32,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
-from textual.widgets import Footer, Header, Input, RichLog, TabbedContent, TabPane
+from textual.widgets import Footer, Header, RichLog, TabbedContent, TabPane
 
 from .. import session
 from ..help_text import HELP_TEXT, HELP_TOPICS
@@ -55,7 +55,7 @@ from .screens import (
     PersonaPickerModal,
     TextPromptModal,
 )
-from .widgets import PromptInput, StatusBar, StreamPreview, TranscriptLog
+from .widgets import ActivityBar, PromptInput, StatusBar, StreamPreview, TranscriptLog
 
 _TAB_ORDER = ["current", "flock", "sessions", "plugins"]
 
@@ -132,6 +132,9 @@ class CoBirbApp(App[None]):
         # ctrl+c sets: a model call in flight cannot be interrupted, so
         # stopping means no further Worker Birbs start.
         self._flock_stop: threading.Event | None = None
+        # Worker id -> state, for the activity line's roll-up. Reset per
+        # engagement so a previous flock's workers do not linger in it.
+        self._flock_states: dict[str, str] = {}
         # Resolved once, for the status bar — the orchestrator that would
         # know the real name doesn't exist yet at mount time.
         self.resolved_model_name = wiring.resolve_model_name(model_name, cwd)
@@ -154,7 +157,7 @@ class CoBirbApp(App[None]):
                 yield TranscriptLog(id="transcript", markup=False, highlight=False, wrap=True)
                 yield StreamPreview(id="streaming-preview")
                 with Container(id="prompt-box"):
-                    yield PromptInput(id="prompt-input", placeholder="Message CoBirb…")
+                    yield PromptInput(id="prompt-input")
             with TabPane("Flock", id="flock"):
                 yield FlockPane()
             with TabPane("Sessions", id="sessions"):
@@ -166,6 +169,7 @@ class CoBirbApp(App[None]):
         # other — so they share one docked, two-row container instead: the
         # live status line, and Textual's key-binding bar under it.
         with Container(id="footer-bar"):
+            yield ActivityBar(id="activity-bar")
             yield StatusBar(id="status-bar")
             yield Footer()
 
@@ -203,7 +207,7 @@ class CoBirbApp(App[None]):
                 "/plan on|off toggles plan mode · ? or /help for help"
             )
         )
-        self.query_one("#prompt-input", Input).focus()
+        self.query_one("#prompt-input", PromptInput).focus()
 
         self.refresh_plugins_pane()
         self.refresh_sessions_pane()
@@ -339,7 +343,18 @@ class CoBirbApp(App[None]):
             )
 
     def set_busy(self, label: str) -> None:
+        """The orchestrator is waiting on the model.
+
+        Drives the activity line as well as the status bar's suffix. The
+        suffix alone was the original state of this and was reported as no
+        indication at all — it competes with persona, model, plan mode and cwd
+        on one dim row. During a flock the activity line is already showing
+        the roll-up of who is doing what, which is more informative than one
+        agent's "thinking", so that is left alone.
+        """
         self.query_one(StatusBar).busy = label
+        if self._flock_stop is None:
+            self.set_activity(label)
 
     async def request_approval(
         self,
@@ -361,9 +376,16 @@ class CoBirbApp(App[None]):
     # ------------------------------------------------------------------ #
     # Input handling
     # ------------------------------------------------------------------ #
-    def on_input_submitted(self, event: Input.Submitted) -> None:
+    def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
+        """A prompt was submitted with enter.
+
+        ``PromptInput`` is a ``TextArea`` now, which has no ``Submitted`` of
+        its own — the widget posts one so this handler reads as it did when it
+        was an ``Input``. See ``PromptInput`` for why enter had to be claimed
+        rather than bound over.
+        """
         prompt = event.value.strip()
-        event.input.value = ""
+        event.input.clear()
         if not prompt:
             return
 
@@ -371,8 +393,7 @@ class CoBirbApp(App[None]):
         # exactly the kind of thing worth arrowing back to, and a history that
         # only remembered messages sent to the model would drop every command
         # the moment it ran.
-        if isinstance(event.input, PromptInput):
-            event.input.remember(prompt)
+        event.input.remember(prompt)
 
         if self._dispatch_command(prompt):
             return
@@ -586,8 +607,10 @@ class CoBirbApp(App[None]):
             return
         self.query_one(TabbedContent).active = "flock"
         self._turn_in_progress = True
-        self.query_one("#prompt-input", Input).disabled = True
+        self.query_one("#prompt-input", PromptInput).disabled = True
         self._flock_stop = threading.Event()
+        self._flock_states = {}
+        self.set_activity("Brainy Birb is planning…")
         self._run_flock(argument.strip())
 
     def _cmd_commands(self, argument: str) -> None:
@@ -613,7 +636,7 @@ class CoBirbApp(App[None]):
         self._turn_in_progress = False
         self._flush_stream()
         self.set_busy("")
-        prompt_input = self.query_one("#prompt-input", Input)
+        prompt_input = self.query_one("#prompt-input", PromptInput)
         prompt_input.disabled = False
         prompt_input.focus()
 
@@ -754,7 +777,7 @@ class CoBirbApp(App[None]):
             self.call_from_thread(self._set_prompt_disabled, False)
 
     def _set_prompt_disabled(self, disabled: bool) -> None:
-        prompt_input = self.query_one("#prompt-input", Input)
+        prompt_input = self.query_one("#prompt-input", PromptInput)
         prompt_input.disabled = disabled
         if not disabled:
             prompt_input.focus()
@@ -872,11 +895,14 @@ class CoBirbApp(App[None]):
 
     def _apply_flock_event(self, kind: str, payload) -> None:
         pane = self.query_one(FlockPane)
+        worker_id = getattr(payload, "id", None) or getattr(payload, "worker_id", "")
         if kind == "started":
+            self._flock_states[worker_id] = "running"
             worker = pane.pane(payload.id)
             if worker is not None:
                 worker.set_state("running")
         elif kind == "finished":
+            self._flock_states[worker_id] = "done" if payload.complete else "failed"
             worker = pane.pane(payload.worker_id)
             if worker is not None:
                 worker.set_state("done" if payload.complete else "failed")
@@ -889,12 +915,39 @@ class CoBirbApp(App[None]):
                 # the work standing up to review.
                 if not payload.clean:
                     worker.set_state("flagged")
+                    self._flock_states[worker_id] = "flagged"
                 worker.write(render.build_notice(payload.describe()))
+        if self._flock_states:
+            self.set_activity("Flock running", self._flock_activity())
 
     def flock_progress(self, text: str) -> None:
         """Progress from the flock itself. Main thread only."""
-        self.query_one(FlockPane).set_status(text.splitlines()[0][:120])
+        headline = text.splitlines()[0][:120]
+        self.query_one(FlockPane).set_status(headline)
+        self.set_activity(headline)
         self.write_transcript(render.build_notice(text))
+
+    def set_activity(self, activity: str, detail: str = "") -> None:
+        """What is running right now, on the line above the status bar.
+
+        Separate from ``set_busy``, which is a suffix on an already-crowded
+        line. This is the one a person watching a quiet screen actually reads.
+        """
+        bar = self.query_one(ActivityBar)
+        bar.activity = activity
+        bar.detail = detail
+
+    def _flock_activity(self) -> str:
+        """A roll-up of who is doing what, for the activity line.
+
+        The whole flock on one line rather than only the most recent event:
+        during a fan-out the interesting question is not "what just happened"
+        but "is anything still going", and that needs every worker visible at
+        once.
+        """
+        order = {"running": 0, "waiting": 1, "flagged": 2, "failed": 3, "done": 4}
+        states = sorted(self._flock_states.items(), key=lambda kv: (order.get(kv[1], 9), kv[0]))
+        return " · ".join(f"{name} {state}" for name, state in states)
 
     def flock_write(self, worker_id: str, renderable) -> None:
         """One renderable into one Worker Birb's pane. Main thread only."""
@@ -916,6 +969,7 @@ class CoBirbApp(App[None]):
 
     def _on_flock_finished(self, run) -> None:
         self._flock_stop = None
+        self.set_activity("")
         self._turn_in_progress = False
         pane = self.query_one(FlockPane)
         if run is None:
@@ -930,7 +984,7 @@ class CoBirbApp(App[None]):
             )
         if run is not None and run.report:
             self.write_transcript(render.build_assistant_message(run.report))
-        prompt_input = self.query_one("#prompt-input", Input)
+        prompt_input = self.query_one("#prompt-input", PromptInput)
         prompt_input.disabled = False
         prompt_input.focus()
 
@@ -1021,7 +1075,7 @@ class CoBirbApp(App[None]):
         # order to keep talking, and leaving the user on the Sessions tab
         # makes them go and find it.
         self.query_one(TabbedContent).active = "current"
-        self.query_one("#prompt-input", Input).focus()
+        self.query_one("#prompt-input", PromptInput).focus()
 
     @work(thread=True, exclusive=True, group="session")
     def _new_session_worker(self) -> None:

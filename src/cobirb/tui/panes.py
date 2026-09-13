@@ -13,13 +13,14 @@ import time
 from typing import TYPE_CHECKING, cast
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, HorizontalScroll, Vertical
 from rich.text import Text
 from textual.widgets import Button, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
 
 from .. import session
 from ..plugins.core import render
+from .widgets import TranscriptLog
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, avoids an import cycle
     from .. import cli
@@ -130,7 +131,11 @@ class WorkerPane(Vertical):
     def compose(self) -> ComposeResult:
         yield Static(self._title("waiting"), classes="worker-title")
         yield Static(self._scope, classes="worker-scope")
-        yield RichLog(
+        # TranscriptLog, not a plain RichLog: a stock one cannot be selected
+        # or copied out of at all (see its docstring). A worker's pane is
+        # where its shortcoming report and its review land, and a report you
+        # cannot copy out of is a report you have to retype.
+        yield TranscriptLog(
             id=f"worker-log-{self._worker_id}", markup=False, highlight=False, wrap=True,
             classes="worker-log",
         )
@@ -149,7 +154,7 @@ class WorkerPane(Vertical):
         self.query_one(".worker-title", Static).update(self._title(state))
 
     def write(self, renderable) -> None:
-        self.query_one(RichLog).write(renderable)
+        self.query_one(TranscriptLog).write(renderable)
 
 
 class FlockPane(Vertical):
@@ -165,14 +170,18 @@ class FlockPane(Vertical):
             Text("No flock running. Type /flock <objective> to start one.", style="dim"),
             id="flock-status",
         )
-        yield Horizontal(id="flock-workers")
+        # HorizontalScroll, and each pane has a *minimum* width rather than an
+        # equal share. Three agents at 1fr each squeeze the text past reading,
+        # and a pane too narrow to read is the same as no pane — so they keep
+        # their width and the row scrolls sideways instead.
+        yield HorizontalScroll(id="flock-workers")
 
     def set_status(self, text: str, style: str = "") -> None:
         self.query_one("#flock-status", Static).update(Text(text, style=style or "bold"))
 
     async def begin(self, charter) -> None:
         """Lay out one pane per worker in the approved charter."""
-        row = self.query_one("#flock-workers", Horizontal)
+        row = self.query_one("#flock-workers", HorizontalScroll)
         await row.remove_children()
         for worker in charter.workers:
             scope = "writes " + ", ".join(worker.writes)
@@ -187,5 +196,5 @@ class FlockPane(Vertical):
             return None
 
     async def clear(self) -> None:
-        await self.query_one("#flock-workers", Horizontal).remove_children()
+        await self.query_one("#flock-workers", HorizontalScroll).remove_children()
         self.set_status("No flock running. Type /flock <objective> to start one.", "dim")

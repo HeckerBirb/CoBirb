@@ -267,7 +267,39 @@ def build_user_message(text: str) -> Text:
     for line in lines[1:]:
         body.append("\n" + _INDENT)
         body.append(line, style="bold")
-    return body
+    # A rule under the prompt, not between exchanges. Both markers are a `>`
+    # in different colours, which is enough to tell whose turn a line is and
+    # not enough to find the seam when scrolling — the complaint that prompted
+    # this was "it's hard to tell where my message ends and the reply begins".
+    # Closing the prompt answers exactly that: whatever follows the rule is
+    # the answer to what precedes it.
+    return Group(body, ExchangeRule())
+
+
+class ExchangeRule:
+    """A dim rule at 80% width, indented to sit under the message text.
+
+    Proportional rather than fixed, so it still reads as a divider in a narrow
+    pane and does not run the whole way across a wide terminal — a full-width
+    rule reads as a section break between exchanges, which is a different and
+    louder thing than "the answer follows".
+
+    A renderable rather than a pre-built string because the width is not known
+    until it is drawn, and the transcript is resizable.
+    """
+
+    # Aligned with the text after the "> " marker, so the rule starts where
+    # the words start rather than under the marker.
+    INDENT = len(_INDENT)
+    FRACTION = 0.8
+    STYLE = "dim"
+
+    def __rich_console__(self, console: "Console", options: "ConsoleOptions") -> "RenderResult":
+        available = max(options.max_width - self.INDENT, 1)
+        width = max(int(available * self.FRACTION), 8)
+        yield Segment(" " * self.INDENT)
+        yield Segment("─" * width, console.get_style(self.STYLE))
+        yield Segment("\n")
 
 
 def build_notice(text: str) -> Text:

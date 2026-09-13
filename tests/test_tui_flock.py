@@ -18,6 +18,7 @@ from cobirb.flock.review import RedCheck, Review
 from cobirb.flock.supervisor import FlockOutcome
 from cobirb.flock.worker import WorkerReport
 from cobirb.tui.app import CoBirbApp
+from cobirb.tui.widgets import PromptInput
 from cobirb.tui.flock_bridge import TuiAsker, WorkerPaneIO
 from cobirb.tui.panes import FlockPane, WorkerPane
 from cobirb.tui.screens import ConfirmModal
@@ -366,14 +367,14 @@ async def test_the_finished_report_re_enables_the_prompt():
         await _flock_tab(pilot, app)
         app._flock_stop = threading.Event()
         app._turn_in_progress = True
-        app.query_one("#prompt-input", Input).disabled = True
+        app.query_one("#prompt-input", PromptInput).disabled = True
 
         app._on_flock_finished(
             FlockRun(charter=_CHARTER, outcome=FlockOutcome(charter=_CHARTER), report="done")
         )
         await pilot.pause()
 
-        assert not app.query_one("#prompt-input", Input).disabled
+        assert not app.query_one("#prompt-input", PromptInput).disabled
         assert app._flock_stop is None
 
 

@@ -43,14 +43,9 @@ def missing_models(config: Config | None = None) -> str:
         spec = resolve_role(role, config)
         if not spec.configured:
             continue
-        # Ollama reports "llama3.1:latest" for a model pulled as "llama3.1",
-        # so an exact match alone would report a false absence on the
-        # commonest possible configuration.
-        if not any(
-            name == spec.name or name.split(":")[0] == spec.name.split(":")[0]
-            for name in available
-        ):
-            problems.append(f"  {role}: {spec.name!r} is not on the endpoint")
+        found, suggestion = _lookup(spec.name, available)
+        if not found:
+            problems.append(f"  {role}: {spec.name!r} is not on the endpoint{suggestion}")
 
     if not problems:
         return ""
@@ -60,3 +55,33 @@ def missing_models(config: Config | None = None) -> str:
         + "\n\nEvery Worker Birb using it would fail the same way, after the planning "
         "work is already done. Check 'cobirb models' and 'ollama list'."
     )
+
+
+def _lookup(wanted: str, available: set[str]) -> tuple[bool, str]:
+    """Whether the endpoint has ``wanted``, and what to suggest if not.
+
+    **A bare name means ``:latest``.** That is Ollama's rule and it is the
+    whole reason this function is not a set membership test: a config naming
+    ``ornith-1.5`` against an endpoint holding ``ornith-1.5:9b`` fails, because
+    the bare name resolves to ``ornith-1.5:latest`` and there is no such thing.
+
+    An earlier version of this compared tag-insensitively — ``ornith-1.5`` vs
+    ``ornith-1.5:9b`` matched, and the check reported "found" for the exact
+    failure it exists to catch. Recording that here because the wrong version
+    looks more correct at a glance than the right one: being generous about
+    tags is precisely the mistake.
+
+    When the name is absent but something shares its stem, the suggestion
+    names it. "Did you mean ornith-1.5:9b?" is the whole answer; leaving
+    somebody to compare ``ollama list`` by eye is not.
+    """
+    if wanted in available:
+        return True, ""
+    if ":" not in wanted and f"{wanted}:latest" in available:
+        return True, ""
+
+    stem = wanted.split(":")[0].lower()
+    near = sorted(name for name in available if name.split(":")[0].lower() == stem)
+    if near:
+        return False, f" — it has {', '.join(repr(n) for n in near)}. Did you mean one of those?"
+    return False, ""

@@ -88,8 +88,13 @@ INTERACTIVE COMMANDS
   ? or /help         Open this help. '/help <topic>' opens one topic.
 
 INTERACTIVE KEYS
+  enter sends · shift+enter starts a new line (alt+enter or ctrl+j if your
+  terminal cannot tell shift+enter from enter — many cannot). The box wraps
+  and grows to 8 lines, then scrolls.
   f1 help · f2 next tab · ctrl+q quit · up/down recall earlier prompts (the
-  last 100, in memory only — nothing you type is written to disk).
+  last 100, in memory only — nothing you type is written to disk); in a
+  multi-line message they move the cursor, and recall from the first/last
+  line.
   ctrl+c copies the transcript selection if you have dragged one out with
   the mouse, and otherwise cancels a running turn (a stuck or slow shell
   command, most usefully — quitting mid-turn tries this first too, so it

@@ -35,6 +35,7 @@ from .plugins.core import TerminalIO
 from .runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
 from .runtime.export import write_export
 from .flock.run import Asker, run_flock_session
+from .runtime.bootstrap import ensure_home
 from .runtime.models import describe_roles
 from .session import SessionManager
 from .runtime.headless import EXIT_DENIED, EXIT_ERROR, EXIT_OK, HeadlessIO, HeadlessResult, describe_context
@@ -517,6 +518,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand == "help":
         print(HELP_TOPICS[args.topic] if args.topic else HELP_TEXT)
         return 0
+
+    # Before the first Config() read, so a new user's very first run leaves a
+    # file where the docs say one lives. Reported on stderr rather than
+    # silently, since something appearing in your home directory should be
+    # something you were told about.
+    seeded = ensure_home()
+    if seeded:
+        print(f"cobirb: created a starter config at {seeded}", file=sys.stderr)
 
     config = Config()
 

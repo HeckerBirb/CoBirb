@@ -16,7 +16,8 @@ from textual.binding import Binding
 from textual.reactive import reactive
 from textual.selection import Selection
 from textual.strip import Strip
-from textual.widgets import Input, RichLog, Static
+from textual.message import Message
+from textual.widgets import Input, RichLog, Static, TextArea
 
 from ..plugins.core import render
 
@@ -57,6 +58,71 @@ class StatusBar(Static):
             # (persona/model/cwd) stays readable while a turn is running.
             line.append("  ")
             line.append(self.busy, style="bold yellow")
+        return line
+
+
+class ActivityBar(Static):
+    """What is running right now, on its own line, with a moving indicator.
+
+    ``StatusBar`` already had a ``busy`` field, and it was not enough: a dim
+    suffix on a line that already carries persona, model, plan mode and cwd is
+    easy to miss entirely. The report that prompted this was that Brainy Birb
+    built a whole skeleton with no sign of life anywhere in CoBirb — the only
+    evidence it was working was Ollama's own terminal scrolling in another
+    window.
+
+    Two things make this readable where that was not. It is a line of its own,
+    so nothing competes with it. And the indicator *moves*: a static label
+    cannot distinguish "working" from "hung", which is the actual question
+    somebody staring at a quiet screen is asking.
+
+    Hidden entirely when nothing is running, rather than showing "idle" — a
+    permanent row that usually says nothing is a row people stop reading.
+    """
+
+    # Braille rather than ASCII: it animates in place at one cell wide, so the
+    # text beside it never shifts.
+    FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    INTERVAL = 0.1
+
+    activity: reactive[str] = reactive("")
+    detail: reactive[str] = reactive("")
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self._frame = 0
+        self._timer: object | None = None
+
+    def on_mount(self) -> None:
+        self._timer = self.set_interval(self.INTERVAL, self._tick, pause=True)
+        self.display = False
+
+    def _tick(self) -> None:
+        self._frame = (self._frame + 1) % len(self.FRAMES)
+        self.refresh()
+
+    def watch_activity(self, activity: str) -> None:
+        """Start and stop the animation with the work, so an idle app is not
+        repainting a spinner forever."""
+        self.display = bool(activity)
+        timer = self._timer
+        if timer is None:
+            return
+        if activity:
+            timer.resume()
+        else:
+            timer.pause()
+
+    def render(self) -> Text:
+        if not self.activity:
+            return Text("")
+        line = Text()
+        line.append(self.FRAMES[self._frame], style="bold cyan")
+        line.append(" ")
+        line.append(self.activity, style="bold")
+        if self.detail:
+            line.append("   ")
+            line.append(self.detail, style="dim")
         return line
 
 
@@ -245,42 +311,166 @@ class TranscriptLog(RichLog):
         return selection.extract(text), "\n"
 
 
-class PromptInput(Input):
-    """The message box, with shell-style up/down recall.
+class PromptInput(TextArea):
+    """The message box: wraps, grows to 8 lines, then scrolls.
 
-    ``Input`` is single-line, so it binds neither arrow key itself and both
-    are free to mean "walk the history" without taking anything away.
+    A ``TextArea`` rather than an ``Input``, and the change cost two keys.
+    ``PromptInput`` used to extend ``Input``, whose docstring said why that
+    worked: *"``Input`` is single-line, so it binds neither arrow key itself
+    and both are free to mean 'walk the history'."* A multi-line box takes
+    both arrows back, and takes ``enter`` with it.
 
-    Navigation keeps a cursor into the history plus the half-typed draft the
-    user was on when they started walking, so arrowing all the way back down
-    returns what they had rather than leaving the box on the newest history
-    entry.
+    **Enter submits; shift+enter, alt+enter and ctrl+j insert a newline.**
+    Three keys for one action because shift+enter is the one people reach for
+    and the one that cannot be relied on: many terminals send an identical
+    escape sequence for enter and shift+enter, and on those it would submit
+    with no way to type a second line at all. ``alt+enter`` and ``ctrl+j`` (a
+    literal line feed, distinct from carriage return since teletypes) get
+    through where it does not.
+
+    **Up and down walk the history only from the edges.** On the first line
+    ``up`` recalls, anywhere else it moves the cursor; ``down`` mirrors that on
+    the last line. It is the shell convention, and people do not notice it
+    happening — which is the point, since the alternative is inventing a third
+    key for something that already has an obvious one.
+
+    Growing is done here rather than in CSS because Textual sizes a
+    ``TextArea`` to its container, not its content. The height comes from the
+    *wrapped* line count, so one long wrapped line counts for as much as it
+    occupies.
     """
+
+    # Never taller than this. Past it the box scrolls instead of eating the
+    # transcript: the thing you are writing about is worth more screen than
+    # the writing.
+    MAX_LINES = 8
+    MIN_LINES = 1
+
+    # Newline keys in the order they are worth trying. Named rather than
+    # inlined so the help text and the placeholder can list them.
+    NEWLINE_KEYS = ("shift+enter", "alt+enter", "ctrl+j")
 
     BINDINGS = [
         Binding("up", "history_prev", "Previous prompt", show=False),
         Binding("down", "history_next", "Next prompt", show=False),
     ]
 
-    def __init__(self, history: PromptHistory | None = None, **kwargs: object) -> None:
+    class Submitted(Message):
+        """Enter was pressed. Carries the text, as ``Input.Submitted`` did."""
+
+        def __init__(self, prompt: "PromptInput", value: str) -> None:
+            super().__init__()
+            self.input = prompt
+            self.value = value
+
+    def __init__(self, history: "PromptHistory | None" = None, **kwargs: object) -> None:
+        kwargs.setdefault("soft_wrap", True)
+        kwargs.setdefault("show_line_numbers", False)
+        # `placeholder` is an Input argument; TextArea has no such thing, and
+        # every existing call site passes one.
+        kwargs.pop("placeholder", None)
         super().__init__(**kwargs)  # type: ignore[arg-type]
-        self.history = history if history is not None else PromptHistory()
+        # `prompt_history`, not `history`: TextArea already owns an attribute
+        # by that name for its undo stack, and shadowing it makes focusing the
+        # widget raise. A collision worth naming, because the obvious name is
+        # taken and the failure is nowhere near the assignment.
+        self.prompt_history = history if history is not None else PromptHistory()
         # None means "not walking the history"; otherwise an index into it.
         self._position: int | None = None
         self._draft = ""
 
+    # ------------------------------------------------------------------ #
+    # Value, named as the old widget named it
+    # ------------------------------------------------------------------ #
+    @property
+    def value(self) -> str:
+        """The typed text.
+
+        ``TextArea`` calls this ``text``. Keeping ``value`` too means the app
+        and its tests read as they did against ``Input``, so swapping the
+        widget stayed a widget swap rather than a rename across five files.
+        """
+        return self.text
+
+    @value.setter
+    def value(self, text: str) -> None:
+        self.text = text
+
+    # ------------------------------------------------------------------ #
+    # Keys
+    # ------------------------------------------------------------------ #
+    async def _on_key(self, event) -> None:
+        """Claim enter and the newline keys before ``TextArea`` inserts them.
+
+        ``TextArea._on_key`` maps ``enter`` to inserting a newline, so this has
+        to run ahead of it rather than binding over it.
+        """
+        if event.key == "enter":
+            event.prevent_default()
+            event.stop()
+            if self.text.strip():
+                self.post_message(self.Submitted(self, self.text))
+            return
+        if event.key in self.NEWLINE_KEYS:
+            event.prevent_default()
+            event.stop()
+            self.insert("\n")
+            return
+        await super()._on_key(event)
+
+    # ------------------------------------------------------------------ #
+    # Growing
+    # ------------------------------------------------------------------ #
+    def on_mount(self) -> None:
+        self._resize()
+
+    def _on_text_area_changed(self, event) -> None:
+        self._resize()
+
+    def on_resize(self) -> None:
+        """Re-measure when the window changes: the same text wraps into a
+        different number of lines at a different width."""
+        self._resize()
+
+    def _resize(self) -> None:
+        try:
+            wrapped = self.wrapped_document.height
+        except Exception:  # noqa: BLE001 - nothing to measure before first layout
+            wrapped = 1
+        self.styles.height = max(self.MIN_LINES, min(self.MAX_LINES, wrapped))
+
+    # ------------------------------------------------------------------ #
+    # History
+    # ------------------------------------------------------------------ #
     def remember(self, text: str) -> None:
         """Record a just-submitted prompt and return to the live draft."""
-        self.history.add(text)
+        self.prompt_history.add(text)
         self._position = None
         self._draft = ""
 
+    def clear(self) -> None:
+        """Empty the box, and shrink it back with the text."""
+        self.text = ""
+        self._resize()
+
+    @property
+    def _on_first_line(self) -> bool:
+        return self.cursor_location[0] == 0
+
+    @property
+    def _on_last_line(self) -> bool:
+        return self.cursor_location[0] >= self.document.line_count - 1
+
     def action_history_prev(self) -> None:
-        entries = self.history.entries
+        """Recall on the first line; move the cursor anywhere else."""
+        if not self._on_first_line:
+            self.action_cursor_up()
+            return
+        entries = self.prompt_history.entries
         if not entries:
             return
         if self._position is None:
-            self._draft = self.value
+            self._draft = self.text
             self._position = len(entries) - 1
         elif self._position > 0:
             self._position -= 1
@@ -289,7 +479,11 @@ class PromptInput(Input):
         self._recall(entries[self._position])
 
     def action_history_next(self) -> None:
-        entries = self.history.entries
+        """Mirror of the above, from the last line."""
+        if not self._on_last_line:
+            self.action_cursor_down()
+            return
+        entries = self.prompt_history.entries
         if self._position is None:
             return  # not walking the history; nothing newer to go to
         if self._position < len(entries) - 1:
@@ -301,5 +495,6 @@ class PromptInput(Input):
         self._draft = ""
 
     def _recall(self, text: str) -> None:
-        self.value = text
-        self.cursor_position = len(text)
+        self.text = text
+        self.move_cursor(self.document.end)
+        self._resize()
