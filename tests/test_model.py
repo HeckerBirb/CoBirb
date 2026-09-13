@@ -587,3 +587,78 @@ def test_context_window_is_looked_up_once_per_model(monkeypatch):
     assert provider.context_window() == 16384
     assert provider.context_window() == 16384
     assert len(calls) == 1
+
+
+# --------------------------------------------------------------------------- #
+# What a failure actually says.
+#
+# `urllib.error.HTTPError` is a *subclass* of `URLError`, so one
+# `except URLError` caught both "nothing is listening" and "the server
+# answered, and the answer was no" — and reported them identically. A model
+# the server did not have came back as "Is Ollama running?", with the real
+# reason sitting unread in the response body. Found by a user whose Worker
+# Birbs all failed against a running Ollama.
+# --------------------------------------------------------------------------- #
+import json as _json
+import threading as _threading
+import urllib.error as _urllib_error
+from http.server import BaseHTTPRequestHandler as _Handler, HTTPServer as _HTTPServer
+
+import pytest as _pytest
+
+from cobirb.plugins.core.model import LocalModelProvider as _Provider
+
+
+def _server(code, body):
+    class _Fake(_Handler):
+        protocol_version = "HTTP/1.0"
+
+        def do_POST(self):
+            raw = _json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *args):
+            return None
+
+    server = _HTTPServer(("127.0.0.1", 0), _Fake)
+    _threading.Thread(target=server.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{server.server_address[1]}"
+
+
+def test_a_model_the_server_does_not_have_says_so():
+    """The server already said what was wrong. Repeating it beats guessing."""
+    url = _server(404, {"error": 'model "ornith-1.5" not found, try pulling it first'})
+
+    with _pytest.raises(RuntimeError) as caught:
+        _Provider(model="ornith-1.5", base_url=url).chat("", "hi")
+
+    message = str(caught.value)
+    assert "does not have 'ornith-1.5'" in message
+    assert "try pulling it first" in message  # the server's own words
+    assert "Is Ollama running?" not in message  # it plainly was
+
+
+def test_a_server_error_is_reported_as_one_not_as_a_dead_socket():
+    url = _server(500, {"error": "out of memory"})
+
+    with _pytest.raises(RuntimeError, match="out of memory"):
+        _Provider(model="m", base_url=url).chat("", "hi")
+
+
+def test_an_openai_style_nested_error_is_also_read():
+    """Ollama puts the message under `error`; other compatible servers nest it
+    under `error.message`."""
+    url = _server(400, {"error": {"message": "context length exceeded", "type": "invalid"}})
+
+    with _pytest.raises(RuntimeError, match="context length exceeded"):
+        _Provider(model="m", base_url=url).chat("", "hi")
+
+
+def test_a_server_that_is_genuinely_not_there_still_asks_the_right_question():
+    """The old message was correct for this case, and only this case."""
+    with _pytest.raises(RuntimeError, match="Is Ollama running?"):
+        _Provider(model="m", base_url="http://127.0.0.1:1").chat("", "hi")

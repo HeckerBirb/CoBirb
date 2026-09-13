@@ -358,7 +358,9 @@ def _run_flock(objective: str, cwd: str, model_name: str | None, *, headless: bo
         print(f"cobirb: could not start — {exc}", file=sys.stderr)
         return EXIT_ERROR
 
-    def confirm(question: str) -> bool:
+    def confirm(question: str, detail: str = "") -> bool:
+        if detail:
+            print(f"\n{detail}")
         print(f"\n{question} [y/N] ", end="", flush=True)
         try:
             return input().strip().lower() in ("y", "yes")

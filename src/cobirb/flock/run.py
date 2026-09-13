@@ -31,6 +31,7 @@ from ..orchestrator import Orchestrator
 from . import branch
 from .brainy import PROPOSE_CHARTER, ProposeCharterTool, plan_prompt, round_summary
 from .charter import Charter
+from .preflight import missing_models
 from .probe import ProbeResult, probe_concurrency
 from .supervisor import FlockOutcome, check_partition, run_flock
 
@@ -52,7 +53,11 @@ class Asker:
     with no way to ask must not approve its own charter.
     """
 
-    confirm: Callable[[str], bool] = lambda prompt: False
+    # ``detail`` is what the question is *about* — the charter, the list of
+    # overlaps. It goes to the asker rather than being printed beforehand
+    # because a centred dialog drawn over the thing it is asking about leaves
+    # the user approving something they cannot read.
+    confirm: Callable[..., bool] = lambda prompt, detail="": False
     show: Callable[[str], None] = lambda text: None
 
 
@@ -151,6 +156,15 @@ def _drive(
     on_charter: Callable[[Charter], None] | None = None,
 ) -> FlockRun:
     """The five stages. Split out so the branch above closes on every path."""
+    # ---- 0. Can this run at all? ---------------------------------------- #
+    # Before the planning work, not after: a missing worker model costs
+    # nothing to find now and costs a whole skeleton to find later.
+    warning = missing_models(config)
+    if warning and not ask.confirm("Start the flock anyway?", warning):
+        run.stopped_at = "preflight"
+        run.report = warning
+        return run
+
     # ---- 1. Plan and scaffold ------------------------------------------- #
     ask.show("Brainy Birb is planning and building the skeleton…")
     charter, narration = _plan(orchestrator, objective, cwd, plan_turns)
@@ -174,11 +188,10 @@ def _drive(
     # ---- 2. Does the partition hold together? --------------------------- #
     disjoint, partition = check_partition(charter)
     if not disjoint:
-        ask.show(partition)
         if not ask.confirm(
-            "The partition overlaps. Workers writing the same file cannot run safely "
-            "in parallel, and 'which worker broke this' stops having an answer.\n"
-            "Run anyway, one worker at a time?"
+            "The partition overlaps. Run anyway, one worker at a time?",
+            f"{partition}\n\nWorkers writing the same file cannot run safely in parallel, "
+            "and 'which worker broke this' stops having an answer.",
         ):
             run.stopped_at = "partition"
             run.report = f"Stopped: the partition overlaps.\n{partition}"
@@ -190,10 +203,15 @@ def _drive(
         concurrency = charter.concurrency
 
     # ---- 3. The one human decision -------------------------------------- #
+    # The charter travels *with* the question rather than being shown before
+    # it. Shown before, a centred dialog covers the very thing it is asking
+    # about — which makes "approve this charter" a question nobody can
+    # actually answer.
     ask.show(charter.describe())
     if not ask.confirm(
         f"Approve this charter? {len(charter.workers)} Worker Birb(s) will run "
-        "unattended inside exactly these scopes, with no further prompts."
+        "unattended inside exactly these scopes, with no further prompts.",
+        charter.describe(),
     ):
         run.stopped_at = "approval"
         run.report = "Charter not approved; nothing ran."
@@ -202,9 +220,10 @@ def _drive(
     # ---- 4. Can the endpoint actually do two at once? ------------------- #
     if probe and concurrency > 1:
         if ask.confirm(
-            "Check whether your model endpoint serves two requests at once? "
-            "It takes a few seconds, and a server that queues them would make a "
-            "concurrent flock quietly sequential."
+            "Check whether your model endpoint serves two requests at once?",
+            "It takes a few seconds. A server that queues them would make a concurrent "
+            "flock quietly sequential — two panes, one of them stalled, for reasons "
+            "nothing tells you.",
         ):
             run.probe = probe_concurrency(orchestrator.model)
             ask.show(run.probe.describe())

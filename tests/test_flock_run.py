@@ -104,7 +104,7 @@ def test_nothing_runs_until_the_charter_is_approved(monkeypatch, tmp_path):
 
     run = run_flock_session(
         orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q: False), probe=False,
+        ask=Asker(confirm=lambda q, detail='': False), probe=False,
     )
 
     assert ran == []
@@ -137,7 +137,7 @@ def test_approving_the_charter_fans_the_work_out(monkeypatch, tmp_path):
 
     run = run_flock_session(
         orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q: True), probe=False,
+        ask=Asker(confirm=lambda q, detail='': True), probe=False,
     )
 
     assert run.ran
@@ -154,7 +154,7 @@ def test_the_user_is_shown_the_scopes_before_being_asked(monkeypatch, tmp_path):
 
     run_flock_session(
         orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q: True, show=shown.append), probe=False,
+        ask=Asker(confirm=lambda q, detail='': shown.append(detail) or True, show=shown.append), probe=False,
     )
 
     everything = "\n".join(shown)
@@ -174,7 +174,7 @@ def test_no_charter_is_a_legitimate_answer_not_a_failure(monkeypatch, tmp_path):
 
     run = run_flock_session(
         orchestrator, "rename one variable", str(tmp_path),
-        ask=Asker(confirm=lambda q: True), probe=False,
+        ask=Asker(confirm=lambda q, detail='': True), probe=False,
     )
 
     assert run.charter is None
@@ -203,7 +203,7 @@ def test_an_overlapping_partition_stops_unless_the_user_says_otherwise(monkeypat
 
     run = run_flock_session(
         orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q: False), probe=False,
+        ask=Asker(confirm=lambda q, detail='': False), probe=False,
     )
 
     assert run.stopped_at == "partition"
@@ -228,7 +228,7 @@ def test_carrying_on_past_an_overlap_drops_to_one_worker_at_a_time(monkeypatch, 
 
     run_flock_session(
         orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q: True), probe=False,
+        ask=Asker(confirm=lambda q, detail='': True), probe=False,
     )
 
     assert seen["concurrency"] == 1

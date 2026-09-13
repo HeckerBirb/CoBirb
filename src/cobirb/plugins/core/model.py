@@ -146,6 +146,64 @@ def _build_messages(system: str, context: str) -> list[dict[str, Any]]:
     return messages
 
 
+def _unreachable(base_url: str, exc: Exception, model: str = "") -> RuntimeError:
+    """Turn a failed request into something that names the actual problem.
+
+    ``urllib.error.HTTPError`` is a *subclass* of ``URLError``, so a single
+    ``except URLError`` catches both "nothing is listening" and "the server
+    answered, and the answer was no" — and reports them identically. That is
+    how a model the server does not have came back as "Is Ollama running?",
+    with the real reason (Ollama says ``model "x" not found, try pulling it
+    first``) sitting unread in the response body.
+
+    So: a transport failure keeps the old message, because "is it running" is
+    the right question then. An HTTP status is reported as what it is, with
+    the server's own words, because the server has already said what is wrong
+    and repeating it beats guessing.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        detail = _error_body(exc)
+        named = f" {model!r}" if model else " that model"
+        if exc.code == 404:
+            return RuntimeError(
+                f"The model provider at {base_url} does not have{named}"
+                f"{f' — it said: {detail}' if detail else ''}. "
+                "Check the spelling with 'cobirb models', and that it is pulled "
+                "('ollama list')."
+            )
+        return RuntimeError(
+            f"The model provider at {base_url} refused the request for{named}: "
+            f"{exc.code} {exc.reason}{f' — {detail}' if detail else ''}"
+        )
+    return RuntimeError(
+        f"Could not reach the model provider at {base_url}: {exc}. Is Ollama running?"
+    )
+
+
+def _error_body(exc: "urllib.error.HTTPError") -> str:
+    """Whatever the server said about the failure, if it said anything.
+
+    Ollama puts a plain message under ``error``; other OpenAI-compatible
+    servers nest it under ``error.message``. Both are worth more than the
+    status line, and a body that is neither is returned as-is rather than
+    dropped.
+    """
+    try:
+        raw = exc.read().decode("utf-8", "replace").strip()
+    except Exception:  # noqa: BLE001 - a body we cannot read is simply absent
+        return ""
+    if not raw:
+        return ""
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw[:300]
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(error, dict):
+        error = error.get("message")
+    return str(error or raw)[:300]
+
+
 class LocalModelProvider(ModelProvider):
     """Chats with a local Ollama server.
 
@@ -187,9 +245,7 @@ class LocalModelProvider(ModelProvider):
             with urllib.request.urlopen(request, timeout=120) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
-            raise RuntimeError(
-                f"Could not reach the model provider at {self._base_url}: {exc}. Is Ollama running?"
-            ) from exc
+            raise _unreachable(self._base_url, exc, self._model) from exc
 
     def list_models(self) -> list[str]:
         """Return the model names available from the configured endpoint.
@@ -209,9 +265,7 @@ class LocalModelProvider(ModelProvider):
             with urllib.request.urlopen(request, timeout=10) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
-            raise RuntimeError(
-                f"Could not reach the model provider at {self._base_url}: {exc}. Is Ollama running?"
-            ) from exc
+            raise _unreachable(self._base_url, exc) from exc
         entries = payload.get("data") or []
         return sorted({entry["id"] for entry in entries if entry.get("id")})
 
@@ -358,9 +412,7 @@ class LocalModelProvider(ModelProvider):
         try:
             response = urllib.request.urlopen(request, timeout=120)
         except urllib.error.URLError as exc:
-            raise RuntimeError(
-                f"Could not reach the model provider at {self._base_url}: {exc}. Is Ollama running?"
-            ) from exc
+            raise _unreachable(self._base_url, exc, self._model) from exc
 
         tool_calls: list[ToolCall] = []
         with response:

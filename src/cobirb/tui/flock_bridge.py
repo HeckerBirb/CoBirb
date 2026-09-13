@@ -43,7 +43,7 @@ class TuiAsker:
     def __init__(self, app: "CoBirbApp") -> None:
         self._app = app
 
-    def confirm(self, question: str) -> bool:
+    def confirm(self, question: str, detail: str = "") -> bool:
         """Ask, blocking the flock's thread until a person answers.
 
         Fails closed on anything going wrong — the app shutting down
@@ -52,13 +52,19 @@ class TuiAsker:
         Birbs will be allowed to touch, and a flock that approved its own
         charter would be an agent granting itself permissions.
 
+        ``detail`` is the thing being asked about — the charter itself, most
+        importantly — and it goes *inside* the dialog. Shown separately behind
+        it, a centred modal covers the very text it is asking approval for.
+
         Deliberately not routed through a same-thread shortcut, exactly as
         ``TuiIO.confirm`` is not: ``push_screen_wait`` only works inside a
         worker, and calling it on the UI thread would deadlock the loop that
         has to draw and dismiss the modal.
         """
         try:
-            answer = self._app.call_from_thread(self._app.request_confirmation, question)
+            answer = self._app.call_from_thread(
+                self._app.request_confirmation, question, detail
+            )
         except Exception:  # noqa: BLE001 - nobody to ask means no, never guess yes
             return False
         return bool(answer)

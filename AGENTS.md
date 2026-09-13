@@ -448,6 +448,30 @@ all drift from the real agent within a month.
 The generalisation worth keeping: **do not reach for access control to solve what is a review
 problem**, and do not build a parallel path for an agent that can use the existing one.
 
+## 4o. Say what actually failed
+
+`urllib.error.HTTPError` is a **subclass** of `URLError`, so a single
+`except urllib.error.URLError` catches both "nothing is listening on that port" and "the server
+answered, and the answer was no" — and, in `LocalModelProvider`, reported them identically as
+*"Could not reach the model provider … Is Ollama running?"*.
+
+That is how a model the endpoint did not have came back as a connectivity problem, with Ollama's
+own explanation (`model "x" not found, try pulling it first`) sitting unread in the response body.
+Found in the field, by a user whose three Worker Birbs all failed against an Ollama that was
+plainly running. See `_unreachable` and `_error_body`.
+
+The rule this leaves behind: **a transport failure and a rejected request are different questions
+and must not share an error message.** "Is it running?" is the right thing to ask only when nothing
+answered. When something answered, it has already said what is wrong, and repeating its words beats
+guessing at them.
+
+`flock/preflight.py` applies the same idea one level earlier: a flock is the first thing that uses
+two model roles at once, so a worker model named in config but never pulled produced one identical
+failure per Worker Birb, minutes after approval, with the planning work already spent. One
+`/v1/models` call before planning turns that into a sentence. A *check*, not a gate — an endpoint
+that cannot answer it gets the benefit of the doubt, since being unable to list models is not
+evidence that a model is absent.
+
 ## 5. Plugin SPI
 
 Core imports only these interfaces; plugins import only the SPI and never each other; core never
@@ -831,10 +855,45 @@ they are shaped around, deliberately.
 - **v0.5.1 "Field notes"** — fixes and polish from actually using the Flock. Collected here rather
   than deferred: these are things found in the way of the work, and a list of them aging in a later
   milestone is how a tool stays annoying.
+  - **A 404 from the model endpoint is reported as "Is Ollama running?"** `urllib.error.HTTPError`
+    is a *subclass* of `URLError`, so one `except URLError` catches both "nothing is listening" and
+    "the server answered, and the answer was no", and reports them identically. Ollama's own
+    explanation is read off the wire and discarded. *A transport failure and a rejected request are
+    different questions and must not share a message.*
+  - **An untagged model name silently means `:latest`.** Found in the field and worth writing down
+    because it cost a whole run: a config naming `ornith-1.5` against an endpoint holding
+    `ornith-1.5:9b` 404s, because Ollama resolves a bare name to `ornith-1.5:latest`. The
+    orchestrator model happened to be `:latest` and worked, so only the Worker Birbs failed, which
+    made it read as a Flock bug. CoBirb should say *"the endpoint has ornith-1.5:9b — did you mean
+    that?"* rather than leaving someone to compare `ollama list` by eye.
+  - **Check the models exist before planning, not after.** A flock is the first thing using two
+    model roles at once, so a bad worker model produces one identical failure per Worker Birb,
+    minutes after approval, with the skeleton already built. One `/v1/models` call up front turns
+    that into a sentence. ⚠️ A tag-insensitive comparison here would *miss* the case above — the
+    check has to know that a bare name means `:latest`.
+  - **The charter approval dialog covers the charter.** It is centred over the transcript the
+    charter was just printed into, so the one question in the whole run that requires reading
+    something is asked with that something hidden. The charter belongs *inside* the dialog.
   - **Multi-line prompt input.** The box is one line and scrolls sideways for ever. It should wrap,
     grow to at most 8 lines, then scroll vertically. Not cosmetic — a flock objective is a
-    paragraph, and composing one in a horizontally-scrolling single line is genuinely hard. Needs
-    two interaction decisions first; see §12.1.
+    paragraph, and composing one in a horizontally-scrolling single line is genuinely hard.
+    Decided: **enter submits, shift+enter inserts a newline** — with a caveat, see §12.1.
+  - **The Flock tab needs horizontal scrolling.** Panes are `1fr` each, so three agents already
+    squeeze the text past readability. They should keep a minimum readable width and the row should
+    scroll left/right instead of shrinking. A pane too narrow to read is the same as no pane.
+  - **Flock pane text must be selectable.** The worker panes use a plain `RichLog`, which cannot be
+    selected or copied out of at all; the main transcript uses `TranscriptLog` precisely because of
+    that. The panes should use the same widget — a report you cannot copy out of is a report you
+    have to retype.
+  - **Ship a config file on install.** `~/.cobirb/` and a `config.json` seeded from
+    `config.json.example` should exist after installing, rather than the user finding an empty
+    directory and having to know what goes in it. Must never overwrite an existing file.
+  - **Separate a prompt from its reply visually.** Marker colour alone is not enough to find where
+    one ends and the next begins when scrolling back. A rule at ~80% width between exchanges.
+  - **Show that something is happening.** Brainy Birb builds a whole skeleton with no sign of life
+    beyond Ollama's own terminal scrolling. The status bar's spinner is not enough and did not
+    always appear; the bottom of the screen should carry a live line of what is currently running —
+    which agent, which phase — for the Flock and for ordinary turns.
 - **v0.6.0–0.9.0** — plugin distribution, cross-session memory, vision, mid-turn steering,
   session branching, SPI freeze and session migrations.
 
@@ -848,19 +907,23 @@ Designing to this year's ceiling is how a tool arrives obsolete.
 
 ### 12.1 Deferred, needing a decision
 
-**Multi-line prompt input: two keys have to be reassigned.** `PromptInput` extends `Input`, and its
+**Multi-line prompt input: shift+enter is not reliably distinguishable.** Decided: enter submits,
+shift+enter inserts a newline. The catch is that many terminals send an identical escape sequence
+for both, so on those, shift+enter will submit and there will be no way to insert a newline at all.
+So this needs a second key that always works — `alt+enter` or `ctrl+j` — bound to the same action
+and documented, rather than shipping a keystroke that silently does the wrong thing on somebody's
+terminal. Whether to *say* so in the UI (a hint under the box) is the open part.
+
+**Multi-line prompt input: what up/down do.** `PromptInput` extends `Input`, and its
 docstring says why that worked: *"``Input`` is single-line, so it binds neither arrow key itself and
 both are free to mean 'walk the history'."* Going multi-line takes that back, and takes `enter`
 with it.
 
-- **Submit vs. newline.** Enter currently submits. In a multi-line box it conventionally inserts a
-  newline, so one of them needs another key. The usual answer is shift+enter for the newline — but
-  many terminals send an identical sequence for enter and shift+enter, so it cannot be relied on.
-  Real candidates are alt+enter, ctrl+j, or inverting it (enter inserts, ctrl+d submits). This is a
-  decision about which terminals the tool must work in, which is the user's to make.
-- **History vs. cursor movement.** Up/down currently walk the prompt history. In a multi-line box
-  they should move the cursor. The shell convention resolves it: recall history only when the
-  cursor is already on the first (or last) line, otherwise move. That keeps both without a new key.
+`PromptInput` extends `Input`, and its docstring says why that worked: *"``Input`` is single-line,
+so it binds neither arrow key itself and both are free to mean 'walk the history'."* Going
+multi-line takes that back. The shell convention resolves it without a new key: recall history only
+when the cursor is already on the first (or last) line, otherwise move the cursor. Taking that
+unless told otherwise.
 
 Also a rewrite rather than a tweak: `TextArea` has no `Submitted` event, so
 `CoBirbApp.on_input_submitted` needs replacing with key handling, and Textual's `TextArea` does not
