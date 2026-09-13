@@ -100,7 +100,16 @@ class StdioClient:
         self.call_timeout = call_timeout
 
         self._process: subprocess.Popen[str] | None = None
-        self._incoming: "queue.Queue[dict[str, Any]]" = queue.Queue()
+        # One mailbox per in-flight request, not one shared queue. A shared
+        # queue works only while a single thread is ever waiting: with two,
+        # whichever wakes first consumes whatever arrived and discards it if
+        # the id does not match, so a concurrent caller loses its reply and
+        # waits out its whole timeout. Nothing called this concurrently until
+        # the Flock did.
+        self._mailboxes: "dict[int, queue.Queue[dict[str, Any]]]" = {}
+        # Set when the server's stdout closes, so everyone waiting gives up
+        # rather than each sitting out its own timeout.
+        self._eof = threading.Event()
         self._stderr: deque[str] = deque(maxlen=_MAX_STDERR_LINES)
         self._next_id = 0
         self._lock = threading.Lock()
@@ -206,8 +215,15 @@ class StdioClient:
         with self._lock:
             self._next_id += 1
             request_id = self._next_id
-        self._send({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
-        message = self._await(request_id, timeout, method)
+            # Registered before the request goes out, so a reply that arrives
+            # before this thread reaches _await still has somewhere to land.
+            self._mailboxes[request_id] = queue.Queue()
+        try:
+            self._send({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
+            message = self._await(request_id, timeout, method)
+        finally:
+            with self._lock:
+                self._mailboxes.pop(request_id, None)
         if "error" in message:
             error = message["error"] or {}
             raise McpError(f"{method} failed: {error.get('message', error)}")
@@ -228,26 +244,27 @@ class StdioClient:
             raise McpError(f"{self.name} stopped listening: {exc}{self._stderr_tail()}") from exc
 
     def _await(self, request_id: int, timeout: int, method: str) -> dict[str, Any]:
-        """Wait for the response to ``request_id``.
+        """Wait for the response to ``request_id``, and only that one.
 
-        Anything else that arrives in the meantime is discarded: notifications
-        (progress, log lines) are advisory, and a request *from* the server —
-        sampling, elicitation — is a capability this client did not advertise,
-        so a well-behaved server will not send one and a badly-behaved one is
-        not owed an answer.
+        The reader thread routes by id, so this waits on its own mailbox and
+        cannot consume somebody else's reply. Anything unroutable is dropped
+        there rather than here: notifications (progress, log lines) are
+        advisory, and a request *from* the server — sampling, elicitation — is
+        a capability this client never advertised, so a well-behaved server
+        will not send one and a badly-behaved one is not owed an answer.
         """
-        deadline = timeout
-        while True:
-            try:
-                message = self._incoming.get(timeout=deadline)
-            except queue.Empty:
-                raise McpError(
-                    f"{self.name} did not answer {method} within {timeout}s{self._stderr_tail()}"
-                ) from None
-            if message.get("__eof__"):
-                raise McpError(f"{self.name} exited{self._stderr_tail()}")
-            if message.get("id") == request_id:
-                return message
+        mailbox = self._mailboxes[request_id]
+        try:
+            message = mailbox.get(timeout=timeout)
+        except queue.Empty:
+            if self._eof.is_set():
+                raise McpError(f"{self.name} exited{self._stderr_tail()}") from None
+            raise McpError(
+                f"{self.name} did not answer {method} within {timeout}s{self._stderr_tail()}"
+            ) from None
+        if message.get("__eof__"):
+            raise McpError(f"{self.name} exited{self._stderr_tail()}")
+        return message
 
     def _read_stdout(self) -> None:
         process = self._process
@@ -267,12 +284,26 @@ class StdioClient:
                     logger.debug("mcp/%s: non-JSON on stdout: %.200s", self.name, line)
                     continue
                 if isinstance(message, dict):
-                    self._incoming.put(message)
+                    self._deliver(message)
         except (OSError, ValueError):
             pass
         finally:
-            # Unblocks anything waiting on a response from a server that died.
-            self._incoming.put({"__eof__": True})
+            # Unblocks everyone waiting on a server that died, not just
+            # whoever happens to be first in a queue.
+            self._eof.set()
+            with self._lock:
+                waiting = list(self._mailboxes.values())
+            for mailbox in waiting:
+                mailbox.put({"__eof__": True})
+
+    def _deliver(self, message: dict[str, Any]) -> None:
+        """Route one message to the caller waiting for it, if any."""
+        with self._lock:
+            mailbox = self._mailboxes.get(message.get("id"))  # type: ignore[arg-type]
+        if mailbox is not None:
+            mailbox.put(message)
+        else:
+            logger.debug("mcp/%s: unrouted message %.120s", self.name, message)
 
     def _read_stderr(self) -> None:
         process = self._process

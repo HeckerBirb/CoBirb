@@ -34,9 +34,10 @@ from .runtime import commands, personas, plugins, sessions, wiring
 from .plugins.core import TerminalIO
 from .runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
 from .runtime.export import write_export
+from .flock.run import Asker, run_flock_session
 from .runtime.models import describe_roles
 from .session import SessionManager
-from .runtime.headless import EXIT_ERROR, EXIT_OK, HeadlessIO, HeadlessResult, describe_context
+from .runtime.headless import EXIT_DENIED, EXIT_ERROR, EXIT_OK, HeadlessIO, HeadlessResult, describe_context
 from .runtime.personas import NO_PERSONA
 from .runtime.plugins import PluginsSummary, ToolInfo
 from .typing import spi as cobirb_typing
@@ -329,6 +330,59 @@ def _run_tui(
     return 0
 
 
+def _run_flock(objective: str, cwd: str, model_name: str | None, *, headless: bool) -> int:
+    """``cobirb flock -p "..."`` — divide a piece of work between several agents.
+
+    Brainy Birb plans, designs the seams and builds the skeleton, then proposes
+    a charter. You approve it once, and the Worker Birbs run unattended inside
+    exactly the scopes you saw. One round, then it reports back.
+
+    Refused outright in headless mode. The charter approval is the *only* place
+    a person sees what a flock is about to be allowed to do, and a flock that
+    approved its own charter would be an agent granting itself permissions —
+    precisely what the permission layer exists to prevent.
+    """
+    if headless:
+        print(
+            "cobirb: flock mode needs someone to approve the charter, so it cannot run "
+            "headless. The charter is the only place you see what the workers will be "
+            "allowed to touch.",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    persona = personas.load_persona(None)
+    try:
+        orchestrator = wiring.build_orchestrator(cwd, persona, {}, model_name=model_name)
+    except Exception as exc:  # noqa: BLE001
+        print(f"cobirb: could not start — {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    def confirm(question: str) -> bool:
+        print(f"\n{question} [y/N] ", end="", flush=True)
+        try:
+            return input().strip().lower() in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return False
+
+    try:
+        run = run_flock_session(
+            orchestrator, objective, cwd,
+            ask=Asker(confirm=confirm, show=lambda text: print(f"\n{text}")),
+        )
+    except KeyboardInterrupt:
+        print("\ncobirb: interrupted.", file=sys.stderr)
+        return EXIT_ERROR
+    finally:
+        orchestrator.close()
+
+    print(f"\n{run.report}")
+    if run.stopped_at:
+        return EXIT_ERROR if run.stopped_at == "partition" else EXIT_OK
+    return EXIT_OK if run.outcome is not None and run.outcome.all_done else EXIT_DENIED
+
+
 def _run_models(config: Config, override: str | None) -> int:
     """``cobirb models`` — which model plays which part, and why.
 
@@ -357,9 +411,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "subcommand",
         nargs="?",
-        choices=["help", "models", "commands"],
+        choices=["help", "models", "commands", "flock"],
         help="'help' for the overview, 'models' for how each role resolves, "
-        "'commands' for the custom commands available here.",
+        "'commands' for the custom commands available here, 'flock' to divide "
+        "a piece of work between several agents (see 'cobirb help flock').",
     )
     parser.add_argument(
         "topic",
@@ -468,6 +523,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand == "commands":
         print(describe_commands(discover_commands(args.cwd or ".")))
         return EXIT_OK
+    if args.subcommand == "flock":
+        if not args.prompt:
+            print(
+                "cobirb flock needs an objective: cobirb flock -p \"add CSV export\"",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+        return _run_flock(args.prompt, args.cwd or ".", args.model, headless=args.headless)
 
     allow_overrides = wiring.parse_allow_tools(args.allow_tool)
     persona_name = args.persona or config.get("persona")

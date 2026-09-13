@@ -172,6 +172,20 @@ def test_a_server_that_never_answers_times_out_and_quotes_its_own_stderr(tmp_pat
     silent.close()
 
 
+def test_concurrent_calls_each_get_their_own_answer(client):
+    """One shared queue worked only while a single thread ever waited: with
+    two, whichever woke first consumed whatever arrived and discarded it when
+    the id did not match, so the other lost its reply and waited out its whole
+    timeout. Nothing called this concurrently until the Flock did."""
+    import concurrent.futures
+
+    words = [f"word-{n}" for n in range(12)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        answers = list(pool.map(lambda w: client.call_tool("echo", {"text": w}), words))
+
+    assert [text for _, text in answers] == words
+
+
 # --------------------------------------------------------------------------- #
 # Privacy: what a server is given
 # --------------------------------------------------------------------------- #
