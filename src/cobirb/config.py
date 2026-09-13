@@ -71,6 +71,9 @@ class Config:
         self.repo_path = repo_path or os.path.join(cwd or ".", "cobirb.json")
         user = _load(self.user_path)
         repo = _load(self.repo_path)
+        # Kept separately as well as merged: a few settings are deliberately
+        # readable only from the user's own file. See `user_get`.
+        self._user_data = user
         # Repo config overrides user config.
         self._data = _merge(user, repo)
 
@@ -81,6 +84,33 @@ class Config:
     def get(self, *keys: str, default: Any = None) -> Any:
         """Return a nested value, e.g. ``config.get("models", "default", "name")``."""
         value: Any = self._data
+        for key in keys:
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            else:
+                return default
+        return value
+
+    def user_get(self, *keys: str, default: Any = None) -> Any:
+        """Read a setting from the **user's own** config file only.
+
+        Repo-scoped ``cobirb.json`` normally overrides the user file, which is
+        what you want for "which model does this project use" and emphatically
+        not what you want for anything that can execute code. Two settings can:
+        ``hooks`` runs shell commands at lifecycle points, and ``mcp_servers``
+        launches long-lived subprocesses. Read through ``get()`` those would
+        mean that cloning a repository and running CoBirb in it hands that
+        repository's author a shell — before the model is ever asked anything,
+        and with no approval prompt in the way, because the prompt is a thing
+        CoBirb decides to show and this would be code deciding whether to show
+        it.
+
+        So those two are read from here instead: a file only the user writes,
+        outside any repository. It costs per-project hooks, which is a real
+        loss and a deliberate one — the alternative is a permission model that
+        the contents of a downloaded directory can rewrite.
+        """
+        value: Any = self._user_data
         for key in keys:
             if isinstance(value, dict) and key in value:
                 value = value[key]

@@ -24,13 +24,18 @@ opt a capability in.**
 
 ## Status
 
-🚧 **v0.3.0.** The core loop, built-in tools, the permission model, encrypted sessions and
-a local Ollama provider — plus the things that make it usable on real work: context
-compaction so long sessions don't degrade, project instructions, `.gitignore` awareness,
-a `repo_map` tool so it can find its way around, a diff shown before any write, `/undo`
-and `/diff`, credential redaction, an opt-in "run my tests after you change something"
-loop, and a headless mode for CI. See [`AGENTS.md`](./AGENTS.md) for the architecture, the plugin SPI, and the
-reasoning behind both.
+🚧 **v0.3.0, with v0.4.0 landing.** The core loop, built-in tools, the permission model,
+encrypted sessions and a local Ollama provider — plus the things that make it usable on real
+work: context compaction so long sessions don't degrade, project instructions, `.gitignore`
+awareness, a `repo_map` tool so it can find its way around, a diff shown before any write,
+`/undo` and `/diff`, credential redaction, an opt-in "run my tests after you change something"
+loop, and a headless mode for CI.
+
+Newly in: **one model per role** (`cobirb models`), **hooks** that can refuse a tool call before
+you are even asked about it, **custom commands** — a prompt you wrote down, invoked by name — and
+an **MCP client** over stdio, so tools from a local server become CoBirb tools under the same
+permission layer as everything else. See [`AGENTS.md`](./AGENTS.md) for the architecture, the
+plugin SPI, and the reasoning behind all of it.
 
 ## Quick start
 
@@ -152,12 +157,30 @@ Being straight about the edges, since the rest of this page makes strong claims:
   `/context`); old tool results are summarised away first, and a large file is read a
   range at a time rather than whole. Nothing is lost from your session file, only from
   what the model is shown at once.
+- **An MCP server you configure is a program you chose to run.** CoBirb's "no telemetry, no
+  outbound network" promises are about CoBirb. A configured server can open its own network
+  connections and send the arguments of every call it receives — file paths, code, queries —
+  anywhere it likes, and nothing in CoBirb detects or prevents that. Two defaults reduce the
+  blast radius: a server does **not** inherit your environment (no cloud credentials, no API
+  tokens for unrelated services), and its tools are pre-approved by nothing. Read
+  `cobirb help mcp` before adding one; it also has a worked example of writing your own
+  offline server, which is the case worth building for.
+- **A repository's `cobirb.json` can currently pre-approve tools.** Cloning a repo and running
+  CoBirb inside it honours the `allow_tools` in its config, with no prompt. `hooks` and
+  `mcp_servers` are deliberately exempt — those are read from your own config only — but
+  `allow_tools` predates that rule. Read a project's `cobirb.json` before working in it. See
+  §12.1 of [`AGENTS.md`](./AGENTS.md) for the fix under consideration.
 
 ## Configuration
 
 Copy [`cobirb.json.example`](./cobirb.json.example) to `cobirb.json` (repo-scoped) or
 `~/.cobirb/config.json` (user-scoped) and edit it — nothing here is loaded until you do, and
 nothing defaults to a networked provider. See `cobirb help config` for what each key does.
+
+Two keys — `hooks` and `mcp_servers` — are read from `~/.cobirb/config.json` **only**. Both can
+execute code with no approval prompt in the way, so honouring them from a project's file would
+make cloning a repository enough to run its author's code. Putting them in a repo config does
+nothing.
 
 ## Documentation
 

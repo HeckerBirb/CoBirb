@@ -20,6 +20,13 @@ from .checkpoints import Checkpoints
 from .context import DEFAULT_CONTEXT_TOKENS, CompactionReport, compact, history_budget
 from .policy import AuditLog, Policy
 from .redaction import redact
+from .runtime.hooks import (
+    EVENT_AFTER_TOOL,
+    EVENT_AFTER_TURN,
+    EVENT_BEFORE_TOOL,
+    EVENT_BEFORE_TURN,
+    HookRunner,
+)
 from .runtime.verify import VerifySettings, run_verification
 from .session import PHASE_ACT, PHASE_PLAN, PHASE_VALIDATE, Session, SessionManager, Turn
 from .typing import spi as cobirb_typing
@@ -168,6 +175,8 @@ class Orchestrator:
         redact_secrets: bool = True,
         verify: "VerifySettings | None" = None,
         checkpoints: "Checkpoints | None" = None,
+        hooks: "HookRunner | None" = None,
+        mcp_clients: list[Any] | None = None,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -184,6 +193,14 @@ class Orchestrator:
         # Snapshots taken before the agent changes a file, backing /undo.
         # None disables it entirely (`"checkpoints": false`).
         self.checkpoints = checkpoints
+        # The user's own commands at the lifecycle points. Always an object,
+        # never None — an empty runner returns immediately, which keeps every
+        # call site below free of a "are hooks configured?" branch.
+        self.hooks = hooks or HookRunner()
+        # MCP servers running as child processes for the life of this
+        # orchestrator. Held only so `close()` can stop them: their tools are
+        # already in `tools` and nothing here treats them specially.
+        self.mcp_clients = list(mcp_clients or [])
         # What this project is and what it asks of an agent: its AGENTS.md,
         # and an outline of its codebase. Resolved at wiring time because
         # reading project files is not core's job, and composed into every
@@ -278,6 +295,7 @@ class Orchestrator:
         logger.info("starting run; turns=%d plan_mode=%s", len(session.turns), plan_mode)
         self.last_turn_streamed = False
         self._stream_label = persona
+        self._fire_and_report(EVENT_BEFORE_TURN, payload={"prompt": prompt})
 
         if plan_mode:
             plan_text, plan_streamed = self._run_plan_phase(
@@ -313,6 +331,12 @@ class Orchestrator:
             if not validation_streamed:
                 self._render_phase(PHASE_VALIDATE, persona, validation_text)
 
+        # Last thing before the session is handed back, so an after_turn hook
+        # that reads the workspace sees it in its finished state — including
+        # anything the verify-and-fix pass changed.
+        self._fire_and_report(
+            EVENT_AFTER_TURN, payload={"changed_files": self._changed_anything()}
+        )
         return session
 
     def _verify_and_fix(
@@ -629,6 +653,22 @@ class Orchestrator:
             self._render_tool_call(tool_name, arguments, result)
             return
 
+        # The user's own rules, before the user's own judgement. A hook that
+        # is going to refuse this should refuse it before anyone is asked to
+        # approve it — otherwise the prompt puts a question to a person whose
+        # answer has already been overruled.
+        gate = self.hooks.fire(EVENT_BEFORE_TOOL, tool_name=tool_name, arguments=arguments)
+        if gate.blocked:
+            self._record_call(tool_name, ok=False, denied=True)
+            result = cobirb_typing.ToolResult(
+                ok=False,
+                content=f"Blocked by a before_tool hook: {gate.reason}",
+                error="blocked_by_hook",
+            )
+            session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
+            self._render_tool_call(tool_name, arguments, result)
+            return
+
         # Not already permitted: ask the user rather than silently denying,
         # so "default-deny" means "asks first," not "the model never finds
         # out it could have worked." Fails closed (denies) with no adapter,
@@ -671,6 +711,13 @@ class Orchestrator:
         self._record_call(tool_name, ok=result.ok, denied=False)
         session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
         self._render_tool_call(tool_name, arguments, result)
+        # Observation only: an after_tool hook has nothing left to prevent, so
+        # its exit code is logged rather than acted on. It gets whether the
+        # call succeeded, not the result body — a formatter needs to know a
+        # file changed, and does not need the file.
+        self._fire_and_report(
+            EVENT_AFTER_TOOL, tool_name=tool_name, arguments=arguments, payload={"ok": result.ok}
+        )
 
     def _redacted(self, result: cobirb_typing.ToolResult) -> cobirb_typing.ToolResult:
         """Strip credentials from a tool result before it goes anywhere.
@@ -689,6 +736,23 @@ class Orchestrator:
         return cobirb_typing.ToolResult(
             ok=result.ok, content=redaction.text, error=result.error, meta=result.meta
         )
+
+    def _fire_and_report(self, event: str, **kwargs: Any) -> None:
+        """Run the hooks for an observational event and surface any failures.
+
+        Shown rather than swallowed: a hook the user wrote to format their code
+        after every edit, which has been silently exiting 1 for a week, is
+        worse than no hook at all. It never stops the run — by this point
+        there is nothing left to stop.
+        """
+        outcome = self.hooks.fire(event, **kwargs)
+        for failure in outcome.failures:
+            message = f"{event} hook failed: {failure}"
+            logger.warning(message)
+            render_through(
+                self.io, "render_notice", message,
+                fallback=lambda: self.io.render(f"\n[hook] {message}\n"),
+            )
 
     def _record_call(self, tool_name: str, *, ok: bool, denied: bool) -> None:
         self.last_run_tool_calls.append({"name": tool_name, "ok": ok, "denied": denied})
@@ -792,6 +856,22 @@ class Orchestrator:
     @property
     def session_path(self) -> str | None:
         return self.session.path if self.session else None
+
+    def close(self) -> None:
+        """Release anything this orchestrator started.
+
+        Today that is the MCP servers, which are child processes and would
+        otherwise outlive the run that spawned them. Idempotent and never
+        raising: this runs on the way out, including on the way out of a
+        failure, and a shutdown that can itself fail is worse than the leak
+        it was trying to prevent.
+        """
+        for client in self.mcp_clients:
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001 - nothing to do about it at this point
+                logger.debug("an MCP server did not shut down cleanly", exc_info=True)
+        self.mcp_clients = []
 
 
 def build_default_policy(

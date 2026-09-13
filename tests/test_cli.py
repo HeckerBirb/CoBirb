@@ -8,6 +8,7 @@ every other test, because ``session.py`` was only ever tested by calling
 """
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -284,6 +285,11 @@ class _StubOrchestrator:
         self.session = StubSessionManager() if with_session_manager else None
         self._run_result = run_result if run_result is not None else StubSession()
         self._run_raises = run_raises
+
+    def close(self):
+        """Part of the Orchestrator contract since MCP servers became
+        child processes it owns. A no-op here; the stub starts nothing."""
+        self.closed = True
 
     def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False):
         if self._run_raises is not None:
@@ -1209,6 +1215,29 @@ def test_describe_plugins_lists_every_built_in_tool_as_core(tmp_path):
 def test_describe_plugins_reports_core_for_every_unconfigured_slot(tmp_path):
     summary = plugins.describe_plugins(str(tmp_path))
     assert summary.slots == {"model": "core", "io": "core", "crypto": "core"}
+
+
+def test_describe_plugins_names_configured_mcp_servers_without_starting_them(tmp_path):
+    """This snapshot exists to populate a tab. Starting somebody's database
+    proxy to draw a list would be an absurd side effect of opening it, so the
+    names are what can honestly be shown until a turn builds a real one."""
+    home = tmp_path / ".cobirb"
+    home.mkdir()
+    (home / "config.json").write_text(
+        json.dumps(
+            {
+                "mcp_servers": {
+                    "notes": {"command": "false"},
+                    "off": {"command": "false", "enabled": False},
+                }
+            }
+        )
+    )
+
+    summary = plugins.describe_plugins(str(tmp_path))
+
+    assert summary.mcp_servers == ["notes"]
+    assert summary.issues == {}  # nothing was started, so nothing failed
 
 
 def test_describe_plugins_reports_a_misconfigured_slot_without_crashing(tmp_path):

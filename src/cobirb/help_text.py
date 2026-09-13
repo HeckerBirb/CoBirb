@@ -79,6 +79,8 @@ INTERACTIVE COMMANDS
                      session is using, and what has been compacted away.
   /plan on|off       Toggle plan mode mid-conversation.
   /plan              Show whether plan mode is currently on.
+  /commands          List your own prompt files, invocable by name. Any
+                     other /word is one of them — see 'help commands'.
   ? or /help         Open this help. '/help <topic>' opens one topic.
 
 INTERACTIVE KEYS
@@ -90,9 +92,24 @@ INTERACTIVE KEYS
   never sits waiting on one either). In a tool-approval dialog: y allow
   once · a allow for the rest of the session · n (or escape) deny.
 
+EXTENDING IT
+  Roles          One model per job: orchestrator, worker. 'cobirb models'
+                 shows how yours resolve. See 'help model'.
+  Commands       A prompt in ~/.cobirb/commands/<name>.md becomes /<name>.
+                 'cobirb commands' lists them. See 'help commands'.
+  Hooks          Your own command at a decision point — a before_tool hook
+                 can refuse a call outright. See 'help hooks'.
+  MCP            Tools from a local server over stdio, subject to the same
+                 permission layer as everything else. A server you add can
+                 make its own network calls: READ 'help mcp' first.
+
+  Hooks and MCP servers are read from ~/.cobirb/config.json only, never from
+  a project's cobirb.json — both execute code with no approval prompt, and a
+  repository must not be able to install one.
+
 TOPICS
   Run 'cobirb help <topic>' for more: session, persona, plan, model,
-  plugins, tools, config.
+  commands, hooks, mcp, plugins, tools, config.
 """
 
 HELP_TOPICS: dict[str, str] = {
@@ -225,6 +242,275 @@ CoBirb does not overwrite it:
 Nothing about CoBirb's actual guarantees depends on any of this: permissions
 are enforced in policy.py and sessions are encrypted by the crypto backend,
 not by asking a model to cooperate.
+
+ONE MODEL PER ROLE
+
+A role is a job, not a name. Configure them separately when the jobs differ:
+
+  {
+    "models": {
+      "default":      {"name": "qwen2.5-coder:32b",
+                       "base_url": "http://gpu-box:11434"},
+      "orchestrator": {"name": "qwen2.5-coder:32b"},
+      "worker":       {"name": "qwen2.5-coder:7b",
+                       "base_url": "http://localhost:11434"}
+    }
+  }
+
+  default        Falls back to for everything else. The three older keys —
+                 "model", "default_model", models.default.name — all still
+                 name this one.
+  orchestrator   The agent you talk to: holds the objective, decides what
+                 happens next. This is what runs today.
+  worker         A subagent given one bounded piece of work. Reserved for
+                 the flock (v0.5.0) — nothing calls it yet. It resolves now
+                 so the config can be written and checked before then.
+
+Every role inherits field by field, so a role may name a model without
+repeating the endpoint it is served from. --model outranks all of them.
+
+  cobirb models    Print how each role resolves and where each answer came
+                   from. A role you typo'd is listed too, so it is visible
+                   rather than a silent fallback to the default.
+""",
+    "hooks": """\
+HOOKS — your own commands at CoBirb's decision points
+
+The permission layer answers "may this run?" by asking you. That works until
+the answer is a rule rather than a judgement: never touch anything under
+infra/, always run the formatter after an edit, tell me when a turn finishes.
+Asking a human to re-enact a policy twenty times a session is how people end
+up approving things unread.
+
+Hooks live in ~/.cobirb/config.json ONLY — never in a project's cobirb.json.
+A hook runs without an approval prompt, so honouring one from a repository
+would make cloning that repository enough to run its author's code. This
+costs per-project hooks, deliberately.
+
+  {
+    "hooks": {
+      "before_tool": [
+        {"match": "write_file", "command": "~/.cobirb/hooks/guard-infra.sh"}
+      ],
+      "after_turn": ["notify-send 'CoBirb finished'"]
+    }
+  }
+
+EVENTS
+  before_tool   Before a tool call — before you are even asked to approve
+                it. The only event that can change what happens.
+  after_tool    After a call has run. Observation only.
+  before_turn   Before the model is given the prompt.
+  after_turn    After the turn is finished, including any verify-and-fix
+                pass, so the workspace is in its final state.
+
+THE CONTRACT
+  The event arrives on stdin as one JSON object:
+
+    {"event": "before_tool", "tool": "write_file",
+     "arguments": {"path": "infra/main.tf", "content": "..."},
+     "cwd": "/home/you/project"}
+
+  Exit 0 means proceed. A non-zero exit from a before_tool hook BLOCKS the
+  call, and whatever the hook printed becomes the reason the MODEL is given
+  — so say something it can act on ("infra/ is generated; edit the module
+  instead") rather than a flat refusal it will simply retry. On the other
+  three events a non-zero exit is reported to you and nothing else.
+
+  A hook that cannot be run, or that times out ("timeout", default 30s), is
+  treated as a refusal. Failing open would mean a guard stops guarding at
+  exactly the moment it breaks.
+
+  "match" is a glob against the tool name ("write_*", "mcp__db__*"), and
+  applies to the two tool events. Omit it to match everything.
+
+A before_tool hook cannot APPROVE anything: it can only refuse. Everything
+it lets past still goes to the permission layer, which still asks you.
+""",
+    "commands": """\
+COMMANDS — a prompt you have written down, invoked by name
+
+Everyone ends up with a handful of prompts they retype. Retyping them means
+they drift, and the good version of a prompt is usually the fifth one.
+
+Put one in a markdown file and its filename becomes the command:
+
+  ~/.cobirb/commands/review.md            available everywhere
+  <project>/.cobirb/commands/review.md    available in that project
+
+  /review src/parser.py       Interactively.
+  cobirb -p "/review src/parser.py"       One-shot; the same expansion.
+  /commands  ·  cobirb commands           List what is available here.
+
+ARGUMENTS
+  $ARGUMENTS   Everything that followed the command.
+  $1 … $9      Individual words, so a path and a flag can go in different
+               places. A placeholder with nothing to fill it is empty, not
+               an error.
+  If the body has no placeholder at all, what you typed is appended — never
+  silently dropped.
+
+DESCRIPTION
+  An optional frontmatter block, for the listing. The block itself is not
+  sent to the model:
+
+    ---
+    description: Review a diff the way this team reviews diffs
+    ---
+    Read the staged diff and check it against $ARGUMENTS.
+
+A project command is DATA, not code: it expands to a prompt and nothing
+else, which is why these are read from a project directory when hooks and
+MCP servers are not. Every tool call it leads to still goes through the
+permission layer, and a built-in command always wins a name collision — a
+custom /undo cannot quietly change what /undo does.
+""",
+    "mcp": """\
+MCP — tools that live in someone else's process
+
+The Model Context Protocol is how CoBirb gains tools it knows nothing about:
+your issue tracker, your database, your house style guide. Each one becomes
+a normal CoBirb tool named mcp__<server>__<tool>, and goes through the same
+default-deny permission layer, the same approval prompt, the same redaction
+pass and the same audit log as read_file does.
+
+  Only stdio transport is supported, and deliberately so. An MCP server over
+  stdio is a subprocess on this machine talking over a pipe. HTTP and SSE
+  transports point at a URL, and a URL is a network call CoBirb did not make
+  and cannot see inside.
+
+READ THIS BEFORE ADDING ONE
+
+  An MCP server is a program you are choosing to run and to show your work
+  to. CoBirb's promises — no telemetry, no outbound network — are about
+  CoBirb. They do not extend to a server you configure. A server CAN:
+
+    • open its own network connections, to anywhere, at any time;
+    • send the arguments of every call it receives — file paths, code
+      snippets, queries, whatever the model passed it — anywhere it likes;
+    • report usage, phone home, or update itself, and never mention it.
+
+  Nothing in CoBirb can prevent this, and nothing in CoBirb tries to detect
+  it. Adding a server is a decision to trust its author with the part of
+  your work that touches it. Two things reduce the blast radius, both on by
+  default:
+
+    • THE ENVIRONMENT IS NOT INHERITED. A server gets PATH, HOME, LANG and
+      whatever you list under "env" — not your cloud credentials, not your
+      API tokens for services CoBirb has nothing to do with. Set
+      "inherit_env": true only for a server you have decided you trust.
+    • NOTHING IS PRE-APPROVED. MCP tools are not in the read-tool set, so
+      the directory-scoped read grant does not cover them. Each one is
+      asked about, and "always" grants that one tool for that session.
+
+  Prefer servers you can read. A server that runs entirely offline — a proxy
+  in front of a local database, a reader for a local archive — gives you the
+  capability without the question.
+
+CONFIGURING ONE
+
+  ~/.cobirb/config.json ONLY, never a project's cobirb.json: a server entry
+  is a command line, so honouring one from a repository would make cloning
+  it enough to run its author's code.
+
+  {
+    "mcp_servers": {
+      "notes": {
+        "command": "python3",
+        "args": ["/home/you/.cobirb/mcp/notes_server.py"],
+        "env": {"NOTES_DIR": "/home/you/notes"},
+        "inherit_env": false,
+        "cwd": null,
+        "timeout": 120,
+        "startup_timeout": 30,
+        "enabled": true
+      }
+    }
+  }
+
+  A server that fails to start is reported on stderr and skipped; the
+  session runs without it rather than not running.
+
+WRITING YOUR OWN — an offline proxy over a database
+
+  This is the case worth building for: you want the model to answer
+  questions about a real dataset, and you do not want the dataset, the
+  schema, or the queries leaving the machine. A server you wrote does
+  exactly what you can read, and CoBirb never sees the database at all —
+  only the rows your server chose to return.
+
+  It is a program that reads JSON-RPC 2.0 from stdin and writes it to
+  stdout, one message per line. Three methods, and you are done:
+
+    import json, sqlite3, sys
+
+    DB = sqlite3.connect("/home/you/data/app.db")
+    TOOLS = [{
+        "name": "query",
+        "description": "Run a read-only SQL query against the app database.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"sql": {"type": "string"}},
+            "required": ["sql"],
+        },
+    }]
+
+    def reply(mid, result):
+        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": mid,
+                                     "result": result}) + "\\n")
+        sys.stdout.flush()
+
+    def text(body, is_error=False):
+        return {"content": [{"type": "text", "text": body}],
+                "isError": is_error}
+
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        msg = json.loads(line)
+        method = msg.get("method")
+        if method == "initialize":
+            reply(msg["id"], {"protocolVersion": "2025-06-18",
+                              "capabilities": {"tools": {}},
+                              "serverInfo": {"name": "appdb",
+                                             "version": "1"}})
+        elif method == "tools/list":
+            reply(msg["id"], {"tools": TOOLS})
+        elif method == "tools/call":
+            sql = msg["params"].get("arguments", {}).get("sql", "")
+            if not sql.lstrip().lower().startswith("select"):
+                reply(msg["id"], text("only SELECT is allowed here", True))
+                continue
+            try:
+                rows = DB.execute(sql).fetchmany(100)
+            except Exception as exc:
+                reply(msg["id"], text(f"query failed: {exc}", True))
+            else:
+                reply(msg["id"], text(json.dumps(rows)))
+        elif method and method.startswith("notifications/"):
+            pass          # nothing to acknowledge
+        elif "id" in msg:
+            reply(msg["id"], text(f"unsupported method {method}", True))
+
+  Point CoBirb at it and it appears as mcp__appdb__query. Notes on the
+  above, all of which matter in practice:
+
+    • Never write anything but JSON-RPC to stdout. Banners, print()
+      debugging and progress bars all corrupt the stream — CoBirb logs and
+      skips a non-JSON line, but your own parser probably will not. Use
+      stderr, which CoBirb captures and quotes back if the server fails.
+    • Answer every request that has an "id". A request left unanswered is
+      a client sitting on a timeout.
+    • Enforce your own limits inside the server. The SELECT check and the
+      fetchmany(100) above are the whole reason this is a proxy rather
+      than a database connection handed to a model: the server is where
+      "read-only" and "not the whole table" are facts rather than
+      instructions.
+    • Return errors as isError results, not as JSON-RPC errors. CoBirb
+      turns those into a failed tool result, which the model reads and
+      adapts to; a transport-level error reads as the server being broken.
+    • Descriptions are read by the model. "Run a read-only SQL query
+      against the app database" earns better calls than "query".
 """,
     "plugins": """\
 PLUGINS — bolt-on capabilities
@@ -371,7 +657,24 @@ Read from (repo overrides user): ~/.cobirb/config.json, then ./cobirb.json
                                  on if you want that trail and understand
                                  what ends up in it.
 
+USER-CONFIG ONLY
+
+Two keys are read from ~/.cobirb/config.json and nowhere else. Both can
+execute code with no approval prompt in the way, so honouring them from a
+project's cobirb.json would make cloning a repository enough to run its
+author's code. Putting them in a project file does nothing at all.
+
+  "hooks"                        Your own commands at CoBirb's decision
+                                 points; a before_tool hook can refuse a
+                                 call outright. See 'cobirb help hooks'.
+  "mcp_servers"                  Local MCP servers to start and take tools
+                                 from. Each one is a program you choose to
+                                 run and to show your work to — read
+                                 'cobirb help mcp' before adding one.
+
 Nothing here ever defaults to a networked provider — model/provider
-settings are opt-in, matching CoBirb's no-network-by-default rule.
+settings are opt-in, matching CoBirb's no-network-by-default rule. A
+configured MCP server is the one exception you can create yourself, and it
+is not a CoBirb network call: it is a program you asked to run.
 """,
 }

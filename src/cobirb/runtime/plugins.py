@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ..config import Config
+from ..mcp import McpTool
 from ..plugins.core import AesGcmScryptSessionCrypto, ToolRegistry
 from ..plugins.core.tools import BUILTIN_TOOLS
 from ..plugins.loader import load_plugins
@@ -154,7 +155,11 @@ class ToolInfo:
 
     name: str
     description: str
-    source: str  # "core" or "plugin"
+    # "core", "plugin", or "mcp". MCP is called out separately rather than
+    # lumped in with plugins because the distinction is the one a person
+    # actually cares about here: a plugin is Python running in this process, an
+    # MCP tool is a separate program that can do things CoBirb cannot see.
+    source: str
 
 
 @dataclass
@@ -164,6 +169,12 @@ class PluginsSummary:
     slots: dict[str, str] = field(default_factory=dict)
     tools: list[ToolInfo] = field(default_factory=list)
     issues: dict[str, str] = field(default_factory=dict)
+    # Configured MCP servers, by name — *not* started. This snapshot exists to
+    # populate a tab, and starting somebody's database proxy to draw a list
+    # would be an absurd side effect of opening it. Their tools therefore
+    # appear here only once a turn has built a real orchestrator; until then
+    # the names are what can honestly be shown.
+    mcp_servers: list[str] = field(default_factory=list)
 
 
 def describe_plugins(cwd: str) -> PluginsSummary:
@@ -190,13 +201,28 @@ def describe_plugins(cwd: str) -> PluginsSummary:
 
     tools = sorted(
         (
-            ToolInfo(
-                name=tool.name(),
-                description=tool.description(),
-                source="core" if type(tool) in BUILTIN_TOOLS else "plugin",
-            )
+            ToolInfo(name=tool.name(), description=tool.description(), source=_source_of(tool))
             for tool in registry.values()
         ),
         key=lambda info: info.name,
     )
-    return PluginsSummary(slots=slots, tools=tools, issues=issues)
+    return PluginsSummary(
+        slots=slots, tools=tools, issues=issues, mcp_servers=configured_mcp_servers(config)
+    )
+
+
+def configured_mcp_servers(config: Config) -> list[str]:
+    """Names of the MCP servers the user has configured, without starting any."""
+    block = config.user_get("mcp_servers", default={}) or {}
+    if not isinstance(block, dict):
+        return []
+    return sorted(
+        str(name) for name, spec in block.items()
+        if isinstance(spec, dict) and spec.get("enabled") is not False
+    )
+
+
+def _source_of(tool: Any) -> str:
+    if type(tool) in BUILTIN_TOOLS:
+        return "core"
+    return "mcp" if isinstance(tool, McpTool) else "plugin"

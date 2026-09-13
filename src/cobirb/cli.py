@@ -32,7 +32,9 @@ from .policy import PermissionError
 from .plugins.core import render
 from .runtime import commands, personas, plugins, sessions, wiring
 from .plugins.core import TerminalIO
+from .runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
 from .runtime.export import write_export
+from .runtime.models import describe_roles
 from .session import SessionManager
 from .runtime.headless import EXIT_ERROR, EXIT_OK, HeadlessIO, HeadlessResult, describe_context
 from .runtime.personas import NO_PERSONA
@@ -143,6 +145,38 @@ def _run_one_shot(
         print(f"cobirb: {message}", file=sys.stderr)
         return EXIT_ERROR
 
+    try:
+        return _drive_one_shot(
+            orchestrator, prompt, persona, system, session_path, password, cwd,
+            plan_mode, headless, as_json,
+        )
+    finally:
+        # Whatever happened, don't leave MCP servers running behind a process
+        # that has finished. `finally` rather than a line at the end: the error
+        # paths above are exactly when a leaked child is least likely to be
+        # noticed.
+        orchestrator.close()
+
+
+def _drive_one_shot(
+    orchestrator: Any,
+    prompt: str,
+    persona: cobirb_typing.Persona,
+    system: str,
+    session_path: str | None,
+    password: str | None,
+    cwd: str,
+    plan_mode: bool,
+    headless: bool,
+    as_json: bool,
+) -> int:
+    """Run the turn against an already-wired orchestrator and report on it.
+
+    Split from ``_run_one_shot`` only so that wiring's own failure path and
+    this one can be told apart: everything here has an orchestrator to shut
+    down afterwards, and nothing above it does.
+    """
+    report = HeadlessResult(ok=False, summary="")
     if not as_json:
         _render_user_prompt(prompt)
     try:
@@ -295,6 +329,25 @@ def _run_tui(
     return 0
 
 
+def _run_models(config: Config, override: str | None) -> int:
+    """``cobirb models`` — which model plays which part, and why.
+
+    Worth its own subcommand rather than a line in ``help``: role resolution
+    has three layers (the role's own key, the default's, and ``--model``), and
+    the question people actually have is "so which one runs?" — which is a
+    fact about *their* config, not something documentation can answer.
+    """
+    print("Model roles:\n")
+    for spec in describe_roles(config, override):
+        print(f"  {spec.describe()}")
+    print(
+        "\nEvery role falls back to 'default'. 'worker' is reserved for subagents\n"
+        "(v0.5.0) and has no caller yet — it resolves now so the config can be\n"
+        "written and checked before then. See 'cobirb help model'."
+    )
+    return EXIT_OK
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cobirb",
@@ -304,8 +357,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "subcommand",
         nargs="?",
-        choices=["help"],
-        help="Show help (or 'cobirb help' for this overview).",
+        choices=["help", "models", "commands"],
+        help="'help' for the overview, 'models' for how each role resolves, "
+        "'commands' for the custom commands available here.",
     )
     parser.add_argument(
         "topic",
@@ -408,6 +462,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = Config(cwd=args.cwd)
+
+    if args.subcommand == "models":
+        return _run_models(config, args.model)
+    if args.subcommand == "commands":
+        print(describe_commands(discover_commands(args.cwd or ".")))
+        return EXIT_OK
+
     allow_overrides = wiring.parse_allow_tools(args.allow_tool)
     persona_name = args.persona or config.get("persona")
     persona = personas.load_persona(persona_name)
@@ -425,7 +486,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.prompt is not None:
         status = _run_one_shot(
-            args.prompt,
+            expand_custom_command(args.prompt, args.cwd or "."),
             persona,
             system,
             allow_overrides,

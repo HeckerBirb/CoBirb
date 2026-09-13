@@ -156,6 +156,22 @@ def build_plugins_view(summary: "PluginsSummary") -> Group:
         tools_table.add_row(tool.name, tool.source, tool.description)
 
     parts: list[Any] = [slots_table, tools_table]
+    if summary.mcp_servers:
+        # Named, not listed as tools: this snapshot deliberately starts no
+        # servers, so their tools only appear in the table above once a turn
+        # has built a real orchestrator.
+        parts.append(
+            Panel(
+                Text(
+                    ", ".join(summary.mcp_servers)
+                    + "\n\nStarted with your first message; their tools then join the table "
+                    "above as mcp__<server>__<tool>. Each one is a separate program that can "
+                    "make its own network calls — see 'cobirb help mcp'."
+                ),
+                title="MCP servers configured",
+                border_style="yellow",
+            )
+        )
     if summary.issues:
         lines = "\n".join(f"• {ident}: {message}" for ident, message in summary.issues.items())
         parts.append(Panel(Text(lines), title="Plugin issues", border_style="red"))

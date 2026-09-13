@@ -37,6 +37,7 @@ from textual.widgets import Footer, Header, Input, RichLog, TabbedContent, TabPa
 from .. import session
 from ..help_text import HELP_TEXT, HELP_TOPICS
 from ..runtime import commands, personas, plugins, wiring
+from ..runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
 from ..runtime.export import write_export
 from ..config import Config
 from ..orchestrator import Orchestrator, render_through
@@ -368,6 +369,11 @@ class CoBirbApp(App[None]):
         if self._dispatch_command(prompt):
             return
 
+        # After the built-ins, before the model: a custom command *is* a
+        # prompt, so what it expands to is what gets sent and what the
+        # transcript shows. Showing "/review" and sending 400 words would make
+        # the session log unreadable to the person who wrote it.
+        prompt = self._expand_custom(prompt)
         self.write_user_prompt(prompt)
         # Disabled here, on the main thread, and re-enabled in
         # _on_turn_finished — this is what replaces the old loop's
@@ -393,6 +399,13 @@ class CoBirbApp(App[None]):
         An unrecognised ``/thing`` is deliberately *not* a command: it goes to
         the model like any other message, since it is far more likely to be
         prose than a typo'd command.
+
+        Returns ``True`` when the input was handled here and nothing should be
+        sent to the model. A *custom* command is the exception that isn't one:
+        it is handled here but produces a prompt, which is sent — so it is
+        expanded before this is ever called (see ``on_input_submitted``) and
+        reaches this method only if it also collides with a built-in name,
+        which the built-in wins.
         """
         if prompt == "?":
             self.action_help("")
@@ -405,6 +418,36 @@ class CoBirbApp(App[None]):
             return False
         handler(self, argument.strip())
         return True
+
+    def _discard_orchestrator(self) -> None:
+        """Drop the current orchestrator, stopping anything it started.
+
+        Interactive mode rebuilds one whenever the session changes, so a plain
+        ``self.orchestrator = None`` would leave any MCP servers it started
+        running with nothing holding them — several sessions into an
+        afternoon that is a handful of orphaned child processes.
+        """
+        if self.orchestrator is not None:
+            self.orchestrator.close()
+        self.orchestrator = None
+
+    def on_unmount(self) -> None:
+        """Shut down cleanly when the app closes."""
+        self._discard_orchestrator()
+
+    def _expand_custom(self, prompt: str) -> str:
+        """Turn ``/review foo.py`` into the prompt the user wrote down.
+
+        Built-in commands are resolved first (in ``_dispatch_command``), so a
+        custom command cannot shadow ``/undo`` and quietly change what it does.
+        Discovery is per-submission rather than cached at startup: editing a
+        command file and using it in the same session is the normal way these
+        get written, and a cache would mean restarting to test a one-line
+        change.
+        """
+        if not prompt.startswith("/") or prompt.partition(" ")[0] in self._COMMANDS:
+            return prompt
+        return expand_custom_command(prompt, self.cwd)
 
     def _cmd_help(self, argument: str) -> None:
         self.action_help(argument)
@@ -508,6 +551,12 @@ class CoBirbApp(App[None]):
         self.query_one(StatusBar).plan_mode = self.plan_mode
         self.write_transcript(render.build_notice(message))
 
+    def _cmd_commands(self, argument: str) -> None:
+        """List the prompt files that are available as commands here."""
+        self.write_transcript(
+            render.build_notice(describe_commands(discover_commands(self.cwd)))
+        )
+
     _COMMANDS = {
         "/help": _cmd_help,
         "/model": _cmd_model,
@@ -517,6 +566,7 @@ class CoBirbApp(App[None]):
         "/undo": _cmd_undo,
         "/export": _cmd_export,
         "/diff": _cmd_diff,
+        "/commands": _cmd_commands,
     }
 
     def _on_turn_finished(self) -> None:
@@ -792,7 +842,7 @@ class CoBirbApp(App[None]):
         # bound to this session via the exact same load-if-exists path
         # _build_orchestrator already uses for --session, so there is only
         # one code path that ever opens a session file, tested once.
-        self.orchestrator = None
+        self._discard_orchestrator()
         self.persona = personas.load_persona(manager.session.persona)
         self.system = personas.build_system_prompt(self.persona, harness=self.harness)
         status = self.query_one(StatusBar)
@@ -844,7 +894,7 @@ class CoBirbApp(App[None]):
     def _apply_new_session(self, path: str, password: str) -> None:
         self.session_path = path
         self.password = password
-        self.orchestrator = None
+        self._discard_orchestrator()
         self.query_one(StatusBar).session_path = path
         self.query_one(SessionsPane).set_status(
             f"'{os.path.basename(path)}' will be created on your next message."
