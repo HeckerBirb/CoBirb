@@ -11,6 +11,7 @@ import re
 from typing import Any, ClassVar
 
 from ...typing.spi import Tool, ToolResult
+from .ignores import IgnoreRules
 
 
 # --------------------------------------------------------------------------- #
@@ -276,25 +277,14 @@ class ApplyPatchTool(CobirbTool):
         return ToolResult(ok=True, content=f"Applied patch to {path}")
 
 
-_DEFAULT_IGNORED_DIR_NAMES = {
-    ".git",
-    ".venv",
-    "venv",
-    "__pycache__",
-    "node_modules",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-}
+def _ignore_rules(tool: "CobirbTool") -> IgnoreRules:
+    """The ignore rules for this tool's working directory.
 
-
-def _is_ignored_path(path: str) -> bool:
-    """True if any path component is a vendor/build/cache directory glob and
-    grep skip by default, so they don't crawl e.g. .venv/ or .git/ on every
-    call. Not full .gitignore parsing — just the common, expensive offenders.
+    Built per call rather than cached: it is one small file read, and a
+    long-running session should notice a `.gitignore` the agent itself just
+    edited rather than working from a stale copy of it.
     """
-    parts = os.path.normpath(path).split(os.sep)
-    return any(part in _DEFAULT_IGNORED_DIR_NAMES or part.endswith(".egg-info") for part in parts)
+    return IgnoreRules.for_directory(tool._cwd or ".")
 
 
 class GlobTool(CobirbTool):
@@ -311,8 +301,8 @@ class GlobTool(CobirbTool):
                 "include_ignored": {
                     "type": "boolean",
                     "description": (
-                        "Include vendor and cache directories (.git, .venv, node_modules, "
-                        "__pycache__, ...) that are skipped by default."
+                        "Include files that .gitignore, or CoBirb's built-in list of "
+                        "vendor and cache directories, would otherwise skip."
                     ),
                     "default": False,
                 },
@@ -328,7 +318,8 @@ class GlobTool(CobirbTool):
         try:
             results = glob_module.glob(pattern, recursive=True)
             if not include_ignored:
-                results = [r for r in results if not _is_ignored_path(r)]
+                rules = _ignore_rules(self)
+                results = [r for r in results if not rules.is_ignored(r)]
             return ToolResult(ok=True, content="\n".join(sorted(results)) if results else "(no matches)")
         except OSError as exc:
             return ToolResult(ok=False, content=f"glob failed: {exc}", error=str(exc))
@@ -349,7 +340,8 @@ class GrepTool(CobirbTool):
                 "include_ignored": {
                     "type": "boolean",
                     "description": (
-                        "Include vendor and cache directories that are skipped by default."
+                        "Include files that .gitignore, or CoBirb's built-in list of "
+                        "vendor and cache directories, would otherwise skip."
                     ),
                     "default": False,
                 },
@@ -367,7 +359,8 @@ class GrepTool(CobirbTool):
             root = self._resolve(arguments.get("path", "."))
             paths = [p for p in glob_module.glob(root + "/**/*", recursive=True)]
             if not include_ignored:
-                paths = [p for p in paths if not _is_ignored_path(p)]
+                rules = _ignore_rules(self)
+                paths = [p for p in paths if not rules.is_ignored(p)]
             # Compiled once, up front, so an invalid pattern is reported as
             # what it is. Left to re.search it would raise re.error on the
             # first line of the first file, escape this handler (which only
