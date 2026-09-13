@@ -23,6 +23,7 @@ and old checkpoints are pruned.
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -180,6 +181,64 @@ class Checkpoints:
 
         shutil.rmtree(checkpoint.directory, ignore_errors=True)
         return report
+
+    # ------------------------------------------------------------------ #
+    # Reviewing
+    # ------------------------------------------------------------------ #
+    def originals(self) -> dict[str, str | None]:
+        """Every file the agent has changed, and where its *earliest* saved
+        copy lives — or ``None`` for one it created.
+
+        Earliest, walking oldest checkpoint first: the question "what has this
+        session done to my code" is asked against how the files looked when it
+        started, not against the state one turn ago.
+        """
+        first: dict[str, str | None] = {}
+        for checkpoint in self._checkpoints:
+            for original, saved in checkpoint.files.items():
+                if original in first:
+                    continue
+                first[original] = (
+                    os.path.join(checkpoint.directory, saved) if saved is not None else None
+                )
+        return first
+
+    def session_diff(self) -> str:
+        """A unified diff of everything the agent has changed so far.
+
+        Built from the snapshots rather than from git, for two reasons: it
+        works in a directory that isn't a repository, and it shows *the
+        agent's* changes specifically rather than conflating them with
+        whatever the user had already edited.
+        """
+        chunks: list[str] = []
+        for current, original in sorted(self.originals().items()):
+            shown = os.path.relpath(current, self.cwd)
+            before = ""
+            if original is not None:
+                try:
+                    with open(original, "r", encoding="utf-8", errors="replace") as fh:
+                        before = fh.read()
+                except OSError:
+                    continue
+            try:
+                with open(current, "r", encoding="utf-8", errors="replace") as fh:
+                    after = fh.read()
+            except OSError:
+                after = ""  # deleted since, or never created
+            if before == after:
+                continue
+            chunks.append(
+                "".join(
+                    difflib.unified_diff(
+                        before.splitlines(keepends=True),
+                        after.splitlines(keepends=True),
+                        fromfile=f"{shown} (before this session)",
+                        tofile=f"{shown} (now)",
+                    )
+                )
+            )
+        return "\n".join(chunk for chunk in chunks if chunk)
 
     @property
     def undoable_turns(self) -> int:

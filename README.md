@@ -89,7 +89,8 @@ Running `cobirb` with no `-p` opens a full-screen terminal app, with three tabs:
 
 In the input: `/model` lists the models the configured endpoint currently has and lets you pick
 one for this session; `/persona` opens the same kind of picker for personas —
-including `none`, the default — and `/persona <name>` switches directly; `/context` shows how much of the model's window this session is using;
+including `none`, the default — and `/persona <name>` switches directly; `/diff` shows everything the agent has changed this session and `/undo` puts the last turn back;
+`/context` shows how much of the model's window this session is using;
 `/plan on|off` toggles plan mode (`/plan` alone reports it); `?` or `/help` opens the help screen
 (`/help <topic>` for one topic). Keys: `f1` help, `f2` next tab, `ctrl+q` quit, `up`/`down`
 recall earlier prompts (the last 100, in memory only), `ctrl+c` copies the transcript

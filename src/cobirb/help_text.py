@@ -71,6 +71,8 @@ INTERACTIVE COMMANDS
   /persona <name>    Switch to a named persona directly.
   /export [PATH]     Write this session out as readable markdown. The
                      file is plaintext; the session stays encrypted.
+  /diff              Everything the agent has changed this session, as one
+                     diff. Works without git; shows only its own edits.
   /undo              Put back the files the last turn changed. Cannot
                      undo what a shell command did — see 'help tools'.
   /context           Show how much of the model's context window this

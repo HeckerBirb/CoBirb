@@ -459,6 +459,25 @@ class CoBirbApp(App[None]):
             return
         self.write_transcript(render.build_notice(checkpoints.undo_last().describe()))
 
+    def _cmd_diff(self, argument: str) -> None:
+        """Everything the agent has changed this session, as one diff.
+
+        Built from the undo snapshots, not from git: it works in a directory
+        that is not a repository, and it shows *the agent's* changes rather
+        than conflating them with whatever the user had already edited.
+        """
+        checkpoints = getattr(self.orchestrator, "checkpoints", None)
+        if checkpoints is None:
+            self.write_transcript(
+                render.build_notice("No change tracking this session (\"checkpoints\": false).")
+            )
+            return
+        diff = checkpoints.session_diff()
+        if not diff.strip():
+            self.write_transcript(render.build_notice("No files have been changed this session."))
+            return
+        self.write_transcript(render.build_preview_panel("this session", diff))
+
     def _cmd_export(self, argument: str) -> None:
         """Write this session out as markdown.
 
@@ -497,6 +516,7 @@ class CoBirbApp(App[None]):
         "/context": _cmd_context,
         "/undo": _cmd_undo,
         "/export": _cmd_export,
+        "/diff": _cmd_diff,
     }
 
     def _on_turn_finished(self) -> None:

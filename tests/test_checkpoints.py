@@ -143,3 +143,88 @@ def test_a_failed_restore_is_reported_rather_than_swallowed(tmp_path):
 
     assert report.failed
     assert "could not undo" in report.describe()
+
+
+# --------------------------------------------------------------------------- #
+# /diff — what the agent changed this session.
+#
+# Built from the snapshots rather than git, so it works in a directory that is
+# not a repository and shows the agent's changes specifically rather than
+# conflating them with whatever the user had already edited.
+# --------------------------------------------------------------------------- #
+def test_the_session_diff_shows_what_the_agent_changed(tmp_path):
+    target = tmp_path / "a.py"
+    target.write_text("def f():\n    return 1\n")
+    checkpoints = _store(tmp_path)
+
+    checkpoints.begin_turn()
+    checkpoints.record(str(target))
+    target.write_text("def f():\n    return 2\n")
+
+    diff = checkpoints.session_diff()
+
+    assert "-    return 1" in diff and "+    return 2" in diff
+    assert "a.py" in diff
+
+
+def test_the_diff_is_against_the_start_of_the_session_not_the_last_turn(tmp_path):
+    """"What has this session done to my code" is asked against how things
+    looked when it started."""
+    target = tmp_path / "a.py"
+    target.write_text("v1\n")
+    checkpoints = _store(tmp_path)
+
+    for version in ("v2\n", "v3\n"):
+        checkpoints.begin_turn()
+        checkpoints.record(str(target))
+        target.write_text(version)
+
+    diff = checkpoints.session_diff()
+
+    assert "-v1" in diff and "+v3" in diff
+    assert "v2" not in diff  # the intermediate state is not part of the answer
+
+
+def test_a_file_the_agent_created_shows_as_wholly_added(tmp_path):
+    checkpoints = _store(tmp_path)
+    checkpoints.begin_turn()
+    checkpoints.record(str(tmp_path / "new.py"))
+    (tmp_path / "new.py").write_text("brand new\n")
+
+    diff = checkpoints.session_diff()
+
+    assert "+brand new" in diff
+
+
+def test_a_file_edited_back_to_where_it_started_is_not_in_the_diff(tmp_path):
+    target = tmp_path / "a.py"
+    target.write_text("original\n")
+    checkpoints = _store(tmp_path)
+
+    checkpoints.begin_turn()
+    checkpoints.record(str(target))
+    target.write_text("changed\n")
+    target.write_text("original\n")
+
+    assert checkpoints.session_diff().strip() == ""
+
+
+def test_a_session_that_changed_nothing_has_an_empty_diff(tmp_path):
+    checkpoints = _store(tmp_path)
+    checkpoints.begin_turn()
+
+    assert checkpoints.session_diff() == ""
+
+
+def test_the_diff_works_without_git(tmp_path):
+    """Deliberate: the checkpoint store is the source, so a directory that
+    was never a repository still answers the question."""
+    assert not (tmp_path / ".git").exists()
+    target = tmp_path / "a.py"
+    target.write_text("before\n")
+    checkpoints = _store(tmp_path)
+    checkpoints.begin_turn()
+    checkpoints.record(str(target))
+    target.write_text("after\n")
+
+    assert "+after" in checkpoints.session_diff()

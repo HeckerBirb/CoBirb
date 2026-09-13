@@ -146,6 +146,12 @@ is outside undo. That is why `UndoReport.describe()` names the files it actually
 of reporting success: a user told "undone" who then finds otherwise is worse off than one told
 exactly what came back.
 
+`/diff` renders the whole session's changes from the same store: for each file ever touched, its
+*earliest* snapshot against the file now. Deliberately not `git diff` — this works in a directory
+that was never a repository, and it shows the agent's changes rather than conflating them with
+whatever the user had already edited. A file the agent edited and then edited back does not
+appear, which is correct: nothing changed.
+
 Snapshots are plaintext, unlike sessions. A copy of `src/app.py` exposes nothing that
 `src/app.py` did not already expose in the directory it came from, so encrypting it would be
 ceremony; the store is 0700 and pruned to the last 20 changing turns.
