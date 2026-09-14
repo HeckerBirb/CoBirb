@@ -24,42 +24,16 @@ opt a capability in.**
 
 ## Status
 
-🚧 **v0.7.0.** The core loop, built-in tools, the permission model,
-encrypted sessions and a local Ollama provider — plus the things that make it usable on real
-work: context compaction so long sessions don't degrade, project instructions, `.gitignore`
-awareness, a `repo_map` tool so it can find its way around, a diff shown before any write,
-`/undo` and `/diff`, credential redaction, an opt-in "run my tests after you change something"
-loop, and a headless mode for CI.
+🚧 **v0.7.0** — pre-1.0, under active development, full test suite green. The core agent loop,
+encrypted sessions, context compaction, project instructions, a `repo_map` tool, diff-before-write
+with `/undo`, credential redaction, headless mode for CI, an extensible plugin system (hooks, MCP,
+custom commands, per-role models), and **the Flock** — `cobirb flock -p "..."` divides a piece of
+work between several agents that cannot see each other, coordinated by a shared skeleton rather
+than by talking to one another (`cobirb help flock`) — are all shipped.
 
-**0.7 is the hardening release** — the last one before 1.0. The plugin SPI is now **frozen and
-versioned**: within a version changes are additive only, a plugin declares what it was written
-against with `COBIRB_SPI = 1`, and one that needs a newer CoBirb is refused with a message saying
-so instead of failing later. Session files carry a schema version with a migration path, and one
-written by a *newer* CoBirb is declined rather than misread and saved back wrong. Session
-encryption now records its own KDF parameters, which is what made it possible to raise the scrypt
-cost to OWASP's current recommendation without orphaning the files already on disk — old sessions
-still open. See §12.3 of [`AGENTS.md`](./AGENTS.md) for the full security review.
-
-**New in 0.6 — a running session stops being a one-shot commitment.** Type while the model is
-answering and it **redirects the turn in progress** rather than queuing behind it — mid-stream,
-where the model supports being cut off. **Branch a conversation** into a new file to try a
-different direction (`--branch`, or the Sessions tab) without disturbing the original. And
-`cobirb plugin install ./my-plugin` makes a plugin on your disk something CoBirb actually
-discovers — local only, no registry, nothing fetched.
-
-**New in 0.5 — the Flock.** `cobirb flock -p "add CSV export"` divides a piece of work between
-several agents that cannot see each other. One *Brainy Birb* plans it, designs the interfaces and
-writes the skeleton — typed stubs, semantic docstrings, failing tests — then hands one ticket to
-each *Worker Birb*. A worker knows only its own part: not what the feature is, not how many others
-there are, not what they are building. It works because the skeleton is the communication channel,
-so nobody has to coordinate. You approve the charter once, see every worker's exact scope before
-anything runs, and the work is reviewed against the skeleton afterwards. See `cobirb help flock`.
-
-In 0.4: **one model per role** (`cobirb models`), **hooks** that can refuse a tool call before you
-are even asked about it, **custom commands** — a prompt you wrote down, invoked by name — and an
-**MCP client** over stdio, so tools from a local server become CoBirb tools under the same
-permission layer as everything else. See [`AGENTS.md`](./AGENTS.md) for the architecture, the
-plugin SPI, and the reasoning behind all of it.
+See [`CHANGELOG.md`](./CHANGELOG.md) for release-by-release history, and
+[`AGENTS.md`](./AGENTS.md) for the architecture, the plugin SPI, and the security design —
+including §12.3's review of session encryption and the plugin-install path.
 
 ## Quick start
 
@@ -250,6 +224,7 @@ layer.
 
 - [AGENTS.md](./AGENTS.md) — the single source of truth: architecture, the plugin SPI,
   the security design, and the working conventions.
+- [CHANGELOG.md](./CHANGELOG.md) — release history.
 
 ## License
 
