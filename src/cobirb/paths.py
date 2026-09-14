@@ -68,3 +68,9 @@ def user_personas_dir() -> str:
 def user_plugins_dir() -> str:
     """Where a user's own local plugin directories live."""
     return os.path.join(cobirb_dir(), "plugins")
+
+
+def memories_dir() -> str:
+    """Where memory catalogues live — one file per catalogue: ``<name>.md``
+    (plaintext, chmod 0600) or ``<name>.md.enc`` (password-protected)."""
+    return os.path.join(cobirb_dir(), "memories")
