@@ -4,7 +4,7 @@ The core is intentionally thin — it does not contain feature business logic. I
 connects a model provider, a tool registry, a policy layer, an I/O adapter, and a
 session manager, and drives the agentic loop.
 
-The loop preserves the Copilot design but keeps it local and approval-gated:
+The loop keeps the familiar agentic coding-assistant shape, but local and approval-gated:
 
     Prompt → understand → inspect → plan → act → observe → reason → iterate
             → validate → report

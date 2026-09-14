@@ -26,8 +26,8 @@ class StatusBar(Static):
     """One persistent line: who's speaking, on what model, with plan mode on
     or off, in which directory.
 
-    This is the CoBirb equivalent of the status line in a Copilot-style CLI,
-    minus its "AI credits used" counter — CoBirb is local and free, so there
+    This is the CoBirb equivalent of the status line other terminal coding
+    assistants show, minus an "AI credits used" counter — CoBirb is local and free, so there
     is nothing to meter. It is kept *live* rather than printed once at
     startup, so a ``/persona`` or ``/plan`` change is visible for the rest of
     the session instead of scrolling away.

@@ -7,8 +7,9 @@
 
 ## 1. What CoBirb is
 
-A **privacy-first, Copilot-like agentic CLI**: Copilot CLI behavior, minus every default
-network/telemetry behavior, plus a hard boundary around the rest. **No data leaves the process
+A **privacy-first, agentic coding CLI**: the behavior people already expect from a terminal
+coding assistant, minus every default network/telemetry behavior, plus a hard boundary around
+the rest. **No data leaves the process
 unless the user opts a capability in.** Noah the African Grey is the mascot and an *opt-in* persona,
 not the default voice. Status: **v0.5.1.** Loop, tools, permissions, encrypted sessions, Ollama provider and
 the interactive app, plus context compaction, project instructions, `.gitignore` awareness,
@@ -222,10 +223,10 @@ most-referenced first. Python symbols come from `ast` (exact, stdlib); other lan
 set of regexes, which is crude next to tree-sitter but avoids a compiled dependency for a job that
 is orientation rather than analysis.
 
-**It is a tool, not something injected into every request.** Aider-style tools put their map in
-every system prompt, which works at 128k and would be ruinous at the 4096 a local model is usually
-served — a permanent map would consume the conversation it exists to help, and fight the
-compaction in §4b. As a tool it costs nothing until asked for, and the model can ask about a
+**It is a tool, not something injected into every request.** Some coding-agent tools put their
+repo map in every system prompt, which works at 128k and would be ruinous at the 4096 a local
+model is usually served — a permanent map would consume the conversation it exists to help, and
+fight the compaction in §4b. As a tool it costs nothing until asked for, and the model can ask about a
 subtree. If that turns out to be the wrong call and it should be injected at session start
 instead, that is a deliberate decision to take, not a default to drift into.
 

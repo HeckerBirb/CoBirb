@@ -4,6 +4,16 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.9.1]
+
+- Removed every named mention of other AI coding tools from docstrings, `AGENTS.md`, `README.md`
+  and package metadata (`pyproject.toml`), rephrased to keep the same meaning. Prompted by a local
+  model echoing one of those names back unprompted — CoBirb's own description of itself is
+  something a model can read (project instructions, package metadata) and repeat, so it
+  shouldn't name a product it isn't.
+- `cobirb.__version__` (used in the MCP client handshake) had drifted out of sync with
+  `pyproject.toml`'s version since v0.8.0; corrected and kept in this release.
+
 ## [0.9.0] — "Noah", the default theme
 
 The parrot's own colours, replacing the stock teal/orange/navy scheme app-wide: one accent

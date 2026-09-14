@@ -1,6 +1,6 @@
 # CoBirb 🦜
 
-A privacy-first, Copilot-like agentic CLI. It lives in your terminal, runs against your own
+A privacy-first, agentic coding CLI. It lives in your terminal, runs against your own
 local models, and stays out of their way.
 
 > **Privacy is not a feature. It's the foundation.**
