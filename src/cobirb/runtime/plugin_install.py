@@ -63,6 +63,17 @@ _NAME_PREFIX = "cobirb_plugins_"
 # not part of a turn loop with a person waiting on a reply.
 _PIP_TIMEOUT_SECONDS = 300
 
+# Where `--replace` parks the plugin it is replacing until the new one has
+# proven it installs and is discoverable.
+#
+# Beside `plugins/` rather than inside it, and on purpose: discovery walks
+# every directory under `plugins/`, so parking it there would briefly present
+# the old copy as a second, wrongly-named plugin — and a copy stranded by a
+# process killed mid-reinstall would keep doing so for good, in both
+# `cobirb plugin list` and the loader's error list. Same `~/.cobirb` tree, so
+# the move stays a rename rather than a cross-filesystem copy.
+_DISPLACED_DIR_NAME = "plugins.being-replaced"
+
 
 class PluginInstallError(Exception):
     """A plugin could not be installed, with a reason a person can act on."""
@@ -196,12 +207,20 @@ def install_plugin(source_dir: str, *, replace: bool = False) -> InstallResult:
         raise PluginInstallError(f"[project].name {declared_name!r} has nothing after the prefix")
 
     target = os.path.join(paths.user_plugins_dir(), name)
+    displaced = None
     if os.path.exists(target):
         if not replace:
             raise PluginInstallError(
                 f"{target} already exists — pass replace=True (or --replace) to reinstall it"
             )
-        shutil.rmtree(target)
+        # Moved aside rather than deleted. A reinstall whose *new* source turns
+        # out not to install, or not to be discoverable, must not cost the user
+        # the working plugin they already had — "a failed install leaves no
+        # trace" has to mean no trace either way, not "leaves you with neither".
+        displaced = os.path.join(paths.cobirb_dir(), _DISPLACED_DIR_NAME, name)
+        shutil.rmtree(displaced, ignore_errors=True)
+        os.makedirs(os.path.dirname(displaced), exist_ok=True)
+        os.replace(target, displaced)
 
     os.makedirs(paths.user_plugins_dir(), exist_ok=True)
     shutil.copytree(source_dir, target)
@@ -210,7 +229,7 @@ def install_plugin(source_dir: str, *, replace: bool = False) -> InstallResult:
         output = _run_pip("install", "-e", target)
         _make_importable_in_this_process(target)
         discovered, errors = load_plugins()
-        found = tuple(sorted(key for key, cls in discovered.items() if key.endswith(f":{name}")))
+        found = tuple(sorted(key for key in discovered if key.endswith(f":{name}")))
         if not found:
             reason = errors.get(f"local:{name}", "the loader did not report why")
             raise PluginInstallError(f"installed, but not discovered as a plugin: {reason}")
@@ -218,18 +237,35 @@ def install_plugin(source_dir: str, *, replace: bool = False) -> InstallResult:
         # Never leave a directory behind that "worked" only by copying files —
         # a failed install should leave no more trace than an install that was
         # never attempted.
-        _run_pip_uninstall_quietly(declared_name)
+        _run_pip_quietly("uninstall", "-y", declared_name)
         shutil.rmtree(target, ignore_errors=True)
+        if displaced is not None:
+            os.replace(displaced, target)
+            # The failed attempt took the old editable install down with it, so
+            # the restored directory alone would no longer be discoverable —
+            # the loader resolves a local plugin through real package metadata.
+            # Best-effort: this path is already reporting someone else's
+            # failure, and a restore that cannot itself be completed should not
+            # replace that message with its own.
+            _run_pip_quietly("install", "-e", target)
         raise
 
+    if displaced is not None:
+        shutil.rmtree(displaced, ignore_errors=True)
     return InstallResult(name=name, path=target, discovered_as=found, pip_output=output)
 
 
-def _run_pip_uninstall_quietly(distribution_name: str) -> None:
+def _run_pip_quietly(*args: str) -> None:
+    """``_run_pip`` for cleanup paths, where failing changes nothing.
+
+    Every caller is already unwinding from some other failure and is about to
+    raise it; a pip command that also fails here would only replace the
+    interesting error with a less interesting one.
+    """
     try:
-        _run_pip("uninstall", "-y", distribution_name)
+        _run_pip(*args)
     except PluginInstallError:
-        pass  # best-effort cleanup on a path that is already reporting a different failure
+        pass
 
 
 def remove_plugin(name: str) -> RemoveResult:

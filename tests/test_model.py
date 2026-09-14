@@ -394,6 +394,26 @@ def test_interrupting_a_reply_with_nothing_in_flight_reports_that_plainly():
     assert provider.interrupt_current_reply() is False
 
 
+def test_a_leftover_steer_signal_cannot_disguise_the_next_real_failure(monkeypatch):
+    """An interrupt that lands in the gap between the last chunk and the
+    generator finishing sets the steer signal with no exception left to
+    consume it. If that signal survived into the next request, the next
+    genuine failure — an unreachable server — would be reported as a steer
+    instead of as itself, which is the same class of mistake as the 404 once
+    reported as "is Ollama running?". A fresh request clears it."""
+    import http.client
+
+    def refuse(self):
+        raise ConnectionRefusedError("connection refused")
+
+    monkeypatch.setattr(http.client.HTTPConnection, "connect", refuse)
+    provider = LocalModelProvider(model="m", base_url="http://127.0.0.1:1")
+    provider._steer_signal.set()  # as a mistimed interrupt would have left it
+
+    with pytest.raises(RuntimeError, match="Could not reach the model provider"):
+        list(provider.chat("system", "context", stream=True))
+
+
 # --------------------------------------------------------------------------- #
 # _build_messages: turns the orchestrator's JSON turn history into a proper
 # multi-turn Ollama messages array (the fix for the tool-calling loop that

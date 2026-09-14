@@ -209,6 +209,41 @@ def _error_body(exc: "urllib.error.HTTPError") -> str:
     return str(error or raw)[:300]
 
 
+def _drop(connections: "list[http.client.HTTPConnection]") -> None:
+    """Tear down in-flight connections hard enough to wake whoever is reading.
+
+    The mechanism both ``cancel()`` (force-stop) and ``interrupt_current_reply()``
+    (mid-turn steering) are built on, kept in one place because getting it
+    wrong is silent: the two steps look redundant and neither is.
+
+    - ``shutdown()`` **and not** ``close()``: closing a socket from another
+      thread does not wake a ``recv`` already blocked on it; shutting it down
+      does. This is the line that unsticks a worker waiting on the model, and
+      dropping the connection is also how Ollama is told to stop generating —
+      there is no per-request abort endpoint, the disconnect *is* the signal.
+    - ``close()`` **as well as** ``shutdown()``: a shut-down-but-still-open
+      socket can hand the chunked-response parser a clean EOF, which ends the
+      stream *quietly* — no exception, so nothing for ``_as_control_exception``
+      to recognise as our own doing, and a deliberate interruption looks
+      exactly like a reply that simply finished.
+
+    Best-effort throughout: every caller is already on its way out, and a
+    failure to tear down a connection that is going away anyway is not worth
+    raising over.
+    """
+    for conn in connections:
+        sock = getattr(conn, "sock", None)
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001 - already going; nothing to do
+            pass
+
+
 class LocalModelProvider(ModelProvider):
     """Chats with a local Ollama server.
 
@@ -489,6 +524,14 @@ class LocalModelProvider(ModelProvider):
         why a tracked ``http.client`` socket, rather than ``urllib``, is what
         makes a stuck Worker Birb force-stoppable at all.
         """
+        # A fresh request cannot already have been interrupted. Without this,
+        # an `interrupt_current_reply()` that lands in the moment between the
+        # last chunk arriving and the generator finishing leaves `_steer_signal`
+        # set with no exception to consume it — and the *next* request's first
+        # genuine failure (an unreachable server, say) would then be reported
+        # as a steer instead of as what it was. That is exactly the class of
+        # mistake the 0.5.1 field note about 404s existed to stamp out.
+        self._steer_signal.clear()
         conn, prefix = self._connect()
         tool_calls: list[ToolCall] = []
         try:
@@ -553,33 +596,20 @@ class LocalModelProvider(ModelProvider):
         with self._inflight_lock:
             self._cancelled = True
             connections = list(self._inflight)
-        for conn in connections:
-            # shutdown(), not close(): closing a socket from another thread
-            # does not wake a blocked recv, but shutting it down does. This is
-            # the line that actually unsticks a worker waiting on the model —
-            # and, because the connection drops, tells the server to stop.
-            sock = getattr(conn, "sock", None)
-            if sock is not None:
-                try:
-                    sock.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
-            try:
-                conn.close()
-            except Exception:  # noqa: BLE001 - already going; nothing to do
-                pass
+        _drop(connections)
 
     def interrupt_current_reply(self) -> bool:
         """Cut off whatever this provider is streaming right now — mid-turn
         steering's resumable counterpart to ``cancel()``'s one-way stop.
 
-        Shuts down the same tracked socket ``cancel()`` does, for the same
-        reason (only ``socket.shutdown()``, not ``close()``, wakes a ``recv``
-        blocked on another thread — see ``cancel()``). The difference is
-        entirely in what happens *after*: ``cancel()`` latches ``_cancelled``
-        so every later request is refused; this sets ``_steer_signal``
-        instead, which ``_as_control_exception`` consumes exactly once (on
-        the very interruption it caused) and clears — so the next ``chat()``
+        Drops the same tracked connections ``cancel()`` does, by the same
+        mechanism (``_drop``). The difference is entirely in what happens
+        *after*: ``cancel()`` latches ``_cancelled`` so every later request is
+        refused; this sets ``_steer_signal`` instead, which
+        ``_as_control_exception`` consumes exactly once (on the very
+        interruption it caused) and clears — and which ``_stream_chat`` clears
+        again at the head of every request, so a signal that never met an
+        exception cannot colour the next one. Either way the next ``chat()``
         call opens a fresh connection and runs as if nothing happened. A
         provider that is mid-generation when this fires raises
         ``SteeringInterrupted`` out of ``_stream_chat``; a provider with
@@ -596,23 +626,7 @@ class LocalModelProvider(ModelProvider):
             connections = list(self._inflight)
             if connections:
                 self._steer_signal.set()
-        for conn in connections:
-            # Both shutdown() and close(), exactly as cancel() does: shutdown()
-            # alone wakes the blocked recv but a shutdown-but-not-closed socket
-            # can still read a clean EOF and let the chunked-response parser
-            # end the stream quietly, with no exception for _as_control_exception
-            # to turn into SteeringInterrupted. Closing the connection on top
-            # is what actually makes the read fail loudly.
-            sock = getattr(conn, "sock", None)
-            if sock is not None:
-                try:
-                    sock.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
-            try:
-                conn.close()
-            except Exception:  # noqa: BLE001 - already going; nothing to do
-                pass
+        _drop(connections)
         return bool(connections)
 
     def parse_tool_calls(self, raw: str) -> list[ToolCall]:

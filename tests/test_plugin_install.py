@@ -170,6 +170,42 @@ def test_installing_over_an_existing_plugin_is_refused_without_replace(monkeypat
         install_plugin(str(_fixture_plugin(tmp_path)))
 
 
+def test_a_failed_replace_puts_the_working_plugin_back(monkeypatch, tmp_path):
+    """--replace must not cost you the plugin you already had. A reinstall
+    whose new source doesn't work has to leave the old one installed and
+    discoverable, not leave you with neither — so this runs the real pip
+    round trip both ways rather than mocking it: the restore is only real if
+    the *distribution* comes back too, not just the directory."""
+    _isolate(monkeypatch, tmp_path)
+    install_plugin(str(_fixture_plugin(tmp_path)))
+
+    broken = tmp_path / "broken-source"
+    broken.mkdir()
+    (broken / "pyproject.toml").write_text(textwrap.dedent("""\
+        [build-system]
+        requires = ["setuptools>=61"]
+        build-backend = "setuptools.build_meta"
+        [project]
+        name = "cobirb_plugins_greeter"
+        version = "0.0.2"
+        [project.entry-points."cobirb.plugins"]
+        tool = "greeter_plugin:NOT_A_TOOL"
+        [tool.setuptools]
+        py-modules = ["greeter_plugin"]
+    """))
+    (broken / "greeter_plugin.py").write_text("NOT_A_TOOL = object()\n")
+
+    try:
+        with pytest.raises(PluginInstallError, match="not discovered"):
+            install_plugin(str(broken), replace=True)
+
+        assert list_installed() == ["greeter"]  # and nothing parked alongside it
+        discovered, _ = load_plugins()
+        assert discovered["tool:greeter"]().name() == "greet"
+    finally:
+        remove_plugin("greeter")
+
+
 def test_a_failed_install_leaves_no_directory_behind(monkeypatch, tmp_path):
     """An install that copies files but never becomes discoverable is worse
     than no install at all — it looks like it worked."""

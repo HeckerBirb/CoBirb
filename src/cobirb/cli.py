@@ -438,13 +438,18 @@ def _run_models(config: Config, override: str | None) -> int:
     return EXIT_OK
 
 
-def _run_plugin(verb: str | None, target: str | None, *, replace: bool) -> int:
+def _run_plugin(verb: str | None, target: str | None, *, replace: bool, cwd: str) -> int:
     """``cobirb plugin install|list|remove`` — see 'cobirb help plugin'.
 
     Deliberately thin: all the actual work (validation, the pip round trip,
     rollback on a failed install) lives in ``runtime.plugin_install``, tested
     on its own. This only turns three verbs and an optional path/name into
     calls on it and reports what happened.
+
+    ``cwd`` matters to ``list`` alone, and only because discovery also looks
+    at a project's own ``cobirb/plugins/`` directory — listing what is active
+    from the process's directory while the rest of the run works somewhere
+    else would quietly answer a different question than the one asked.
     """
     if verb not in ("install", "list", "remove"):
         print(
@@ -465,7 +470,7 @@ def _run_plugin(verb: str | None, target: str | None, *, replace: bool) -> int:
                 print(f"  - {name}")
         print()
         print("Everything currently active, including plain pip-installed plugins:")
-        Console().print(render.build_plugins_view(describe_plugins(".")))
+        Console().print(render.build_plugins_view(describe_plugins(cwd)))
         return EXIT_OK
 
     if not target:
@@ -663,7 +668,11 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_ERROR
         return _run_flock(args.prompt, args.cwd or ".", args.model, headless=args.headless)
     if args.subcommand == "plugin":
-        return _run_plugin(args.topic, args.target, replace=args.replace)
+        # args.topic holds the verb here, not a help topic — the two share a
+        # positional slot; see _build_parser.
+        return _run_plugin(
+            args.topic, args.target, replace=args.replace, cwd=args.cwd or "."
+        )
 
     allow_overrides = wiring.parse_allow_tools(args.allow_tool)
     persona_name = args.persona or config.get("persona")
@@ -682,6 +691,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.branch:
         return _run_branch(args.branch, args.branch_at, session_path, password, args.cwd or ".")
+
+    # Said rather than ignored: a flag someone typed that quietly does nothing
+    # is the same failure as `-w` once being inert without `--session`, which
+    # this project has already fixed once (see sessions.resolve_session).
+    if args.branch_at is not None:
+        print("cobirb: --branch-at only means something with --branch.", file=sys.stderr)
+        return EXIT_ERROR
 
     if args.prompt is not None:
         status = _run_one_shot(

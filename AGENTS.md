@@ -651,6 +651,13 @@ is what actually controls discovery going forward; the `pip uninstall` alongside
 tidiness. Both `install` and `remove` roll back cleanly on failure rather than leaving a directory
 that looks installed but was never discovered.
 
+**`--replace` never costs you the plugin you already had.** The existing directory is *moved* to
+`~/.cobirb/plugins.being-replaced/<name>` rather than deleted, and put back — with a best-effort
+`pip install -e` to restore the editable dist the failed attempt took down with it — if the new
+source turns out not to install or not to be discoverable. Parked beside `plugins/`, never inside
+it: discovery walks everything under `plugins/`, so a copy stranded there by a process killed
+mid-reinstall would show up for good as a second, wrongly-named plugin.
+
 **SPI security:** a plugin cannot pre-approve its own tools — the policy is the sole authority; a
 plugin-declared `shell`-grade tool inherits the same gate; plugin tool calls hit the audit log like
 any other.
@@ -860,9 +867,15 @@ to `steer()` — whenever `_turn_in_progress` is true. Two things happen, and ei
   uses, but **resumable**: it sets a `_steer_signal` that `_as_control_exception` consumes once and
   clears, rather than `cancel()`'s one-way `_cancelled` latch, so the very next request opens a
   fresh connection and behaves normally. Getting this to actually raise (rather than let the chunked
-  reader end the stream quietly on a clean EOF) took *both* `shutdown()` and `close()` on the
-  connection, exactly as `cancel()` already does — a real, non-obvious finding from testing this
-  against a real socket rather than a mock, the same discipline that found the force-stop bug.
+  reader end the stream quietly on a clean EOF) needs *both* `shutdown()` and `close()` on the
+  connection — that pair is `_drop()`, shared with `cancel()`, and both halves are load-bearing: a
+  real, non-obvious finding from testing this against a real socket rather than a mock, the same
+  discipline that found the force-stop bug.
+  ⚠️ `_stream_chat` **clears `_steer_signal` before every request**, because an interrupt that lands
+  in the gap between the last chunk and the generator returning sets the flag with no exception left
+  to consume it. A signal surviving into the next request would report that request's first genuine
+  failure — an unreachable endpoint, say — as a steer: the same conflation of "we did this" with
+  "the server said no" that §12's 404 field note existed to stamp out.
 
 The partial reply is kept as a genuine (if incomplete) assistant turn, not discarded or treated as
 an error — `_loop` records it, shows a small "redirected by a new message" notice, and loops
@@ -879,6 +892,12 @@ the *whole* of a selected session into a brand-new file and switches straight in
 unchanged and stays independently resumable at its original length. `Session.forked_from` records
 `"<source path>@turn<N>"` on the branch — the same lineage idea as a Flock session's `flock` pairing
 token, so a branch found months later still says plainly where it came from.
+
+A branch is a faithful copy, not just its turns: `persona`, `working_dir` and the `flock` token come
+along (`flock` names the *engagement*, not a turn, so a branch of a flock session is still part of
+that flock). `summary` and `validation` are the exception when `--branch-at` truncates — both
+describe the end of a conversation, and a truncated branch is precisely the one that doesn't have
+that end, so carrying them would caption it with a conclusion it no longer contains.
 
 Branching from an *earlier* point in the conversation, rather than its current end, is CLI-only for
 now: `cobirb --session PATH -w --branch NEW_PATH --branch-at N` keeps turns `0..N` inclusive. The

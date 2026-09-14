@@ -296,22 +296,30 @@ class Orchestrator:
         if self.checkpoints is not None:
             self.checkpoints.begin_turn()
 
-        # Only while the loop below is actually executing — see steer()'s
-        # docstring for why a message with no turn to redirect is refused
-        # rather than queued for whatever run happens next. Any message left
-        # over from a run that ended without draining its queue (an
-        # exception mid-loop, say) is stale and must not leak into this one.
-        self._turn_active = True
+        # Clear first, *then* open for steering — never the other way round.
+        # Anything left in the queue is stale (a run that ended without
+        # draining it, an exception mid-loop) and must not leak into this
+        # run; but once `_turn_active` is true, steer() starts accepting
+        # messages and telling the caller so, and clearing after that point
+        # would throw away a message the user was just told had landed.
         self._clear_steer_queue()
+        self._turn_active = True
         try:
             return self._run_body(
-                prompt, system, cwd, persona, max_turns, plan_mode, session
+                prompt=prompt,
+                system=system,
+                cwd=cwd,
+                persona=persona,
+                max_turns=max_turns,
+                plan_mode=plan_mode,
+                session=session,
             )
         finally:
             self._turn_active = False
 
     def _run_body(
         self,
+        *,
         prompt: str,
         system: str,
         cwd: str,
@@ -451,7 +459,16 @@ class Orchestrator:
 
     def _run_plan_phase(self, system: str, session: Session) -> tuple[str, bool]:
         """One reply with no tools offered — the model can only think out
-        loud, never act. Recorded as its own "plan"-phase turn."""
+        loud, never act. Recorded as its own "plan"-phase turn.
+
+        A steering message that lands mid-plan (see ``steer()``) cuts this
+        reply short like any other, and the partial plan is recorded as the
+        plan turn. It is deliberately not re-planned here: the message stays
+        queued and is drained by the act loop immediately after, which is
+        where the user's redirection actually wants to take effect. One
+        phase per ``run()`` stays true, and the truncated plan remains in
+        history as the honest record of what happened.
+        """
         context = self._build_context(session)
         reply, streamed = self._chat(system, context, tools=[])
         content = _materialize(reply)
@@ -482,10 +499,14 @@ class Orchestrator:
         back around to pick up the message that interrupted it, rather than
         parsing tool calls out of a reply that never finished.
         """
-        context = self._build_context(session)
         for _ in range(max_turns):
-            if self._drain_steer(session):
-                context = self._build_context(session)
+            # One place builds the context, once per model call, from
+            # whatever the session holds right now — so every path that adds
+            # a turn (a tool result, a drained steering message, a reply cut
+            # short) is automatically reflected in the next request without
+            # having to remember to rebuild it on the way out.
+            self._drain_steer(session)
+            context = self._build_context(session)
             reply, streamed = self._chat(system, context, tools)
 
             if self._last_chat_was_steered:
@@ -495,11 +516,11 @@ class Orchestrator:
                 # max_turns) rather than treated as a finished answer or
                 # scanned for tool calls it never got to emit.
                 session.add(Turn(role="assistant", content=_materialize(reply), phase=phase))
-                render_through(
-                    self.io, "render_notice", "↳ redirected by a new message",
-                    fallback=lambda: None,
-                )
-                context = self._build_context(session)
+                # No fallback: an adapter with no `render_notice` hook simply
+                # doesn't show this. The steering message itself is already
+                # visible wherever the user typed it, so a plain-render
+                # fallback would be noise rather than information.
+                render_through(self.io, "render_notice", "↳ redirected by a new message")
                 continue
 
             # If the model wants to act, allow it (policy-gated) and keep going.
@@ -524,7 +545,6 @@ class Orchestrator:
                     )
                 )
                 self._execute_tool_calls(tool_calls, phase=phase)
-                context = self._build_context(session)
                 continue
 
             # No tool calls: this is the model's final answer for this turn.
@@ -982,24 +1002,23 @@ class Orchestrator:
                 logger.debug("interrupt_current_reply raised", exc_info=True)
         return True
 
-    def _drain_steer(self, session: Session) -> bool:
+    def _drain_steer(self, session: Session) -> None:
         """Apply every steering message queued so far as a user turn.
 
-        Called at each loop boundary (see ``_loop``). Draining in a loop
-        rather than taking one message matters when several arrive before
-        the next boundary — a person typing two quick corrections should see
-        both taken into account, in order, not just the last one silently
-        winning.
+        Called at each loop boundary (see ``_loop``), which rebuilds the
+        context from the session immediately afterwards either way — so this
+        reports nothing back and the caller needs no branch. Draining in a
+        loop rather than taking one message matters when several arrive
+        before the next boundary: a person typing two quick corrections
+        should see both taken into account, in order, not just the last one
+        silently winning.
         """
-        drained = False
         while True:
             try:
                 message = self._steer_queue.get_nowait()
             except queue.Empty:
-                break
+                return
             session.add(Turn(role="user", content=f"{_STEER_PREAMBLE}{message}"))
-            drained = True
-        return drained
 
     def _clear_steer_queue(self) -> None:
         """Discard anything left in the queue from a previous, finished run.

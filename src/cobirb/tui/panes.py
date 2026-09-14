@@ -108,27 +108,29 @@ class SessionsPane(Vertical):
     def set_status(self, message: str) -> None:
         self.query_one("#sessions-status", Static).update(message)
 
+    def _selected_path(self) -> str | None:
+        """The highlighted session's path, or ``None`` with nothing to act on.
+
+        Says so in the status line when nothing is selected, and stays quiet
+        for the "(no saved sessions found)" placeholder row — that one is a
+        message, not a choice, so telling someone to select a session when
+        there are none to select would be the wrong instruction.
+        """
+        options = self.query_one("#sessions-list", OptionList)
+        if options.highlighted is None:
+            self.set_status("Select a session from the list first.")
+            return None
+        return options.get_option_at_index(options.highlighted).id
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()  # this is the handler for it; don't let it keep bubbling
         app = cast("CoBirbApp", self.app)
         if event.button.id == "sessions-resume":
-            options = self.query_one("#sessions-list", OptionList)
-            if options.highlighted is None:
-                self.set_status("Select a session from the list first.")
-                return
-            option = options.get_option_at_index(options.highlighted)
-            if option.id is None:
-                return  # the "(no saved sessions found)" placeholder row
-            app.begin_resume_session(option.id)
+            if (path := self._selected_path()) is not None:
+                app.begin_resume_session(path)
         elif event.button.id == "sessions-branch":
-            options = self.query_one("#sessions-list", OptionList)
-            if options.highlighted is None:
-                self.set_status("Select a session from the list first.")
-                return
-            option = options.get_option_at_index(options.highlighted)
-            if option.id is None:
-                return  # the "(no saved sessions found)" placeholder row
-            app.begin_branch_session(option.id)
+            if (path := self._selected_path()) is not None:
+                app.begin_branch_session(path)
         elif event.button.id == "sessions-new":
             app.begin_new_session()
         elif event.button.id == "sessions-refresh":

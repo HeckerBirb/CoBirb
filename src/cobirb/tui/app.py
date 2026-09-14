@@ -403,15 +403,18 @@ class CoBirbApp(App[None]):
         if not prompt:
             return
 
+        # Before either branch below, not inside one: "/persona kawaii" is
+        # exactly the kind of thing worth arrowing back to, and a history that
+        # only remembered messages sent to the model would drop every command
+        # the moment it ran. A steering message needs it for a second reason —
+        # if the turn finishes in the moment between the keypress and this
+        # handler, the box has already been cleared and the refusal notice is
+        # all that's left, so up-arrow is the only way back to what was typed.
+        event.input.remember(prompt)
+
         if self._turn_in_progress:
             self._steer_current_turn(prompt)
             return
-
-        # Before the command dispatch below, not after: "/persona kawaii" is
-        # exactly the kind of thing worth arrowing back to, and a history that
-        # only remembered messages sent to the model would drop every command
-        # the moment it ran.
-        event.input.remember(prompt)
 
         if self._dispatch_command(prompt):
             return
@@ -442,7 +445,9 @@ class CoBirbApp(App[None]):
         (no orchestrator yet, or the turn just finished in the gap between
         the keypress and this running) — reported plainly rather than
         silently dropped, since the message the user just typed did not, in
-        that case, go anywhere.
+        that case, go anywhere. It is in the prompt history either way (see
+        ``on_prompt_input_submitted``), so a refused message is one up-arrow
+        from being sent as an ordinary prompt instead.
         """
         if self.orchestrator is None or not self.orchestrator.steer(message):
             self.write_transcript(

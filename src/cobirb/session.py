@@ -371,6 +371,15 @@ def fork_session(
     else:
         branch_path = _branch_path_for(path)
 
+    # A truncated branch keeps no summary or validation: both describe the
+    # *end* of the conversation, and the turns they describe are the ones
+    # being cut off — carrying them over would caption a branch with the
+    # conclusion of a conversation it deliberately doesn't contain. A full
+    # branch is a faithful copy and keeps them. `flock` is carried either
+    # way: it identifies which engagement this conversation belongs to, not
+    # any particular turn, so a branch of a flock session is still part of
+    # that flock (and `forked_from` says which branch it is).
+    truncated = len(kept) < total
     branch = Session(
         working_dir=source.working_dir,
         persona=source.persona,
@@ -379,6 +388,9 @@ def fork_session(
         # cleanly independent of the source, so mutating the branch later can
         # never reach back into the session it came from.
         turns=[Turn.from_dict(t.to_dict()) for t in kept],
+        summary=None if truncated else source.summary,
+        validation=None if truncated else source.validation,
+        flock=source.flock,
         forked_from=f"{path}@turn{lineage_turn}",
     )
     branch_manager = SessionManager(branch_path, crypto, source.working_dir, source.persona)

@@ -1741,6 +1741,15 @@ def test_branch_without_a_session_is_refused(capsys):
     assert "--branch needs --session" in capsys.readouterr().err
 
 
+def test_branch_at_without_branch_says_so_rather_than_doing_nothing(capsys):
+    """A typed flag that quietly does nothing is the same failure as `-w`
+    once being inert without --session."""
+    status = cli.main(["--branch-at", "2"])
+
+    assert status == 1
+    assert "--branch-at only means something with --branch" in capsys.readouterr().err
+
+
 def test_branch_reports_an_out_of_range_turn_plainly(tmp_path, capsys):
     source = str(tmp_path / "s.json")
     _seed_session(source, turns=2)

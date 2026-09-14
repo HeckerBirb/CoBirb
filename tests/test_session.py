@@ -312,6 +312,42 @@ def test_fork_session_up_to_turn_keeps_only_a_prefix(tmp_path):
     assert branch.session.forked_from == f"{path}@turn1"
 
 
+def test_a_full_branch_is_a_faithful_copy_of_the_whole_session(tmp_path):
+    """Everything describing the conversation comes along, not just the turns
+    — a branch that silently dropped the summary, the validation report or a
+    flock session's pairing token would be a lossy copy wearing a faithful
+    one's name."""
+    manager, path = _seeded_manager(tmp_path)
+    manager.session.summary = "the last answer"
+    manager.session.validation = "checked, and it holds"
+    manager.session.flock = "flock-guid-1234"
+    manager.save("pw")
+
+    branch = fork_session(path, AesGcmScryptSessionCrypto(), "pw")
+
+    assert branch.session.summary == "the last answer"
+    assert branch.session.validation == "checked, and it holds"
+    assert branch.session.flock == "flock-guid-1234"
+
+
+def test_a_truncated_branch_drops_the_summary_of_turns_it_does_not_have(tmp_path):
+    """The summary and validation describe the end of the conversation, and a
+    truncated branch cuts that end off — carrying them over would caption the
+    branch with the conclusion of a conversation it doesn't contain. The flock
+    token still comes along: it names the engagement, not a turn."""
+    manager, path = _seeded_manager(tmp_path)
+    manager.session.summary = "the last answer"
+    manager.session.validation = "checked, and it holds"
+    manager.session.flock = "flock-guid-1234"
+    manager.save("pw")
+
+    branch = fork_session(path, AesGcmScryptSessionCrypto(), "pw", up_to_turn=1)
+
+    assert branch.session.summary is None
+    assert branch.session.validation is None
+    assert branch.session.flock == "flock-guid-1234"
+
+
 def test_fork_session_rejects_an_out_of_range_turn(tmp_path):
     _, path = _seeded_manager(tmp_path)
 

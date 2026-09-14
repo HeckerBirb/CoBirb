@@ -527,6 +527,12 @@ async def test_steering_refused_by_the_orchestrator_is_reported_plainly(monkeypa
 
         assert orchestrator.steer_calls == ["too late"]
         assert "Nothing to steer" in _transcript_text(app)
+        # The box was cleared before we knew it would be refused, so the
+        # history is the only way back to what was typed — one up-arrow from
+        # sending it as an ordinary prompt instead.
+        prompt_input = app.query_one("#prompt-input", PromptInput)
+        prompt_input.action_history_prev()
+        assert prompt_input.value == "too late"
 
         orchestrator._release.set()
         await _until(pilot, lambda: not app._turn_in_progress)
