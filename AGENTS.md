@@ -26,7 +26,9 @@ not run weights — see §12.1.
    layer may touch the network, only when the user configures a provider, and CoBirb will never
    package or bless one. Decided September 2026: local models only, forever. The SPI still lets a
    third party write a remote provider; that is their choice to make and ours to not make for
-   them.
+   them. The one exception is `cobirb --upgrade` (§5.6): a `git fetch` that only ever runs because
+   a person typed the command, never on by default — the same "explicitly invoked, not ambient"
+   test §5.5 already applies to installing a plugin.
 3. **Never echo the password.** `-w` with no value reads stdin without echo; never logged, stored,
    or retained past the call that needs it.
 4. **Sessions encrypted at rest.** Plaintext never hits disk. No PQ-KEM — §7.
@@ -101,6 +103,10 @@ style by hand.
 - **Keep the core thin.** Adding "core" logic for a feature means that feature is probably a
   plugin. This is the #1 architectural decision — don't erode it.
 - **Persona data never touches behavior or permissions** (§6).
+- **Every version bump gets a matching `vX.Y.Z` git tag, in the same commit or right after it.**
+  `cobirb --upgrade` (§5.6) resolves "latest" and a named release entirely off tags — there is no
+  other record of which commit a release was. Bumping `pyproject.toml`'s `version` without tagging
+  leaves that release unreachable by `--upgrade`.
 
 ## 4. Architecture & the loop
 
@@ -675,6 +681,43 @@ mid-reinstall would show up for good as a second, wrongly-named plugin.
 plugin-declared `shell`-grade tool inherits the same gate; plugin tool calls hit the audit log like
 any other.
 
+### 5.6 `cobirb --upgrade` (`runtime/upgrade.py`)
+
+CoBirb is distributed as a git clone that gets `pip install -e`'d (directly, or via `pipx install
+--editable .` for a global binary — README "Installing"). The checkout *is* the installation, so
+"upgrade" reduces to "move that checkout to a different tag and reinstall" — `git fetch --tags`,
+resolve a tag (the highest by parsed version if none is named), `git checkout`, then the exact
+`pip install -e <repo>` the README already tells a person to rerun by hand after a `pyproject.toml`
+change. Every release gets a matching `vX.Y.Z` tag for this to resolve against — the convention
+this module depends on, not something it can discover another way.
+
+**Repo-root discovery walks up from `runtime/upgrade.py`'s own file, not the working directory.**
+For an editable install that file's real path *is* the checkout, never a copy, so the walk (bounded
+at 8 levels, looking for a `.git` directory beside a `pyproject.toml`) reliably finds it regardless
+of where `cobirb --upgrade` is run from. A plain, non-editable `pip install .` copies the file into
+site-packages with no `.git` above it anywhere; that case is refused with a plain "re-clone and
+reinstall the ordinary way" rather than guessed at.
+
+**Refuses a downgrade unless `--force`.** Tags compare as parsed semver, not as git history order —
+a tag created out of order should not confuse "older" with "not yet merged". Moving to an older
+release can silently undo a session-schema or SPI change a person is relying on, which is exactly
+the kind of mistake `--force` exists to make someone say out loud.
+
+**Refuses outright on a dirty working tree**, rather than stashing changes on the person's behalf —
+an unasked-for `git stash` is a surprise they'd have to go find later; refusing costs one command
+and loses nothing. Checked before the network call, so a dirty tree never triggers a needless
+fetch.
+
+**The one deliberate exception to §2's "no outbound network by default".** Justified the same way
+§5.5 justifies a plugin install running arbitrary code: it is what the user just typed, never
+something CoBirb decided to do on its own. Left in detached `HEAD` at the target tag afterward —
+the ordinary result of checking out a tag in any git project, not a CoBirb invention.
+
+Tests (`test_upgrade.py`) mock `_run_git`/`_tag_exists`/`_run_pip` for the tag-selection and
+refusal logic, and run one real git fetch/checkout against a throwaway local bare repo (pip stays
+mocked there too, for speed) to prove the actual git side works — the same split
+`test_plugin_install.py` uses at its own subprocess boundary.
+
 ## 6. Personas
 
 **Off by default.** A persona is a costume, and CoBirb sends it as a system message — which
@@ -887,9 +930,10 @@ polish) and is imported lazily, so one-shot never loads it. Three live tabs:
 Commands `/model`, `/persona [name]`, `/plan [on|off]`, `/context`, `/undo`, `/diff`, `/export`,
 `/commands`, `/flock <objective>`, `?`/`/help [topic]`. Anything else beginning with `/` is looked up as a custom command
 (§4j) and otherwise goes to the model unchanged. Non-interactive: `cobirb models` (§4h),
-`cobirb commands`, and `cobirb plugin install <path> [--replace] | list | remove <name>` (§5.5) —
-the `topic`/`target` positional is shared with `help` and validated by hand rather than through
-argparse `choices=`, since which verbs are legal depends on the subcommand. Keys: `f1` help, `f2`
+`cobirb commands`, `cobirb plugin install <path> [--replace] | list | remove <name>` (§5.5), and
+`cobirb --upgrade [tag] [--force]` (§5.6) — the `topic`/`target` positional is shared with `help`
+and validated by hand rather than through argparse `choices=`, since which verbs are legal depends
+on the subcommand. Keys: `f1` help, `f2`
 next tab, `ctrl+q` quit, `up`/`down` recall the last 100 prompts (memory only), `ctrl+c` copies a
 selection if there is one else cancels the turn. `/model` hot-swaps `orchestrator.model` in place
 rather than rebuilding, preserving this session's "always allow" approvals. `default_model` is

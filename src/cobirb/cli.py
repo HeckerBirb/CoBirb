@@ -34,6 +34,7 @@ from .runtime import commands, personas, plugins, sessions, wiring
 from .plugins.core import TerminalIO
 from .runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
 from .runtime.plugin_install import PluginInstallError, install_plugin, list_installed, remove_plugin
+from .runtime.upgrade import UpgradeError, upgrade
 from .runtime.export import write_export
 from .flock.run import Asker, run_flock_session
 from .runtime.bootstrap import ensure_home
@@ -490,6 +491,22 @@ def _run_plugin(verb: str | None, target: str | None, *, replace: bool, cwd: str
     return EXIT_OK
 
 
+def _run_upgrade(tag: str | None, *, force: bool) -> int:
+    """``cobirb --upgrade [tag] [--force]`` — see 'runtime/upgrade.py'.
+
+    Thin on purpose, the same way ``_run_plugin`` is: the git/pip round trip,
+    the downgrade guard and the dirty-tree refusal all live in
+    ``runtime.upgrade``, tested on its own. This only reports what happened.
+    """
+    try:
+        result = upgrade(tag, force=force)
+    except UpgradeError as exc:
+        print(f"cobirb: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    print(result.describe())
+    return EXIT_OK
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cobirb",
@@ -525,6 +542,24 @@ def _build_parser() -> argparse.ArgumentParser:
         "--replace",
         action="store_true",
         help="With 'plugin install': overwrite an already-installed plugin of the same name.",
+    )
+    parser.add_argument(
+        "--upgrade",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="TAG",
+        help="Move this checkout to another tagged release, then exit: the latest by "
+        "default, or a specific one ('cobirb --upgrade v0.8.0'). Only works for the "
+        "ordinary install — a git clone, then 'pip install -e .' or 'pipx install "
+        "--editable .' — since that is the checkout this moves. Refuses a downgrade "
+        "unless --force says so, and refuses outright on uncommitted local changes.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="With --upgrade: allow moving to a tag older than the one currently "
+        "running (a downgrade). Meaningless without --upgrade.",
     )
 
     mode = parser.add_argument_group("modes")
@@ -643,6 +678,14 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_ERROR
         print(HELP_TOPICS[args.topic] if args.topic else HELP_TEXT)
         return 0
+
+    if args.upgrade is not None:
+        return _run_upgrade(args.upgrade or None, force=args.force)
+    if args.force:
+        # Said rather than ignored — see --branch-at's own check below for
+        # why a flag that would otherwise silently do nothing gets a line.
+        print("cobirb: --force only means something with --upgrade.", file=sys.stderr)
+        return EXIT_ERROR
 
     # Before the first Config() read, so a new user's very first run leaves a
     # file where the docs say one lives. Reported on stderr rather than

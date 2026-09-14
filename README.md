@@ -30,7 +30,10 @@ Starting from nothing, on a machine with [Ollama](https://ollama.com) installed:
 ollama pull qwen2.5-coder:14b     # any local model works; this one is a reasonable default
                                   # for coding work. See `cobirb help model` for choosing by
                                   # VRAM budget, and for the num_ctx trap worth knowing about.
-pip install -e .                  # or ".[dev]" if you intend to run the test suite
+
+git clone https://github.com/HeckerBirb/CoBirb && cd CoBirb
+pipx install --editable .         # a `cobirb` binary on PATH, nothing to activate — see
+                                  # "Installing" below for an alternative, and for upgrading later
 
 # Interactive: the full-screen app.
 COBIRB_MODEL_NAME="qwen2.5-coder:14b" cobirb
@@ -81,6 +84,34 @@ Run the test suite with `pytest`.
 Three runtime dependencies, all local-only: `rich` (rendering), `cryptography` (session
 encryption), and `textual` (the interactive app — imported lazily, so one-shot mode never
 loads it).
+
+## Installing
+
+The Quick start above uses [pipx](https://pipx.pypa.io): `pipx install --editable .`, run once
+from the clone, puts a `cobirb` binary on your `PATH` with its three dependencies isolated in
+their own environment — no venv to remember to activate. `--editable` keeps it pointed at the
+clone, so a plain source change (yours, or `git pull`) needs nothing further.
+
+Prefer a plain venv instead if you're going to be editing CoBirb's own source:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .      # or ".[dev]" for the test suite
+```
+
+Either way, only a **source change** is picked up automatically. A `pyproject.toml` change (a
+new dependency, a changed entry point, a version bump) needs `pip install -e .` — or `pipx
+install --editable .` again, over the same install — rerun: that's metadata pip snapshots once
+at install time, not something it reads fresh off the source on every run. It's cheap and
+idempotent, so re-running it after a `git pull` when you're unsure never hurts.
+
+**Staying current:** `cobirb --upgrade` moves this checkout to the latest tagged release —
+fetches, checks out the tag, and reinstalls, in one step. Name a specific release instead with
+`cobirb --upgrade v0.8.0`. It refuses to move to an *older* release than the one currently
+running unless you pass `--force`, and refuses outright on a checkout with uncommitted changes
+rather than guessing what to do with them. This is the one CoBirb command that talks to a
+network by default — allowed because you just typed it, the same reasoning `cobirb plugin
+install` already relies on to run a plugin's own code.
 
 ## Interactive mode
 

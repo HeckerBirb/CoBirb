@@ -4,6 +4,21 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.8.0] — Installable
+
+A stranger can get a working `cobirb` binary onto their `PATH`, and keep it current.
+
+- **Global install via [pipx](https://pipx.pypa.io).** `pipx install --editable .` puts a
+  `cobirb` binary on `PATH` with its three dependencies isolated in their own environment — no
+  venv to activate. `--editable` keeps it pointed at the git clone, so a source change still
+  needs nothing further; see README "Installing" for the plain-venv alternative.
+- **`cobirb --upgrade [tag] [--force]`.** Fetches tags, checks out the latest release by default
+  or a named one, and reinstalls to refresh metadata. Refuses to move to an older release than
+  the one currently running unless `--force` says so, and refuses outright on a checkout with
+  uncommitted changes rather than guessing what to do with them. The one CoBirb command that
+  talks to a network by default — because it's what was just typed, the same justification
+  `cobirb plugin install` already relies on.
+
 ## [0.7.0] — Hardened
 
 The last release before the plugin and session-file formats were frozen.

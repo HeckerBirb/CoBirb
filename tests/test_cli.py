@@ -1741,6 +1741,39 @@ def test_branch_without_a_session_is_refused(capsys):
     assert "--branch needs --session" in capsys.readouterr().err
 
 
+def test_upgrade_flag_dispatches_to_run_upgrade(monkeypatch):
+    """Thin dispatch test — the actual upgrade logic is tested against
+    ``runtime.upgrade`` directly in ``test_upgrade.py``."""
+    seen = {}
+
+    def fake_run_upgrade(tag, *, force):
+        seen["tag"] = tag
+        seen["force"] = force
+        return 0
+
+    monkeypatch.setattr(cli, "_run_upgrade", fake_run_upgrade)
+
+    assert cli.main(["--upgrade", "v0.8.0", "--force"]) == 0
+    assert seen == {"tag": "v0.8.0", "force": True}
+
+
+def test_upgrade_flag_with_no_tag_passes_none(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        cli, "_run_upgrade", lambda tag, *, force: seen.update(tag=tag, force=force) or 0
+    )
+
+    assert cli.main(["--upgrade"]) == 0
+    assert seen == {"tag": None, "force": False}
+
+
+def test_force_without_upgrade_says_so_rather_than_doing_nothing(capsys):
+    status = cli.main(["--force"])
+
+    assert status == 1
+    assert "--force only means something with --upgrade" in capsys.readouterr().err
+
+
 def test_branch_at_without_branch_says_so_rather_than_doing_nothing(capsys):
     """A typed flag that quietly does nothing is the same failure as `-w`
     once being inert without --session."""
