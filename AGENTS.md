@@ -1007,7 +1007,7 @@ they are shaped around, deliberately.
     beyond Ollama's own terminal scrolling. The status bar's spinner is not enough and did not
     always appear; the bottom of the screen should carry a live line of what is currently running —
     which agent, which phase — for the Flock and for ordinary turns.
-- **v0.6.0 "Interactive" (in progress)** — the three items that make a running session less of a
+- **v0.6.0 "Interactive" (done)** — the three items that make a running session less of a
   one-shot commitment.
   - ✅ **Plugin distribution.** `cobirb plugin install/list/remove` (§5.5) — turns a plugin's source
     directory on disk into something the loader actually discovers, without CoBirb ever reaching
