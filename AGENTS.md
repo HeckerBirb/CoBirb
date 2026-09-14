@@ -812,8 +812,9 @@ few-dependencies stance (a tab bar, fixed regions and modals need a real framewo
 polish) and is imported lazily, so one-shot never loads it. Three live tabs:
 
 - **Current** — transcript, live status line (persona · model · plan · cwd · session), boxed input
-  that greys out mid-turn and returns when done (no `continue? [y/N]` gate), tool approval as a
-  modal (`y` once / `a` always / `n`/escape deny).
+  that stays usable through a turn rather than greying out (mid-turn steering, below) and returns
+  when done (no `continue? [y/N]` gate), tool approval as a modal (`y` once / `a` always / `n`/escape
+  deny).
 - **Sessions** — lists `.json` files under `default_sessions_dir()` with size/mtime read **without
   decrypting**; resumes one (a `TextPromptModal` collects the password, since a full-screen app
   can't use `getpass`) or starts a new one. Resuming validates the password, reads persona/turn
@@ -841,6 +842,33 @@ selection if there is one else cancels the turn. `/model` hot-swaps `orchestrato
 rather than rebuilding, preserving this session's "always allow" approvals. `default_model` is
 validated at startup *silently* — unavailable is ignored, not an error — and if nothing resolves the
 picker opens unprompted.
+
+**Mid-turn steering** (`Orchestrator.steer()`, v0.6.0). Submitting a message while a turn is
+already running redirects it instead of queuing a second one: the prompt box is left enabled
+through a turn (it used to disable outright), and `on_prompt_input_submitted` routes to
+`_steer_current_turn` — no command dispatch, no custom-command expansion, just the raw text handed
+to `steer()` — whenever `_turn_in_progress` is true. Two things happen, and either alone is enough:
+
+- The message is queued and applied as a user turn at the next loop boundary (`_loop`'s
+  `_drain_steer`, between tool calls or before the next model call), prefixed with a short preamble
+  telling the model plainly that this arrived while it was still replying — a small local model has
+  no other way to know its own output was just interrupted.
+- If the model is *currently streaming* and implements the optional, duck-typed
+  `interrupt_current_reply()` (`LocalModelProvider` does), that stream is cut off immediately by
+  raising `SteeringInterrupted` out of `chat()` — the same tracked-socket `shutdown()` force-stop
+  uses, but **resumable**: it sets a `_steer_signal` that `_as_control_exception` consumes once and
+  clears, rather than `cancel()`'s one-way `_cancelled` latch, so the very next request opens a
+  fresh connection and behaves normally. Getting this to actually raise (rather than let the chunked
+  reader end the stream quietly on a clean EOF) took *both* `shutdown()` and `close()` on the
+  connection, exactly as `cancel()` already does — a real, non-obvious finding from testing this
+  against a real socket rather than a mock, the same discipline that found the force-stop bug.
+
+The partial reply is kept as a genuine (if incomplete) assistant turn, not discarded or treated as
+an error — `_loop` records it, shows a small "redirected by a new message" notice, and loops
+straight back around to pick up the queued message, consuming one of `max_turns`. Rendered in the
+transcript with a distinct `»` marker (`render.build_steer_message`, bold magenta, no closing
+rule) so it reads as an interjection into something already in progress rather than a fresh
+exchange. Not built for the Flock: a worker's own steering is a different, unbuilt question.
 
 **Threading.** `Orchestrator.run()` stays **synchronous and untouched**; the app runs it on a
 Textual thread worker and `TuiIO` marshals every callback back via `App.call_from_thread`. No
@@ -966,8 +994,9 @@ they are shaped around, deliberately.
   - ✅ **Plugin distribution.** `cobirb plugin install/list/remove` (§5.5) — turns a plugin's source
     directory on disk into something the loader actually discovers, without CoBirb ever reaching
     out to fetch or resolve one itself.
-  - ⏳ **Mid-turn steering** — sending a message while the model is already answering, rather than
-    only before or after.
+  - ✅ **Mid-turn steering.** `Orchestrator.steer()` (§9) — a message sent while a turn is running
+    redirects it instead of queuing a second one, cutting off an in-progress stream immediately
+    where the model supports it.
   - ⏳ **Session branching** — forking a conversation to try a different direction from a past point,
     distinct from the Flock's already-shipped GUID-based worker branching (§4m).
 - **v0.7.0 "Aware" (design only)** — cross-session memory and vision input. See the roadmap

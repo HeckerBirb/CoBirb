@@ -28,7 +28,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Iterable, Optional
 
-from ...typing.spi import ModelProvider, Tool, ToolCall
+from ...typing.spi import ModelProvider, SteeringInterrupted, Tool, ToolCall
 
 DEFAULT_BASE_URL = "http://localhost:11434"
 
@@ -242,6 +242,10 @@ class LocalModelProvider(ModelProvider):
         self._inflight: set = set()
         self._inflight_lock = threading.Lock()
         self._cancelled = False
+        # Set by interrupt_current_reply() to cut off *this* stream without
+        # latching the provider closed the way `_cancelled` does — see that
+        # method and `_as_control_exception` for the distinction that matters.
+        self._steer_signal = threading.Event()
 
     def name(self) -> str:
         return f"ollama/{self._model}" if self._model else "(unconfigured)"
@@ -276,17 +280,24 @@ class LocalModelProvider(ModelProvider):
             self._inflight.discard(conn)
         conn.close()
 
-    def _as_cancellation(self, exc: Exception) -> Exception:
-        """Whatever this failure actually was, report it as a cancellation if
-        ``cancel()`` is why it happened.
+    def _as_control_exception(self, exc: Exception) -> Exception:
+        """Whatever this failure actually was, report it as *our own doing*
+        if a ``cancel()`` or ``interrupt_current_reply()`` is why it happened.
 
         A shutdown socket fails in whatever way the code that was reading it
         happens to fail — ``http.client`` hits EOF, nulls its file pointer, and
         the next read raises ``AttributeError`` rather than a clean ``OSError``.
         The type is not the interesting fact once we know we did this to
-        ourselves; the interesting fact is that we did it to ourselves.
+        ourselves; the interesting fact is *which* of the two we did.
+        ``cancel()`` wins if somehow both fired, since a full stop subsumes a
+        steer.
         """
-        return RuntimeError("the model request was cancelled") if self._cancelled else exc
+        if self._cancelled:
+            return RuntimeError("the model request was cancelled")
+        if self._steer_signal.is_set():
+            self._steer_signal.clear()
+            return SteeringInterrupted()
+        return exc
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         """A single request/response round trip — ``/api/show`` and the
@@ -490,8 +501,8 @@ class LocalModelProvider(ModelProvider):
                 )
                 response = conn.getresponse()
             except OSError as exc:
-                if self._cancelled:
-                    raise self._as_cancellation(exc) from exc
+                if self._cancelled or self._steer_signal.is_set():
+                    raise self._as_control_exception(exc) from exc
                 raise _unreachable(self._base_url, urllib.error.URLError(exc), self._model) from exc
             if response.status >= 400:
                 body = response.read()
@@ -516,8 +527,8 @@ class LocalModelProvider(ModelProvider):
                     tool_calls = _extract_tool_calls(message)
                 if chunk.get("done"):
                     break
-        except Exception as exc:  # noqa: BLE001 - see _as_cancellation
-            raise self._as_cancellation(exc) from exc
+        except Exception as exc:  # noqa: BLE001 - see _as_control_exception
+            raise self._as_control_exception(exc) from exc
         finally:
             self._release(conn)
         self._last_tool_calls = tool_calls
@@ -557,6 +568,52 @@ class LocalModelProvider(ModelProvider):
                 conn.close()
             except Exception:  # noqa: BLE001 - already going; nothing to do
                 pass
+
+    def interrupt_current_reply(self) -> bool:
+        """Cut off whatever this provider is streaming right now — mid-turn
+        steering's resumable counterpart to ``cancel()``'s one-way stop.
+
+        Shuts down the same tracked socket ``cancel()`` does, for the same
+        reason (only ``socket.shutdown()``, not ``close()``, wakes a ``recv``
+        blocked on another thread — see ``cancel()``). The difference is
+        entirely in what happens *after*: ``cancel()`` latches ``_cancelled``
+        so every later request is refused; this sets ``_steer_signal``
+        instead, which ``_as_control_exception`` consumes exactly once (on
+        the very interruption it caused) and clears — so the next ``chat()``
+        call opens a fresh connection and runs as if nothing happened. A
+        provider that is mid-generation when this fires raises
+        ``SteeringInterrupted`` out of ``_stream_chat``; a provider with
+        nothing in flight (between tool calls, or not yet connected) has
+        nothing to interrupt, hence the return value.
+
+        Not part of ``chat()``/non-streaming: ``_post`` stays on plain
+        ``urllib`` for the reasons its own docstring gives, so a steer that
+        lands while ``/api/show`` or a non-streaming call is in flight simply
+        has nothing to cut off here — the orchestrator still applies the
+        queued steering message at the next loop boundary either way.
+        """
+        with self._inflight_lock:
+            connections = list(self._inflight)
+            if connections:
+                self._steer_signal.set()
+        for conn in connections:
+            # Both shutdown() and close(), exactly as cancel() does: shutdown()
+            # alone wakes the blocked recv but a shutdown-but-not-closed socket
+            # can still read a clean EOF and let the chunked-response parser
+            # end the stream quietly, with no exception for _as_control_exception
+            # to turn into SteeringInterrupted. Closing the connection on top
+            # is what actually makes the read fail loudly.
+            sock = getattr(conn, "sock", None)
+            if sock is not None:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 - already going; nothing to do
+                pass
+        return bool(connections)
 
     def parse_tool_calls(self, raw: str) -> list[ToolCall]:
         return self._last_tool_calls

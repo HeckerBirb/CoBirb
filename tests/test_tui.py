@@ -418,10 +418,12 @@ class _CancellableOrchestrator(_StubOrchestrator):
     cancel_running() on its fake ``shell`` tool — simulating a hung shell
     command exactly the way the real bug looked from the TUI's side."""
 
-    def __init__(self, *, shell_present=True):
+    def __init__(self, *, shell_present=True, steer_accepts=True):
         super().__init__()
         self._release = threading.Event()
         self.cancel_calls = 0
+        self.steer_calls: list[str] = []
+        self._steer_accepts = steer_accepts
         if shell_present:
             self.tools = {"shell": SimpleNamespace(cancel_running=self._cancel_running)}
 
@@ -429,6 +431,10 @@ class _CancellableOrchestrator(_StubOrchestrator):
         self.cancel_calls += 1
         self._release.set()
         return True
+
+    def steer(self, message: str) -> bool:
+        self.steer_calls.append(message)
+        return self._steer_accepts
 
     def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False):
         self.calls.append({"prompt": prompt, "persona": persona, "plan_mode": plan_mode})
@@ -468,9 +474,62 @@ async def test_ctrl_c_with_nothing_cancellable_does_not_touch_the_turn(monkeypat
         await pilot.press("ctrl+c")
         await pilot.pause()
 
-        assert app.query_one("#prompt-input", PromptInput).disabled  # still running
+        # The box stays enabled through an ordinary turn now (mid-turn
+        # steering — see Orchestrator.steer()), so "still running" is no
+        # longer visible as a disabled input; _turn_in_progress is the actual
+        # signal, and is what the other tests in this section already check.
+        assert app._turn_in_progress
         orchestrator._release.set()  # let it finish so the test cleans up promptly
-        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
+        await _until(pilot, lambda: not app._turn_in_progress)
+
+
+# --------------------------------------------------------------------------- #
+# Mid-turn steering: a message submitted while a turn is already running
+# redirects it (Orchestrator.steer()) instead of starting a second,
+# overlapping one. See Orchestrator.steer() for the model-facing half.
+# --------------------------------------------------------------------------- #
+async def test_a_message_typed_mid_turn_steers_it_instead_of_starting_a_new_one(monkeypatch):
+    orchestrator = _CancellableOrchestrator()
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "run the game")
+        await _until(pilot, lambda: app._turn_in_progress)
+
+        await _submit(pilot, app, "actually, stop and check the tests first")
+
+        assert orchestrator.steer_calls == ["actually, stop and check the tests first"]
+        assert len(orchestrator.calls) == 1  # no second, overlapping run() started
+        assert "actually, stop and check the tests first" in _transcript_text(app)
+        # The box stayed usable throughout — never disabled by the steer.
+        assert not app.query_one("#prompt-input", PromptInput).disabled
+
+        orchestrator._release.set()
+        await _until(pilot, lambda: not app._turn_in_progress)
+
+
+async def test_steering_refused_by_the_orchestrator_is_reported_plainly(monkeypatch):
+    """A race between the keypress and the turn actually finishing —
+    Orchestrator.steer() returning False must not be silently swallowed,
+    since the user's message genuinely did not go anywhere."""
+    orchestrator = _CancellableOrchestrator(steer_accepts=False)
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "run the game")
+        await _until(pilot, lambda: app._turn_in_progress)
+
+        await _submit(pilot, app, "too late")
+
+        assert orchestrator.steer_calls == ["too late"]
+        assert "Nothing to steer" in _transcript_text(app)
+
+        orchestrator._release.set()
+        await _until(pilot, lambda: not app._turn_in_progress)
 
 
 async def test_ctrl_c_with_no_turn_running_falls_back_to_the_quit_hint(monkeypatch):

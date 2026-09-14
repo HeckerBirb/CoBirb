@@ -276,6 +276,30 @@ def build_user_message(text: str) -> Text:
     return Group(body, ExchangeRule())
 
 
+STEER_MARKER_STYLE = "bold magenta"
+_STEER_MARKER = "» "
+
+
+def build_steer_message(text: str) -> Text:
+    """A message sent to redirect a turn that is already running.
+
+    Distinct from ``build_user_message``'s ``> `` marker (bold cyan, closed
+    by a rule): a ``»`` in a different colour makes clear at a glance that
+    this interjected into something already in progress, mid-transcript,
+    rather than opening a fresh exchange — and it deliberately isn't followed
+    by an ``ExchangeRule``, since it doesn't close one; whatever the model
+    was already saying continues right below it.
+    """
+    lines = text.splitlines() or [""]
+    body = Text()
+    body.append(_STEER_MARKER, style=STEER_MARKER_STYLE)
+    body.append(lines[0], style="italic")
+    for line in lines[1:]:
+        body.append("\n" + _INDENT)
+        body.append(line, style="italic")
+    return body
+
+
 class ExchangeRule:
     """A dim rule at 80% width, indented to sit under the message text.
 

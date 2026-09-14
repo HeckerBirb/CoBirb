@@ -13,7 +13,7 @@ import pytest
 
 from cobirb.plugins.core.model import LocalModelProvider, _build_messages
 from cobirb.plugins.core.tools import ReadFileTool
-from cobirb.typing.spi import Tool, ToolCall, ToolResult
+from cobirb.typing.spi import SteeringInterrupted, Tool, ToolCall, ToolResult
 
 
 class _FakeResponse:
@@ -311,6 +311,87 @@ def test_a_stuck_stream_can_be_cancelled_from_another_thread():
     assert received == ["one "]
     assert isinstance(error[0], RuntimeError)
     assert "cancelled" in str(error[0])
+
+
+def test_interrupting_a_reply_raises_but_leaves_the_provider_usable():
+    """Mid-turn steering's resumable half. Unlike ``cancel()``, interrupting a
+    stream must not stop the provider for good — the very next request has to
+    work normally. Proven against a real socket for the same reason
+    force-stop was (a mock can't show a shutdown from another thread waking a
+    blocked recv, or that the connection *after* it is unaffected).
+    """
+    import http.server
+    import threading
+    import time
+
+    calls = {"chat": 0}
+
+    class _Hang(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_POST(self):
+            if self.path.endswith("/api/show"):
+                body = json.dumps({"parameters": "", "model_info": {}}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            calls["chat"] += 1
+            self.send_response(200)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            if calls["chat"] == 1:
+                line = (json.dumps({"message": {"content": "one "}}) + "\n").encode()
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(line), line))
+                self.wfile.flush()
+                time.sleep(30)  # then hang, as if mid-generation
+                return
+            for chunk in (
+                {"message": {"content": "hi"}, "done": False},
+                {"message": {"content": ""}, "done": True},
+            ):
+                line = (json.dumps(chunk) + "\n").encode()
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(line), line))
+                self.wfile.flush()
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+
+        def log_message(self, *args):
+            return None
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Hang)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    provider = LocalModelProvider(model="m", base_url=f"http://127.0.0.1:{server.server_address[1]}")
+
+    received, error = [], []
+
+    def consume():
+        try:
+            for chunk in provider.chat("", "hi", stream=True):
+                received.append(chunk)
+        except Exception as exc:  # noqa: BLE001
+            error.append(exc)
+
+    worker = threading.Thread(target=consume, daemon=True)
+    worker.start()
+    time.sleep(1.0)  # let the first token arrive and the read block
+
+    had_something_to_cut_off = provider.interrupt_current_reply()
+    worker.join(timeout=5)
+
+    assert had_something_to_cut_off
+    assert received == ["one "]
+    assert len(error) == 1 and isinstance(error[0], SteeringInterrupted)
+
+    # The provider is not latched closed the way cancel() leaves it — the
+    # very next request behaves exactly as if nothing had happened.
+    assert list(provider.chat("", "hi again", stream=True)) == ["hi"]
+
+
+def test_interrupting_a_reply_with_nothing_in_flight_reports_that_plainly():
+    provider = LocalModelProvider(model="m", base_url="http://127.0.0.1:1")
+    assert provider.interrupt_current_reply() is False
 
 
 # --------------------------------------------------------------------------- #

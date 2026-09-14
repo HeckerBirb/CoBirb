@@ -92,6 +92,21 @@ class ToolResult:
     meta: dict[str, Any] = field(default_factory=dict)
 
 
+class SteeringInterrupted(Exception):
+    """A model reply was deliberately cut off mid-stream to steer the turn.
+
+    Raised by a ``ModelProvider`` (from inside ``chat()``'s stream, when it
+    implements the optional, duck-typed ``interrupt_current_reply()`` — see
+    ``ModelProvider`` below) to tell the orchestrator "this wasn't a failure,
+    a person redirected the turn while I was still answering." The
+    orchestrator catches it by type to keep whatever content streamed so far
+    as a genuine (if incomplete) assistant turn, rather than reporting the
+    turn as broken — the same distinction ``cancel()``'s one-way stop makes
+    for ending a run outright, but resumable: the provider is expected to
+    serve the very next request normally.
+    """
+
+
 # --------------------------------------------------------------------------- #
 # Model provider
 # --------------------------------------------------------------------------- #
@@ -136,6 +151,16 @@ class ModelProvider(abc.ABC):
     @abc.abstractmethod
     def supports_vision(self) -> bool:
         """Whether the model can consume image bytes (relevant to vision adapters)."""
+
+    # Optional, duck-typed, not part of this ABC (the same way `cancel()`
+    # isn't): `cancel()` stops a provider for good; `interrupt_current_reply()
+    # -> bool` cuts off only the reply in progress — raising
+    # `SteeringInterrupted` out of `chat()`'s stream — and leaves the
+    # provider ready to serve the very next request normally. Returns
+    # whether there was actually something in flight to interrupt. A
+    # provider that implements neither simply can't be steered mid-stream;
+    # the orchestrator still applies a queued steering message at the next
+    # turn boundary either way.
 
 
 # --------------------------------------------------------------------------- #

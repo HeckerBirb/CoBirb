@@ -10,7 +10,7 @@ from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 from cobirb.plugins.core.tools import ReadFileTool, ShellTool, ToolRegistry
 from cobirb.policy import Policy
 from cobirb.session import SessionManager, Turn
-from cobirb.typing.spi import ToolCall
+from cobirb.typing.spi import SteeringInterrupted, ToolCall, ToolResult
 
 
 class _DummyModel:
@@ -1342,3 +1342,116 @@ def test_cancel_survives_a_model_cancel_that_raises(tmp_path):
     orchestrator.cancel()  # must not raise, and must still reach the shell
 
     assert stopped == [True]
+
+
+# --------------------------------------------------------------------------- #
+# Orchestrator.steer() — mid-turn steering, cancel()'s resumable counterpart.
+#
+# Redirecting a turn in progress rather than ending it: a queued message is
+# applied as a user turn at the next loop boundary, and — when the model
+# supports it — an in-progress stream is cut off immediately instead of
+# being read to the end first. Both halves are exercised here in isolation
+# (single-threaded, with a stub model standing in for "another thread just
+# called steer()"); the real cross-thread socket mechanics that make
+# interrupt_current_reply() actually wake a blocked read are proven for real
+# in test_model.py, the same way cancel()'s are.
+# --------------------------------------------------------------------------- #
+def test_steer_with_no_turn_in_progress_is_refused():
+    orchestrator = Orchestrator(model=_DummyModel(), tools={}, policy=Policy())
+
+    assert orchestrator.steer("redirect this") is False
+
+
+def test_steer_queued_between_tool_calls_is_applied_at_the_next_boundary():
+    """A message that arrives while the model is between tool calls doesn't
+    need interrupt_current_reply() at all — the loop is already about to ask
+    the model for its next turn, which is where _drain_steer picks it up."""
+    holder: dict = {}
+
+    class _SteeringTool:
+        def name(self):
+            return "noop"
+
+        def description(self):
+            return "does nothing, but steers the turn on the way"
+
+        def parameters(self):
+            return {"type": "object", "properties": {}}
+
+        def execute(self, arguments):
+            holder["orch"].steer("actually, focus on the tests instead")
+            return ToolResult(ok=True, content="done")
+
+    model = _ToolCallModel("noop", {}, reply="wrapping up")
+    orchestrator = Orchestrator(
+        model=model,
+        tools={"noop": _SteeringTool()},
+        policy=Policy(allowed={"noop"}),
+    )
+    holder["orch"] = orchestrator
+
+    session = orchestrator.run("do a thing", "sys", cwd="/tmp")
+
+    contents = [t.content for t in session.turns if t.role == "user"]
+    assert any("actually, focus on the tests instead" in c for c in contents)
+    assert session.summary == "wrapping up"
+
+
+class _SteerableStreamingModel(_DummyModel):
+    """Streams one chunk, then checks whether ``steer()`` asked it to stop —
+    standing in for what a real ``interrupt_current_reply()`` does from
+    another thread mid-generation (proven against a real socket in
+    test_model.py). The model itself calls ``steer()`` partway through its
+    own stream, the single-threaded equivalent of "the user hit send exactly
+    then".
+    """
+
+    def __init__(self, holder, message, follow_up_reply="acknowledged"):
+        super().__init__(reply=follow_up_reply)
+        self._holder = holder
+        self._message = message
+        self._interrupted = False
+        self.calls = 0
+        self.interrupt_calls = 0
+
+    def supports_streaming(self):
+        return True
+
+    def chat(self, system, context, tools=None, *, stream=False):
+        self.calls += 1
+        if not stream:
+            return self.reply
+        if self.calls == 1:
+            return self._first_stream()
+        return iter([self.reply])
+
+    def _first_stream(self):
+        yield "partial "
+        self._holder["orch"].steer(self._message)
+        if self._interrupted:
+            raise SteeringInterrupted()
+        yield "unwanted rest"  # only reached if steer() failed to interrupt
+
+    def interrupt_current_reply(self):
+        self.interrupt_calls += 1
+        self._interrupted = True
+        return True
+
+
+def test_steer_interrupts_a_streaming_reply_and_keeps_the_partial_content():
+    holder: dict = {}
+    model = _SteerableStreamingModel(holder, "actually, focus on the tests")
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), io=_RecordingIO())
+    holder["orch"] = orchestrator
+
+    session = orchestrator.run("do a thing", "sys", cwd="/tmp")
+
+    assert model.interrupt_calls == 1
+    assistant_turns = [t.content for t in session.turns if t.role == "assistant"]
+    # The partial reply is kept as-is — cut off, not corrupted or discarded —
+    # and "unwanted rest" never arrives because the stream was actually cut
+    # off rather than merely asked nicely to stop.
+    assert assistant_turns[0] == "partial "
+    user_turns = [t.content for t in session.turns if t.role == "user"]
+    assert any("actually, focus on the tests" in c for c in user_turns)
+    assert session.summary == "acknowledged"

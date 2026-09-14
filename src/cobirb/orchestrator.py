@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 from difflib import get_close_matches
 from typing import Any, Callable, Iterable
 
@@ -42,6 +43,15 @@ _STREAM_EMPTY = object()
 # it very often is the thing that changed something, even though it cannot say
 # so in advance the way the file tools can.
 _CHANGING_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "shell"})
+
+# Prefixed onto a steering message before it re-enters history as a user
+# turn, so a small local model — which has no other way to know its own
+# reply was just cut off — is told plainly why a new user turn has appeared
+# in the middle of what it was saying, rather than reading as a non sequitur.
+_STEER_PREAMBLE = (
+    "[The user sent this while you were still replying, to redirect you now "
+    "rather than wait. Take it into account immediately:] "
+)
 
 # System-prompt addenda for plan mode's three phases (Orchestrator.run,
 # plan_mode=True). Off by default — the model plans, acts and validates
@@ -222,6 +232,18 @@ class Orchestrator:
         self.last_turn_streamed = False
         # Overwritten by run() with the active persona name for this call.
         self._stream_label = "assistant"
+        # Mid-turn steering (see steer()): messages queued from another
+        # thread while run() is executing, applied at the next loop boundary
+        # by _drain_steer. A plain queue.SimpleQueue rather than a list plus
+        # a lock — nothing here needs more than thread-safe put/get.
+        self._steer_queue: "queue.SimpleQueue[str]" = queue.SimpleQueue()
+        # True only while run() is actually executing, so steer() can refuse
+        # a message with no turn to redirect instead of queuing it for some
+        # future, unrelated run.
+        self._turn_active = False
+        # Set by _chat() when a stream was cut off by a steer rather than
+        # finishing on its own — see SteeringInterrupted and _loop().
+        self._last_chat_was_steered = False
 
     # ------------------------------------------------------------------ #
     # Public run
@@ -274,6 +296,33 @@ class Orchestrator:
         if self.checkpoints is not None:
             self.checkpoints.begin_turn()
 
+        # Only while the loop below is actually executing — see steer()'s
+        # docstring for why a message with no turn to redirect is refused
+        # rather than queued for whatever run happens next. Any message left
+        # over from a run that ended without draining its queue (an
+        # exception mid-loop, say) is stale and must not leak into this one.
+        self._turn_active = True
+        self._clear_steer_queue()
+        try:
+            return self._run_body(
+                prompt, system, cwd, persona, max_turns, plan_mode, session
+            )
+        finally:
+            self._turn_active = False
+
+    def _run_body(
+        self,
+        prompt: str,
+        system: str,
+        cwd: str,
+        persona: str,
+        max_turns: int,
+        plan_mode: bool,
+        session: Session,
+    ) -> Session:
+        """The actual run() logic, wrapped by run() itself so ``_turn_active``
+        is reliably cleared on every exit path — see run()'s ``try/finally``.
+        """
         # cwd is per-run metadata, not conversation history, so it rides on
         # the system prompt rather than being spliced into the turn history.
         #
@@ -423,10 +472,35 @@ class Orchestrator:
         summary-only behavior the plain loop always had — see
         ``run()``'s history before plan mode existed). Used both for the
         normal act loop and, in plan mode, the validate phase too.
+
+        Mid-turn steering (see ``steer()``) is applied at two points: a
+        queued message is drained into history at the top of every
+        iteration — the boundary between tool calls, and before the very
+        first model call — and, if the model was cut off mid-stream (see
+        ``_chat``'s ``SteeringInterrupted`` handling), its partial reply is
+        kept as a genuine (if incomplete) turn and the loop goes straight
+        back around to pick up the message that interrupted it, rather than
+        parsing tool calls out of a reply that never finished.
         """
         context = self._build_context(session)
         for _ in range(max_turns):
+            if self._drain_steer(session):
+                context = self._build_context(session)
             reply, streamed = self._chat(system, context, tools)
+
+            if self._last_chat_was_steered:
+                # Cut off deliberately, not broken — recorded as-is so the
+                # model's next reply is informed by what it already said,
+                # and looped straight back around (consuming one of
+                # max_turns) rather than treated as a finished answer or
+                # scanned for tool calls it never got to emit.
+                session.add(Turn(role="assistant", content=_materialize(reply), phase=phase))
+                render_through(
+                    self.io, "render_notice", "↳ redirected by a new message",
+                    fallback=lambda: None,
+                )
+                context = self._build_context(session)
+                continue
 
             # If the model wants to act, allow it (policy-gated) and keep going.
             tool_calls = (
@@ -497,7 +571,16 @@ class Orchestrator:
         Returns ``(content, streamed)``. Falls back to a single
         non-streaming call otherwise (including for duck-typed test doubles
         that don't implement ``supports_streaming``).
+
+        Sets ``self._last_chat_was_steered`` for ``_loop`` to check: a model
+        that implements the optional ``interrupt_current_reply`` may raise
+        ``SteeringInterrupted`` mid-stream (see ``steer()``), which is caught
+        here and turned into "return whatever streamed so far, flagged as
+        cut short" rather than an error — a non-streaming call is never
+        interruptible this way, since it has already fully returned by the
+        time anything could react.
         """
+        self._last_chat_was_steered = False
         if tools is None:
             tools = list(self.tools.values())
         supports_streaming = getattr(self.model, "supports_streaming", lambda: False)()
@@ -507,8 +590,6 @@ class Orchestrator:
             return _materialize(reply), False
 
         stream = iter(self.model.chat(system, context, tools, stream=True))
-        first = self._spun(label, lambda: next(stream, _STREAM_EMPTY))
-
         chunks: list[str] = []
         started = False
 
@@ -532,10 +613,14 @@ class Orchestrator:
                 self.io.render(chunk)
                 chunks.append(chunk)
 
-        if first is not _STREAM_EMPTY:
-            _emit(first)
-        for chunk in stream:
-            _emit(chunk)
+        try:
+            first = self._spun(label, lambda: next(stream, _STREAM_EMPTY))
+            if first is not _STREAM_EMPTY:
+                _emit(first)
+            for chunk in stream:
+                _emit(chunk)
+        except cobirb_typing.SteeringInterrupted:
+            self._last_chat_was_steered = True
         if chunks:
             self.io.render("\n")
         return "".join(chunks), True
@@ -859,6 +944,76 @@ class Orchestrator:
     def session_path(self) -> str | None:
         return self.session.path if self.session else None
 
+    def steer(self, message: str) -> bool:
+        """Redirect the turn in progress with ``message``, without ending it.
+
+        Safe to call from another thread — the whole point, since the thread
+        running ``run()`` is busy with the loop. Unlike ``cancel()``, nothing
+        is lost: ``message`` is queued and applied at the next natural
+        boundary, and whatever the model already said stays in history.
+
+        Two things happen, and either alone is enough for the message to
+        eventually land:
+
+        - It is queued (``_steer_queue``), to be added as a user turn the
+          next time ``_loop`` is between model calls — immediately, if the
+          model is between tool calls right now.
+        - If the model is *currently* streaming its reply and implements the
+          optional ``interrupt_current_reply()`` (see ``LocalModelProvider``
+          and ``SteeringInterrupted``), that stream is cut off right away
+          rather than left to finish — so redirecting a model that is
+          three paragraphs into the wrong answer doesn't mean reading the
+          rest of it first.
+
+        Returns whether there is a run to steer at all. A call with no turn
+        in progress is not queued — steering a turn that has not started
+        would be indistinguishable from just sending an ordinary message,
+        and queuing it here would let it apply to some unrelated future run
+        instead of being sent as what it actually is.
+        """
+        if not self._turn_active:
+            return False
+        self._steer_queue.put(message)
+        interrupt = getattr(self.model, "interrupt_current_reply", None)
+        if callable(interrupt):
+            try:
+                interrupt()
+            except Exception:  # noqa: BLE001 - the queued message still lands at the next boundary
+                logger.debug("interrupt_current_reply raised", exc_info=True)
+        return True
+
+    def _drain_steer(self, session: Session) -> bool:
+        """Apply every steering message queued so far as a user turn.
+
+        Called at each loop boundary (see ``_loop``). Draining in a loop
+        rather than taking one message matters when several arrive before
+        the next boundary — a person typing two quick corrections should see
+        both taken into account, in order, not just the last one silently
+        winning.
+        """
+        drained = False
+        while True:
+            try:
+                message = self._steer_queue.get_nowait()
+            except queue.Empty:
+                break
+            session.add(Turn(role="user", content=f"{_STEER_PREAMBLE}{message}"))
+            drained = True
+        return drained
+
+    def _clear_steer_queue(self) -> None:
+        """Discard anything left in the queue from a previous, finished run.
+
+        Only ``run()`` calls this, once, before starting — a message that
+        arrived too late for the run it was meant to steer must not silently
+        reattach itself to an unrelated later one.
+        """
+        while True:
+            try:
+                self._steer_queue.get_nowait()
+            except queue.Empty:
+                return
+
     def cancel(self) -> None:
         """Interrupt whatever this orchestrator is doing right now.
 
@@ -868,6 +1023,9 @@ class Orchestrator:
         Ctrl+C uses on an ordinary turn) and a model request (closing its
         connection unblocks the read and tells the server to stop). Neither is
         present on every orchestrator, so both are probed rather than assumed.
+
+        This is the one-way, end-the-run stop — see ``steer()`` for the
+        resumable alternative that redirects a turn instead of ending it.
         """
         shell = self.tools.get("shell")
         stop_shell = getattr(shell, "cancel_running", None)

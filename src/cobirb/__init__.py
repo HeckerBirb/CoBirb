@@ -13,6 +13,7 @@ from .typing.spi import (  # noqa: F401  (public SPI)
     ModelProvider,
     Persona,
     SessionCrypto,
+    SteeringInterrupted,
     Tool,
     ToolCall,
     ToolResult,
@@ -26,5 +27,6 @@ __all__ = [
     "I_OAdapter",
     "SessionCrypto",
     "Persona",
+    "SteeringInterrupted",
     "__version__",
 ]

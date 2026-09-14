@@ -389,10 +389,22 @@ class CoBirbApp(App[None]):
         its own — the widget posts one so this handler reads as it did when it
         was an ``Input``. See ``PromptInput`` for why enter had to be claimed
         rather than bound over.
+
+        The box stays enabled through an ordinary turn now (mid-turn
+        steering — see ``_steer_current_turn``), so this is also where a
+        message submitted *while one is running* gets routed differently:
+        not as a new prompt or a slash command, but as ``Orchestrator.steer()``
+        redirecting the turn already in flight. A flock engagement still
+        disables the box outright (``_cmd_flock``) — steering a flock is a
+        different, unbuilt question, not this one.
         """
         prompt = event.value.strip()
         event.input.clear()
         if not prompt:
+            return
+
+        if self._turn_in_progress:
+            self._steer_current_turn(prompt)
             return
 
         # Before the command dispatch below, not after: "/persona kawaii" is
@@ -410,13 +422,34 @@ class CoBirbApp(App[None]):
         # the session log unreadable to the person who wrote it.
         prompt = self._expand_custom(prompt)
         self.write_user_prompt(prompt)
-        # Disabled here, on the main thread, and re-enabled in
-        # _on_turn_finished — this is what replaces the old loop's
-        # "continue? [y/N]" gate. There is nothing to confirm: when the box
-        # comes back, you just keep typing.
-        event.input.disabled = True
+        # Left enabled, on purpose: this used to disable the box until the
+        # turn finished — the old loop's "continue? [y/N]" gate, with nothing
+        # to confirm since the box just comes back. Mid-turn steering is what
+        # it stays open *for* now: submitting again before this one finishes
+        # is routed above to _steer_current_turn rather than piling up a
+        # second, overlapping run_turn.
         self._turn_in_progress = True
         self._run_turn(prompt)
+
+    def _steer_current_turn(self, message: str) -> None:
+        """Redirect the turn already running, instead of starting a new one.
+
+        No command dispatch and no custom-command expansion here, unlike an
+        ordinary prompt: text typed while a turn is running reads as talking
+        to the model *right now*, not as issuing a meta-command — swapping
+        the model or resuming a session mid-turn is a different, riskier
+        thing than this is trying to be. ``Orchestrator.steer()`` can refuse
+        (no orchestrator yet, or the turn just finished in the gap between
+        the keypress and this running) — reported plainly rather than
+        silently dropped, since the message the user just typed did not, in
+        that case, go anywhere.
+        """
+        if self.orchestrator is None or not self.orchestrator.steer(message):
+            self.write_transcript(
+                render.build_notice("Nothing to steer — the turn just finished.")
+            )
+            return
+        self.write_transcript(render.build_steer_message(message))
 
     # ------------------------------------------------------------------ #
     # Slash commands
