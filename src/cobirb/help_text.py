@@ -120,7 +120,7 @@ EXTENDING IT
 
 TOPICS
   Run 'cobirb help <topic>' for more: session, persona, plan, model,
-  commands, hooks, mcp, flock, plugins, tools, config.
+  commands, hooks, mcp, flock, plugin, plugins, tools, config.
 """
 
 HELP_TOPICS: dict[str, str] = {
@@ -427,6 +427,45 @@ THE CONTRACT
 
 A before_tool hook cannot APPROVE anything: it can only refuse. Everything
 it lets past still goes to the permission layer, which still asks you.
+""",
+    "plugin": """\
+PLUGIN — a registry that is a plain file
+
+  cobirb plugin install <path>    Install a local plugin's source directory.
+  cobirb plugin list              What's installed, and what's active.
+  cobirb plugin remove <name>     Uninstall one.
+
+Local only, on purpose. `install` takes a path already on your disk — never a
+URL, a package name, or a version to fetch. There is no index to query and
+nothing this command ever reaches out for. If you want a published plugin,
+`pip install` it yourself the normal way; CoBirb finds anything registering a
+`cobirb.plugins` entry point regardless of how it got there (see 'cobirb help
+plugins', plural, for how discovery works generally). This command exists for
+the other case: you have a plugin's source on disk and want CoBirb to find it.
+
+WHAT INSTALL ACTUALLY DOES
+  `plugins/loader.py` resolves a local plugin through real Python package
+  metadata, not by reading its pyproject.toml directly — so it has to be a
+  properly installed distribution, editable or not. `install` copies the
+  directory into ~/.cobirb/plugins/<name>/ and runs `pip install -e` on it,
+  automating a sequence you could do by hand — nothing it does is a new
+  capability, only fewer steps to get wrong.
+
+  The source must declare, in pyproject.toml:
+    - [project].name equal to cobirb_plugins_<name> — the loader derives the
+      distribution name it looks up from the installed directory's own
+      basename, not from anything inside the package, so this has to match
+      exactly or the plugin will install cleanly and never be found.
+    - a [project.entry-points."cobirb.plugins"] table naming the class.
+
+  A failed install (wrong name, no matching entry point, doesn't subclass the
+  right SPI interface) is rolled back completely — the copied directory and
+  the pip package both — rather than left half-installed and silently broken.
+
+No checksum or signature check: the source you name is already on your own
+disk, under your own control, before this command ever touches it. That
+verification would only earn its cost once something could be fetched by this
+command rather than merely relocated by it — which it deliberately cannot.
 """,
     "commands": """\
 COMMANDS — a prompt you have written down, invoked by name

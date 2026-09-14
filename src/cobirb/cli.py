@@ -33,6 +33,7 @@ from .plugins.core import render
 from .runtime import commands, personas, plugins, sessions, wiring
 from .plugins.core import TerminalIO
 from .runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
+from .runtime.plugin_install import PluginInstallError, install_plugin, list_installed, remove_plugin
 from .runtime.export import write_export
 from .flock.run import Asker, run_flock_session
 from .runtime.bootstrap import ensure_home
@@ -40,7 +41,7 @@ from .runtime.models import describe_roles
 from .session import SessionManager
 from .runtime.headless import EXIT_DENIED, EXIT_ERROR, EXIT_OK, HeadlessIO, HeadlessResult, describe_context
 from .runtime.personas import NO_PERSONA
-from .runtime.plugins import PluginsSummary, ToolInfo
+from .runtime.plugins import PluginsSummary, ToolInfo, describe_plugins
 from .typing import spi as cobirb_typing
 from .plugins.core import persona_shapes_voice  # noqa: F401  (re-exported)
 
@@ -401,6 +402,53 @@ def _run_models(config: Config, override: str | None) -> int:
     return EXIT_OK
 
 
+def _run_plugin(verb: str | None, target: str | None, *, replace: bool) -> int:
+    """``cobirb plugin install|list|remove`` — see 'cobirb help plugin'.
+
+    Deliberately thin: all the actual work (validation, the pip round trip,
+    rollback on a failed install) lives in ``runtime.plugin_install``, tested
+    on its own. This only turns three verbs and an optional path/name into
+    calls on it and reports what happened.
+    """
+    if verb not in ("install", "list", "remove"):
+        print(
+            "cobirb: usage: cobirb plugin install <path> | list | remove <name>",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    if verb == "list":
+        from rich.console import Console
+
+        installed = list_installed()
+        if not installed:
+            print("No plugins installed via 'cobirb plugin install'.")
+        else:
+            print("Installed via 'cobirb plugin install':")
+            for name in installed:
+                print(f"  - {name}")
+        print()
+        print("Everything currently active, including plain pip-installed plugins:")
+        Console().print(render.build_plugins_view(describe_plugins(".")))
+        return EXIT_OK
+
+    if not target:
+        noun = "source directory" if verb == "install" else "name"
+        print(f"cobirb: 'plugin {verb}' needs a {noun}.", file=sys.stderr)
+        return EXIT_ERROR
+
+    try:
+        if verb == "install":
+            result = install_plugin(target, replace=replace)
+        else:
+            result = remove_plugin(target)
+    except PluginInstallError as exc:
+        print(f"cobirb: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    print(result.describe())
+    return EXIT_OK
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cobirb",
@@ -410,16 +458,32 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "subcommand",
         nargs="?",
-        choices=["help", "models", "commands", "flock"],
+        choices=["help", "models", "commands", "flock", "plugin"],
         help="'help' for the overview, 'models' for how each role resolves, "
         "'commands' for the custom commands available here, 'flock' to divide "
-        "a piece of work between several agents (see 'cobirb help flock').",
+        "a piece of work between several agents, 'plugin' to install/list/remove "
+        "a local plugin (see 'cobirb help flock'/'cobirb help plugin').",
     )
     parser.add_argument(
         "topic",
         nargs="?",
-        choices=sorted(HELP_TOPICS),
-        help=f"With 'help': a specific topic ({', '.join(sorted(HELP_TOPICS))}).",
+        # Not constrained to HELP_TOPICS here: with subcommand="plugin" this
+        # slot holds the verb (install/list/remove) instead of a help topic,
+        # since argparse's `choices` can't depend on another argument's value.
+        # main() validates it against the right set once it knows which.
+        help=f"With 'help': a specific topic ({', '.join(sorted(HELP_TOPICS))}). "
+        "With 'plugin': install, list, or remove.",
+    )
+    parser.add_argument(
+        "target",
+        nargs="?",
+        help="With 'plugin install': the local plugin source directory. "
+        "With 'plugin remove': the plugin's name.",
+    )
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="With 'plugin install': overwrite an already-installed plugin of the same name.",
     )
 
     mode = parser.add_argument_group("modes")
@@ -512,6 +576,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.subcommand == "help":
+        if args.topic and args.topic not in HELP_TOPICS:
+            print(
+                f"cobirb: no help topic {args.topic!r}. Topics: {', '.join(sorted(HELP_TOPICS))}.",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
         print(HELP_TOPICS[args.topic] if args.topic else HELP_TEXT)
         return 0
 
@@ -538,6 +608,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             return EXIT_ERROR
         return _run_flock(args.prompt, args.cwd or ".", args.model, headless=args.headless)
+    if args.subcommand == "plugin":
+        return _run_plugin(args.topic, args.target, replace=args.replace)
 
     allow_overrides = wiring.parse_allow_tools(args.allow_tool)
     persona_name = args.persona or config.get("persona")

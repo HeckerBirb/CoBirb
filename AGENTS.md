@@ -617,6 +617,40 @@ Tests: per-tool units (`test_tools.py`), a stub-provider loop contract (`test_or
 crypto round-trip incl. tamper and wrong-password (`test_crypto.py`), plugin load + broken-plugin
 survival (`test_loader.py`), live Ollama behind `COBIRB_TEST_MODEL` (`test_integration_ollama.py`).
 
+### 5.5 `cobirb plugin install/list/remove` (`runtime/plugin_install.py`)
+
+A published entry-point package needs nothing from this — `pip install some-plugin` is already the
+whole story. This exists only for the local-directory kind: `_load_local_plugin` resolves a plugin
+under `~/.cobirb/plugins/<name>/` through real `importlib.metadata` package metadata, which means it
+must genuinely be `pip install -e`'d under a name matching the directory, a step easy to get wrong
+by hand. `cobirb plugin install <path>` automates exactly that sequence and refuses early — before
+touching pip — if `pyproject.toml` is missing, has no `[project].name`, declares no
+`[project.entry-points."cobirb.plugins"]` table, or the name doesn't start with
+`cobirb_plugins_<name>` (the prefix the loader's directory-basename convention requires).
+
+**Deliberately local-only, forever.** `install` takes a path already on disk, never a URL, a
+package name to resolve, or a version to fetch. There is no index and nothing it reaches out for —
+a registry, even a curated one, is a new trust and networking question this project has repeatedly
+closed off. No checksum or signature check either: the source is already on the user's own disk
+under their own control before this ever runs, so copying it crosses no new trust boundary. That
+verification would only earn its cost once this module can *fetch* a plugin rather than merely
+relocate one, which it deliberately cannot.
+
+**A genuine Python gotcha, worth knowing if this file is ever touched again:** right after a fresh
+`pip install -e`, `importlib.metadata.distribution()` finds the new package immediately (it just
+reads the dist-info pip wrote), but the module itself is not yet importable in the *same* running
+process — `site` only processes new `.pth` entries at interpreter startup. `install_plugin()`
+verifies its own work by re-running discovery, so this bit a real end-to-end test the moment
+`_run_pip` was no longer mocked. Fixed by `_make_importable_in_this_process()`
+(`importlib.invalidate_caches()` + `sys.path.insert(0, target)`) — which also means a plugin
+installed while CoBirb is already running works immediately, no restart needed.
+
+`remove` only ever touches what this mechanism itself created (`~/.cobirb/plugins/<name>/`) — never
+a project-scoped plugin or one installed by hand with plain `pip install`. Removing the directory
+is what actually controls discovery going forward; the `pip uninstall` alongside it is best-effort
+tidiness. Both `install` and `remove` roll back cleanly on failure rather than leaving a directory
+that looks installed but was never discovered.
+
 **SPI security:** a plugin cannot pre-approve its own tools — the policy is the sole authority; a
 plugin-declared `shell`-grade tool inherits the same gate; plugin tool calls hit the audit log like
 any other.
@@ -798,8 +832,10 @@ polish) and is imported lazily, so one-shot never loads it. Three live tabs:
 
 Commands `/model`, `/persona [name]`, `/plan [on|off]`, `/context`, `/undo`, `/diff`, `/export`,
 `/commands`, `/flock <objective>`, `?`/`/help [topic]`. Anything else beginning with `/` is looked up as a custom command
-(§4j) and otherwise goes to the model unchanged. Non-interactive: `cobirb models` (§4h) and
-`cobirb commands`. Keys: `f1` help, `f2`
+(§4j) and otherwise goes to the model unchanged. Non-interactive: `cobirb models` (§4h),
+`cobirb commands`, and `cobirb plugin install <path> [--replace] | list | remove <name>` (§5.5) —
+the `topic`/`target` positional is shared with `help` and validated by hand rather than through
+argparse `choices=`, since which verbs are legal depends on the subcommand. Keys: `f1` help, `f2`
 next tab, `ctrl+q` quit, `up`/`down` recall the last 100 prompts (memory only), `ctrl+c` copies a
 selection if there is one else cancels the turn. `/model` hot-swaps `orchestrator.model` in place
 rather than rebuilding, preserving this session's "always allow" approvals. `default_model` is
@@ -925,8 +961,18 @@ they are shaped around, deliberately.
     beyond Ollama's own terminal scrolling. The status bar's spinner is not enough and did not
     always appear; the bottom of the screen should carry a live line of what is currently running —
     which agent, which phase — for the Flock and for ordinary turns.
-- **v0.6.0–0.9.0** — plugin distribution, cross-session memory, vision, mid-turn steering,
-  session branching, SPI freeze and session migrations.
+- **v0.6.0 "Interactive" (in progress)** — the three items that make a running session less of a
+  one-shot commitment.
+  - ✅ **Plugin distribution.** `cobirb plugin install/list/remove` (§5.5) — turns a plugin's source
+    directory on disk into something the loader actually discovers, without CoBirb ever reaching
+    out to fetch or resolve one itself.
+  - ⏳ **Mid-turn steering** — sending a message while the model is already answering, rather than
+    only before or after.
+  - ⏳ **Session branching** — forking a conversation to try a different direction from a past point,
+    distinct from the Flock's already-shipped GUID-based worker branching (§4m).
+- **v0.7.0 "Aware" (design only)** — cross-session memory and vision input. See the roadmap
+  artifact for the design proposals; nothing here ships as code until a following release.
+- **v0.8.0–v0.9.0** — SPI freeze and session migrations.
 
 **Time horizon.** CoBirb is built for the hardware of the next few years, not this one — local
 models on ordinary machines will be considerably more capable in one to three years than they are

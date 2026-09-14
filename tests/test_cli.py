@@ -428,9 +428,18 @@ def test_main_help_topic_prints_that_topic_only(topic, capsys):
     assert out.strip() != help_text.HELP_TEXT.strip()
 
 
-def test_main_help_rejects_an_unknown_topic():
-    with pytest.raises(SystemExit):
-        cli.main(["help", "does-not-exist"])
+def test_main_help_rejects_an_unknown_topic(capsys):
+    """A plain nonzero return, not argparse's own SystemExit(2) — `topic`'s
+    static choices had to be dropped so `plugin install/list/remove` could
+    reuse the same positional slot for its verb, so this is validated by hand
+    now. Exit 1 rather than argparse's default 2 is also the better fit here:
+    this project's own exit codes give 2 a specific, different meaning
+    (headless and something was refused), which argparse's default silently
+    collided with."""
+    status = cli.main(["help", "does-not-exist"])
+
+    assert status != 0
+    assert "does-not-exist" in capsys.readouterr().err
 
 
 def test_main_one_shot_mode_routes_prompt_and_options(monkeypatch):
