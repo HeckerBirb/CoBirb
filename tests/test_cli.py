@@ -516,6 +516,9 @@ def test_main_persona_flag_selects_the_requested_persona(monkeypatch):
 
 
 def test_main_defaults_cwd_to_current_directory(monkeypatch):
+    """Resolved to the real, absolute directory — not the literal string
+    "." (which used to reach the header panel and status bar verbatim as
+    "CoBirb · model · .")."""
     captured = {}
 
     def fake_run_one_shot(
@@ -527,7 +530,7 @@ def test_main_defaults_cwd_to_current_directory(monkeypatch):
     monkeypatch.setattr(cli, "_run_one_shot", fake_run_one_shot)
     cli.main(["-p", "hi"])
 
-    assert captured["cwd"] == "."
+    assert captured["cwd"] == os.getcwd()
 
 
 def test_main_one_shot_without_session_never_prompts_for_a_password(monkeypatch):

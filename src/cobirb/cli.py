@@ -668,6 +668,12 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    # Resolved once, to an absolute path, rather than passing the literal
+    # string "." at every call site below: that used to reach the header
+    # panel and status bar verbatim (`CoBirb · model · .`), which is
+    # technically correct — every path is joined against the real
+    # process cwd regardless — but reads as a bug rather than "here".
+    cwd = os.path.abspath(args.cwd) if args.cwd else os.getcwd()
 
     if args.subcommand == "help":
         if args.topic and args.topic not in HELP_TOPICS:
@@ -700,7 +706,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand == "models":
         return _run_models(config, args.model)
     if args.subcommand == "commands":
-        print(describe_commands(discover_commands(args.cwd or ".")))
+        print(describe_commands(discover_commands(cwd)))
         return EXIT_OK
     if args.subcommand == "flock":
         if not args.prompt:
@@ -709,12 +715,12 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return EXIT_ERROR
-        return _run_flock(args.prompt, args.cwd or ".", args.model, headless=args.headless)
+        return _run_flock(args.prompt, cwd, args.model, headless=args.headless)
     if args.subcommand == "plugin":
         # args.topic holds the verb here, not a help topic — the two share a
         # positional slot; see _build_parser.
         return _run_plugin(
-            args.topic, args.target, replace=args.replace, cwd=args.cwd or "."
+            args.topic, args.target, replace=args.replace, cwd=cwd
         )
 
     allow_overrides = wiring.parse_allow_tools(args.allow_tool)
@@ -730,10 +736,10 @@ def main(argv: list[str] | None = None) -> int:
     session_path, password = sessions.resolve_session(args.session, args.password)
 
     if args.export:
-        return _run_export(args.export, session_path, password, args.cwd or ".")
+        return _run_export(args.export, session_path, password, cwd)
 
     if args.branch:
-        return _run_branch(args.branch, args.branch_at, session_path, password, args.cwd or ".")
+        return _run_branch(args.branch, args.branch_at, session_path, password, cwd)
 
     # Said rather than ignored: a flag someone typed that quietly does nothing
     # is the same failure as `-w` once being inert without `--session`, which
@@ -744,13 +750,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.prompt is not None:
         status = _run_one_shot(
-            expand_custom_command(args.prompt, args.cwd or "."),
+            expand_custom_command(args.prompt, cwd),
             persona,
             system,
             allow_overrides,
             session_path,
             password,
-            args.cwd or ".",
+            cwd,
             args.model,
             plan_mode,
             headless=args.headless,
@@ -776,7 +782,7 @@ def main(argv: list[str] | None = None) -> int:
         allow_overrides,
         session_path,
         password,
-        args.cwd or ".",
+        cwd,
         args.model,
         plan_mode,
         harness,

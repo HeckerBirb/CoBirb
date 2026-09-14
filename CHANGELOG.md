@@ -4,6 +4,19 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.9.2]
+
+- **`--cwd` (and its default) now resolves to a real, absolute path** instead of passing the
+  literal string `.` around when it wasn't given — which used to show up verbatim in the header
+  panel and status bar (`CoBirb · model · .`). Resolved once in `cli.main()` rather than at every
+  call site.
+- The header panel naming the configured default rather than the model the startup picker
+  actually selected is **not fixed** — a fix was tried, it wrote a second, visually identical
+  header panel right below the first, which is worse than the original bug, so it was reverted the
+  same day. Documented as a known, accepted limitation in `AGENTS.md` (the transcript is
+  append-only; `/model`'s existing "Model set to X." notice was already the closest thing to a
+  correction, before and after this release, unchanged either way).
+
 ## [0.9.1]
 
 - Removed every named mention of other AI coding tools from docstrings, `AGENTS.md`, `README.md`

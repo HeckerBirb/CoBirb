@@ -934,6 +934,25 @@ the base text colour but doesn't reach those. Not fixed here: doing so needs a R
 threaded through both `TerminalIO`'s `Console` and the TUI's `RichLog`, which is more machinery
 than this revision's scope justified.
 
+**The header panel (`build_header_panel`) can go stale, and that's a known, accepted limit, not
+a bug to "fix" by writing a second one.** It's written once, in `on_mount`, from whatever model
+`__init__` resolved — before `_select_model_worker(auto=True)`'s async check has run, so if the
+configured model turns out to be unavailable and the startup picker changes it, the panel above
+still names the original. `TranscriptLog`/`RichLog` is append-only (§ its own docstring): there is
+no way to edit a line already written, only to write another one — and a second, visually
+identical header panel right below the first (tried once, in v0.9.2, reverted the same day) reads
+as a bug, not a correction. `_apply_selected_model` writes a plain "Model set to X." notice
+instead, the same one `/model` already uses mid-session — less complete than a truly corrected
+banner, but honest about what actually ran, without duplicating the chrome to say so.
+
+**`cwd` is resolved to an absolute path once, in `cli.main()`, before any subcommand or mode sees
+it** (v0.9.2) — `os.path.abspath(args.cwd) if args.cwd else os.getcwd()`, replacing what used to be
+`args.cwd or "."` repeated at every call site. Every path operation downstream already worked
+correctly either way (`"."` resolves against the real process cwd exactly like an absolute path
+would), so this was cosmetic rather than functional — but cosmetic exactly where it's most
+visible: the header panel and status bar used to print the literal string `.` as the working
+directory instead of a real path.
+
 - **Current** — transcript, live status line (persona · model · plan · cwd · session), boxed input
   that stays usable through a turn rather than greying out (mid-turn steering, below) and returns
   when done (no `continue? [y/N]` gate), tool approval as a modal (`y` once / `a` always / `n`/escape

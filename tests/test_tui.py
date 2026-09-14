@@ -1184,6 +1184,28 @@ async def test_startup_check_opens_the_picker_when_the_configured_model_is_missi
         assert options.get_option_at_index(0).id == "gemma4"
 
 
+async def test_startup_picker_selection_is_confirmed_in_the_transcript(monkeypatch):
+    """The header panel is written in on_mount, before the startup check
+    knows which model will actually run — so picking one there still leaves
+    that banner naming the originally configured model, not this one. Known,
+    accepted limitation (the transcript is append-only, so that panel can't
+    be corrected in place); what this guards is that the model actually
+    running is still stated plainly, the same way `/model` confirms one
+    picked mid-session."""
+    _stub_list_models(monkeypatch, models=["llama3.1", "gemma4"])
+    app = _make_app(model_name="does-not-exist")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _until(pilot, lambda: isinstance(app.screen, ModelPickerModal))
+
+        app.screen.query_one("#model-options", OptionList).focus()
+        await pilot.press("enter")
+        await _until(pilot, lambda: app.model_name == "llama3.1")
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
+
+        assert "Model set to llama3.1." in _transcript_text(app)
+
+
 async def test_startup_check_opens_the_picker_when_no_model_is_configured(monkeypatch):
     _stub_list_models(monkeypatch, models=["gemma4"])
     app = _make_app(model_name=None)
