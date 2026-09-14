@@ -58,6 +58,12 @@ def session_to_markdown(session: Session, *, title: str = "CoBirb session") -> s
             lines.extend([fence, content or "(no output)", fence])
         else:
             lines.append(content or "_(empty)_")
+        if turn.images:
+            # A marker only, never the bytes: an export is plaintext by
+            # design (see this module's docstring) and an attached image
+            # riding along unasked in it is not the same "explicit act".
+            names = ", ".join(img.get("filename", "attachment") for img in turn.images)
+            lines.append(f"\n📎 {names}")
         lines.append("")
 
     if session.summary:

@@ -22,6 +22,8 @@ modes, which a full-screen app's stderr is invisible to).
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import os
 import threading
 import time
@@ -62,6 +64,18 @@ from .screens import (
 from .widgets import ActivityBar, PromptInput, StatusBar, StreamPreview, TranscriptLog
 
 _TAB_ORDER = ["current", "flock", "sessions", "plugins"]
+
+# Magic-byte prefixes for the image formats CoBirb recognizes via /image.
+# A sniff, not a size cap: the point is "is this actually an image", not
+# "is this small enough" — CoBirb's hardware baseline has no business
+# picking a byte limit, and nothing here does.
+_IMAGE_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"BM")
+
+
+def _looks_like_an_image(data: bytes) -> bool:
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return True
+    return any(data.startswith(magic) for magic in _IMAGE_MAGIC)
 
 # "Noah" (v0.9.0) — the default theme, the parrot's own five colours
 # (defined once in plugins.core.render, alongside the Rich styles that use
@@ -180,6 +194,10 @@ class CoBirbApp(App[None]):
         # disk and feeding context are separate things.
         self.loaded_catalogues: dict[str, memory.MemoryCatalogue] = {}
         self._memory_crypto: Any | None = None
+        # Queued by /image, consumed by the very next submitted prompt (see
+        # _run_turn) — attach, then type your message normally, the way
+        # attaching a file works everywhere. [{"filename", "data": bytes}].
+        self._pending_images: list[dict[str, Any]] = []
         # Set for the duration of a flock engagement. The Event is what
         # ctrl+c sets: a model call in flight cannot be interrupted, so
         # stopping means no further Worker Birbs start.
@@ -374,6 +392,8 @@ class CoBirbApp(App[None]):
         log = self.query_one("#transcript", TranscriptLog)
         log.write(Text(""))
         log.write(render.build_user_message(prompt))
+        for item in self._pending_images:
+            log.write(Text(f"\U0001f4ce {item['filename']}", style="dim"))
         log.write(Text(""))
 
     def append_stream(self, text: str) -> None:
@@ -769,6 +789,65 @@ class CoBirbApp(App[None]):
         blocks = [c.render() for c in self.loaded_catalogues.values()]
         return "\n\n".join(block for block in blocks if block)
 
+    def _cmd_image(self, argument: str) -> None:
+        """``/image <path>`` — attach an image to the next message you send.
+
+        No caption argument: nobody types a description of their own
+        screenshot. The message you type and send next *is* the caption,
+        when there is one — the same as attaching a file anywhere else.
+        """
+        path = os.path.expanduser(argument.strip())
+        if not path:
+            self.write_transcript(render.build_notice("Usage: /image <path>"))
+            return
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read()
+        except OSError as exc:
+            self.write_transcript(render.build_notice(f"Could not read '{path}' — {exc}"))
+            return
+        if not _looks_like_an_image(data):
+            self.write_transcript(render.build_notice(f"'{path}' doesn't look like an image CoBirb recognizes."))
+            return
+        filename = os.path.basename(path)
+        self._pending_images.append({"filename": filename, "data": data})
+        model = getattr(self.orchestrator, "model", None)
+        if model is not None and not model.supports_vision():
+            self.write_transcript(
+                render.build_notice(
+                    f"\U0001f4ce {filename} queued — the current model doesn't support vision, so "
+                    "this will be understood as text only. Switch with /model, or send anyway."
+                )
+            )
+        else:
+            self.write_transcript(
+                render.build_notice(f"\U0001f4ce {filename} queued — attach more with /image, or send your message.")
+            )
+
+    def _take_pending_images(self) -> "list[dict[str, Any]] | None":
+        """Pop this turn's queued attachments and shape them for
+        ``Orchestrator.run(images=...)``: content-hash id, filename, and the
+        base64 data to send this call only. Persists an encrypted copy
+        alongside the session first, when there is one to persist into —
+        ``SessionManager`` never retains a password, so this is the one
+        place that can, because it's the one place that already has it.
+        """
+        pending = self._pending_images
+        self._pending_images = []
+        if not pending:
+            return None
+        payload = []
+        for item in pending:
+            data = item["data"]
+            image_id = hashlib.sha256(data).hexdigest()
+            manager = getattr(self.orchestrator, "session", None)
+            if manager is not None:
+                image_id = manager.attach_image(data, self.password)
+            payload.append(
+                {"id": image_id, "filename": item["filename"], "data": base64.b64encode(data).decode("ascii")}
+            )
+        return payload
+
     def _cmd_plan(self, argument: str) -> None:
         self.plan_mode, message = commands.apply_plan_toggle(argument, self.plan_mode)
         self.query_one(StatusBar).plan_mode = self.plan_mode
@@ -827,6 +906,7 @@ class CoBirbApp(App[None]):
         "/flock": _cmd_flock,
         "/memories": _cmd_memories,
         "/remember": _cmd_remember,
+        "/image": _cmd_image,
     }
 
     def _on_turn_finished(self) -> None:
@@ -872,6 +952,7 @@ class CoBirbApp(App[None]):
             # method.
             memory_block = self._memory_system_prompt()
             system = f"{self.system}\n\n{memory_block}" if memory_block else self.system
+            images = self._take_pending_images()
             turn_result = self.orchestrator.run(
                 prompt,
                 system,
@@ -879,6 +960,7 @@ class CoBirbApp(App[None]):
                 persona=self.persona.name,
                 session_path=self.session_path,
                 plan_mode=self.plan_mode,
+                images=images,
             )
             # A streamed final answer is already in the transcript; rendering
             # the summary too would just show it twice.

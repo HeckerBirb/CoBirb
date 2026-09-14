@@ -162,3 +162,48 @@ def test_a_file_that_is_not_a_session_says_so_rather_than_looking_like_a_bad_pas
 
     with pytest.raises(ValueError, match=expected):
         crypto.decrypt(blob, "pw")
+
+
+# --------------------------------------------------------------------------- #
+# Attachment encryption: derive-once, reuse-the-key (for session images)
+# --------------------------------------------------------------------------- #
+def test_derive_key_encrypt_bytes_round_trip():
+    crypto = AesGcmScryptSessionCrypto()
+    key = crypto.derive_key("s3cret", b"0123456789abcdef")
+    blob = crypto.encrypt_bytes(b"raw image bytes", key)
+    assert blob != b"raw image bytes"
+    assert crypto.decrypt_bytes(blob, key) == b"raw image bytes"
+
+
+def test_encrypt_bytes_uses_a_fresh_nonce_each_call():
+    crypto = AesGcmScryptSessionCrypto()
+    key = crypto.derive_key("s3cret", b"0123456789abcdef")
+    first = crypto.encrypt_bytes(b"same plaintext", key)
+    second = crypto.encrypt_bytes(b"same plaintext", key)
+    assert first != second
+
+
+def test_decrypt_bytes_with_wrong_key_fails():
+    crypto = AesGcmScryptSessionCrypto()
+    key = crypto.derive_key("right", b"0123456789abcdef")
+    other_key = crypto.derive_key("wrong", b"0123456789abcdef")
+    blob = crypto.encrypt_bytes(b"secret", key)
+    with pytest.raises(Exception):
+        crypto.decrypt_bytes(blob, other_key)
+
+
+def test_derive_key_is_deterministic_for_the_same_password_and_salt():
+    crypto = AesGcmScryptSessionCrypto()
+    salt = b"0123456789abcdef"
+    assert crypto.derive_key("pw", salt) == crypto.derive_key("pw", salt)
+
+
+def test_attachment_methods_are_not_part_of_the_frozen_spi():
+    """derive_key/encrypt_bytes/decrypt_bytes must stay duck-typed extras,
+    never promoted onto the SessionCrypto ABC — a new abstract method would
+    break every third-party crypto plugin the moment core called it."""
+    from cobirb.typing.spi import SessionCrypto
+
+    assert not hasattr(SessionCrypto, "derive_key")
+    assert not hasattr(SessionCrypto, "encrypt_bytes")
+    assert not hasattr(SessionCrypto, "decrypt_bytes")

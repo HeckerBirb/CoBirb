@@ -83,3 +83,10 @@ def test_a_real_encrypted_session_round_trips_to_markdown(tmp_path):
     # ...and the session on disk is still opaque.
     with open(path, "rb") as fh:
         assert b"the secret plan" not in fh.read()
+
+
+def test_an_attached_image_shows_as_a_marker_never_as_bytes():
+    session = Session(turns=[Turn(role="user", content="see attached", images=[{"id": "a", "filename": "shot.png"}])])
+    markdown = session_to_markdown(session)
+    assert "shot.png" in markdown
+    assert "📎" in markdown

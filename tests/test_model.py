@@ -491,9 +491,10 @@ class _RoutingResponses:
     """
 
     def __init__(self, system: str | None = None, chat_payload: dict | None = None,
-                 model_info: dict | None = None):
+                 model_info: dict | None = None, capabilities: list | None = None):
         self.system = system
         self.model_info = model_info
+        self.capabilities = capabilities
         self.chat_payload = chat_payload or {"message": {"role": "assistant", "content": "ok"}}
         self.requests: list[tuple[str, dict]] = []
 
@@ -507,6 +508,8 @@ class _RoutingResponses:
                 shown["system"] = self.system
             if self.model_info is not None:
                 shown["model_info"] = self.model_info
+            if self.capabilities is not None:
+                shown["capabilities"] = self.capabilities
             return _FakeResponse(shown)
         return _FakeResponse(self.chat_payload)
 
@@ -726,12 +729,14 @@ def test_builtin_and_plugin_tools_serialize_identically(monkeypatch):
 class _ShowResponses:
     """Answers /api/show with a given parameters block."""
 
-    def __init__(self, parameters=None, model_info=None):
+    def __init__(self, parameters=None, model_info=None, capabilities=None):
         self.payload = {}
         if parameters is not None:
             self.payload["parameters"] = parameters
         if model_info is not None:
             self.payload["model_info"] = model_info
+        if capabilities is not None:
+            self.payload["capabilities"] = capabilities
 
     def __call__(self, request, timeout=None):
         return _FakeResponse(self.payload)
@@ -889,3 +894,60 @@ def test_a_server_that_is_genuinely_not_there_still_asks_the_right_question(monk
     monkeypatch.setattr(http.client.HTTPConnection, "connect", refuse)
     with _pytest.raises(RuntimeError, match="Is Ollama running?"):
         _Provider(model="m", base_url="http://127.0.0.1:1").chat("", "hi")
+
+
+# --------------------------------------------------------------------------- #
+# Vision
+# --------------------------------------------------------------------------- #
+def test_supports_vision_reads_capabilities(monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _ShowResponses(capabilities=["completion", "vision"]))
+    assert LocalModelProvider(model="m").supports_vision() is True
+
+
+def test_supports_vision_is_false_without_the_capability(monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _ShowResponses(capabilities=["completion", "tools"]))
+    assert LocalModelProvider(model="m").supports_vision() is False
+
+
+def test_supports_vision_is_false_when_show_fails(monkeypatch):
+    def boom(*args, **kwargs):
+        raise urllib.error.URLError("nope")
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+    assert LocalModelProvider(model="m").supports_vision() is False
+
+
+def test_images_are_attached_when_the_model_supports_vision(monkeypatch):
+    responses = _RoutingResponses(capabilities=["vision"])
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+    context = json.dumps(
+        [{"role": "user", "content": "what is this", "images": [{"id": "a", "filename": "x.png", "data": "QUJD"}]}]
+    )
+
+    LocalModelProvider(model="m").chat("", context)
+
+    assert responses.chat_messages[0]["images"] == ["QUJD"]
+
+
+def test_images_are_not_attached_when_the_model_lacks_vision(monkeypatch):
+    responses = _RoutingResponses(capabilities=["completion"])
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+    context = json.dumps(
+        [{"role": "user", "content": "what is this", "images": [{"id": "a", "filename": "x.png", "data": "QUJD"}]}]
+    )
+
+    LocalModelProvider(model="m").chat("", context)
+
+    assert "images" not in responses.chat_messages[0]
+
+
+def test_a_historical_turn_with_no_data_field_attaches_nothing():
+    """Compaction already turned older attachments into a text marker with
+    no `data` key left — nothing here for the provider to attach either way."""
+    from cobirb.plugins.core.model import _build_messages
+
+    context = json.dumps(
+        [{"role": "user", "content": "[image: old.png]", "images": [{"id": "a", "filename": "old.png"}]}]
+    )
+    messages = _build_messages("", context, include_images=True)
+    assert "images" not in messages[0]

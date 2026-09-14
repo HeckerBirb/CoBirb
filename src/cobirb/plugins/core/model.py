@@ -91,7 +91,7 @@ def _advertised_context(model_info: Any) -> int | None:
     return None
 
 
-def _build_messages(system: str, context: str) -> list[dict[str, Any]]:
+def _build_messages(system: str, context: str, *, include_images: bool = False) -> list[dict[str, Any]]:
     """Turn the orchestrator's JSON-encoded turn history into a proper
     multi-turn Ollama ``messages`` array, instead of flattening the whole
     conversation into a single opaque "user" message.
@@ -147,7 +147,19 @@ def _build_messages(system: str, context: str) -> list[dict[str, Any]]:
                 message["tool_name"] = tool_use[0].get("name", "")
             messages.append(message)
         else:
-            messages.append({"role": role if role == "assistant" else "user", "content": content})
+            message = {"role": role if role == "assistant" else "user", "content": content}
+            images = turn.get("images")
+            if images and include_images:
+                # Ollama's native image field: base64 strings alongside the
+                # message they belong to. Orchestrator._build_context only
+                # ever puts real data here for the newest turn — an older
+                # image-bearing turn has already collapsed to a text marker
+                # in `content` by the time this runs, so there is usually
+                # nothing left here to attach for it.
+                data = [img["data"] for img in images if img.get("data")]
+                if data:
+                    message["images"] = data
+            messages.append(message)
     return messages
 
 
@@ -491,7 +503,9 @@ class LocalModelProvider(ModelProvider):
             )
         payload: dict[str, Any] = {
             "model": self._model,
-            "messages": _build_messages(self.compose_system(system), context),
+            "messages": _build_messages(
+                self.compose_system(system), context, include_images=self.supports_vision()
+            ),
             "stream": stream,
         }
         # State the window rather than hoping the server's default is
@@ -639,4 +653,14 @@ class LocalModelProvider(ModelProvider):
         return True
 
     def supports_vision(self) -> bool:
-        return False
+        """Whether ``/api/show`` lists ``vision`` among this model's
+        capabilities — off the same cached payload ``context_window()``
+        already reads from, not a second round trip.
+
+        Most local models cannot see images at all; unlike a service that
+        ships one known model, CoBirb has no choice but to ask. Missing or
+        unreadable capabilities read as ``False`` — the same "don't send
+        something the model can't use" caution as everything else here.
+        """
+        capabilities = self._show().get("capabilities")
+        return isinstance(capabilities, list) and "vision" in capabilities

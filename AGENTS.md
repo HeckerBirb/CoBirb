@@ -162,6 +162,27 @@ the same staleness that killed the old header panel would hit a memory block com
 never revisited. **Never reaches a Worker Birb**: `build_subagent` passes `project_context=""` for
 the same "nothing but its brief" reason it withholds `AGENTS.md` and the repo map.
 
+## 6c. Vision — attached images (`session.py`, `orchestrator.py`, `plugins/core/model.py`)
+
+`/image <path>` (TUI) queues a file onto the *next* submitted prompt — no caption argument; the
+message typed and sent next is the caption, when there is one, the same as attaching a file
+anywhere else. `Turn.images` persists only `[{"id": <content hash>, "filename"}]`, never bytes;
+the encrypted bytes live in a sibling directory next to the session file (`SessionManager.
+images_dir()` — `<session>.images/<id>`), under a key derived from the session password *once*
+and cached (`SessionManager._image_key`, `crypto.py`'s `derive_key`/`encrypt_bytes`/`decrypt_bytes`
+— duck-typed extras, deliberately **not** added to the frozen `SessionCrypto` ABC; a crypto plugin
+without them still works via plain `encrypt`/`decrypt`, just slower).
+
+**Only the newest turn's images are ever sent as bytes.** `Orchestrator._build_context` walks
+`session.turns` fresh every call: the last turn's `images` (when `Orchestrator.run(images=...)` was
+given data for this call) keeps the real base64 payload; every earlier image-bearing turn is
+rewritten in place to a plain `[image: filename]` text marker. Nothing is ever resent, and nothing
+in `context.py`'s `compact()` needs to know images exist at all. `_build_messages`
+(`plugins/core/model.py`) attaches an entry's data to Ollama's native `images` field only when
+`supports_vision()` is true — read off the same cached `/api/show` payload `context_window()`
+already uses, checking `capabilities` for `"vision"`, since most local models cannot see images at
+all and CoBirb has to ask rather than assume. `/export` shows a `📎 filename` marker, never bytes.
+
 ## 7. Context management (`context.py`)
 
 `DEFAULT_CONTEXT_TOKENS = 32768` is the floor used only when the provider cannot say; the provider
@@ -285,7 +306,7 @@ answered "no" got what they asked for.
 
 **TUI** — four tabs: Current, Flock, Sessions, Plugins. Slash commands `/help`, `/model`,
 `/persona`, `/plan`, `/context`, `/undo`, `/export`, `/diff`, `/commands`, `/flock`, `/memories`,
-`/remember`; anything else
+`/remember`, `/image`; anything else
 starting with `/` is tried as a custom command, then sent to the model unchanged. Keys: `f1` help,
 `f2` next tab, `ctrl+q` quit, `ctrl+c` copy selection else cancel the turn, `up`/`down` recall the
 last 100 prompts (memory only). The prompt box stays enabled during a turn — submitting again
@@ -382,17 +403,11 @@ fresh decision to take with the user, not a gap to helpfully fill.
   first reads as a bug, not a correction. `StatusBar` already carries persona/model/plan/cwd/session
   and self-corrects because it is a reactive widget.
 
-**Not built yet, but already constrained.** Vision: no `images` parameter on `chat()`, no
-`Turn.images`, no `/image`, and `supports_vision()` stays a constant `False`. When it lands: no
-alt-text field for the user to fill in (nobody types a caption for their own screenshot) — an
-attached image rides as a normal part of the turn it's sent with, encrypted at rest under the
-*session's* own key (not a separate "project" boundary — a session is already the right,
-already-existing trust boundary), and is never resent as bytes once history moves past it; an older
-turn's image degrades to a plain `[image: filename]` marker the same way `context.py` already elides
-an oversized tool result, not a model-written description. `supports_vision()` becomes real by
-reading the provider's own advertised capabilities (mirroring how `_advertised_context()` already
-reads the context window off the same cached payload), since most local models cannot see images at
-all and CoBirb — unlike a service that ships one known model — has to ask.
+Vision (attached images) is built — see §6c. What's still not built is the rest of the deferred
+list below: cross-project sharing of memory catalogues, image editing, and anything resembling the
+"Projects" container design once floated and superseded by memory catalogues (§6b) — a catalogue is
+already the right-sized, independently loadable unit; a project wrapper around sessions + memory +
+manifest never got built and shouldn't be revisited without a fresh reason.
 
 ## 18. Known gaps (documented, not defects)
 

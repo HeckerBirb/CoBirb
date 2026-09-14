@@ -223,6 +223,13 @@ class Orchestrator:
         # report. Derived here rather than sniffed out of turn text later,
         # because "was this denied?" should be a fact and not a string match.
         self.last_run_tool_calls: list[dict[str, Any]] = []
+        # Set for the duration of one run() call: [{"id","filename","data"}]
+        # for whatever was attached to *this* turn, "data" being base64. Read
+        # by _build_context to attach real bytes to the newest turn only —
+        # every earlier image-bearing turn gets a plain [image: filename]
+        # marker instead, so nothing is ever resent. Cleared when run()
+        # returns; it does not apply to any later, unrelated turn.
+        self._live_images: "list[dict[str, str]] | None" = None
         # The last verification run, for the headless report and /verify.
         self.last_verification = None
         # What the last _build_context had to throw away, for /context.
@@ -258,8 +265,17 @@ class Orchestrator:
         max_turns: int = 8,
         session_path: str | None = None,
         plan_mode: bool = False,
+        images: "list[dict[str, str]] | None" = None,
     ) -> Session:
         """Run the loop for a single objective.
+
+        ``images``, when given, is ``[{"id", "filename", "data"}]`` for
+        whatever was attached to this specific prompt — ``data`` is base64,
+        already-plaintext bytes the caller read off local disk (see
+        ``tui.app.CoBirbApp._cmd_image``). Only *this* turn's images are ever
+        sent as bytes; every earlier image-bearing turn already collapsed to
+        a plain ``[image: filename]`` marker by the time this method returns
+        (see ``_build_context``), so nothing is ever resent to the model.
 
         Stops as soon as the model gives a plain-text reply with no further
         tool calls (that reply becomes ``session.summary``), or after
@@ -291,7 +307,7 @@ class Orchestrator:
         the answer to it was. ``last_turn_streamed`` is set accordingly so
         that post-``run()`` print becomes a no-op rather than a duplicate.
         """
-        session = self._open_session(prompt, system, cwd, persona, session_path)
+        session = self._open_session(prompt, system, cwd, persona, session_path, images)
         self.last_run_tool_calls = []
         if self.checkpoints is not None:
             self.checkpoints.begin_turn()
@@ -304,6 +320,7 @@ class Orchestrator:
         # would throw away a message the user was just told had landed.
         self._clear_steer_queue()
         self._turn_active = True
+        self._live_images = images or None
         try:
             return self._run_body(
                 prompt=prompt,
@@ -316,6 +333,7 @@ class Orchestrator:
             )
         finally:
             self._turn_active = False
+            self._live_images = None
 
     def _run_body(
         self,
@@ -649,7 +667,13 @@ class Orchestrator:
     # Session plumbing
     # ------------------------------------------------------------------ #
     def _open_session(
-        self, prompt: str, system: str, cwd: str, persona: str, session_path: str | None = None
+        self,
+        prompt: str,
+        system: str,
+        cwd: str,
+        persona: str,
+        session_path: str | None = None,
+        images: "list[dict[str, str]] | None" = None,
     ) -> Session:
         # Reuse the supplied session manager when one was injected (e.g. a
         # resumed --session), so prior history and the session path/cipher
@@ -657,7 +681,12 @@ class Orchestrator:
         # opening turn of *this* run.
         if self.session is None:
             self.session = SessionManager.create(session_path or ".", self.crypto, cwd, persona)
-        self.session.session.add(Turn(role="user", content=prompt))
+        # Only {id, filename} is persisted — never the bytes. The encrypted
+        # copy is written separately (CoBirbApp._cmd_image, which has the
+        # session password this class is never handed); this dataclass only
+        # ever holds a reference to it.
+        stored_images = [{"id": i["id"], "filename": i["filename"]} for i in images] if images else None
+        self.session.session.add(Turn(role="user", content=prompt, images=stored_images))
         return self.session.session
 
     def _context_budget(self) -> int:
@@ -691,7 +720,20 @@ class Orchestrator:
         loses its oldest tool results first and its oldest turns only if that
         wasn't enough.
         """
-        turns = [{"role": t.role, "content": t.content, "tool_use": t.tool_use} for t in session.turns]
+        turns = []
+        last_index = len(session.turns) - 1
+        for index, t in enumerate(session.turns):
+            entry: dict[str, Any] = {"role": t.role, "content": t.content, "tool_use": t.tool_use}
+            if t.images:
+                if index == last_index and self._live_images:
+                    # The wire-format entry for *this* call only — never
+                    # persisted (see _open_session), never resent once this
+                    # run ends and a later one rebuilds this list afresh.
+                    entry["images"] = self._live_images
+                else:
+                    marker = " ".join(f"[image: {img.get('filename') or 'attachment'}]" for img in t.images)
+                    entry["content"] = f"{entry['content']}\n{marker}".strip() if entry["content"] else marker
+            turns.append(entry)
         turns, report = compact(turns, self._context_budget())
         self.last_compaction = report
         if report.changed:

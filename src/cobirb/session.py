@@ -6,6 +6,7 @@ with the session file is detectable on reload.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -138,6 +139,14 @@ class Turn:
     # with plan mode off. Purely descriptive: never affects how a turn is
     # replayed into context (see Orchestrator._build_context).
     phase: str | None = None
+    # Images attached to this turn: [{"id": <content hash>, "filename": <original
+    # basename>}, ...]. The bytes themselves live encrypted alongside the
+    # session (see SessionManager.attach_image) — this is only the reference.
+    # No alt-text/description field: nobody types a caption for their own
+    # screenshot, and a model-written one would need a model call this class
+    # has no business making. Deliberately *not* covered by digest() below —
+    # see that method's docstring for why.
+    images: "list[dict[str, str]] | None" = None
     ts: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     _stored_hash: str | None = None
 
@@ -156,6 +165,7 @@ class Turn:
             "content": self.content,
             "tool_use": self.tool_use,
             "phase": self.phase,
+            "images": self.images,
             "ts": self.ts,
             "hash": self.digest(),
         }
@@ -167,6 +177,7 @@ class Turn:
             content=data["content"],
             tool_use=data.get("tool_use"),
             phase=data.get("phase"),
+            images=data.get("images"),
             ts=data.get("ts", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
             _stored_hash=data.get("hash"),
         )
@@ -182,6 +193,14 @@ class Turn:
         same rewrite risk applies to relabeling a "plan" turn as "validate"
         after the fact. Serialized with sorted keys so the digest is stable
         across runs.
+
+        Deliberately does **not** cover ``images``: this formula is compared
+        against a hash stored by whatever CoBirb version wrote the file, so
+        adding a field to it would fail every session written before this
+        one existed the moment it's reopened — not a hypothetical, an actual
+        regression this avoids. Images are a reference to supplementary
+        content, not a record of what the agent did, so leaving them out is
+        an acceptable, deliberate gap rather than a hole in the guarantee.
         """
         payload = json.dumps(
             {"role": self.role, "content": self.content, "tool_use": self.tool_use, "phase": self.phase},
@@ -222,6 +241,13 @@ class Session:
     # branch found months from now still says plainly where it came from and
     # at which turn.
     forked_from: str | None = None
+    # Base64 salt for deriving this session's attachment key (see
+    # SessionManager.attach_image/read_image) — generated once, on first
+    # attachment, and reused for the rest of the session's life so every
+    # image doesn't pay its own scrypt derivation. Not secret; it travels in
+    # the plaintext JSON like everything else here, which is fine — the
+    # salt alone derives nothing without the password.
+    image_key_salt: str | None = None
 
     def add(self, turn: Turn) -> None:
         self.turns.append(turn)
@@ -241,6 +267,7 @@ class Session:
             "validation": self.validation,
             "flock": self.flock,
             "forked_from": self.forked_from,
+            "image_key_salt": self.image_key_salt,
         }
 
     @classmethod
@@ -260,6 +287,7 @@ class Session:
             validation=data.get("validation"),
             flock=data.get("flock"),
             forked_from=data.get("forked_from"),
+            image_key_salt=data.get("image_key_salt"),
         )
 
 
@@ -335,6 +363,67 @@ class SessionManager:
         blob = self.crypto.encrypt(plaintext, password)
         _write_blob(self.path, blob)
         return blob
+
+    def images_dir(self) -> str:
+        """Where this session's attached images live: a sibling directory,
+        not a subtree of ``~/.cobirb/sessions`` specifically — a session
+        opened via an explicit ``--session PATH`` elsewhere on disk gets its
+        images right next to it, the same as the session file itself does.
+        """
+        base, _ = os.path.splitext(self.path)
+        return f"{base}.images"
+
+    def _image_key(self, password: str) -> bytes | None:
+        """This session's attachment key, derived once and cached — or
+        ``None`` if the crypto backend has no fast path (see crypto.py's
+        ``derive_key``), in which case callers fall back to plain
+        ``encrypt``/``decrypt`` per attachment."""
+        if self.session is None:
+            return None
+        derive = getattr(self.crypto, "derive_key", None)
+        if derive is None:
+            return None
+        if getattr(self, "_image_key_cache", None) is not None:
+            return self._image_key_cache
+        if not self.session.image_key_salt:
+            self.session.image_key_salt = base64.b64encode(os.urandom(16)).decode("ascii")
+        salt = base64.b64decode(self.session.image_key_salt)
+        self._image_key_cache = derive(password, salt)
+        return self._image_key_cache
+
+    def attach_image(self, data: bytes, password: str) -> str:
+        """Encrypt ``data`` and store it, returning its content-hash id.
+
+        Deduplicates by content: attaching the same bytes twice reuses the
+        same id and does not write a second copy.
+        """
+        image_id = hashlib.sha256(data).hexdigest()
+        directory = self.images_dir()
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, image_id)
+        if os.path.isfile(path):
+            return image_id
+        key = self._image_key(password)
+        encrypt_bytes = getattr(self.crypto, "encrypt_bytes", None)
+        if key is not None and encrypt_bytes is not None:
+            blob = encrypt_bytes(data, key)
+        else:
+            blob = self.crypto.encrypt(base64.b64encode(data).decode("ascii"), password)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(blob)
+        return image_id
+
+    def read_image(self, image_id: str, password: str) -> bytes:
+        """Decrypt and return a previously attached image's bytes."""
+        path = os.path.join(self.images_dir(), image_id)
+        with open(path, "rb") as fh:
+            blob = fh.read()
+        key = self._image_key(password)
+        decrypt_bytes = getattr(self.crypto, "decrypt_bytes", None)
+        if key is not None and decrypt_bytes is not None:
+            return decrypt_bytes(blob, key)
+        return base64.b64decode(self.crypto.decrypt(blob, password))
 
     def _verify_hashes(self, session: Session) -> None:
         """Raise if any stored turn's content no longer matches its hash."""

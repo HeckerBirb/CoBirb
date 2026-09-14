@@ -443,3 +443,61 @@ def test_fork_session_wrong_password_is_rejected(tmp_path):
 
     with pytest.raises(Exception):  # noqa: B017 - the crypto library's own tamper/auth error
         fork_session(path, AesGcmScryptSessionCrypto(), "wrong-password")
+
+
+# --------------------------------------------------------------------------- #
+# Attached images
+# --------------------------------------------------------------------------- #
+def test_attach_and_read_image_round_trips(manager):
+    image_id = manager.attach_image(b"pretend-png-bytes", "pw")
+    assert manager.read_image(image_id, "pw") == b"pretend-png-bytes"
+
+
+def test_attach_image_deduplicates_by_content(manager):
+    first = manager.attach_image(b"same bytes", "pw")
+    second = manager.attach_image(b"same bytes", "pw")
+    assert first == second
+    assert len(os.listdir(manager.images_dir())) == 1
+
+
+def test_attach_image_reuses_the_derived_key_across_calls(manager):
+    manager.attach_image(b"one", "pw")
+    key_after_first = manager._image_key_cache
+    manager.attach_image(b"two", "pw")
+    assert manager._image_key_cache is key_after_first
+
+
+def test_read_image_with_wrong_password_fails(manager):
+    image_id = manager.attach_image(b"secret bytes", "pw")
+    # A fresh manager, so the key cache from `manager` above isn't reused —
+    # this exercises decrypt_bytes/derive_key from a cold start.
+    other = SessionManager(manager.path, AesGcmScryptSessionCrypto(), persona="noah")
+    other.session = manager.session
+    with pytest.raises(Exception):
+        other.read_image(image_id, "wrong-password")
+
+
+def test_image_key_salt_is_generated_once_and_persisted(manager):
+    manager.attach_image(b"one", "pw")
+    salt = manager.session.image_key_salt
+    assert salt
+    manager.attach_image(b"two", "pw")
+    assert manager.session.image_key_salt == salt
+
+
+def test_images_dir_is_a_sibling_of_the_session_file(manager):
+    assert manager.images_dir() == manager.path[: -len(".json")] + ".images"
+
+
+def test_turn_images_field_round_trips_through_to_dict_and_from_dict():
+    turn = Turn(role="user", content="see attached", images=[{"id": "abc123", "filename": "shot.png"}])
+    restored = Turn.from_dict(turn.to_dict())
+    assert restored.images == [{"id": "abc123", "filename": "shot.png"}]
+
+
+def test_turn_digest_is_unaffected_by_images():
+    """A session written before `images` existed must still verify: the
+    digest formula must not change just because a turn now has images."""
+    with_images = Turn(role="user", content="x", images=[{"id": "a", "filename": "f"}])
+    without_images = Turn(role="user", content="x", images=None)
+    assert with_images.digest() == without_images.digest()

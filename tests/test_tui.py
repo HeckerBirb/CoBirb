@@ -104,9 +104,9 @@ class _StubOrchestrator:
         child processes it owns. A no-op here; the stub starts nothing."""
         self.closed = True
 
-    def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False):
+    def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False, images=None):
         self.calls.append(
-            {"prompt": prompt, "system": system, "persona": persona, "plan_mode": plan_mode}
+            {"prompt": prompt, "system": system, "persona": persona, "plan_mode": plan_mode, "images": images}
         )
         if self._run_raises is not None:
             raise self._run_raises
@@ -442,7 +442,7 @@ class _CancellableOrchestrator(_StubOrchestrator):
         self.steer_calls.append(message)
         return self._steer_accepts
 
-    def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False):
+    def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False, images=None):
         self.calls.append({"prompt": prompt, "persona": persona, "plan_mode": plan_mode})
         self._release.wait(timeout=5)
         return StubSession()
@@ -2671,3 +2671,72 @@ async def test_a_loaded_catalogue_reaches_the_system_prompt_but_is_dropped_when_
 
         assert "fact one" in builds[0]["built"].calls[0]["system"]
         assert "work" in builds[0]["built"].calls[0]["system"]
+
+
+# --------------------------------------------------------------------------- #
+# /image attachments
+# --------------------------------------------------------------------------- #
+_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 20
+
+
+async def test_image_with_no_argument_shows_usage():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/image")
+        assert "Usage: /image" in _transcript_text(app)
+
+
+async def test_image_rejects_a_file_that_is_not_an_image(tmp_path):
+    not_an_image = tmp_path / "notes.txt"
+    not_an_image.write_text("just some text")
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, f"/image {not_an_image}")
+        assert "doesn't look like an image" in _transcript_text(app)
+        assert app._pending_images == []
+
+
+async def test_image_reports_a_missing_file():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/image /no/such/file.png")
+        assert "Could not read" in _transcript_text(app)
+
+
+async def test_a_queued_image_rides_the_next_submitted_prompt(tmp_path, monkeypatch):
+    builds = []
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(record=builds))
+    png = tmp_path / "shot.png"
+    png.write_bytes(_PNG_BYTES)
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, f"/image {png}")
+        assert app._pending_images and app._pending_images[0]["filename"] == "shot.png"
+
+        await _submit(pilot, app, "what is this")
+        await _until(pilot, lambda: bool(builds))
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
+
+        images = builds[0]["built"].calls[0]["images"]
+        assert images[0]["filename"] == "shot.png"
+        assert images[0]["data"]  # base64, non-empty
+        assert app._pending_images == []  # consumed, not left queued for a later turn
+
+
+async def test_the_transcript_shows_a_marker_for_a_queued_image(tmp_path, monkeypatch):
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build())
+    png = tmp_path / "shot.png"
+    png.write_bytes(_PNG_BYTES)
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, f"/image {png}")
+        await _submit(pilot, app, "what is this")
+        await _until(pilot, lambda: "shot.png" in _transcript_text(app))

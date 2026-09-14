@@ -4,6 +4,25 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.11.0]
+
+- **Vision: attach an image with `/image <path>`.** No caption argument — nobody types a
+  description of their own screenshot; the message typed and sent next is the caption, when there
+  is one, the same as attaching a file anywhere else.
+  - Persisted reference only (`{id, filename}`); the encrypted bytes live in a sibling
+    `<session>.images/` directory, keyed by a session-password-derived key that's derived once and
+    reused (`crypto.py`'s new `derive_key`/`encrypt_bytes`/`decrypt_bytes` — duck-typed extras, not
+    added to the frozen `SessionCrypto` ABC, so a third-party crypto plugin without them still
+    works, just slower).
+  - **Only the newest turn's image is ever sent as bytes.** Every earlier image-bearing turn is
+    rewritten to a plain `[image: filename]` marker the moment a later turn exists — nothing is
+    ever resent, and `context.py`'s compaction needs no changes to know images exist.
+  - `supports_vision()` is real now (was a hardcoded `False`): reads `capabilities` off the same
+    cached `/api/show` payload the context-window lookup already uses. Most local models can't see
+    images at all, so CoBirb asks rather than assuming.
+  - `/export` shows a `📎 filename` marker, never the bytes — an export is plaintext by design, and
+    an attached image riding along unasked in it isn't the same explicit act.
+
 ## [0.10.0]
 
 - **Memory catalogues.** Named lists of facts fed into the system prompt, each its own file under

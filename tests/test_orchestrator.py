@@ -1455,3 +1455,72 @@ def test_steer_interrupts_a_streaming_reply_and_keeps_the_partial_content():
     user_turns = [t.content for t in session.turns if t.role == "user"]
     assert any("actually, focus on the tests" in c for c in user_turns)
     assert session.summary == "acknowledged"
+
+
+# --------------------------------------------------------------------------- #
+# Attached images
+# --------------------------------------------------------------------------- #
+def test_an_attached_image_is_sent_with_data_on_its_own_turn():
+    model = _WindowedModel(window=8192)
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
+
+    orchestrator.run(
+        "what is this",
+        "sys",
+        cwd="/tmp",
+        images=[{"id": "abc", "filename": "shot.png", "data": "QUJD"}],
+    )
+
+    sent = json.loads(model.contexts[0])
+    assert sent[0]["images"] == [{"id": "abc", "filename": "shot.png", "data": "QUJD"}]
+
+
+def test_the_persisted_turn_never_carries_image_bytes():
+    model = _WindowedModel(window=8192)
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
+
+    orchestrator.run(
+        "what is this",
+        "sys",
+        cwd="/tmp",
+        images=[{"id": "abc", "filename": "shot.png", "data": "QUJD"}],
+    )
+
+    persisted = orchestrator.session.session.turns[0]
+    assert persisted.images == [{"id": "abc", "filename": "shot.png"}]
+
+
+def test_an_older_image_bearing_turn_degrades_to_a_text_marker():
+    model = _WindowedModel(window=8192)
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
+
+    orchestrator.run("first", "sys", cwd="/tmp", images=[{"id": "a", "filename": "one.png", "data": "AAAA"}])
+    orchestrator.run("second", "sys", cwd="/tmp")
+
+    sent = json.loads(model.contexts[-1])
+    first_turn = next(t for t in sent if t["content"].startswith("first"))
+    assert "images" not in first_turn
+    assert "[image: one.png]" in first_turn["content"]
+
+
+def test_no_images_means_no_images_key_at_all():
+    model = _WindowedModel(window=8192)
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
+
+    orchestrator.run("plain prompt", "sys", cwd="/tmp")
+
+    sent = json.loads(model.contexts[0])
+    assert "images" not in sent[0]
+
+
+def test_live_images_do_not_leak_into_a_later_unrelated_run():
+    model = _WindowedModel(window=8192)
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
+
+    orchestrator.run("first", "sys", cwd="/tmp", images=[{"id": "a", "filename": "one.png", "data": "AAAA"}])
+    orchestrator.run("second", "sys", cwd="/tmp")
+
+    sent = json.loads(model.contexts[-1])
+    second_turn = sent[-1]
+    assert second_turn["content"] == "second"
+    assert "images" not in second_turn
