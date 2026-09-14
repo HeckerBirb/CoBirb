@@ -202,6 +202,62 @@ TextPromptModal {
     margin: 0 1;
 }
 
+MemoryCataloguesModal, RememberModal, NewCatalogueModal {
+    align: center middle;
+}
+
+#memory-dialog, #remember-dialog {
+    width: 64;
+    max-width: 90%;
+    height: auto;
+    max-height: 80%;
+    padding: 1 2;
+    border: round $accent;
+    background: $surface;
+}
+
+#new-catalogue-dialog {
+    width: 60;
+    max-width: 90%;
+    height: auto;
+    padding: 1 2;
+    border: round $accent;
+    background: $surface;
+}
+
+#memory-title, #remember-title, #new-catalogue-title {
+    text-style: bold;
+}
+
+#memory-hint, #remember-hint, #remember-fact, #new-catalogue-note {
+    padding-bottom: 1;
+    color: $text-muted;
+}
+
+#memory-options, #remember-options {
+    height: auto;
+    max-height: 16;
+}
+
+#memory-error, #new-catalogue-error {
+    color: $error;
+    height: auto;
+}
+
+#memory-buttons, #new-catalogue-buttons {
+    height: auto;
+    padding-top: 1;
+    align-horizontal: center;
+}
+
+#memory-buttons Button, #new-catalogue-buttons Button {
+    margin: 0 1;
+}
+
+#new-catalogue-name-label, #new-catalogue-password-label, #new-catalogue-confirm-label {
+    color: $text-muted;
+}
+
 /* ---------------------------------------------------------------- */
 /* The Flock tab: one column per Worker Birb.                        */
 /* ---------------------------------------------------------------- */

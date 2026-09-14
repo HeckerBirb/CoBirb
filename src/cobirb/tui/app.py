@@ -35,7 +35,7 @@ from textual.containers import Container
 from textual.theme import Theme
 from textual.widgets import Footer, Header, RichLog, TabbedContent, TabPane
 
-from .. import session
+from .. import memory, paths, session
 from ..help_text import HELP_TEXT, HELP_TOPICS
 from ..runtime import commands, personas, plugins, wiring
 from ..runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
@@ -53,8 +53,10 @@ from .screens import (
     ApprovalModal,
     ConfirmModal,
     HelpModal,
+    MemoryCataloguesModal,
     ModelPickerModal,
     PersonaPickerModal,
+    RememberModal,
     TextPromptModal,
 )
 from .widgets import ActivityBar, PromptInput, StatusBar, StreamPreview, TranscriptLog
@@ -172,6 +174,12 @@ class CoBirbApp(App[None]):
         # for the rest of the session instead of each turn forgetting what
         # was approved during the previous one.
         self.orchestrator: Orchestrator | None = None
+        # Catalogues unlocked this session (by /memories or a /remember
+        # prompt) — held in memory only, for the life of the process. The
+        # always-present Public catalogue is *not* auto-loaded: existing on
+        # disk and feeding context are separate things.
+        self.loaded_catalogues: dict[str, memory.MemoryCatalogue] = {}
+        self._memory_crypto: Any | None = None
         # Set for the duration of a flock engagement. The Event is what
         # ctrl+c sets: a model call in flight cannot be interrupted, so
         # stopping means no further Worker Birbs start.
@@ -659,6 +667,108 @@ class CoBirbApp(App[None]):
             )
         )
 
+    # ------------------------------------------------------------------ #
+    # Memory catalogues
+    # ------------------------------------------------------------------ #
+    def _cmd_memories(self, argument: str) -> None:
+        self.push_screen(MemoryCataloguesModal())
+
+    def _cmd_remember(self, argument: str) -> None:
+        """``/remember <fact>`` — save a fact into a catalogue of the user's
+        choosing.
+
+        Deliberately a plain slash command, not a model tool: a tool would
+        either be unreachable for a model that can't call tools at all, or
+        get called on every turn with no memory of having already asked —
+        this fires exactly once, exactly when typed, regardless of what the
+        model can do.
+        """
+        fact = argument.strip()
+        if not fact:
+            self.write_transcript(render.build_notice("Usage: /remember <fact to save>"))
+            return
+        self.push_screen(RememberModal(fact))
+
+    def memory_catalogue_rows(self) -> "list[memory.CatalogueFile]":
+        return memory.discover_catalogues()
+
+    def _get_memory_crypto(self) -> Any:
+        """The crypto backend catalogues use — resolved once and reused,
+        the same object sessions already resolve via ``plugins.build_crypto``."""
+        if self._memory_crypto is None:
+            config = Config()
+            _, discovered, _ = plugins.discover_plugins(self.cwd, config)
+            self._memory_crypto, _ = plugins.build_crypto(config, discovered)
+        return self._memory_crypto
+
+    def memory_load(self, row: "memory.CatalogueFile", password: "str | None") -> str:
+        """Load ``row`` into ``loaded_catalogues``. Returns "" on success, or
+        an error message to show inline (never raises into the modal)."""
+        try:
+            catalogue = memory.load(row.path, self._get_memory_crypto(), password)
+        except memory.CatalogueError as exc:
+            return str(exc)
+        self.loaded_catalogues[catalogue.name] = catalogue
+        return ""
+
+    def memory_unload(self, name: str) -> None:
+        self.loaded_catalogues.pop(name, None)
+
+    def memory_create(self, name: str, password: str) -> str:
+        try:
+            catalogue = memory.create(paths.memories_dir(), name, self._get_memory_crypto(), password)
+        except memory.CatalogueError as exc:
+            return str(exc)
+        self.loaded_catalogues[catalogue.name] = catalogue
+        return ""
+
+    def memory_delete(self, name: str) -> str:
+        row = next((r for r in self.memory_catalogue_rows() if r.name == name), None)
+        if row is None:
+            return f"No catalogue named '{name}'."
+        memory.delete(row.path)
+        self.loaded_catalogues.pop(name, None)
+        return ""
+
+    def memory_rename(self, name: str, new_name: str) -> str:
+        row = next((r for r in self.memory_catalogue_rows() if r.name == name), None)
+        if row is None:
+            return f"No catalogue named '{name}'."
+        try:
+            new_path = memory.rename(row.path, new_name)
+        except memory.CatalogueError as exc:
+            return str(exc)
+        catalogue = self.loaded_catalogues.pop(name, None)
+        if catalogue is not None:
+            catalogue.name = new_name
+            catalogue.path = new_path
+            self.loaded_catalogues[new_name] = catalogue
+        return ""
+
+    def memory_remember(self, catalogue_name: str, fact: str) -> None:
+        """Append ``fact`` to the (already-loaded) catalogue named
+        ``catalogue_name`` and save it, then report what happened."""
+        catalogue = self.loaded_catalogues.get(catalogue_name)
+        if catalogue is None:
+            self.write_transcript(render.build_notice(f"'{catalogue_name}' is not loaded."))
+            return
+        memory.append_fact(catalogue, fact)
+        memory.save(catalogue, self._get_memory_crypto())
+        self.write_transcript(render.build_notice(f"Remembered, in '{catalogue_name}'."))
+
+    def _memory_system_prompt(self) -> str:
+        """This turn's contribution to the system prompt from every loaded
+        catalogue — Brainy Birb's own context, never a Worker Birb's brief
+        (see ``runtime.wiring.build_subagent``, which gets no project
+        context at all for the same reason).
+
+        Built fresh on every call rather than cached: a catalogue loaded or
+        appended to mid-session must be reflected on the very next turn, not
+        only on the one after the orchestrator happens to be rebuilt.
+        """
+        blocks = [c.render() for c in self.loaded_catalogues.values()]
+        return "\n\n".join(block for block in blocks if block)
+
     def _cmd_plan(self, argument: str) -> None:
         self.plan_mode, message = commands.apply_plan_toggle(argument, self.plan_mode)
         self.query_one(StatusBar).plan_mode = self.plan_mode
@@ -715,6 +825,8 @@ class CoBirbApp(App[None]):
         "/diff": _cmd_diff,
         "/commands": _cmd_commands,
         "/flock": _cmd_flock,
+        "/memories": _cmd_memories,
+        "/remember": _cmd_remember,
     }
 
     def _on_turn_finished(self) -> None:
@@ -758,9 +870,11 @@ class CoBirbApp(App[None]):
             # `cobirb.session` (the Sessions-tab code below needs it), and a
             # same-named local here would shadow it for the rest of this
             # method.
+            memory_block = self._memory_system_prompt()
+            system = f"{self.system}\n\n{memory_block}" if memory_block else self.system
             turn_result = self.orchestrator.run(
                 prompt,
-                self.system,
+                system,
                 cwd=self.cwd,
                 persona=self.persona.name,
                 session_path=self.session_path,

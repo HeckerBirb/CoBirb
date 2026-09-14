@@ -10,7 +10,7 @@ terminal prompt, it fails closed: escape means deny.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from rich.text import Text
 from textual.app import ComposeResult
@@ -20,7 +20,13 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
+from .. import memory
 from ..plugins.core import render
+
+if TYPE_CHECKING:
+    from .app import CoBirbApp
+
+_SEPARATOR_ID = "__separator__"
 
 
 class ApprovalModal(ModalScreen[str]):
@@ -288,3 +294,286 @@ class ConfirmModal(ModalScreen[bool]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
         self.dismiss(event.button.id == "confirm-yes")
+
+
+# --------------------------------------------------------------------------- #
+# Memory catalogues
+# --------------------------------------------------------------------------- #
+def _ordered_catalogue_options(
+    rows: "list[memory.CatalogueFile]", loaded: "dict[str, memory.MemoryCatalogue]"
+) -> list[Option]:
+    """Loaded catalogues first, a disabled separator, then the rest —
+    alphabetical within each group. Shared by ``/memories`` and the
+    ``/remember`` picker so the two can never present a different order for
+    the same state.
+    """
+    loaded_rows = sorted((r for r in rows if r.name in loaded), key=lambda r: r.name)
+    other_rows = sorted((r for r in rows if r.name not in loaded), key=lambda r: r.name)
+    options = []
+    for row in loaded_rows:
+        marker = "\U0001f513 " if row.encrypted else "  "  # 🔓 loaded-and-unlocked
+        options.append(Option(f"{marker}{row.name}", id=row.name))
+    if loaded_rows and other_rows:
+        options.append(Option("─" * 24, id=_SEPARATOR_ID, disabled=True))
+    for row in other_rows:
+        marker = "\U0001f512 " if row.encrypted else "  "  # 🔒 needs a password
+        options.append(Option(f"{marker}{row.name}", id=row.name))
+    return options
+
+
+class NewCatalogueModal(ModalScreen[Optional[tuple[str, str]]]):
+    """Name + password + confirm-password. Dismisses with ``(name,
+    password)`` — ``password`` is ``""`` for an unencrypted catalogue — or
+    ``None`` on cancel. Mismatched non-blank passwords are an inline error,
+    not a dismiss.
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=True)]
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="new-catalogue-dialog"):
+            yield Static("New memory catalogue", id="new-catalogue-title")
+            yield Static("Name:", id="new-catalogue-name-label")
+            yield Input(id="new-catalogue-name")
+            yield Static("Password (optional):", id="new-catalogue-password-label")
+            yield Input(password=True, id="new-catalogue-password")
+            yield Static("Confirm password:", id="new-catalogue-confirm-label")
+            yield Input(password=True, id="new-catalogue-confirm")
+            yield Static(
+                "Leave both blank to create an unencrypted catalogue.",
+                id="new-catalogue-note",
+            )
+            yield Static("", id="new-catalogue-error")
+            with Horizontal(id="new-catalogue-buttons"):
+                yield Button("Create", variant="primary", id="new-catalogue-create")
+                yield Button("Cancel", id="new-catalogue-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#new-catalogue-name", Input).focus()
+
+    def _submit(self) -> None:
+        name = self.query_one("#new-catalogue-name", Input).value.strip()
+        password = self.query_one("#new-catalogue-password", Input).value
+        confirm = self.query_one("#new-catalogue-confirm", Input).value
+        error = self.query_one("#new-catalogue-error", Static)
+        if not name:
+            error.update("A name is required.")
+            return
+        if password != confirm:
+            error.update("Passwords do not match.")
+            return
+        self.dismiss((name, password))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self._submit()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "new-catalogue-create":
+            self._submit()
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class MemoryCataloguesModal(ModalScreen[None]):
+    """``/memories``: load, unload, rename, delete, or create catalogues.
+
+    Delegates every actual file/crypto operation to ``CoBirbApp`` (the same
+    ``cast("CoBirbApp", self.app)`` pattern the Plugins pane already uses) and
+    only re-renders its own list afterward — one dialog stays open across
+    several actions rather than reopening per operation.
+    """
+
+    BINDINGS = [Binding("escape", "close", "Close", show=True)]
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="memory-dialog"):
+            yield Static("Memory catalogues", id="memory-title")
+            yield Static(
+                "Select a catalogue to load it, or select a loaded one to unload it.",
+                id="memory-hint",
+            )
+            yield OptionList(id="memory-options")
+            yield Static("", id="memory-error")
+            with Horizontal(id="memory-buttons"):
+                yield Button("New…", id="memory-new")
+                yield Button("Rename", id="memory-rename")
+                yield Button("Delete", id="memory-delete", variant="error")
+                yield Button("Close", id="memory-close")
+
+    def on_mount(self) -> None:
+        self._refresh()
+        self.query_one("#memory-options", OptionList).focus()
+
+    def _app(self) -> "CoBirbApp":
+        return cast("CoBirbApp", self.app)
+
+    def _refresh(self, error: str = "") -> None:
+        app = self._app()
+        options = self.query_one("#memory-options", OptionList)
+        options.clear_options()
+        for option in _ordered_catalogue_options(app.memory_catalogue_rows(), app.loaded_catalogues):
+            options.add_option(option)
+        self.query_one("#memory-error", Static).update(error)
+
+    def _highlighted_name(self) -> "str | None":
+        options = self.query_one("#memory-options", OptionList)
+        if options.highlighted is None:
+            return None
+        option_id = options.get_option_at_index(options.highlighted).id
+        return None if option_id == _SEPARATOR_ID else option_id
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        name = event.option_id
+        if not name or name == _SEPARATOR_ID:
+            return
+        app = self._app()
+        if name in app.loaded_catalogues:
+            app.memory_unload(name)
+            self._refresh()
+            return
+        row = next((r for r in app.memory_catalogue_rows() if r.name == name), None)
+        if row is None:
+            return
+        if not row.encrypted:
+            error = app.memory_load(row, None)
+            self._refresh(error)
+            return
+
+        def unlock(password: "str | None") -> None:
+            if password:
+                self._refresh(app.memory_load(row, password))
+
+        self.app.push_screen(
+            TextPromptModal("Unlock catalogue", f"Password for '{name}':", password=True), unlock
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        button_id = event.button.id
+        if button_id == "memory-close":
+            self.dismiss(None)
+            return
+        if button_id == "memory-new":
+            self.app.push_screen(NewCatalogueModal(), self._on_new)
+            return
+        name = self._highlighted_name()
+        if name is None:
+            self._refresh("Select a catalogue first.")
+            return
+        if button_id == "memory-delete":
+            self.app.push_screen(
+                ConfirmModal(f"Delete '{name}'?", "This cannot be undone.", confirm_label="Delete"),
+                lambda yes: self._on_delete(name, yes),
+            )
+        elif button_id == "memory-rename":
+            self.app.push_screen(
+                TextPromptModal("Rename catalogue", "New name:", name), lambda new: self._on_rename(name, new)
+            )
+
+    def _on_new(self, result: "tuple[str, str] | None") -> None:
+        if result is None:
+            return
+        name, password = result
+        error = self._app().memory_create(name, password)
+        self._refresh(error)
+
+    def _on_delete(self, name: str, confirmed: bool) -> None:
+        if confirmed:
+            self._refresh(self._app().memory_delete(name))
+        else:
+            self._refresh()
+
+    def _on_rename(self, name: str, new_name: "str | None") -> None:
+        if new_name and new_name != name:
+            self._refresh(self._app().memory_rename(name, new_name))
+        else:
+            self._refresh()
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class RememberModal(ModalScreen[None]):
+    """``/remember <fact>``: pick which catalogue to save ``fact`` into.
+
+    Selecting a locked-and-unloaded catalogue prompts for its password right
+    there rather than requiring a separate ``/memories`` load first; a wrong
+    password re-shows this same picker without losing the fact text.
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=True)]
+
+    def __init__(self, fact: str) -> None:
+        super().__init__()
+        self._fact = fact
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="remember-dialog"):
+            yield Static("Remember this?", id="remember-title")
+            yield Static(Text(self._fact), id="remember-fact")
+            yield Static("Choose a catalogue to save it in:", id="remember-hint")
+            yield OptionList(id="remember-options")
+            yield Static("", id="remember-error")
+
+    def on_mount(self) -> None:
+        self._refresh()
+        self.query_one("#remember-options", OptionList).focus()
+
+    def _app(self) -> "CoBirbApp":
+        return cast("CoBirbApp", self.app)
+
+    def _refresh(self, error: str = "") -> None:
+        app = self._app()
+        options = self.query_one("#remember-options", OptionList)
+        options.clear_options()
+        for option in _ordered_catalogue_options(app.memory_catalogue_rows(), app.loaded_catalogues):
+            options.add_option(option)
+        self.query_one("#remember-error", Static).update(error)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        name = event.option_id
+        if not name or name == _SEPARATOR_ID:
+            return
+        app = self._app()
+        row = next((r for r in app.memory_catalogue_rows() if r.name == name), None)
+        if name not in app.loaded_catalogues:
+            if row is not None and row.encrypted:
+
+                def unlock(password: "str | None") -> None:
+                    if not password:
+                        return
+                    error = app.memory_load(row, password)
+                    if error:
+                        self._refresh(error)
+                    else:
+                        self._save_and_close(name)
+
+                self.app.push_screen(
+                    TextPromptModal("Unlock catalogue", f"Password for '{name}':", password=True), unlock
+                )
+                return
+            if row is not None:
+                # Unencrypted and not yet loaded — nothing to unlock, just
+                # open it before writing to it.
+                error = app.memory_load(row, None)
+                if error:
+                    self._refresh(error)
+                    return
+        self._save_and_close(name)
+
+    def _save_and_close(self, name: str) -> None:
+        self._app().memory_remember(name, self._fact)
+        self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)

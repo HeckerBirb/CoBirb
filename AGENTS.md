@@ -140,6 +140,28 @@ prompt → model call → tool calls (policy-gated) → results into history →
   `DEFAULT_KEEP_TURNS = 20`. Snapshots are plaintext under `0700` (they duplicate files already in
   the workspace). **`shell` is the honest gap** — undo cannot cover what a command did.
 
+## 6b. Memory catalogues (`memory.py`)
+
+Named lists of facts fed into the system prompt, each one file under `paths.memories_dir()`:
+`<name>.md` (plaintext, `0600`) or `<name>.md.enc` (password-protected, the same crypto backend
+sessions use — see §6). `public.md` always exists and is created lazily on first use; anything
+else is created explicitly through `/memories`. A catalogue's `.md` body is a flat `- fact` bullet
+list — no metadata, no timestamps, no source, because this text is read straight into a system
+prompt and should read like a list a person would actually write.
+
+`/memories` (TUI) loads, unloads, renames, deletes, or creates catalogues; `/remember <fact>` saves
+a fact into one, prompting for its password there if it's locked. Both are **plain slash commands,
+not a model tool** — a tool would either be unreachable for a model without tool-calling support, or
+get called on every turn with no memory of already having asked, so this fires exactly once, exactly
+when typed, regardless of what the model can do.
+
+Loaded catalogues (`CoBirbApp.loaded_catalogues`, session-lifetime only, never auto-loaded just
+because they exist on disk) are composed into the system prompt fresh on every `Orchestrator.run()`
+call (`CoBirbApp._memory_system_prompt`) rather than baked into the orchestrator at construction —
+the same staleness that killed the old header panel would hit a memory block computed once and
+never revisited. **Never reaches a Worker Birb**: `build_subagent` passes `project_context=""` for
+the same "nothing but its brief" reason it withholds `AGENTS.md` and the repo map.
+
 ## 7. Context management (`context.py`)
 
 `DEFAULT_CONTEXT_TOKENS = 32768` is the floor used only when the provider cannot say; the provider
@@ -262,7 +284,8 @@ scopes, are reviewed, and Brainy Birb reports.
 answered "no" got what they asked for.
 
 **TUI** — four tabs: Current, Flock, Sessions, Plugins. Slash commands `/help`, `/model`,
-`/persona`, `/plan`, `/context`, `/undo`, `/export`, `/diff`, `/commands`, `/flock`; anything else
+`/persona`, `/plan`, `/context`, `/undo`, `/export`, `/diff`, `/commands`, `/flock`, `/memories`,
+`/remember`; anything else
 starting with `/` is tried as a custom command, then sent to the model unchanged. Keys: `f1` help,
 `f2` next tab, `ctrl+q` quit, `ctrl+c` copy selection else cancel the turn, `up`/`down` recall the
 last 100 prompts (memory only). The prompt box stays enabled during a turn — submitting again
@@ -359,17 +382,17 @@ fresh decision to take with the user, not a gap to helpfully fill.
   first reads as a bug, not a correction. `StatusBar` already carries persona/model/plan/cwd/session
   and self-corrects because it is a reactive widget.
 
-**Not built yet, but already constrained.** Cross-session memory is not built, and the interim
-design (loose, unencrypted, under `~/.cobirb/memory/`) was considered and rejected — it would be
-restructured the moment a per-project password became the boundary it belongs inside. When it is
-built: **facts, not transcripts**; **never stored in the repository** (memory is read straight into
-the system prompt, so a repo-writable store is a stored prompt injection with no approval in front
-of it); explicit `/remember` + an approval-gated tool as the baseline, with model-proposed entries
-only inside a project boundary that contains a wrong invented fact; and **never injected into a
-Worker Birb's run** — "nothing but its brief" is load-bearing for the Flock. Vision is likewise
-deferred: no `images` parameter on `chat()`, no `Turn.images`, no `/image`, and `supports_vision()`
-stays a constant `False`; when it lands, images are encrypted under a project password with a short
-alt-text in the session instead of the image, so a turn need not decrypt everything to start.
+**Not built yet, but already constrained.** Vision: no `images` parameter on `chat()`, no
+`Turn.images`, no `/image`, and `supports_vision()` stays a constant `False`. When it lands: no
+alt-text field for the user to fill in (nobody types a caption for their own screenshot) — an
+attached image rides as a normal part of the turn it's sent with, encrypted at rest under the
+*session's* own key (not a separate "project" boundary — a session is already the right,
+already-existing trust boundary), and is never resent as bytes once history moves past it; an older
+turn's image degrades to a plain `[image: filename]` marker the same way `context.py` already elides
+an oversized tool result, not a model-written description. `supports_vision()` becomes real by
+reading the provider's own advertised capabilities (mirroring how `_advertised_context()` already
+reads the context window off the same cached payload), since most local models cannot see images at
+all and CoBirb — unlike a service that ships one known model — has to ask.
 
 ## 18. Known gaps (documented, not defects)
 

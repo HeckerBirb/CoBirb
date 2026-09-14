@@ -4,6 +4,24 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.10.0]
+
+- **Memory catalogues.** Named lists of facts fed into the system prompt, each its own file under
+  `~/.cobirb/memories/`: `<name>.md` (plaintext) or `<name>.md.enc` (password-protected, reusing
+  the same AES-256-GCM + scrypt backend sessions already use). A `public.md` catalogue always
+  exists; anything else is created explicitly.
+  - `/memories` — load, unload, rename, delete, or create a catalogue, from a TUI dialog. Loaded
+    catalogues are listed first, separated from the rest.
+  - `/remember <fact>` — save a fact into a catalogue you pick on the spot, prompting for a
+    password there if the chosen one is locked. **Deliberately a plain slash command, not a model
+    tool**: a tool would either be unreachable for a model without tool-calling support, or get
+    called on every turn with no memory of already having asked. This fires exactly once, exactly
+    when typed, regardless of what the model can do.
+  - Loaded catalogues are composed into the system prompt fresh on every turn (never baked into
+    the orchestrator at construction time, which is what made the old header panel go stale) and
+    are never sent to a Worker Birb — same "nothing but its brief" boundary the Flock already
+    enforces for `AGENTS.md` and the repo map.
+
 ## [0.9.2]
 
 - **`--cwd` (and its default) now resolves to a real, absolute path** instead of passing the

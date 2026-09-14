@@ -302,6 +302,10 @@ def build_subagent(
         io=io or HeadlessIO(),
         session=None,
         context_tokens=config.get("context_tokens"),
+        # No project context, and — separately — no memory catalogues either:
+        # those are composed into `system` per turn by the TUI itself
+        # (CoBirbApp._memory_system_prompt), which a Worker Birb's run never
+        # goes through. Consistent with "nothing but its brief" above.
         project_context="",
         redact_secrets=config.get("redact_secrets") is not False,
         verify=(

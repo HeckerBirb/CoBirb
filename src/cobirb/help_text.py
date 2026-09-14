@@ -89,6 +89,11 @@ INTERACTIVE COMMANDS
   /flock <what>      Divide a piece of work between several agents. Opens
                      the Flock tab; you approve the charter before anything
                      runs. See 'help flock'.
+  /memories          Load, create, rename, or delete memory catalogues —
+                     named lists of facts fed into the system prompt.
+  /remember <fact>   Save a fact into a catalogue you pick. A plain command,
+                     not a model tool, so it works the same regardless of
+                     what the model can do, and only fires when typed.
   ? or /help         Open this help. '/help <topic>' opens one topic.
 
 INTERACTIVE KEYS

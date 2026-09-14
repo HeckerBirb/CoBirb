@@ -28,17 +28,22 @@ from textual.widgets.option_list import Option
 
 from conftest import StubSession, StubSessionManager
 
-from cobirb import cli, help_text, session
+from cobirb import cli, help_text, memory, paths, session
 from cobirb.plugins.core import render
+from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 from cobirb.runtime import commands, personas, plugins, sessions, wiring
 from cobirb.tui.app import CoBirbApp
 from cobirb.tui.panes import PluginsPane, SessionsPane
 from cobirb.tui.screens import (
     ApprovalModal,
     HelpModal,
+    MemoryCataloguesModal,
     ModelPickerModal,
+    NewCatalogueModal,
     PersonaPickerModal,
+    RememberModal,
     TextPromptModal,
+    _ordered_catalogue_options,
 )
 from cobirb.tui.widgets import (
     PromptHistory,
@@ -2500,3 +2505,169 @@ async def test_the_undo_stack_is_not_shadowed_by_the_prompt_history():
         assert box.has_focus
         assert hasattr(box.history, "checkpoint")  # TextArea's, intact
         assert isinstance(box.prompt_history, PromptHistory)  # ours, alongside
+
+
+# --------------------------------------------------------------------------- #
+# Memory catalogues
+# --------------------------------------------------------------------------- #
+def test_ordered_catalogue_options_puts_loaded_ones_first_with_a_separator():
+    rows = [
+        memory.CatalogueFile(path="/a", name="zeta", encrypted=False),
+        memory.CatalogueFile(path="/b", name="alpha", encrypted=True),
+        memory.CatalogueFile(path="/c", name="beta", encrypted=False),
+    ]
+    loaded = {"beta": object()}
+    options = _ordered_catalogue_options(rows, loaded)
+    ids = [o.id for o in options]
+    assert ids == ["beta", "__separator__", "alpha", "zeta"]
+    assert options[1].disabled
+
+
+def test_ordered_catalogue_options_has_no_separator_when_nothing_is_loaded():
+    rows = [memory.CatalogueFile(path="/a", name="alpha", encrypted=False)]
+    options = _ordered_catalogue_options(rows, {})
+    assert [o.id for o in options] == ["alpha"]
+
+
+async def test_remember_with_no_argument_shows_usage_and_opens_nothing():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/remember")
+        assert "Usage: /remember" in _transcript_text(app)
+        assert not isinstance(app.screen, RememberModal)
+
+
+async def test_remember_opens_the_picker_with_the_fact_text():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/remember I prefer tabs over spaces")
+        await _until(pilot, lambda: isinstance(app.screen, RememberModal))
+        assert "I prefer tabs over spaces" in _static_text(app, "#remember-fact")
+
+
+async def test_remembering_into_an_unencrypted_catalogue_writes_the_fact():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        memory.create(paths.memories_dir(), "work", AesGcmScryptSessionCrypto(), None)
+
+        await _submit(pilot, app, "/remember keep commits short")
+        await _until(pilot, lambda: isinstance(app.screen, RememberModal))
+
+        options = app.screen.query_one("#remember-options", OptionList)
+        options.highlighted = next(
+            i for i in range(options.option_count) if options.get_option_at_index(i).id == "work"
+        )
+        options.action_select()
+        await _until(pilot, lambda: not isinstance(app.screen, RememberModal))
+
+        assert app.loaded_catalogues["work"].facts == ["keep commits short"]
+        reloaded = memory.load(app.loaded_catalogues["work"].path, AesGcmScryptSessionCrypto())
+        assert reloaded.facts == ["keep commits short"]
+
+
+async def test_remembering_into_a_locked_catalogue_prompts_for_a_password_first():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        memory.create(paths.memories_dir(), "secret", AesGcmScryptSessionCrypto(), "hunter2")
+
+        await _submit(pilot, app, "/remember a private fact")
+        await _until(pilot, lambda: isinstance(app.screen, RememberModal))
+
+        options = app.screen.query_one("#remember-options", OptionList)
+        options.highlighted = next(
+            i for i in range(options.option_count) if options.get_option_at_index(i).id == "secret"
+        )
+        options.action_select()
+        await _until(pilot, lambda: isinstance(app.screen, TextPromptModal))
+
+        app.screen.query_one("#prompt-value", Input).value = "hunter2"
+        await pilot.press("enter")
+        await _until(pilot, lambda: not isinstance(app.screen, RememberModal) and "secret" in app.loaded_catalogues)
+
+        assert app.loaded_catalogues["secret"].facts == ["a private fact"]
+
+
+async def test_memories_command_opens_the_catalogues_modal():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/memories")
+        await _until(pilot, lambda: isinstance(app.screen, MemoryCataloguesModal))
+
+
+async def test_memories_new_creates_an_unencrypted_catalogue_on_blank_passwords():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/memories")
+        await _until(pilot, lambda: isinstance(app.screen, MemoryCataloguesModal))
+
+        await pilot.click("#memory-new")
+        await _until(pilot, lambda: isinstance(app.screen, NewCatalogueModal))
+        app.screen.query_one("#new-catalogue-name", Input).value = "work"
+        await pilot.click("#new-catalogue-create")
+        await _until(pilot, lambda: isinstance(app.screen, MemoryCataloguesModal))
+
+        assert "work" in app.loaded_catalogues
+        assert app.loaded_catalogues["work"].encrypted is False
+
+
+async def test_memories_new_rejects_mismatched_passwords_without_creating_anything():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/memories")
+        await _until(pilot, lambda: isinstance(app.screen, MemoryCataloguesModal))
+
+        await pilot.click("#memory-new")
+        await _until(pilot, lambda: isinstance(app.screen, NewCatalogueModal))
+        app.screen.query_one("#new-catalogue-name", Input).value = "personal"
+        app.screen.query_one("#new-catalogue-password", Input).value = "one"
+        app.screen.query_one("#new-catalogue-confirm", Input).value = "two"
+        await pilot.click("#new-catalogue-create")
+        await pilot.pause()
+
+        assert isinstance(app.screen, NewCatalogueModal)  # still open, not dismissed
+        assert "match" in _static_text(app, "#new-catalogue-error")
+        assert memory.discover_catalogues(paths.memories_dir()) == []
+
+
+async def test_memories_selecting_a_loaded_row_unloads_it():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        cat = memory.create(paths.memories_dir(), "work", AesGcmScryptSessionCrypto(), None)
+        app.loaded_catalogues["work"] = cat
+
+        await _submit(pilot, app, "/memories")
+        await _until(pilot, lambda: isinstance(app.screen, MemoryCataloguesModal))
+        options = app.screen.query_one("#memory-options", OptionList)
+        options.highlighted = next(
+            i for i in range(options.option_count) if options.get_option_at_index(i).id == "work"
+        )
+        options.action_select()
+        await pilot.pause()
+
+        assert "work" not in app.loaded_catalogues
+
+
+async def test_a_loaded_catalogue_reaches_the_system_prompt_but_is_dropped_when_empty(monkeypatch):
+    builds = []
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(record=builds))
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        cat = memory.MemoryCatalogue(name="work", path="/tmp/work.md", encrypted=False, facts=["fact one"])
+        app.loaded_catalogues["work"] = cat
+
+        await _submit(pilot, app, "hello")
+        await _until(pilot, lambda: bool(builds))
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
+
+        assert "fact one" in builds[0]["built"].calls[0]["system"]
+        assert "work" in builds[0]["built"].calls[0]["system"]
