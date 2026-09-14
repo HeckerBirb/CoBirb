@@ -71,7 +71,7 @@ class UpgradeResult:
 
     def describe(self) -> str:
         if self.already_current:
-            return f"Already at {self.tag} (v{self.from_version}) — nothing to do."
+            return f"Already at {self.tag} — nothing to do."
         return f"Upgraded v{self.from_version} → v{self.to_version} ({self.tag})."
 
 
