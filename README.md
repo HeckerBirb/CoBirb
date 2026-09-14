@@ -92,11 +92,11 @@ This is enough to get started with Ollama (localhost:11434), default `SYSTEM` pr
 {
   "models": {
     "default": {
-      "name": "gemma4-unchained",
+      "name": "gemma4:latest",
       "base_url": "http://localhost:11434"
     },
     "orchestrator": {
-      "name": "gemma4-unchained:latest"
+      "name": "gemma4-free-as-in-liberty:latest"
     },
     "worker": {
       "name": "ornith-1.5:9b"
