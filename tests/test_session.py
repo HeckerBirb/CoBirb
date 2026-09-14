@@ -8,7 +8,7 @@ import pytest
 
 from cobirb import session as session_module
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
-from cobirb.session import Session, SessionManager, Turn
+from cobirb.session import Session, SessionManager, Turn, fork_session
 
 
 @pytest.fixture
@@ -264,3 +264,94 @@ def test_session_files_are_written_readable_only_by_their_owner(tmp_path):
     manager.save("pw")
 
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+
+
+# --------------------------------------------------------------------------- #
+# fork_session() — session branching (v0.6.0): trying a different direction
+# from a point already on disk, without disturbing what got you there.
+# --------------------------------------------------------------------------- #
+def _seeded_manager(tmp_path, name="session.json"):
+    path = str(tmp_path / name)
+    manager = SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path), "noah", "pw")
+    for i in range(4):
+        manager.session.add_text("user" if i % 2 == 0 else "assistant", f"turn {i}")
+    manager.save("pw")
+    return manager, path
+
+
+def test_fork_session_copies_every_turn_by_default(tmp_path):
+    _, path = _seeded_manager(tmp_path)
+
+    branch = fork_session(path, AesGcmScryptSessionCrypto(), "pw")
+
+    assert [t.content for t in branch.session.turns] == [f"turn {i}" for i in range(4)]
+    assert branch.session.forked_from == f"{path}@turn3"
+
+
+def test_fork_session_writes_a_new_file_and_leaves_the_source_untouched(tmp_path):
+    original_manager, path = _seeded_manager(tmp_path)
+    original_bytes = open(path, "rb").read()
+
+    branch = fork_session(path, AesGcmScryptSessionCrypto(), "pw")
+
+    assert branch.path != path
+    assert os.path.exists(branch.path)
+    assert open(path, "rb").read() == original_bytes  # the source file is bit-for-bit unchanged
+
+    # And the source is still independently loadable at its original length.
+    reloaded = SessionManager.load(path, AesGcmScryptSessionCrypto(), "pw")
+    assert len(reloaded.session.turns) == 4
+
+
+def test_fork_session_up_to_turn_keeps_only_a_prefix(tmp_path):
+    _, path = _seeded_manager(tmp_path)
+
+    branch = fork_session(path, AesGcmScryptSessionCrypto(), "pw", up_to_turn=1)
+
+    assert [t.content for t in branch.session.turns] == ["turn 0", "turn 1"]
+    assert branch.session.forked_from == f"{path}@turn1"
+
+
+def test_fork_session_rejects_an_out_of_range_turn(tmp_path):
+    _, path = _seeded_manager(tmp_path)
+
+    with pytest.raises(ValueError, match="out of range"):
+        fork_session(path, AesGcmScryptSessionCrypto(), "pw", up_to_turn=99)
+
+
+def test_fork_session_refuses_to_overwrite_an_existing_destination(tmp_path):
+    _, path = _seeded_manager(tmp_path)
+    destination = str(tmp_path / "already-here.json")
+    open(destination, "w").close()
+
+    with pytest.raises(ValueError, match="already exists"):
+        fork_session(path, AesGcmScryptSessionCrypto(), "pw", out_path=destination)
+
+
+def test_fork_session_honours_an_explicit_destination(tmp_path):
+    _, path = _seeded_manager(tmp_path)
+    destination = str(tmp_path / "my-branch.json")
+
+    branch = fork_session(path, AesGcmScryptSessionCrypto(), "pw", out_path=destination)
+
+    assert branch.path == destination
+
+
+def test_forking_a_branch_does_not_collide_with_the_original_branch_file(tmp_path):
+    """Two branches of the same session, taken back to back, must land in
+    two different files — a filename collision here would silently discard
+    one branch's turns underneath the other's."""
+    _, path = _seeded_manager(tmp_path)
+
+    first = fork_session(path, AesGcmScryptSessionCrypto(), "pw")
+    second = fork_session(path, AesGcmScryptSessionCrypto(), "pw")
+
+    assert first.path != second.path
+    assert os.path.exists(first.path) and os.path.exists(second.path)
+
+
+def test_fork_session_wrong_password_is_rejected(tmp_path):
+    _, path = _seeded_manager(tmp_path)
+
+    with pytest.raises(Exception):  # noqa: B017 - the crypto library's own tamper/auth error
+        fork_session(path, AesGcmScryptSessionCrypto(), "wrong-password")

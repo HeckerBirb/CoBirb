@@ -1060,6 +1060,35 @@ class CoBirbApp(App[None]):
     def begin_new_session(self) -> None:
         self._new_session_worker()
 
+    def begin_branch_session(self, path: str) -> None:
+        self._branch_session_worker(path)
+
+    @work(thread=True, exclusive=True, group="session")
+    def _branch_session_worker(self, path: str) -> None:
+        """Fork ``path`` (session.fork_session) and switch straight into the
+        branch — see SessionsPane's docstring for why landing in it, the same
+        way resuming does, is the point rather than an extra step.
+        """
+        password = self.call_from_thread(
+            self.prompt_text, "Branch session", f"Password for {os.path.basename(path)}:", password=True
+        )
+        if not password:
+            return
+        self.call_from_thread(self.query_one(SessionsPane).set_status, "Branching…")
+        try:
+            config = Config()
+            _, discovered, _ = plugins.discover_plugins(self.cwd, config)
+            crypto, _ = plugins.build_crypto(config, discovered)
+            branch = session.fork_session(path, crypto, password)
+        except Exception as exc:  # noqa: BLE001 - wrong password/corruption is routine, not fatal
+            self.call_from_thread(
+                self.query_one(SessionsPane).set_status, f"Could not branch that session — {exc}"
+            )
+            return
+        self.call_from_thread(
+            lambda: self._apply_resumed_session(branch.path, password, branch, verb="Branched")
+        )
+
     @work(thread=True, exclusive=True, group="session")
     def _resume_session_worker(self, path: str) -> None:
         password = self.call_from_thread(
@@ -1082,7 +1111,9 @@ class CoBirbApp(App[None]):
             return
         self.call_from_thread(self._apply_resumed_session, path, password, manager)
 
-    def _apply_resumed_session(self, path: str, password: str, manager: session.SessionManager) -> None:
+    def _apply_resumed_session(
+        self, path: str, password: str, manager: session.SessionManager, *, verb: str = "Resumed"
+    ) -> None:
         self.session_path = path
         self.password = password
         # Discarded rather than live-swapped: the next message rebuilds it
@@ -1109,7 +1140,7 @@ class CoBirbApp(App[None]):
         self.render_history(turns, os.path.basename(path))
 
         self.query_one(SessionsPane).set_status(
-            f"Resumed '{os.path.basename(path)}' — {len(turns)} turn(s), persona "
+            f"{verb} '{os.path.basename(path)}' — {len(turns)} turn(s), persona "
             f"{self.persona.name}. Your next message continues it."
         )
         self.refresh_sessions_pane()

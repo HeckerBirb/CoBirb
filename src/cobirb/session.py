@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -155,6 +156,11 @@ class Session:
     # came back. One engagement is one flock session; a second round continues
     # it rather than starting another.
     flock: str | None = None
+    # Set only on a session created by fork_session(): "<source path>@turn<N>",
+    # this is session branching's equivalent of `flock`'s pairing token — a
+    # branch found months from now still says plainly where it came from and
+    # at which turn.
+    forked_from: str | None = None
 
     def add(self, turn: Turn) -> None:
         self.turns.append(turn)
@@ -173,6 +179,7 @@ class Session:
             "summary": self.summary,
             "validation": self.validation,
             "flock": self.flock,
+            "forked_from": self.forked_from,
         }
 
     @classmethod
@@ -186,6 +193,7 @@ class Session:
             summary=data.get("summary"),
             validation=data.get("validation"),
             flock=data.get("flock"),
+            forked_from=data.get("forked_from"),
         )
 
 
@@ -288,3 +296,92 @@ def _write_blob(path: str, blob: bytes) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "wb") as fh:
         fh.write(blob)
+
+
+def _branch_path_for(source_path: str) -> str:
+    """A fresh sibling filename for a branch of ``source_path``.
+
+    Alongside the source rather than off in some other directory — a branch
+    found later in a file listing should sit next to the conversation it
+    came from, the same way the Sessions tab expects everything relevant
+    under one directory. A short random suffix rather than a turn count or
+    timestamp: branching the same session twice, or branching a branch, must
+    never collide with an existing file, and nothing about *when* or *from
+    where* needs to be legible from the filename — that's what
+    ``Session.forked_from`` is for.
+    """
+    directory = os.path.dirname(os.path.abspath(source_path)) or "."
+    stem, ext = os.path.splitext(os.path.basename(source_path))
+    ext = ext or ".json"
+    for _ in range(10):
+        candidate = os.path.join(directory, f"{stem}.branch-{secrets.token_hex(4)}{ext}")
+        if not os.path.exists(candidate):
+            return candidate
+    raise RuntimeError(f"could not find a free filename to branch {source_path} into")
+
+
+def fork_session(
+    path: str,
+    crypto: Any,
+    password: str | None,
+    *,
+    up_to_turn: int | None = None,
+    out_path: str | None = None,
+) -> SessionManager:
+    """Branch a saved session into a new, independent file.
+
+    Mid-turn steering (``Orchestrator.steer()``) redirects a turn that is
+    still running; this is the equivalent for a conversation that has
+    already stopped — trying a different direction from a point already on
+    disk, without disturbing what got you there. The source at ``path`` is
+    only ever *read*: everything is written to a new file, so the original
+    stays exactly as it was and is still resumable at its original length.
+
+    ``up_to_turn`` keeps turns ``0..up_to_turn`` inclusive — "branch from
+    here" rather than "branch the whole thing" (the default, ``None``,
+    which keeps every turn). Out of range raises rather than silently
+    clamping: clamping could quietly turn "branch from turn 3" into a full
+    copy, or drop turns a caller meant to keep, and either is a worse
+    surprise than an error.
+
+    ``out_path`` names the new file explicitly (``cobirb --branch PATH``);
+    left unset, a fresh sibling of ``path`` is generated (the Sessions tab's
+    one-click "Branch"). An explicit ``out_path`` that already exists is
+    refused — a branch is a new thing, never a silent overwrite of whatever
+    was already there.
+    """
+    manager = SessionManager.load(path, crypto, password)
+    source = manager.session
+    total = len(source.turns)
+    if up_to_turn is not None:
+        if not (0 <= up_to_turn < total):
+            raise ValueError(
+                f"turn index {up_to_turn} is out of range for {path} (0..{total - 1})"
+            )
+        kept = source.turns[: up_to_turn + 1]
+        lineage_turn = up_to_turn
+    else:
+        kept = list(source.turns)
+        lineage_turn = total - 1
+
+    if out_path is not None:
+        if os.path.exists(out_path):
+            raise ValueError(f"{out_path} already exists — choose a different destination")
+        branch_path = out_path
+    else:
+        branch_path = _branch_path_for(path)
+
+    branch = Session(
+        working_dir=source.working_dir,
+        persona=source.persona,
+        # Deep-copied via to_dict/from_dict rather than kept as the same Turn
+        # objects: a fresh Turn.from_dict recomputes nothing but re-parses
+        # cleanly independent of the source, so mutating the branch later can
+        # never reach back into the session it came from.
+        turns=[Turn.from_dict(t.to_dict()) for t in kept],
+        forked_from=f"{path}@turn{lineage_turn}",
+    )
+    branch_manager = SessionManager(branch_path, crypto, source.working_dir, source.persona)
+    branch_manager.session = branch
+    branch_manager.save(password)
+    return branch_manager

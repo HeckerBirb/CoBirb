@@ -1409,6 +1409,70 @@ async def test_resume_with_the_right_password_switches_to_that_session(tmp_path,
         assert "2 turn(s)" in _sessions_status(app)
 
 
+async def test_branch_forks_the_selected_session_and_switches_into_it(tmp_path, monkeypatch):
+    """The Sessions tab's "Branch…" — see SessionsPane's docstring for why
+    this lands straight in the branch the same way Resume does, and
+    session.fork_session's own tests for the branching logic itself."""
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
+
+    sessions_dir = session.default_sessions_dir()
+    os.makedirs(sessions_dir)
+    path = os.path.join(sessions_dir, "s.json")
+    manager = session.SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path), "professional")
+    manager.session.add_text("user", "hi")
+    manager.session.add_text("assistant", "hello")
+    manager.save("right-password")
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await _open_sessions_tab(pilot, app)
+        options = app.query_one("#sessions-list", OptionList)
+        options.highlighted = 0
+        await pilot.click("#sessions-branch")
+        await _until(pilot, lambda: isinstance(app.screen, TextPromptModal))
+        app.screen.query_one("#prompt-value", Input).value = "right-password"
+        await pilot.press("enter")
+        await _until(pilot, lambda: app.session_path != path and app.session_path is not None)
+
+        # A new file, not the one that was selected — the original is left
+        # exactly as it was.
+        assert app.session_path != path
+        assert os.path.exists(path)
+        original = session.SessionManager.load(path, AesGcmScryptSessionCrypto(), "right-password")
+        assert len(original.session.turns) == 2
+
+        assert app.password == "right-password"
+        assert app.orchestrator is None  # rebuilt fresh, bound to the branch, on the next turn
+        assert app.persona.name == "Professional"
+        assert "Branched" in _sessions_status(app)
+        assert "2 turn(s)" in _sessions_status(app)
+
+
+async def test_branch_with_the_wrong_password_reports_an_error_and_changes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
+
+    sessions_dir = session.default_sessions_dir()
+    os.makedirs(sessions_dir)
+    path = os.path.join(sessions_dir, "s.json")
+    manager = session.SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path))
+    manager.save("right-password")
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await _open_sessions_tab(pilot, app)
+        options = app.query_one("#sessions-list", OptionList)
+        options.highlighted = 0
+        await pilot.click("#sessions-branch")
+        await _until(pilot, lambda: isinstance(app.screen, TextPromptModal))
+        app.screen.query_one("#prompt-value", Input).value = "wrong-password"
+        await pilot.press("enter")
+        await _until(pilot, lambda: "Could not branch" in _sessions_status(app))
+
+        assert app.session_path is None
+
+
 async def test_resuming_discards_an_already_built_orchestrator(monkeypatch):
     """A session switch mid-run must not silently keep talking to the old
     session through an orchestrator built before the switch.

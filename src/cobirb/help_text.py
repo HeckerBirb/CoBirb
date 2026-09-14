@@ -48,6 +48,10 @@ OPTIONS
   --session PATH      Resume/continue the encrypted session at PATH.
   --export PATH       Decrypt --session and write it to PATH as markdown,
                       then exit. Plaintext, deliberately.
+  --branch PATH       Fork --session into a new, independent encrypted
+                      session at PATH, then exit. The original is untouched
+                      and stays resumable exactly as it was. Add
+                      --branch-at N to fork from turn N instead of the end.
   --system-prompt     off (default) or harness. Off sends NO system message
                       at all, so the SYSTEM directive your model was built
                       with applies exactly as it does in Ollama. See
@@ -157,6 +161,19 @@ all — see its own screen for details.
     plaintext session file never exists on disk.
   • Tamper-evident: each turn carries a content hash, checked on reload.
   • Saved after every turn (interactive) or once at the end (one-shot).
+
+BRANCHING — trying a different direction without losing the original
+
+  cobirb --session <path> -w --branch <new-path>            Fork it whole.
+  cobirb --session <path> -w --branch <new-path> --branch-at 3
+                                                     Fork from turn 3 only.
+
+Forking copies a session's turns into a brand-new file; the source is only
+ever read and comes out completely unchanged, still resumable exactly as it
+was. In interactive mode, the Sessions tab's "Branch…" button forks the
+whole of the selected session and switches straight into it — the same way
+"Resume" does. Branching from an earlier point (--branch-at) rather than the
+end is CLI-only for now.
 """,
     "persona": """\
 PERSONA — how CoBirb speaks

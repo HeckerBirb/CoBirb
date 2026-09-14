@@ -1693,4 +1693,73 @@ def test_no_resume_hint_is_printed_after_a_failed_run(monkeypatch, tmp_path, cap
     monkeypatch.setattr(sessions, "read_password", lambda: "nope")
     cli.main(["-p", "hi", "--session", str(existing), "-w"])
 
+
+# --------------------------------------------------------------------------- #
+# --branch — session branching's CLI surface (v0.6.0). Forks the session
+# named by --session into a new file; see fork_session() (session.py) for
+# the actual branching logic, exercised there in more depth.
+# --------------------------------------------------------------------------- #
+def _seed_session(path: str, *, turns: int = 3) -> None:
+    manager = SessionManager.create(path, AesGcmScryptSessionCrypto(), "/work", "noah", "pw")
+    for i in range(turns):
+        manager.session.add_text("user" if i % 2 == 0 else "assistant", f"turn {i}")
+    manager.save("pw")
+
+
+def test_branch_forks_the_named_session_and_reports_the_new_path(tmp_path, capsys):
+    source = str(tmp_path / "s.json")
+    _seed_session(source)
+    destination = str(tmp_path / "branch.json")
+
+    status = cli.main(["--session", source, "-w", "pw", "--branch", destination])
+
+    assert status == 0
+    assert os.path.exists(destination)
+    out = capsys.readouterr().out
+    assert "Branched 3 turn(s)" in out
+    assert destination in out
+    branch = SessionManager.load(destination, AesGcmScryptSessionCrypto(), "pw")
+    assert len(branch.session.turns) == 3
+
+
+def test_branch_at_keeps_only_a_prefix(tmp_path):
+    source = str(tmp_path / "s.json")
+    _seed_session(source, turns=4)
+    destination = str(tmp_path / "branch.json")
+
+    status = cli.main(["--session", source, "-w", "pw", "--branch", destination, "--branch-at", "1"])
+
+    assert status == 0
+    branch = SessionManager.load(destination, AesGcmScryptSessionCrypto(), "pw")
+    assert [t.content for t in branch.session.turns] == ["turn 0", "turn 1"]
+
+
+def test_branch_without_a_session_is_refused(capsys):
+    status = cli.main(["--branch", "/tmp/wherever.json"])
+
+    assert status == 1
+    assert "--branch needs --session" in capsys.readouterr().err
+
+
+def test_branch_reports_an_out_of_range_turn_plainly(tmp_path, capsys):
+    source = str(tmp_path / "s.json")
+    _seed_session(source, turns=2)
+
+    status = cli.main(
+        ["--session", source, "-w", "pw", "--branch", str(tmp_path / "b.json"), "--branch-at", "99"]
+    )
+
+    assert status == 1
+    assert "out of range" in capsys.readouterr().err
+
+
+def test_branch_reports_a_wrong_password_the_same_way_export_does(tmp_path, capsys):
+    source = str(tmp_path / "s.json")
+    _seed_session(source)
+
+    status = cli.main(["--session", source, "-w", "nope", "--branch", str(tmp_path / "b.json")])
+
+    assert status == 1
+    assert "could not open" in capsys.readouterr().err
+
     assert "Session saved" not in capsys.readouterr().err

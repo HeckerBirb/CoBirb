@@ -38,7 +38,7 @@ from .runtime.export import write_export
 from .flock.run import Asker, run_flock_session
 from .runtime.bootstrap import ensure_home
 from .runtime.models import describe_roles
-from .session import SessionManager
+from .session import SessionManager, fork_session
 from .runtime.headless import EXIT_DENIED, EXIT_ERROR, EXIT_OK, HeadlessIO, HeadlessResult, describe_context
 from .runtime.personas import NO_PERSONA
 from .runtime.plugins import PluginsSummary, ToolInfo, describe_plugins
@@ -246,6 +246,42 @@ def _run_export(destination: str, session_path: str | None, password: str | None
     written = write_export(manager.session, destination, title=os.path.basename(session_path))
     print(f"Exported {len(manager.session.turns)} turn(s) to {written}")
     print("This file is plaintext — the session it came from stays encrypted.", file=sys.stderr)
+    return EXIT_OK
+
+
+def _run_branch(
+    destination: str,
+    up_to_turn: int | None,
+    session_path: str | None,
+    password: str | None,
+    cwd: str,
+) -> int:
+    """Fork the session named by --session into a new file at ``destination``."""
+    if session_path is None:
+        print("cobirb: --branch needs --session to say which one to fork.", file=sys.stderr)
+        return EXIT_ERROR
+    try:
+        config = Config()
+        _, discovered, _ = plugins.discover_plugins(cwd, config)
+        crypto, _ = plugins.build_crypto(config, discovered)
+        branch = fork_session(
+            session_path, crypto, password, up_to_turn=up_to_turn, out_path=destination
+        )
+    except ValueError as exc:
+        print(f"cobirb: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    except Exception as exc:  # noqa: BLE001 - a wrong password is routine
+        print(
+            f"cobirb: could not open {session_path} — {sessions.session_open_error(exc)}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    print(
+        f"Branched {len(branch.session.turns)} turn(s) from {session_path} to {branch.path}.\n"
+        "The original is untouched. Resume the branch with:\n"
+        f"  cobirb --session {sessions.abbreviate_home(branch.path)} -w"
+    )
     return EXIT_OK
 
 
@@ -552,6 +588,24 @@ def _build_parser() -> argparse.ArgumentParser:
         "exporting — so CoBirb never picks the destination for you.",
     )
     opts.add_argument(
+        "--branch",
+        metavar="PATH",
+        help="Fork the session named by --session into a new, independent "
+        "encrypted session at PATH, then exit. The original is left exactly "
+        "as it was and stays resumable at its current length; the branch "
+        "picks up from there in whatever direction you take it next. "
+        "Combine with --branch-at to fork from an earlier point instead of "
+        "the session's current end.",
+    )
+    opts.add_argument(
+        "--branch-at",
+        type=int,
+        metavar="N",
+        help="With --branch: keep only turns 0..N (0-indexed, inclusive) "
+        "rather than the whole session — branching from an earlier point in "
+        "the conversation. Without it, the branch keeps every turn.",
+    )
+    opts.add_argument(
         "--headless",
         action="store_true",
         help="Never prompt. Anything not already permitted by --allow-tool or "
@@ -625,6 +679,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.export:
         return _run_export(args.export, session_path, password, args.cwd or ".")
+
+    if args.branch:
+        return _run_branch(args.branch, args.branch_at, session_path, password, args.cwd or ".")
 
     if args.prompt is not None:
         status = _run_one_shot(

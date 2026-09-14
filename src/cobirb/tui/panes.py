@@ -57,13 +57,24 @@ class PluginsPane(Vertical):
 
 
 class SessionsPane(Vertical):
-    """Browse, resume, and start encrypted sessions.
+    """Browse, resume, branch, and start encrypted sessions.
 
     Session files are discovered under ``session.default_sessions_dir()`` —
     a plain, un-decrypted directory listing (name/size/modified only); a
     session opened elsewhere via ``--session <path>`` still works exactly as
     before and just isn't listed here unless it happens to live in that
     directory too.
+
+    "Branch" forks the whole of the selected session into a new file
+    (``session.fork_session``) and switches straight into it, the same way
+    "Resume" does — the point of branching is to keep talking, in a
+    different direction, so landing anywhere else would just be one more
+    step between choosing to branch and actually doing so. The original
+    file is untouched and still listed at its original length. Branching
+    from an earlier point in the conversation rather than its current end
+    is deliberately CLI-only for now (``cobirb --branch PATH --branch-at
+    N``) — picking a cut point needs its own turn-list UI, which is a
+    bigger piece than this milestone's scope.
     """
 
     def compose(self) -> ComposeResult:
@@ -71,6 +82,7 @@ class SessionsPane(Vertical):
         yield OptionList(id="sessions-list")
         with Horizontal(id="sessions-actions"):
             yield Button("Resume", id="sessions-resume", variant="primary")
+            yield Button("Branch…", id="sessions-branch")
             yield Button("New session…", id="sessions-new")
             yield Button("Refresh", id="sessions-refresh")
         yield Static(id="sessions-status")
@@ -108,6 +120,15 @@ class SessionsPane(Vertical):
             if option.id is None:
                 return  # the "(no saved sessions found)" placeholder row
             app.begin_resume_session(option.id)
+        elif event.button.id == "sessions-branch":
+            options = self.query_one("#sessions-list", OptionList)
+            if options.highlighted is None:
+                self.set_status("Select a session from the list first.")
+                return
+            option = options.get_option_at_index(options.highlighted)
+            if option.id is None:
+                return  # the "(no saved sessions found)" placeholder row
+            app.begin_branch_session(option.id)
         elif event.button.id == "sessions-new":
             app.begin_new_session()
         elif event.button.id == "sessions-refresh":

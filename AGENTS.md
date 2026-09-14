@@ -817,9 +817,10 @@ polish) and is imported lazily, so one-shot never loads it. Three live tabs:
   deny).
 - **Sessions** — lists `.json` files under `default_sessions_dir()` with size/mtime read **without
   decrypting**; resumes one (a `TextPromptModal` collects the password, since a full-screen app
-  can't use `getpass`) or starts a new one. Resuming validates the password, reads persona/turn
-  count, sets `self.orchestrator = None`, and lets the *next* message rebuild through the same
-  load-or-create path `--session` uses — so **only one code path ever opens a session file**.
+  can't use `getpass`), branches one (below), or starts a new one. Resuming validates the password,
+  reads persona/turn count, sets `self.orchestrator = None`, and lets the *next* message rebuild
+  through the same load-or-create path `--session` uses — so **only one code path ever opens a
+  session file**.
 - **Flock** — one pane per Worker Birb (§4m), laid out from the approved charter and updated live
   from the supervisor's `started`/`finished`/`reviewed` events, plus a `WorkerPaneIO` per worker so
   its tool calls appear as it makes them. Each pane keeps its *scope* on screen rather than letting
@@ -869,6 +870,23 @@ straight back around to pick up the queued message, consuming one of `max_turns`
 transcript with a distinct `»` marker (`render.build_steer_message`, bold magenta, no closing
 rule) so it reads as an interjection into something already in progress rather than a fresh
 exchange. Not built for the Flock: a worker's own steering is a different, unbuilt question.
+
+**Session branching** (`session.fork_session()`, v0.6.0). Trying a different direction from a point
+already on disk, without disturbing what got you there — the Sessions tab's "Branch…" button forks
+the *whole* of a selected session into a brand-new file and switches straight into it, the same way
+"Resume" does (reusing `_apply_resumed_session`, with a `verb` parameter so the status line says
+"Branched" rather than "Resumed"). The source file is only ever read: it comes out bit-for-bit
+unchanged and stays independently resumable at its original length. `Session.forked_from` records
+`"<source path>@turn<N>"` on the branch — the same lineage idea as a Flock session's `flock` pairing
+token, so a branch found months later still says plainly where it came from.
+
+Branching from an *earlier* point in the conversation, rather than its current end, is CLI-only for
+now: `cobirb --session PATH -w --branch NEW_PATH --branch-at N` keeps turns `0..N` inclusive. The
+TUI button doesn't expose this — picking a cut point needs its own turn-list UI, a bigger piece than
+this milestone's scope, so the one-click path only ever branches everything. An explicit
+`--branch` destination that already exists is refused outright, matching `plugin install`'s
+existing-target convention (§5.5) rather than silently overwriting it; the TUI's generated filename
+(`<stem>.branch-<8 hex>.json`, alongside the source) sidesteps the question entirely.
 
 **Threading.** `Orchestrator.run()` stays **synchronous and untouched**; the app runs it on a
 Textual thread worker and `TuiIO` marshals every callback back via `App.call_from_thread`. No
@@ -997,8 +1015,9 @@ they are shaped around, deliberately.
   - ✅ **Mid-turn steering.** `Orchestrator.steer()` (§9) — a message sent while a turn is running
     redirects it instead of queuing a second one, cutting off an in-progress stream immediately
     where the model supports it.
-  - ⏳ **Session branching** — forking a conversation to try a different direction from a past point,
-    distinct from the Flock's already-shipped GUID-based worker branching (§4m).
+  - ✅ **Session branching.** `session.fork_session()` (§9) — fork a conversation into a new,
+    independent file and try a different direction from there, without disturbing the original.
+    Distinct from the Flock's already-shipped GUID-based worker branching (§4m).
 - **v0.7.0 "Aware" (design only)** — cross-session memory and vision input. See the roadmap
   artifact for the design proposals; nothing here ships as code until a following release.
 - **v0.8.0–v0.9.0** — SPI freeze and session migrations.
