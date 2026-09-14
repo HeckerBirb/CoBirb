@@ -1037,15 +1037,16 @@ they are shaped around, deliberately.
   - ✅ **Session branching.** `session.fork_session()` (§9) — fork a conversation into a new,
     independent file and try a different direction from there, without disturbing the original.
     Distinct from the Flock's already-shipped GUID-based worker branching (§4m).
-- **v0.7.0 "Aware" (next)** — **cross-session memory, and only that.** What CoBirb worked out about
-  a project, carried into the next sitting: standalone facts, not a transcript. Design settled —
-  see §12.2 for the decisions and what is deliberately *not* in this release.
-- **v0.8.0–v0.9.0** — SPI freeze, security review, session migrations.
+- **v0.7.0 "Hardened" (next)** — SPI freeze and versioning, a real session-schema migration path, a
+  security review of the crypto and the plugin-install path, and documentation someone can start
+  from cold. The last release before 1.0, and now the *only* one: what used to be v0.7.0 "Aware"
+  no longer exists, so this moved up from 0.8–0.9 rather than leaving a gap in the numbering.
+- **v1.0.0** — judged by whether someone other than the author adopts it.
 - **v1.1.0 "Projects"** — a project is a password-encrypted batch of the sessions *and* memories
-  belonging to one piece of work, with **no bleed-over between projects**. This is where memory's
-  encryption question gets its real answer (§12.2), and where automatic distillation is allowed to
-  exist at all: inside a project, memory is written both explicitly and by the model proposing
-  entries — outside one, only explicitly.
+  belonging to one piece of work, with **no bleed-over between projects**. **Cross-session memory
+  is part of this release, not an earlier one** (§12.2): it arrives inside the password boundary,
+  designed once, rather than shipping loose and unencrypted first and being restructured here.
+  Automatic distillation exists only within a project, alongside the explicit path.
 - **~v2.0.0 — Vision input.** Deliberately late. See §12.2 for why, and for the storage shape it
   is expected to take once Projects exists.
 
@@ -1117,34 +1118,39 @@ endpoint like everything else; there is no "just for subagents" exception.
 the founding principle. (Subagents are not background agents — they are local, in-process, and
 bounded by a turn you asked for.)
 
-### 12.2 v0.7.0 and beyond: decisions on record
+### 12.2 Memory, Projects and vision: decisions on record
 
-Settled by the user against the "v0.7.0 Design Proposals" document. Written here rather than left
-in an artifact because this is where the next person looks — and because two of them are "do not
-build this yet", which is exactly the kind of instruction that gets accidentally reopened.
+Settled by the user against the design-proposals artifact. Written here rather than left in an
+artifact because this is where the next person looks — and because all of it is some form of "do
+not build this yet", which is exactly the kind of instruction that gets accidentally reopened. The
+whole of what was once v0.7.0 "Aware" now lives at v1.1.0 or later.
 
-**Memory needs no password, for now.** Cross-session memory is *not* encrypted at rest in 0.7.0 and
-does not require a session password to exist — requiring one would make the feature invisible to
-everyone who has never used `-w`, which is most people. It stays under `~/.cobirb/memory/`, never in
-the repository (same argument as config, §4l: memory is read straight into the system prompt, so a
-repo-writable memory is a stored prompt injection with no approval step in front of it), and stays
-**opt-in** (`cross_session_memory`, default false) — consistent with everything else here being off
-until asked for. The encryption question is not dropped, it is *rescheduled*: it gets its real
-answer in Projects (v1.1.0), where a password protects a whole batch of sessions and memories at
-once rather than each feature inventing its own.
+**Cross-session memory is not built until Projects (v1.1.0). Do not build it before.** The
+intermediate design — memory shipping loose, unencrypted, opt-in, under `~/.cobirb/memory/` — was
+considered in full and rejected: it would be built once now and then restructured at 1.1 anyway,
+when a project's password becomes the boundary it belongs inside. Memory arrives *with* Projects,
+designed once, or not at all. What survives from that design and still holds when it is built:
 
-**Automatic distillation waits for Projects.** In 0.7.0 memory is written only deliberately:
-`/remember <fact>`, and a `remember` tool the model may call under the ordinary approval gate. The
-model proposing entries of its own at the end of a run happens **only inside a project** (v1.1.0),
-where both paths are live. The reasoning is containment: a wrong fact the model invented is worse
-than no fact, and inside a project its blast radius is one project's memory rather than everything
-CoBirb believes about every codebase.
+- **Facts, not transcripts.** What was learned about the codebase, standalone and true independent
+  of the conversation that produced it. Sessions already hold history; memory is for what outlives
+  one of them.
+- **Never in the repository.** The same argument as config (§4l): memory is read straight into the
+  system prompt, so a repo-writable memory is a stored prompt injection with no approval step in
+  front of it. A project's own store, under the user's control, is where it lives.
+- **Explicit by default, automatic only inside a project.** `/remember <fact>` and a `remember`
+  tool under the ordinary approval gate are the baseline. The model proposing entries of its own at
+  the end of a run exists only within a project — containment: a confidently wrong invented fact is
+  worse than no fact, and inside a project its blast radius is that project rather than everything
+  CoBirb believes about every codebase.
+- **Not injected into a Worker Birb's run.** "Nothing but its brief" is load-bearing for the
+  Flock's knowledge-isolation argument (§4m). Memory reaches Brainy Birb, which already reads
+  `AGENTS.md`, and stops there.
 
-**Vision is deferred to ~v2.0.0 — do not build it in 0.7.** No `images` parameter on `chat()`, no
-`Turn.images`, no `/image`, and `supports_vision()` stays the constant `False` it is today. The SPI
-change the design proposed is *not* being taken now, which also means the 0.8–0.9 SPI freeze no
-longer has to be sequenced around it. When vision does land, and assuming Projects exists by then,
-the storage shape is already decided: **images are encrypted files under the project's own
-password, and the session stores a short descriptive "alt-text" rather than the image itself** — so
-a run can work out which image the user means from context and that alt-text, without decrypting
-every image in the project just to start a turn.
+**Vision is deferred to ~v2.0.0 — do not build it.** No `images` parameter on `chat()`, no
+`Turn.images`, no `/image`, and `supports_vision()` stays the constant `False` it is today. Not
+taking that SPI change now is also what frees the v0.7.0 SPI freeze from having to be sequenced
+around it. When vision does land, and assuming Projects exists by then, the storage shape is
+already decided: **images are encrypted files under the project's own password, and the session
+stores a short descriptive "alt-text" rather than the image itself** — so a run can work out which
+image the user means from context and that alt-text, without decrypting every image in the project
+just to start a turn.
