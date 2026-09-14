@@ -22,19 +22,6 @@ opt a capability in.**
   does in `ollama run`. When CoBirb does add something, yours goes first.
 - 🦜 Optional personas — various twists on the replies. Off by default.
 
-## Status
-
-🚧 **v0.7.0** — pre-1.0, under active development, full test suite green. The core agent loop,
-encrypted sessions, context compaction, project instructions, a `repo_map` tool, diff-before-write
-with `/undo`, credential redaction, headless mode for CI, an extensible plugin system (hooks, MCP,
-custom commands, per-role models), and **the Flock** — `cobirb flock -p "..."` divides a piece of
-work between several agents that cannot see each other, coordinated by a shared skeleton rather
-than by talking to one another (`cobirb help flock`) — are all shipped.
-
-See [`CHANGELOG.md`](./CHANGELOG.md) for release-by-release history, and
-[`AGENTS.md`](./AGENTS.md) for the architecture, the plugin SPI, and the security design —
-including §12.3's review of session encryption and the plugin-install path.
-
 ## Quick start
 
 Starting from nothing, on a machine with [Ollama](https://ollama.com) installed:
