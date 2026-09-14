@@ -2,6 +2,8 @@
 
 A privacy-first, agentic coding CLI for local LLMs and your eyes only.
 
+![CoBirb's interactive mode](docs/cobirb.png)
+
 > **Privacy-first by design.**
 
 - 🔒 No telemetry. No analytics. No pings. No little birbs singing (except for you).
