@@ -906,6 +906,33 @@ repeatable.
 few-dependencies stance (a tab bar, fixed regions and modals need a real framework, not more `rich`
 polish) and is imported lazily, so one-shot never loads it. Three live tabs:
 
+**"Noah" (v0.9.0) is the default theme** — a `textual.theme.Theme` registered and applied in
+`CoBirbApp.__init__` (`tui/app.py`), replacing Textual's own stock colours entirely rather than
+tweaking pieces of it. Five colours, defined once in `plugins.core.render` so the plain one-shot
+CLI's `>` markers and notices use the exact same palette rather than a second copy of it:
+`TAIL_RED` is the one accent (was two, teal and orange, in different places — merged into one
+because that's what a Textual `Theme`'s `primary`/`accent` fields both becoming the same value
+actually buys you), `CREST_GRAY` is what's meant to be read (chat text, the active tab),
+`FEATHER_GRAY` the secondary layer (notices, dividers, the assistant's own `>`), `WING_GRAY`
+structural chrome (title bar, status bar), `BEAK_BLACK` the canvas (scrollback, input interior).
+Three roles Textual computes rather than declares as a `Theme` field — `text-muted`, the input
+cursor, and the tab underline's `block-cursor-background` — are pinned to exact hex via the
+`Theme`'s `variables` dict instead of their approximate defaults (an alpha-blended "auto 60%", the
+input's own foreground-on-background reverse, `primary` respectively). An error (`build_error_panel`,
+used for a blocked call, a fallen-over provider, or a failed command) gets bold tail-red text on a
+tinted background strip rather than plain tail-red text — deliberately, so it doesn't read as the
+same accent used for the active-tab underline everywhere else; the tint is Tail Red blended 14%
+into Beak Black, with the arithmetic in a comment at its definition. **Left alone:** the
+semantic Rich colours a plan/validation/diff/tool-result panel already carries (cyan/yellow/
+green/red) — those mean something (which phase, pending vs. done, success vs. failure) that a
+uniform reskin would erase, so only the header banner (arbitrary, not semantic) moved to
+Feather Gray. **Known gap:** Rich's own `Markdown` renderer styles inline code spans and a few
+other inline elements (`markdown.code` et al.) from its own default theme, which still renders in
+Rich's stock colours inside an assistant reply — passing `Markdown(text, style=CREST_GRAY)` sets
+the base text colour but doesn't reach those. Not fixed here: doing so needs a Rich `Theme`
+threaded through both `TerminalIO`'s `Console` and the TUI's `RichLog`, which is more machinery
+than this revision's scope justified.
+
 - **Current** — transcript, live status line (persona · model · plan · cwd · session), boxed input
   that stays usable through a turn rather than greying out (mid-turn steering, below) and returns
   when done (no `continue? [y/N]` gate), tool approval as a modal (`y` once / `a` always / `n`/escape

@@ -32,6 +32,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
+from textual.theme import Theme
 from textual.widgets import Footer, Header, RichLog, TabbedContent, TabPane
 
 from .. import session
@@ -59,6 +60,46 @@ from .screens import (
 from .widgets import ActivityBar, PromptInput, StatusBar, StreamPreview, TranscriptLog
 
 _TAB_ORDER = ["current", "flock", "sessions", "plugins"]
+
+# "Noah" (v0.9.0) — the default theme, the parrot's own five colours
+# (defined once in plugins.core.render, alongside the Rich styles that use
+# the same palette for the transcript — see that module's own comment).
+# Replaces Textual's stock theme (a blue/orange scheme) entirely, rather
+# than tweaking pieces of it, which is why `primary` and `accent` both get
+# the same value: this app has one accent, not two.
+#
+# Most of app.tcss never has to name a colour at all — it already reads
+# through `$surface`/`$panel`/`$accent`/`$text-muted` (Textual's built-in
+# Header/Footer/Tabs do the same internally), so registering this Theme is
+# what actually repaints the title bar, the tab underline, the status bar
+# and the footer's keybind letters. The three `variables` entries below are
+# the only roles with no dedicated `Theme` field, overridden explicitly
+# rather than left to their computed defaults (an alpha-blended "auto 60%"
+# for muted text, `primary` for the tab underline, `foreground`-on-solid for
+# the input cursor) so they land on the exact five hex values rather than
+# something merely close.
+NOAH_THEME = Theme(
+    name="noah",
+    dark=True,
+    primary=render.TAIL_RED,
+    accent=render.TAIL_RED,
+    foreground=render.CREST_GRAY,
+    background=render.BEAK_BLACK,
+    surface=render.BEAK_BLACK,
+    panel=render.WING_GRAY,
+    error=render.TAIL_RED,
+    variables={
+        "text-muted": render.FEATHER_GRAY,
+        "text-disabled": render.FEATHER_GRAY,
+        # The active-tab underline (Tabs' `Underline` widget) and the
+        # cursor block in list/table-style widgets both read this rather
+        # than `primary` directly.
+        "block-cursor-background": render.TAIL_RED,
+        "input-cursor-background": render.TAIL_RED,
+        "input-cursor-foreground": render.BEAK_BLACK,
+        "footer-key-foreground": render.TAIL_RED,
+    },
+)
 
 
 def _session_turns(orchestrator: Any) -> list[Any]:
@@ -109,6 +150,8 @@ class CoBirbApp(App[None]):
         harness: bool = False,
     ) -> None:
         super().__init__()
+        self.register_theme(NOAH_THEME)
+        self.theme = "noah"
         self.persona = persona
         self.system = system
         self.allow_overrides = allow_overrides

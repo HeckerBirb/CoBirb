@@ -52,7 +52,7 @@ class StatusBar(Static):
             # that is often long already, and the full path is in the
             # header panel at the top of the transcript.
             parts.append(f"session: {os.path.basename(self.session_path)}")
-        line = Text(" · ".join(parts), style="dim")
+        line = Text(" · ".join(parts), style=render.FEATHER_GRAY)
         if self.busy:
             # The busy label replaces nothing; it is appended so the context
             # (persona/model/cwd) stays readable while a turn is running.

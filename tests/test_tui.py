@@ -29,6 +29,7 @@ from textual.widgets.option_list import Option
 from conftest import StubSession, StubSessionManager
 
 from cobirb import cli, help_text, session
+from cobirb.plugins.core import render
 from cobirb.runtime import commands, personas, plugins, sessions, wiring
 from cobirb.tui.app import CoBirbApp
 from cobirb.tui.panes import PluginsPane, SessionsPane
@@ -2040,6 +2041,16 @@ async def test_a_persona_switch_keeps_the_harness_choice_the_run_started_with():
 # --------------------------------------------------------------------------- #
 # The transcript as one marked column
 # --------------------------------------------------------------------------- #
+def _marker_colour_name(style: str) -> str:
+    """The colour name/hex Rich's own renderer would report for a style
+    string — kept alongside ``_marker_colours`` rather than hardcoding the
+    palette a second time, so a future colour change doesn't need a matching
+    edit here."""
+    from rich.style import Style
+
+    return Style.parse(style).color.name
+
+
 def _marker_colours(app: CoBirbApp) -> list[tuple[str, str]]:
     """(marker colour, rest of the line) for every marked line, in order."""
     out = []
@@ -2081,7 +2092,7 @@ async def test_a_streamed_reply_is_marked_like_any_other(monkeypatch):
         app._flush_stream()
         await pilot.pause()
 
-        assert ("magenta", "streamed reply") in _marker_colours(app)
+        assert (_marker_colour_name(render.ASSISTANT_MARKER_STYLE), "streamed reply") in _marker_colours(app)
 
 
 async def test_the_streaming_preview_is_marked_so_the_reply_does_not_shift(monkeypatch):
@@ -2147,7 +2158,10 @@ async def test_a_streamed_reply_carries_no_persona_label(monkeypatch):
 
         text = _transcript_text(app)
         assert "CoBirb:" not in text
-        assert ("magenta", "Hello, how are you today?") in _marker_colours(app)
+        assert (
+            _marker_colour_name(render.ASSISTANT_MARKER_STYLE),
+            "Hello, how are you today?",
+        ) in _marker_colours(app)
 
 
 async def test_the_tui_draws_nothing_for_begin_stream(monkeypatch):
@@ -2207,7 +2221,10 @@ async def test_replayed_prompts_and_replies_keep_their_markers():
     async with app.run_test() as pilot:
         await pilot.pause()
 
-        assert _marker_colours(app) == [("cyan", "Hi"), ("magenta", "Hello.")]
+        assert _marker_colours(app) == [
+            (_marker_colour_name(render.USER_MARKER_STYLE), "Hi"),
+            (_marker_colour_name(render.ASSISTANT_MARKER_STYLE), "Hello."),
+        ]
 
 
 async def test_a_replayed_tool_call_shows_the_call_and_its_output():

@@ -4,6 +4,15 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.9.0] — "Noah", the default theme
+
+The parrot's own colours, replacing the stock teal/orange/navy scheme app-wide: one accent
+(tail red — was two colours in two places), a canvas, structural chrome, and two tiers of text.
+Defined once in `plugins.core.render` so the plain one-shot CLI and the full-screen app render
+identically, same as everything else that module builds. An error now gets bold text on a
+tinted background strip rather than plain coloured text, so it doesn't read as the same accent
+used for the active-tab underline everywhere else.
+
 ## [0.8.0] — Installable
 
 A stranger can get a working `cobirb` binary onto their `PATH`, and keep it current.

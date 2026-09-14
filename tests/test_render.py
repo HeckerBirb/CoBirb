@@ -180,8 +180,18 @@ def test_error_panel_shows_the_persona_and_the_message():
     panel = render.build_error_panel("Noah", "blocked — nope")
 
     assert panel.title == "Noah"
-    assert panel.border_style == "red"
+    assert panel.border_style == render.TAIL_RED
     assert "blocked" in _printed(panel)
+
+
+def test_error_panel_gets_a_tinted_background_not_just_coloured_text():
+    """An error must read as visually distinct from the ordinary tail-red
+    accent used elsewhere (the active tab, the input focus border) — a
+    background fill, not just coloured text on the usual surface."""
+    panel = render.build_error_panel("Noah", "blocked — nope")
+
+    assert panel.style not in (None, "", "none")
+    assert "on " in str(panel.style)
 
 
 def test_notice_is_plain_text_not_a_panel():

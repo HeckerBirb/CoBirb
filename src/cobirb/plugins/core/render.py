@@ -25,6 +25,27 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, avoids a cli.py import cycl
     from ...cli import PluginsSummary
 from rich.text import Text
 
+# The "Noah" palette (v0.9.0) — the parrot's own colours. Defined once here
+# rather than in the TUI, because this module's whole point is that
+# TerminalIO and the TUI's TuiIO look identical (see the module docstring);
+# a one-shot CLI reply gets the same marker and notice colours a full-screen
+# session does. The TUI's own chrome (title bar, tabs, status bar, input
+# border) is a separate concern, styled through a Textual Theme in
+# tui/app.py — which imports these same five constants rather than repeating
+# the hex.
+TAIL_RED = "#E43A3A"  # the one accent: the user's own `>`, and (in the TUI) the active-tab
+# underline, the input's focus border/cursor, and the footer's keybind letters.
+CREST_GRAY = "#D3D6D9"  # what's meant to be read: all chat text, yours and the assistant's alike.
+FEATHER_GRAY = "#83878C"  # the secondary layer: notices, dividers, the assistant's own `>`.
+WING_GRAY = "#3D4045"  # structural chrome, in the TUI: title bar, status bar, tab-row divider.
+BEAK_BLACK = "#1A1B1D"  # the canvas, in the TUI: scrollback background, input interior.
+
+# Tail Red blended 14% into Beak Black — enough to read as "this line is
+# different" without competing with the tail-red text sitting on top of it.
+# R: .14*228 + .86*26 ≈ 54 (0x36); G: .14*58 + .86*27 ≈ 31 (0x1f);
+# B: .14*58 + .86*29 ≈ 33 (0x21).
+_ERROR_TINT = "#361F21"
+
 
 def unified_diff(path: str, old_str: str, new_str: str) -> str:
     """A small unified diff between an ``edit_file`` call's old/new text, for
@@ -51,7 +72,11 @@ def build_header_panel(
     lines = [f"[bold]{persona_name}[/] · {model_name or '(no model configured)'} · {cwd}"]
     if session_path:
         lines.append(f"session: {session_path}")
-    return Panel("\n".join(lines), expand=False, border_style="cyan")
+    # Feather Gray, not the accent: this banner doesn't mean anything the way
+    # a plan/validation/diff panel's colour does — it's chrome (who/what/where),
+    # so it takes the same secondary tone the rest of the chrome uses rather
+    # than competing with the one accent for attention.
+    return Panel("\n".join(lines), expand=False, border_style=FEATHER_GRAY)
 
 
 def build_plan_panel(persona_name: str, text: str) -> Panel:
@@ -74,7 +99,7 @@ def build_history_divider(text: str) -> Rule:
     """A dim rule marking where a restored conversation ends and the live one
     begins, so replayed turns can't be mistaken for something that just
     happened."""
-    return Rule(Text(text, style="dim"), style="dim")
+    return Rule(Text(text, style=FEATHER_GRAY), style=FEATHER_GRAY)
 
 
 def build_tool_call_panel(
@@ -125,14 +150,26 @@ def build_preview_panel(tool_name: str, preview: str) -> Panel:
 
 
 def build_error_panel(persona_name: str, text: str) -> Panel:
-    """An error notice (a blocked tool call, a provider that fell over)
-    shown in the conversation flow rather than on stderr.
+    """An error notice (a blocked tool call, a provider that fell over, a
+    failed command or connection) shown in the conversation flow rather than
+    on stderr.
 
     Interactive mode has nowhere to print a stray stderr line to — a
     full-screen app owns the whole terminal — so errors that the scrolling
     CLI writes with ``print()`` become a panel in the transcript instead.
+
+    Bold text on a tinted background strip, not just tail-red text on the
+    ordinary background: tail red is also the app's one accent (the active
+    tab, the input focus border), so an error rendered the same way as those
+    would read as more of the same chrome rather than as something wrong.
     """
-    return Panel(Text(text), title=persona_name, title_align="left", border_style="red")
+    return Panel(
+        Text(text, style=f"bold {TAIL_RED}"),
+        title=persona_name,
+        title_align="left",
+        border_style=TAIL_RED,
+        style=f"on {_ERROR_TINT}",
+    )
 
 
 def build_plugins_view(summary: "PluginsSummary") -> Group:
@@ -178,8 +215,8 @@ def build_plugins_view(summary: "PluginsSummary") -> Group:
     return Group(*parts)
 
 
-USER_MARKER_STYLE = "bold cyan"
-ASSISTANT_MARKER_STYLE = "bold magenta"
+USER_MARKER_STYLE = f"bold {TAIL_RED}"
+ASSISTANT_MARKER_STYLE = f"bold {FEATHER_GRAY}"
 _MARKER = "> "
 _INDENT = "  "
 
@@ -222,7 +259,7 @@ class MarkerPrefixed:
 def build_assistant_message(text: str) -> MarkerPrefixed:
     """The model's finished reply: the same ``>`` the user's prompt gets, in a
     different colour, with the body still rendered as markdown."""
-    return MarkerPrefixed(Markdown(text), ASSISTANT_MARKER_STYLE)
+    return MarkerPrefixed(Markdown(text, style=CREST_GRAY), ASSISTANT_MARKER_STYLE)
 
 
 def stream_marker() -> Text:
@@ -243,7 +280,7 @@ def build_streamed_message(text: str) -> MarkerPrefixed:
     completion would reflow and restyle what they just read. Same marker and
     colour as a finished reply, so the transcript still reads uniformly.
     """
-    return MarkerPrefixed(Text(text), ASSISTANT_MARKER_STYLE)
+    return MarkerPrefixed(Text(text, style=CREST_GRAY), ASSISTANT_MARKER_STYLE)
 
 
 def build_user_message(text: str) -> Text:
@@ -263,10 +300,10 @@ def build_user_message(text: str) -> Text:
     lines = text.splitlines() or [""]
     body = Text()
     body.append(_MARKER, style=USER_MARKER_STYLE)
-    body.append(lines[0], style="bold")
+    body.append(lines[0], style=f"bold {CREST_GRAY}")
     for line in lines[1:]:
         body.append("\n" + _INDENT)
-        body.append(line, style="bold")
+        body.append(line, style=f"bold {CREST_GRAY}")
     # A rule under the prompt, not between exchanges. Both markers are a `>`
     # in different colours, which is enough to tell whose turn a line is and
     # not enough to find the seam when scrolling — the complaint that prompted
@@ -316,7 +353,7 @@ class ExchangeRule:
     # the words start rather than under the marker.
     INDENT = len(_INDENT)
     FRACTION = 0.8
-    STYLE = "dim"
+    STYLE = FEATHER_GRAY
 
     def __rich_console__(self, console: "Console", options: "ConsoleOptions") -> "RenderResult":
         available = max(options.max_width - self.INDENT, 1)
@@ -330,4 +367,4 @@ def build_notice(text: str) -> Text:
     """A plain one-line notice (``/persona`` and ``/plan`` confirmations,
     the greeting). Not a panel: these are chatter about the session, not
     content from the model."""
-    return Text(text, style="dim")
+    return Text(text, style=FEATHER_GRAY)
