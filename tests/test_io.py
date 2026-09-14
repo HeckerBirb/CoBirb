@@ -79,21 +79,6 @@ def test_render_writes_plain_text_without_interpreting_markup():
     assert "this has [brackets] and [[double]] ones" in buf.getvalue()
 
 
-def test_render_header_includes_persona_model_and_cwd():
-    term, buf = _make_terminal_io()
-    term.render_header("Noah", "ollama/llama3.1", "/tmp/project", None)
-    out = buf.getvalue()
-    assert "Noah" in out
-    assert "ollama/llama3.1" in out
-    assert "/tmp/project" in out
-
-
-def test_render_header_includes_session_path_when_given():
-    term, buf = _make_terminal_io()
-    term.render_header("Noah", "ollama/llama3.1", "/tmp/project", "/tmp/project/s.json")
-    assert "/tmp/project/s.json" in buf.getvalue()
-
-
 def test_render_answer_renders_markdown_content():
     term, buf = _make_terminal_io()
     term.render_answer("Noah", "**bold** and a list:\n\n- one\n- two")

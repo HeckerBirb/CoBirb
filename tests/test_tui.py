@@ -226,7 +226,7 @@ async def test_status_bar_shows_the_session_path_when_one_is_active():
         assert "session: s.json" in str(app.query_one(StatusBar).render())
 
 
-async def test_the_greeting_and_header_are_in_the_transcript_at_startup():
+async def test_the_greeting_is_in_the_transcript_at_startup():
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -908,7 +908,7 @@ async def test_the_io_bridge_satisfies_the_adapter_contract_and_its_extras():
         assert bridge.listen() is None
         assert bridge.view(b"", "image/png") is None
         for hook in (
-            "spinner", "render_header", "render_answer", "render_plan",
+            "spinner", "render_answer", "render_plan",
             "render_validation", "render_tool_call", "confirm",
         ):
             assert callable(getattr(bridge, hook))
@@ -924,14 +924,12 @@ async def test_the_bridge_writes_plan_and_validation_panels():
         app.io_bridge.render_plan("Noah", "First read the file")
         app.io_bridge.render_validation("Noah", "Confirmed it was read")
         app.io_bridge.render_tool_call("read_file", {"path": "note.txt"}, _Result("banana"))
-        app.io_bridge.render_header("Noah", "ollama/llama3.1", "/work", "/tmp/s.json")
         await pilot.pause()
 
         text = _transcript_text(app)
         assert "plan" in text and "First read the file" in text
         assert "validation" in text and "Confirmed it was read" in text
         assert "tool: read_file" in text and "banana" in text
-        assert "ollama/llama3.1" in text
 
 
 async def test_the_final_answer_falls_back_to_the_bridge_for_an_adapter_without_the_hook(monkeypatch):
@@ -1185,13 +1183,10 @@ async def test_startup_check_opens_the_picker_when_the_configured_model_is_missi
 
 
 async def test_startup_picker_selection_is_confirmed_in_the_transcript(monkeypatch):
-    """The header panel is written in on_mount, before the startup check
-    knows which model will actually run — so picking one there still leaves
-    that banner naming the originally configured model, not this one. Known,
-    accepted limitation (the transcript is append-only, so that panel can't
-    be corrected in place); what this guards is that the model actually
-    running is still stated plainly, the same way `/model` confirms one
-    picked mid-session."""
+    """The only place the startup check's own choice of model is ever
+    stated (there is no header banner any more — see AGENTS.md on why it
+    was removed), the same "Model set to X." notice `/model` uses
+    mid-session."""
     _stub_list_models(monkeypatch, models=["llama3.1", "gemma4"])
     app = _make_app(model_name="does-not-exist")
     async with app.run_test() as pilot:

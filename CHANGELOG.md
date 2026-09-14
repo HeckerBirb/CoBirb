@@ -10,12 +10,13 @@ and its §12 decisions record for the ones that were designed and then deliberat
   literal string `.` around when it wasn't given — which used to show up verbatim in the header
   panel and status bar (`CoBirb · model · .`). Resolved once in `cli.main()` rather than at every
   call site.
-- The header panel naming the configured default rather than the model the startup picker
-  actually selected is **not fixed** — a fix was tried, it wrote a second, visually identical
-  header panel right below the first, which is worse than the original bug, so it was reverted the
-  same day. Documented as a known, accepted limitation in `AGENTS.md` (the transcript is
-  append-only; `/model`'s existing "Model set to X." notice was already the closest thing to a
-  correction, before and after this release, unchanged either way).
+- **Removed the interactive app's header panel.** It named the model configured at startup, not
+  necessarily the one actually running — if the configured model wasn't available and the startup
+  picker changed it, the panel kept naming the original for the rest of the session, because the
+  transcript it lived in is append-only and can't be corrected in place. A same-day fix attempt
+  (writing a second, corrected panel) produced a visibly duplicated banner instead, which is worse
+  than the original bug. Removed rather than patched further: persona/model/plan/cwd/session are
+  already all on the live status line, which self-corrects because it isn't an append-only log.
 
 ## [0.9.1]
 

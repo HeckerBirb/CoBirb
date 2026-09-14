@@ -33,7 +33,7 @@ class TuiIO(I_OAdapter):
     """Renders orchestrator output into a ``CoBirbApp``'s transcript.
 
     Implements the ``I_OAdapter`` contract plus the same duck-typed extras
-    ``TerminalIO`` exposes (``spinner``, ``render_header``, ``render_answer``,
+    ``TerminalIO`` exposes (``spinner``, ``render_answer``,
     ``render_plan``, ``render_validation``, ``render_tool_call``), so the
     orchestrator's ``getattr(io, "...", None)`` hooks all find what they look
     for and nothing falls back to plain text.
@@ -152,11 +152,6 @@ class TuiIO(I_OAdapter):
         ``Orchestrator._chat``).
         """
         return None
-
-    def render_header(
-        self, persona_name: str, model_name: str, cwd: str, session_path: str | None = None
-    ) -> None:
-        self._write(render.build_header_panel(persona_name, model_name, cwd, session_path))
 
     def render_answer(self, persona_name: str, text: str) -> None:
         """The finished reply, as a marked message rather than a titled panel.

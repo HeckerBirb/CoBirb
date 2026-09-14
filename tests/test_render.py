@@ -68,27 +68,6 @@ def test_unified_diff_is_empty_when_nothing_changed():
 # --------------------------------------------------------------------------- #
 # Panels
 # --------------------------------------------------------------------------- #
-def test_header_panel_carries_persona_model_and_cwd():
-    panel = render.build_header_panel("Noah", "ollama/llama3.1", "/work")
-
-    assert isinstance(panel, Panel)
-    printed = _printed(panel)
-    assert "Noah" in printed
-    assert "ollama/llama3.1" in printed
-    assert "/work" in printed
-    assert "session:" not in printed
-
-
-def test_header_panel_adds_the_session_path_only_when_given():
-    printed = _printed(render.build_header_panel("Noah", "m", "/work", "/tmp/s.json"))
-
-    assert "session: /tmp/s.json" in printed
-
-
-def test_header_panel_says_so_when_no_model_is_configured():
-    assert "(no model configured)" in _printed(render.build_header_panel("Noah", "", "/work"))
-
-
 @pytest.mark.parametrize(
     "builder,expected_title",
     [

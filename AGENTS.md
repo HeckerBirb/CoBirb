@@ -601,9 +601,10 @@ class SessionCrypto(abc.ABC):
   Only interactive mode calls it, and only via `cli._build_model(None, cwd)` — a `plugins.model`
   lacking it breaks nothing.
 - **Duck-typed rendering hooks** beyond the contract, implemented by both shipped adapters:
-  `spinner`, `begin_stream`, `render_header`, `render_answer`, `render_plan`, `render_validation`,
+  `spinner`, `begin_stream`, `render_answer`, `render_plan`, `render_validation`,
   `render_tool_call`, `write_error`. Reached via `getattr(io, ..., None)` with a plain-`render()`
-  fallback, so a future speech/vision adapter isn't forced to implement chrome.
+  fallback, so a future speech/vision adapter isn't forced to implement chrome. (`render_header`
+  was one of these too, until v0.9.2 removed it — §9.)
 - **`Tool.name` is a method, and only a method.** Built-ins declare `NAME: ClassVar[str]` and
   inherit `name()` from `CobirbTool`; a tool that exposes `name` as a plain attribute is rejected
   by `ToolRegistry.register` with a message saying so, and `cli._merge_tool_plugins` reports and
@@ -934,16 +935,21 @@ the base text colour but doesn't reach those. Not fixed here: doing so needs a R
 threaded through both `TerminalIO`'s `Console` and the TUI's `RichLog`, which is more machinery
 than this revision's scope justified.
 
-**The header panel (`build_header_panel`) can go stale, and that's a known, accepted limit, not
-a bug to "fix" by writing a second one.** It's written once, in `on_mount`, from whatever model
-`__init__` resolved — before `_select_model_worker(auto=True)`'s async check has run, so if the
-configured model turns out to be unavailable and the startup picker changes it, the panel above
-still names the original. `TranscriptLog`/`RichLog` is append-only (§ its own docstring): there is
-no way to edit a line already written, only to write another one — and a second, visually
-identical header panel right below the first (tried once, in v0.9.2, reverted the same day) reads
-as a bug, not a correction. `_apply_selected_model` writes a plain "Model set to X." notice
-instead, the same one `/model` already uses mid-session — less complete than a truly corrected
-banner, but honest about what actually ran, without duplicating the chrome to say so.
+**The header panel (`build_header_panel`) was removed in v0.9.2. Do not reintroduce it without a
+fresh decision on how it avoids going stale.** It used to be written once, in `on_mount`, from
+whatever model `__init__` resolved — before `_select_model_worker(auto=True)`'s async check had
+run, so if the configured model turned out to be unavailable and the startup picker changed it,
+the panel stayed wrong for the rest of the session. `TranscriptLog`/`RichLog` is append-only (§
+its own docstring): there is no way to edit a line already written, only to write another one —
+and a second, visually identical panel right below the first (tried once, reverted the same day
+after it shipped and was seen live) reads as a bug, not a correction. Removed rather than papered
+over with a plain notice standing in for it: persona/model/plan/cwd/session are already all on
+the live `StatusBar`, which self-corrects because it's a reactive widget, not an append-only log —
+the header panel was duplicating that information in a place that couldn't stay accurate. A real
+fix exists (delay the whole startup banner until the model check resolves, at the cost of
+reordering it after any startup picker interaction and, for a resumed session, after the replayed
+history; or teach `TranscriptLog` to replace a specific previous write) but needs a decision on
+that trade-off, not a default to drift back into.
 
 **`cwd` is resolved to an absolute path once, in `cli.main()`, before any subcommand or mode sees
 it** (v0.9.2) — `os.path.abspath(args.cwd) if args.cwd else os.getcwd()`, replacing what used to be

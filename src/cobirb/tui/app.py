@@ -237,9 +237,6 @@ class CoBirbApp(App[None]):
 
         self.query_one("#streaming-preview", StreamPreview).display = False
 
-        self.io_bridge.render_header(
-            self.persona.name, self.resolved_model_name, self.cwd, self.session_path
-        )
         # A persona greets in character; with no persona (the default) there
         # is no character to greet as, so this stays a plain ready line
         # rather than inventing a voice the user didn't ask for.
@@ -1182,9 +1179,6 @@ class CoBirbApp(App[None]):
         # worse than either alone. The manager here is already decrypted, so
         # the history is replayed straight from it.
         self.query_one("#transcript", TranscriptLog).clear()
-        self.io_bridge.render_header(
-            self.persona.name, self.resolved_model_name, self.cwd, path
-        )
         self.render_history(turns, os.path.basename(path))
 
         self.query_one(SessionsPane).set_status(

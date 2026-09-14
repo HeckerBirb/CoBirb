@@ -60,25 +60,6 @@ def unified_diff(path: str, old_str: str, new_str: str) -> str:
     return "".join(diff)
 
 
-def build_header_panel(
-    persona_name: str, model_name: str, cwd: str, session_path: str | None = None
-) -> Panel:
-    """A compact banner: who's speaking, on what model, where.
-
-    Shown once at the top of a session (and again after a ``/persona``
-    switch) by ``TerminalIO``; written into the transcript at mount time by
-    the TUI.
-    """
-    lines = [f"[bold]{persona_name}[/] · {model_name or '(no model configured)'} · {cwd}"]
-    if session_path:
-        lines.append(f"session: {session_path}")
-    # Feather Gray, not the accent: this banner doesn't mean anything the way
-    # a plan/validation/diff panel's colour does — it's chrome (who/what/where),
-    # so it takes the same secondary tone the rest of the chrome uses rather
-    # than competing with the one accent for attention.
-    return Panel("\n".join(lines), expand=False, border_style=FEATHER_GRAY)
-
-
 def build_plan_panel(persona_name: str, text: str) -> Panel:
     """Plan mode's planning-phase reply — the plan the model is about to
     follow, shown before any tool runs."""

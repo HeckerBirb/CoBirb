@@ -22,7 +22,7 @@ class TerminalIO(I_OAdapter):
 
     Beyond the ``I_OAdapter`` contract (``render``/``listen``/``view``/
     ``confirm``), this concrete adapter exposes a few extra, duck-typed
-    rendering hooks — ``spinner``, ``render_header``, ``render_answer``,
+    rendering hooks — ``spinner``, ``render_answer``,
     ``render_tool_call`` — that the orchestrator and CLI reach for via
     ``getattr(io, "...", None)`` when present, falling back to plain text
     otherwise. Keeping them off the abstract SPI means a future speech/
@@ -106,12 +106,6 @@ class TerminalIO(I_OAdapter):
         streaming preview is already marked).
         """
         self._console.print(render.stream_marker(), end="")
-
-    def render_header(
-        self, persona_name: str, model_name: str, cwd: str, session_path: str | None = None
-    ) -> None:
-        """A compact banner shown once at the top of a session."""
-        self._console.print(render.build_header_panel(persona_name, model_name, cwd, session_path))
 
     def render_answer(self, persona_name: str, text: str) -> None:
         """The assistant's finished reply: markdown behind a ``>`` marker.

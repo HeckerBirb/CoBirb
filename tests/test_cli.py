@@ -1313,9 +1313,9 @@ def test_describe_plugins_never_reports_to_stderr_itself(monkeypatch, tmp_path, 
 
 
 # --------------------------------------------------------------------------- #
-# Phase D: rendering the final answer / interactive header through io's
-# rich chrome hooks (see TerminalIO.render_answer/render_header) when it
-# has them, falling back to plain text/no-op otherwise.
+# Phase D: rendering the final answer through io's rich chrome hook (see
+# TerminalIO.render_answer) when it has one, falling back to plain text
+# otherwise.
 # --------------------------------------------------------------------------- #
 class _RecordingAnswerIO:
     def __init__(self):
