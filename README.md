@@ -24,12 +24,28 @@ opt a capability in.**
 
 ## Status
 
-🚧 **v0.5.1.** The core loop, built-in tools, the permission model,
+🚧 **v0.7.0.** The core loop, built-in tools, the permission model,
 encrypted sessions and a local Ollama provider — plus the things that make it usable on real
 work: context compaction so long sessions don't degrade, project instructions, `.gitignore`
 awareness, a `repo_map` tool so it can find its way around, a diff shown before any write,
 `/undo` and `/diff`, credential redaction, an opt-in "run my tests after you change something"
 loop, and a headless mode for CI.
+
+**0.7 is the hardening release** — the last one before 1.0. The plugin SPI is now **frozen and
+versioned**: within a version changes are additive only, a plugin declares what it was written
+against with `COBIRB_SPI = 1`, and one that needs a newer CoBirb is refused with a message saying
+so instead of failing later. Session files carry a schema version with a migration path, and one
+written by a *newer* CoBirb is declined rather than misread and saved back wrong. Session
+encryption now records its own KDF parameters, which is what made it possible to raise the scrypt
+cost to OWASP's current recommendation without orphaning the files already on disk — old sessions
+still open. See §12.3 of [`AGENTS.md`](./AGENTS.md) for the full security review.
+
+**New in 0.6 — a running session stops being a one-shot commitment.** Type while the model is
+answering and it **redirects the turn in progress** rather than queuing behind it — mid-stream,
+where the model supports being cut off. **Branch a conversation** into a new file to try a
+different direction (`--branch`, or the Sessions tab) without disturbing the original. And
+`cobirb plugin install ./my-plugin` makes a plugin on your disk something CoBirb actually
+discovers — local only, no registry, nothing fetched.
 
 **New in 0.5 — the Flock.** `cobirb flock -p "add CSV export"` divides a piece of work between
 several agents that cannot see each other. One *Brainy Birb* plans it, designs the interfaces and
@@ -47,13 +63,28 @@ plugin SPI, and the reasoning behind all of it.
 
 ## Quick start
 
-Requires a local [Ollama](https://ollama.com) server with a model pulled.
+Starting from nothing, on a machine with [Ollama](https://ollama.com) installed:
 
 ```bash
-pip install -e ".[dev]"
+ollama pull qwen2.5-coder:14b     # any local model works; this one is a reasonable default
+                                  # for coding work. See `cobirb help model` for choosing by
+                                  # VRAM budget, and for the num_ctx trap worth knowing about.
+pip install -e .                  # or ".[dev]" if you intend to run the test suite
 
 # Interactive: the full-screen app.
-COBIRB_MODEL_NAME="llama3.1" cobirb
+COBIRB_MODEL_NAME="qwen2.5-coder:14b" cobirb
+```
+
+⚠️ **Name the tag.** A bare `qwen2.5-coder` means `qwen2.5-coder:latest` to Ollama, which is a
+*different model* from `qwen2.5-coder:14b` and may not be pulled at all. CoBirb checks before a
+Flock run and tells you which tags the endpoint actually has; elsewhere you'll get a 404 with the
+server's own explanation quoted.
+
+Everything else:
+
+```bash
+# Interactive, with the model set in config instead of the environment.
+cobirb
 
 # One-shot: plain stdout, pipes and scripts like any CLI.
 COBIRB_MODEL_NAME="llama3.1" cobirb -p "list the files in this directory" --allow-tool=list_dir
@@ -72,6 +103,16 @@ cobirb --session ~/.cobirb/sessions/session-20260912-185817.json -w
 
 # Read one back as markdown. Plaintext, deliberately — that's what sharing is.
 cobirb --session ~/.cobirb/sessions/session-20260912-185817.json -w --export out.md
+
+# Branch a conversation to try a different direction. The original is untouched
+# and still resumable; --branch-at N forks from turn N instead of the end.
+cobirb --session ~/.cobirb/sessions/session-20260912-185817.json -w \
+  --branch ~/.cobirb/sessions/other-approach.json
+
+# Plugins you have on disk. Local only — nothing is fetched, there is no registry.
+cobirb plugin install ./my-plugin
+cobirb plugin list
+cobirb plugin remove my-plugin
 ```
 
 Run the test suite with `pytest`.
@@ -85,9 +126,12 @@ loads it).
 Running `cobirb` with no `-p` opens a full-screen terminal app, with three tabs:
 
 - **Current** — the conversation. A **live status line** shows persona · model · plan mode ·
-  working directory, kept current as you change it. A **boxed input**: submit and it greys out
-  while the turn runs, then comes back — there's no "continue? [y/N]" to answer, you just keep
-  typing. The **transcript** reads as one column: your prompt and the model's reply
+  working directory, kept current as you change it. A **boxed input** that stays open while the
+  turn runs: send another message and it **steers the turn already in flight** rather than queuing
+  behind it — the model is cut off mid-sentence where it supports that, keeps what it had already
+  said, and takes your correction into account immediately. Steering messages are marked `»` in
+  the transcript so they read as the interjection they were. There's no "continue? [y/N]" to
+  answer either; you just keep typing. The **transcript** reads as one column: your prompt and the model's reply
   each carry a `>` marker, in different colours, with the reply still rendered as markdown.
   Tool calls, errors and plan/validation phases stay in panels — they aren't conversation.
   Drag to select any of it and `ctrl+c` copies it. **Tool approval is a dialog** — `y` allow once, `a` allow for the rest of the session,
@@ -170,6 +214,12 @@ Being straight about the edges, since the rest of this page makes strong claims:
   `/context`); old tool results are summarised away first, and a large file is read a
   range at a time rather than whole. Nothing is lost from your session file, only from
   what the model is shown at once.
+- **Installing a plugin runs that plugin's code.** `cobirb plugin install` hands the directory to
+  `pip`, and pip executes the package's own build backend — so the install is arbitrary code
+  execution at your privileges, before CoBirb has looked at a single class and before any
+  permission prompt exists to ask you about it. No prompt can cover this; it is what installing any
+  Python package means. A plugin is code you chose to run, and choosing it *is* the security
+  decision. Afterwards its tools are gated like any others; the install itself is not.
 - **An MCP server you configure is a program you chose to run.** CoBirb's "no telemetry, no
   outbound network" promises are about CoBirb. A configured server can open its own network
   connections and send the arguments of every call it receives — file paths, code, queries —

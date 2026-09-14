@@ -6,13 +6,23 @@ the plugin registry so a stronger/available scheme can be dropped in later.
 
 The scheme:
 
-    kdf   : scrypt (RFC 7914 interactive parameters: N=2**14, r=8, p=1), with a
-            fresh random salt per encryption, stretching the password into a
-            32-byte key.
+    kdf   : scrypt (N=2**17, r=8, p=1 — OWASP's current recommendation, ~128
+            MiB per derivation), with a fresh random salt per encryption,
+            stretching the password into a 32-byte key.
     bulk  : AES-256-GCM (authenticated encryption) over that key.
 
 The password is used exactly once to derive the session key; it is never stored.
 The salt and nonce are not secret and travel with the ciphertext.
+
+**The blob says how it was made.** A versioned blob is ``b"cobirb1"`` + a
+base64 JSON header naming the KDF and its cost + a newline + the base64 of
+``salt || nonce || ciphertext``. That header is the v0.7.0 hardening change,
+and it exists for one reason: the original format was bare base64 with nowhere
+to record its parameters, which meant the cost constants could never be raised
+— doing so would have silently orphaned every session file already written.
+Blobs without the marker are pre-v0.7.0 and are read with the parameters that
+era used (N=2**14); they keep opening, and are written back in the new format
+the next time the session is saved.
 
 Note on post-quantum crypto: earlier design notes called for wrapping the key
 in an ML-KEM-768 (Kyber) seal. That's a key *encapsulation* mechanism for two
@@ -30,6 +40,8 @@ implementation, deliberately not the PQ seal the original design imagined.
 from __future__ import annotations
 
 import base64
+import binascii
+import json
 import os
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -39,12 +51,62 @@ from ...typing.spi import SessionCrypto
 
 _SALT_LEN = 16
 _NONCE_LEN = 12
-# RFC 7914 "interactive" parameters: costs roughly tens of milliseconds and
-# ~16 MiB of memory per derivation, deliberately slow to brute-force offline
-# without being noticeable for a CLI unlocking a session.
-_SCRYPT_N = 2**14
+
+# Current scrypt cost. 2**17 is ~128 MiB and a few hundred milliseconds per
+# derivation — OWASP's present recommendation, and the right end of the range
+# for a file that sits on disk indefinitely rather than a login that happens
+# constantly. The cost is paid once, when a session is unlocked.
+#
+# Raising this was only possible because the blob now records which parameters
+# produced it (see the format note below). Before that, these constants were
+# effectively permanent: change them and every session file ever written stops
+# decrypting, with no way to tell which ones were which.
+_SCRYPT_N = 2**17
 _SCRYPT_R = 8
 _SCRYPT_P = 1
+
+# What v0.1.0–v0.6.0 wrote: RFC 7914 "interactive" parameters, ~16 MiB. Kept
+# so those files still open. Never used for new writes.
+_LEGACY_SCRYPT = {"n": 2**14, "r": 8, "p": 1}
+
+# Blob format marker. Versioned blobs are `b"cobirb1"` + one JSON header line
+# + the raw bytes; anything without the marker is a pre-v0.7.0 blob, which was
+# bare base64 with no room to say anything about itself. That omission is the
+# finding this addresses: a crypto format that cannot describe its own
+# parameters can never change them, which means it can never be strengthened.
+_MAGIC = b"cobirb1"
+_FORMAT_VERSION = 1
+
+
+def _split(blob: bytes) -> tuple[dict[str, int], bytes]:
+    """Separate a blob's KDF parameters from its ciphertext.
+
+    Two formats, and both have to keep working: a pre-v0.7.0 blob is bare
+    base64 with nothing to say about how it was derived, so it is taken as
+    the legacy parameters — which is exactly what it was. A versioned blob
+    states them, and is read back at whatever cost it was written with, not
+    whatever cost is current.
+
+    A header from a *newer* format version is refused rather than guessed at,
+    on the same reasoning as the session schema: failing to open a file is
+    recoverable, and a wrong password is what a mis-derived key looks like,
+    which would send someone chasing the wrong problem entirely.
+    """
+    if not blob.startswith(_MAGIC):
+        return dict(_LEGACY_SCRYPT), blob
+    header_b64, _, body = blob[len(_MAGIC) :].partition(b"\n")
+    try:
+        header = json.loads(base64.b64decode(header_b64))
+        params = {"n": int(header["n"]), "r": int(header["r"]), "p": int(header["p"])}
+        version = int(header["v"])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ValueError(f"this session's header is unreadable: {exc}") from exc
+    if version > _FORMAT_VERSION:
+        raise ValueError(
+            f"this session uses crypto format v{version}, and this CoBirb reads up to "
+            f"v{_FORMAT_VERSION} — it was written by a newer CoBirb"
+        )
+    return params, body
 
 
 class AesGcmScryptSessionCrypto(SessionCrypto):
@@ -84,12 +146,18 @@ class AesGcmScryptSessionCrypto(SessionCrypto):
                 "before encrypting a session."
             )
         salt = os.urandom(_SALT_LEN)
-        key = backend.scrypt_derive(password.encode(), salt)
+        key = backend.scrypt_derive(password.encode(), salt, _SCRYPT_N, _SCRYPT_R, _SCRYPT_P)
         nonce, ciphertext = backend.aes256_gcm_encrypt(plaintext_json.encode(), key)
-        # Serialize: base64 of salt || nonce || ciphertext (tag prepended to
-        # ciphertext). Salt and nonce are not secret; they must travel with
-        # the blob so decrypt() can reproduce the same key and cipher state.
-        return base64.b64encode(salt + nonce + ciphertext)
+        # Salt and nonce are not secret; they must travel with the blob so
+        # decrypt() can reproduce the same key and cipher state. The KDF
+        # parameters travel with it now too, for the same reason and one
+        # more: without them a future CoBirb cannot raise the cost without
+        # orphaning every file this one wrote.
+        header = json.dumps(
+            {"v": _FORMAT_VERSION, "kdf": "scrypt", "n": _SCRYPT_N, "r": _SCRYPT_R, "p": _SCRYPT_P},
+            sort_keys=True,
+        ).encode()
+        return _MAGIC + base64.b64encode(header) + b"\n" + base64.b64encode(salt + nonce + ciphertext)
 
     def decrypt(self, blob: bytes, password: str) -> str:
         backend = self._backend
@@ -98,9 +166,23 @@ class AesGcmScryptSessionCrypto(SessionCrypto):
                 "Crypto backend unavailable. Install the 'cryptography' library "
                 "before decrypting a session."
             )
-        raw = base64.b64decode(blob)
-        salt, nonce, ciphertext = raw[:_SALT_LEN], raw[_SALT_LEN : _SALT_LEN + _NONCE_LEN], raw[_SALT_LEN + _NONCE_LEN :]
-        key = backend.scrypt_derive(password.encode(), salt)
+        params, body = _split(blob)
+        # Both of these say the same thing — this is not a session file — and
+        # both exist because the alternative is a failure that *reads* like a
+        # wrong password, sending whoever hit it to re-type a password that was
+        # never the problem. Undecodable base64 used to surface as binascii's
+        # "Incorrect padding"; a truncated blob used to slice into an empty
+        # salt and nonce and fail inside the cipher instead.
+        try:
+            raw = base64.b64decode(body, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError(f"this does not look like a CoBirb session file: {exc}") from exc
+        if len(raw) <= _SALT_LEN + _NONCE_LEN:
+            raise ValueError("this file is too short to be a CoBirb session")
+        salt = raw[:_SALT_LEN]
+        nonce = raw[_SALT_LEN : _SALT_LEN + _NONCE_LEN]
+        ciphertext = raw[_SALT_LEN + _NONCE_LEN :]
+        key = backend.scrypt_derive(password.encode(), salt, params["n"], params["r"], params["p"])
         return backend.aes256_gcm_decrypt(ciphertext, key, nonce).decode()
 
 
@@ -112,9 +194,14 @@ class _Backend:
     A fresh random salt and nonce are generated per encryption.
     """
 
-    def scrypt_derive(self, password: bytes, salt: bytes) -> bytes:
-        """Stretch a password into a 32-byte key via scrypt (RFC 7914)."""
-        kdf = Scrypt(salt=salt, length=32, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P)
+    def scrypt_derive(self, password: bytes, salt: bytes, n: int, r: int, p: int) -> bytes:
+        """Stretch a password into a 32-byte key via scrypt (RFC 7914).
+
+        The cost parameters are arguments rather than constants read from the
+        module: decryption has to reproduce whatever cost the blob was
+        *written* with, which is not necessarily the current one.
+        """
+        kdf = Scrypt(salt=salt, length=32, n=n, r=r, p=p)
         return kdf.derive(password)
 
     def aes256_gcm_encrypt(self, plaintext: bytes, key: bytes) -> tuple[bytes, bytes]:

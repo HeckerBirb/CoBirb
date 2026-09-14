@@ -6,10 +6,13 @@ default-deny policy layer.
 """
 from __future__ import annotations
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 from .typing.spi import (  # noqa: F401  (public SPI)
+    MIN_SUPPORTED_SPI_VERSION,
+    SPI_VERSION,
     I_OAdapter,
+    IncompatiblePlugin,
     ModelProvider,
     Persona,
     SessionCrypto,
@@ -28,5 +31,10 @@ __all__ = [
     "SessionCrypto",
     "Persona",
     "SteeringInterrupted",
+    # The frozen SPI's own version surface (v0.7.0) — a plugin author checking
+    # compatibility at runtime should not have to import from a private path.
+    "SPI_VERSION",
+    "MIN_SUPPORTED_SPI_VERSION",
+    "IncompatiblePlugin",
     "__version__",
 ]

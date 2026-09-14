@@ -267,6 +267,58 @@ def test_session_files_are_written_readable_only_by_their_owner(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# Schema versioning and migration (v0.7.0). The machinery exists so a future
+# breaking change has somewhere to live; the property that earns its keep
+# today is refusing a file written by a newer CoBirb.
+# --------------------------------------------------------------------------- #
+def test_every_schema_step_has_a_migration():
+    """A bump to SCHEMA_VERSION without a migration to match would turn every
+    existing session file into an unopenable one. This is the guard that makes
+    that a failing test rather than a support ticket."""
+    for version in range(1, session_module.SCHEMA_VERSION):
+        assert version in session_module._MIGRATIONS, f"no migration from schema v{version}"
+
+
+def test_a_session_from_a_newer_cobirb_is_refused_not_guessed_at():
+    """Opening it optimistically wouldn't fail — it would succeed with the
+    wrong content and then save that back over the original. Declining is
+    recoverable; rewriting someone's history with a misreading is not."""
+    with pytest.raises(session_module.UnsupportedSessionSchema, match="newer CoBirb"):
+        Session.from_dict({"schema": session_module.SCHEMA_VERSION + 1, "turns": []})
+
+
+def test_a_session_with_no_schema_field_loads_as_the_original_version():
+    """Files written before the field existed."""
+    assert Session.from_dict({"turns": []}).schema == 1
+
+
+def test_a_nonsense_schema_value_is_refused():
+    with pytest.raises(session_module.UnsupportedSessionSchema, match="not a version number"):
+        Session.from_dict({"schema": "brand new", "turns": []})
+
+
+def test_migrations_chain_in_order_up_to_the_current_version(monkeypatch):
+    """There is no real migration yet — every field added since schema 1 was
+    optional with a default — so the chain is exercised with synthetic steps.
+    What is being pinned is that each one runs, in order, and that the payload
+    ends up stamped with the version it was brought up to."""
+    monkeypatch.setattr(session_module, "SCHEMA_VERSION", 3)
+    monkeypatch.setattr(
+        session_module,
+        "_MIGRATIONS",
+        {
+            1: lambda data: {**data, "trail": data.get("trail", []) + ["1->2"]},
+            2: lambda data: {**data, "trail": data.get("trail", []) + ["2->3"]},
+        },
+    )
+
+    upgraded = session_module.migrate({"schema": 1, "turns": []})
+
+    assert upgraded["trail"] == ["1->2", "2->3"]
+    assert upgraded["schema"] == 3
+
+
+# --------------------------------------------------------------------------- #
 # fork_session() — session branching (v0.6.0): trying a different direction
 # from a point already on disk, without disturbing what got you there.
 # --------------------------------------------------------------------------- #

@@ -12,7 +12,7 @@ import os
 import secrets
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from . import paths
 
@@ -21,6 +21,67 @@ from . import paths
 PHASE_PLAN = "plan"
 PHASE_ACT = "act"
 PHASE_VALIDATE = "validate"
+
+# The session-file schema this CoBirb writes. See `migrate` for what a bump
+# obliges you to do, and for why this is still 1 after eight releases.
+SCHEMA_VERSION = 1
+
+
+class UnsupportedSessionSchema(ValueError):
+    """A session file's schema is one this CoBirb cannot read.
+
+    A ``ValueError`` so the existing "could not open that session" paths in
+    the CLI and the Sessions tab report it like any other unreadable file,
+    with its own message passed through intact (see
+    ``runtime.sessions.session_open_error``).
+    """
+
+
+# Upgrades, keyed by the version each one reads. `_MIGRATIONS[n]` takes a
+# schema-n payload and returns a schema-(n+1) one; `migrate` chains them.
+#
+# **Empty, and not a placeholder.** Every field added since schema 1 —
+# `phase`, `validation`, `flock`, `forked_from` — was added as optional with a
+# default, so an old file loads correctly with no conversion at all. That is
+# the cheap path and the one to keep taking: a new optional field needs no
+# migration and no bump. A bump is for changes that make an old payload
+# genuinely *wrong* rather than merely sparse — a renamed field, a changed
+# unit, a restructured turn — and then the function that fixes it goes here,
+# `SCHEMA_VERSION` goes up, and a round-trip test covers the upgrade.
+_MIGRATIONS: "dict[int, Callable[[dict[str, Any]], dict[str, Any]]]" = {}
+
+
+def migrate(data: dict[str, Any]) -> dict[str, Any]:
+    """Bring a session payload up to ``SCHEMA_VERSION``.
+
+    Refuses a file from the *future* rather than reading it optimistically.
+    This is the whole reason the version is written down: a newer CoBirb may
+    have changed what a field means, and a best-effort read of it would not
+    fail — it would succeed, quietly, with the wrong content, and then save
+    that back over the original. Declining to open a file is recoverable;
+    rewriting someone's history with a misreading of it is not.
+
+    Missing version means schema 1: files written before the field existed.
+    """
+    version = data.get("schema", 1)
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise UnsupportedSessionSchema(f"session schema {version!r} is not a version number")
+    if version > SCHEMA_VERSION:
+        raise UnsupportedSessionSchema(
+            f"this session is schema v{version}, and this CoBirb understands up to "
+            f"v{SCHEMA_VERSION} — it was written by a newer CoBirb, so upgrade rather "
+            "than opening it here, which would misread it and then save the misreading"
+        )
+    while version < SCHEMA_VERSION:
+        upgrade = _MIGRATIONS.get(version)
+        if upgrade is None:  # pragma: no cover - guarded by test_every_schema_step_has_a_migration
+            raise UnsupportedSessionSchema(
+                f"no migration from session schema v{version} to v{version + 1}"
+            )
+        data = upgrade(data)
+        version += 1
+        data["schema"] = version
+    return data
 
 
 def default_sessions_dir() -> str:
@@ -134,7 +195,7 @@ class Turn:
 class Session:
     """An encrypted, persisted conversation."""
 
-    schema: int = 1
+    schema: int = SCHEMA_VERSION
     created_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     working_dir: str = "."
     # "none" rather than "noah": personas are opt-in, so a session that
@@ -184,8 +245,13 @@ class Session:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Session":
+        # Every path that reads a session goes through here — SessionManager.load,
+        # fork_session, the tests — so this is the one place the version has to
+        # be honoured, and putting it anywhere else would leave a way in that
+        # skips it.
+        data = migrate(data)
         return cls(
-            schema=data.get("schema", 1),
+            schema=data.get("schema", SCHEMA_VERSION),
             created_at=data.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             working_dir=data.get("working_dir", "."),
             persona=data.get("persona", "none"),

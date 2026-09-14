@@ -128,6 +128,114 @@ def test_load_plugins_entry_point_failure_is_captured_not_raised(monkeypatch, tm
 
 
 # --------------------------------------------------------------------------- #
+# SPI versioning (frozen at v0.7.0). A plugin declares COBIRB_SPI; declaring
+# nothing means 1. The check happens at the loader boundary so an unusable
+# plugin never reaches the registry — and, like every other plugin failure
+# here, it is reported rather than raised.
+# --------------------------------------------------------------------------- #
+def _entry_point_serving(plugin_class, name="versioned-plugin"):
+    class _EntryPoint:
+        def __init__(self):
+            self.name = name
+
+        def load(self):
+            return plugin_class
+
+    return _EntryPoint()
+
+
+def _discover_only(monkeypatch, tmp_path, entry_point):
+    """load_plugins() with nothing but ``entry_point`` in play."""
+    import cobirb.plugins.loader as loader_mod
+
+    monkeypatch.setattr(loader_mod.im, "entry_points", lambda **kwargs: [entry_point])
+    monkeypatch.setenv("COBIRB_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    return load_plugins()
+
+
+class _PlainTool(Tool):
+    def name(self):
+        return "plain"
+
+    def description(self):
+        return ""
+
+    def parameters(self):
+        return {}
+
+    def execute(self, arguments):
+        return None
+
+
+def test_a_plugin_declaring_no_spi_version_is_taken_as_version_one(monkeypatch, tmp_path):
+    """Everything written before the freeze existed, and every plugin whose
+    author never thinks about this, has to keep working."""
+    discovered, errors = _discover_only(
+        monkeypatch, tmp_path, _entry_point_serving(_PlainTool)
+    )
+
+    assert discovered == {"tool:versioned-plugin": _PlainTool}
+    assert errors == {}
+
+
+def test_a_plugin_from_the_future_is_refused_with_an_actionable_message(monkeypatch, tmp_path):
+    """It would be calling into methods this core doesn't have. Loading it to
+    fail later, at a worse moment, helps nobody — and the message has to tell
+    its user which side needs upgrading."""
+
+    class _FromTheFuture(_PlainTool):
+        COBIRB_SPI = 99
+
+    discovered, errors = _discover_only(
+        monkeypatch, tmp_path, _entry_point_serving(_FromTheFuture)
+    )
+
+    assert discovered == {}
+    assert "upgrade CoBirb" in errors["entry-point:versioned-plugin"]
+
+
+def test_a_non_integer_spi_declaration_is_a_mistake_not_a_shrug(monkeypatch, tmp_path):
+    """`COBIRB_SPI = "1"` would otherwise compare unequal to every supported
+    version forever, or be skipped and let a real mismatch through."""
+
+    class _Stringly(_PlainTool):
+        COBIRB_SPI = "1"
+
+    discovered, errors = _discover_only(
+        monkeypatch, tmp_path, _entry_point_serving(_Stringly)
+    )
+
+    assert discovered == {}
+    assert "must be an integer" in errors["entry-point:versioned-plugin"]
+
+
+def test_one_incompatible_plugin_does_not_stop_the_others(monkeypatch, tmp_path):
+    """The whole point of reporting rather than raising."""
+
+    class _FromTheFuture(_PlainTool):
+        COBIRB_SPI = 99
+
+    import cobirb.plugins.loader as loader_mod
+
+    monkeypatch.setattr(
+        loader_mod.im,
+        "entry_points",
+        lambda **kwargs: [
+            _entry_point_serving(_FromTheFuture, "too-new"),
+            _entry_point_serving(_PlainTool, "fine"),
+        ],
+    )
+    monkeypatch.setenv("COBIRB_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+
+    discovered, errors = load_plugins()
+
+    assert "tool:fine" in discovered
+    assert "entry-point:too-new" in errors
+
+
+# --------------------------------------------------------------------------- #
 # Local plugin directories (cobirb/plugins/<name>/). This mechanism is more
 # subtle than it looks: a dropped-in directory is only actually usable once
 # it's *also* installed as a real Python distribution named

@@ -523,6 +523,19 @@ The slot is decided by **inspecting the class hierarchy** against the SPI bases,
 name. Discovery is lazy, cached per run, and non-fatal — errors go to stderr (CLI) or the Plugins
 tab (TUI) and the run continues.
 
+**The SPI is frozen as of v0.7.0** (`SPI_VERSION = 1`). Within a version, changes are **additive
+only**: a new optional duck-typed hook is fine (that is how `cancel()` and
+`interrupt_current_reply()` arrived), a new abstract method or a changed signature is not, because
+every existing plugin breaks the moment core calls it. A change that cannot be made additively
+bumps `SPI_VERSION` — a deliberate, visible event, never something a refactor does by accident —
+and `MIN_SUPPORTED_SPI_VERSION` is how support for old plugins is eventually dropped. A plugin
+declares what it targets with a class attribute, `COBIRB_SPI = 1`; declaring nothing means 1, which
+covers everything written before the freeze and every author who will never care. `check_spi_version`
+runs at the loader boundary, so an unusable plugin never reaches the registry, and a version it
+cannot honour is reported like any other plugin failure (`IncompatiblePlugin`, run continues). A
+non-integer declaration is an error rather than a shrug — `COBIRB_SPI = "1"` would otherwise
+compare unequal to every supported version forever.
+
 - **Tools are additive.** Every discovered `Tool` is registered alongside the built-ins; the policy
   still gates whether it can *run*, so no extra trust decision is needed to make it visible. A name
   collision with a *different* implementation is skipped and reported; the same plugin found twice
@@ -695,9 +708,17 @@ they're enforced in `policy.py` and the crypto backend, not by asking the model 
 logged; resist offline brute-force of a stolen file.
 
 ```
-on disk = base64( salt ‖ nonce ‖ AES-256-GCM(plaintext, key, aad=b"cobirb") )
-          key = scrypt(password, salt)   ← RAM only; N=2**14, r=8, p=1 (RFC 7914 interactive)
+on disk = b"cobirb1" ‖ base64(header) ‖ "\n" ‖ base64( salt ‖ nonce ‖ AES-256-GCM(…, aad=b"cobirb") )
+          header      = {"v":1,"kdf":"scrypt","n":131072,"r":8,"p":1}
+          key         = scrypt(password, salt, **header)   ← RAM only; N=2**17 (OWASP current)
 ```
+
+**The header is why the cost can ever change** (v0.7.0, §12.3). Before it, the parameters lived only
+in module constants, so raising them would have silently orphaned every file already written — the
+format had no way to say which cost produced which blob. Blobs with no `cobirb1` marker are
+pre-v0.7.0, read at the N=2**14 that era used, and rewritten in the new format on the next save. A
+header claiming a *newer* format version is refused rather than guessed at: a mis-derived key is
+indistinguishable from a wrong password, which sends someone chasing the wrong problem.
 
 Fresh random salt and nonce per encryption; both travel with the ciphertext (not secret). Vetted
 `cryptography` library, never hand-rolled; the backend is a swappable plugin. The password derives
@@ -721,7 +742,22 @@ Plaintext shape (RAM only; disk holds the blob above):
 
 Each turn carries a content hash, verified on reload (`_verify_hashes`). The digest covers `role`,
 `content`, `tool_use` **and** `phase` — hashing the prose alone would accept a session whose
-recorded `read_file` had been rewritten into a `shell` call. Sessions default to
+recorded `read_file` had been rewritten into a `shell` call.
+
+**`schema` is honoured, not decorative** (v0.7.0). `session.migrate()` runs inside
+`Session.from_dict`, which every read path goes through, so there is no way in that skips it.
+`_MIGRATIONS[n]` upgrades a schema-*n* payload to *n+1* and the chain runs to `SCHEMA_VERSION`;
+a test asserts every step between 1 and current has one, so a bump without a migration fails the
+suite rather than becoming a support ticket. The registry is **empty on purpose** — every field
+added since schema 1 (`phase`, `validation`, `flock`, `forked_from`) was optional with a default,
+so old files load correctly with no conversion. Keep taking that path: a new optional field needs
+no migration and no bump. Bump only for a change that makes an old payload genuinely *wrong* — a
+rename, a changed unit, a restructured turn. A file from a *newer* schema is refused
+(`UnsupportedSessionSchema`), because reading it optimistically would not fail: it would succeed
+with the wrong content and then save that back over the original. Declining to open a file is
+recoverable; rewriting someone's history with a misreading of it is not.
+
+Sessions default to
 `$COBIRB_HOME/.cobirb/sessions/`; `--session <path>` works anywhere. Saved every turn (interactive)
 or once at the end (one-shot); on exit the reopen command is printed with a bare `-w`, so the
 password never reaches scrollback.
@@ -792,6 +828,15 @@ it can reach once running. An approved `npm test` has your full user privileges 
 `~/.ssh`. Decided: document this plainly (README has a "What CoBirb does not protect you from"
 section) rather than build a sandbox. The SPI allows a third party to replace the built-in `shell`
 tool with a sandboxing one, which is the right place for it. Don't quietly imply otherwise in docs.
+
+**Installing a plugin runs the plugin's code.** `cobirb plugin install` shells to `pip install -e`
+(§5.5), and pip executes the package's own build backend — so installing is *already* arbitrary
+code execution, before any policy layer is involved and before CoBirb has looked at a single class.
+No permission prompt covers this and none can: it is what installing any Python package means. The
+honest framing is the same one used for the shell gap: **a plugin is code you chose to run, at your
+own privileges, and choosing it is the security decision.** CoBirb narrows what it can do afterwards
+— the policy gates its tools like any other — but nothing gates the install itself. Reviewed
+v0.7.0; stated rather than papered over, and the README says it too.
 
 **Audit log** — append-only, local, never leaves the machine, **off by default** (`"audit_log":
 true`). Off because arguments are logged unredacted: `write_file`'s full content, `edit_file`'s
@@ -1037,10 +1082,16 @@ they are shaped around, deliberately.
   - ✅ **Session branching.** `session.fork_session()` (§9) — fork a conversation into a new,
     independent file and try a different direction from there, without disturbing the original.
     Distinct from the Flock's already-shipped GUID-based worker branching (§4m).
-- **v0.7.0 "Hardened" (next)** — SPI freeze and versioning, a real session-schema migration path, a
-  security review of the crypto and the plugin-install path, and documentation someone can start
-  from cold. The last release before 1.0, and now the *only* one: what used to be v0.7.0 "Aware"
-  no longer exists, so this moved up from 0.8–0.9 rather than leaving a gap in the numbering.
+- **v0.7.0 "Hardened" (done)** — the last release before 1.0.
+  - ✅ **SPI frozen and versioned** (§5.1). `SPI_VERSION = 1`, additive-only within a version,
+    `COBIRB_SPI` declared per plugin, incompatible plugins refused at the loader boundary.
+  - ✅ **Session-schema migration path** (§7). `migrate()` inside `from_dict`, a guard test that
+    every step has a migration, and a file from a newer CoBirb refused rather than misread.
+  - ✅ **Security review** (§12.3). Versioned crypto blob — which is what allowed the scrypt cost
+    to rise to N=2¹⁷ without orphaning existing files — clear errors for corrupt files, and the
+    plugin installer no longer shadowing the standard library on `sys.path`.
+  - ✅ **Cold-start documentation.** README opens from `ollama pull` onward, and states the
+    plugin-install code-execution boundary alongside the shell and MCP ones.
 - **v1.0.0** — judged by whether someone other than the author adopts it.
 - **v1.1.0 "Projects"** — a project is a password-encrypted batch of the sessions *and* memories
   belonging to one piece of work, with **no bleed-over between projects**. **Cross-session memory
@@ -1154,3 +1205,41 @@ already decided: **images are encrypted files under the project's own password, 
 stores a short descriptive "alt-text" rather than the image itself** — so a run can work out which
 image the user means from context and that alt-text, without decrypting every image in the project
 just to start a turn.
+
+### 12.3 The v0.7.0 security review
+
+What was examined before 1.0, what changed, and what was looked at and left alone. Recorded so the
+next review starts from a baseline rather than from scratch, and so "we looked at this" is a claim
+with a date attached.
+
+**Fixed: the session blob could not describe itself.** The original format was bare base64 of
+`salt || nonce || ciphertext`, with the scrypt cost living only in module constants. That made the
+parameters permanent — raising them would have silently orphaned every session file already
+written, with no way to tell an old blob from a new one. Blobs now carry a versioned header naming
+the KDF and its cost, headerless blobs are read with the parameters that era used, and a header
+from a newer format is refused rather than misread (a mis-derived key is indistinguishable from a
+wrong password, which sends someone chasing the wrong problem). With that in place the cost moved
+from N=2¹⁴ to **N=2¹⁷**, OWASP's current recommendation, ~0.3s per unlock.
+
+**Fixed: a corrupt file looked like a wrong password.** Undecodable base64 surfaced as binascii's
+"Incorrect padding"; a truncated blob sliced into an empty salt and nonce and failed inside the
+cipher. Both now say plainly that the file is not a CoBirb session.
+
+**Fixed: the plugin installer shadowed the standard library.** `_make_importable_in_this_process`
+inserted the freshly installed plugin directory at `sys.path[0]`, ahead of *everything*, so a
+plugin containing `types.py` or `logging.py` would shadow the real module for the rest of the
+process. Appended instead — it finds the new module just as reliably and leaves every existing
+import alone.
+
+**Looked at, left alone — AES-256-GCM + scrypt itself.** Fresh random salt and nonce per
+encryption, a constant AAD, the password used once and never stored, `cryptography`'s vetted
+primitives rather than anything hand-rolled, session files created 0600 via `os.open` (no window at
+the umask's mode). No change wanted. The no-post-quantum-KEM reasoning stands and is argued in
+`crypto.py`'s own docstring.
+
+**Looked at, cannot be fixed — installing a plugin executes its code.** See §8. Not a defect with a
+pending fix; it is what installing a Python package means, and it is stated rather than implied.
+
+**Deliberately still open: no sandbox.** An approved `shell` command runs at the user's full
+privileges (§8). Unchanged by this review, and unchanged on purpose — the SPI lets a third party
+replace the `shell` tool with a sandboxing one, which is where that work belongs.

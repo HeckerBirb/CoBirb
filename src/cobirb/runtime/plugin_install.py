@@ -172,7 +172,15 @@ def _make_importable_in_this_process(target: str) -> None:
     """
     importlib.invalidate_caches()
     if target not in sys.path:
-        sys.path.insert(0, target)
+        # Appended, never inserted at the front. A plugin directory at
+        # sys.path[0] takes precedence over *everything*, the standard library
+        # included, so a plugin that happens to contain `types.py`,
+        # `logging.py` or `json.py` would shadow the real module for the rest
+        # of the process — a hard failure a long way from its cause, and a
+        # trivially exploitable one if the plugin intended it. Appending finds
+        # the new module just as reliably, since nothing else provides that
+        # name, and leaves every existing import alone.
+        sys.path.append(target)
 
 
 def install_plugin(source_dir: str, *, replace: bool = False) -> InstallResult:

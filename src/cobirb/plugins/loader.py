@@ -47,6 +47,13 @@ def load_plugins(entry_points: im.EntryPoints | None = None) -> tuple[dict[str, 
             obj = ep.load()
             for kind, base in _INTERFACES.items():
                 if _is_subclass(obj, base):
+                    # Checked here, at the boundary, rather than at every call
+                    # site later: a plugin that cannot be honoured should never
+                    # reach the registry at all. Raises IncompatiblePlugin,
+                    # which the same handler reports as any other failure —
+                    # the run continues without it, as it does for a plugin
+                    # that simply fails to import.
+                    cobirb_typing.check_spi_version(obj)
                     discovered[f"{kind}:{ep.name}"] = obj
                     break
         except Exception as exc:  # noqa: BLE001 - fail-closed per plugin
@@ -106,5 +113,12 @@ def _load_local_plugin(path: str, kind: str) -> Any | None:
             obj = ep.load()
         except Exception as exc:  # noqa: BLE001
             raise PluginError(f"failed loading plugin {os.path.basename(path)}: {exc}") from exc
-        return obj if _is_subclass(obj, _INTERFACES[kind]) else None
+        if not _is_subclass(obj, _INTERFACES[kind]):
+            return None
+        # Deliberately *not* wrapped in PluginError: an incompatible plugin is
+        # not a broken one, and its own message already says what to do about
+        # it. load_plugins() files it under the same per-plugin error key
+        # either way, so the run continues without it.
+        cobirb_typing.check_spi_version(obj)
+        return obj
     return None

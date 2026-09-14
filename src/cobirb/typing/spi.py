@@ -2,12 +2,87 @@
 
 This module defines the *contract* that plugins implement. The core depends on
 these interfaces but never imports plugin internals.
+
+**This contract is frozen as of v0.7.0.** What that means, precisely, because
+"frozen" is a word people read optimistically:
+
+- Within an SPI version, changes are **additive only**. A new optional,
+  duck-typed hook (the way ``cancel()`` and ``interrupt_current_reply()``
+  arrived) is fine; a plugin that has never heard of it keeps working. New
+  *abstract* methods, renamed methods, and changed signatures are not fine,
+  because every existing plugin breaks the moment core calls them.
+- A change that cannot be made additively bumps ``SPI_VERSION``. That is a
+  deliberate, visible event, not something a refactor does by accident.
+- ``MIN_SUPPORTED_SPI_VERSION`` is how long old plugins keep working. Raising
+  it is how support is eventually dropped, and is equally deliberate.
+
+A plugin declares the version it was written against with a class attribute:
+
+    class MyTool(Tool):
+        COBIRB_SPI = 1
+
+Declaring nothing means 1 — everything written before the freeze existed, and
+the overwhelming majority of plugins that will never care. The loader checks
+the number and refuses, *non-fatally*, anything it cannot honestly support:
+a plugin from the future would be calling into methods this core does not
+have, and loading it to fail later at a worse moment helps nobody.
 """
 from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
+
+# The SPI revision this core implements, and the oldest it still accepts.
+# Both are 1: the interface is being frozen at its first stable shape rather
+# than renumbered to mark the occasion.
+SPI_VERSION = 1
+MIN_SUPPORTED_SPI_VERSION = 1
+
+# What a plugin class sets to declare which revision it was written against.
+# A plain class attribute rather than metadata or an extra entry point: it is
+# visible in the plugin's own source next to the class it describes, needs no
+# packaging ceremony, and costs a plugin author who doesn't care exactly
+# nothing, since its absence means 1.
+SPI_VERSION_ATTRIBUTE = "COBIRB_SPI"
+
+
+class IncompatiblePlugin(Exception):
+    """A plugin declares an SPI version this core cannot honour.
+
+    Separate from ``plugins.loader.PluginError`` (something went wrong while
+    loading) because nothing went wrong here: the plugin is intact and the
+    core is intact, and they simply do not have a contract in common. The
+    distinction matters for what the message should say — "this plugin needs
+    a newer CoBirb" is a different instruction to its user than "this plugin
+    is broken".
+    """
+
+
+def check_spi_version(plugin: Any) -> None:
+    """Raise ``IncompatiblePlugin`` unless ``plugin`` declares a usable SPI.
+
+    A missing declaration is version 1, as documented above. A declaration
+    that isn't an integer is treated as a mistake rather than quietly ignored:
+    ``COBIRB_SPI = "1"`` is exactly the sort of thing that would otherwise
+    compare unequal to every supported version forever, or worse, be silently
+    skipped and let a genuinely incompatible plugin through.
+    """
+    declared = getattr(plugin, SPI_VERSION_ATTRIBUTE, MIN_SUPPORTED_SPI_VERSION)
+    if isinstance(declared, bool) or not isinstance(declared, int):
+        raise IncompatiblePlugin(
+            f"{SPI_VERSION_ATTRIBUTE} must be an integer, not {declared!r}"
+        )
+    if declared > SPI_VERSION:
+        raise IncompatiblePlugin(
+            f"needs CoBirb SPI v{declared}, but this CoBirb implements v{SPI_VERSION} — "
+            "upgrade CoBirb, or use a build of the plugin written for this version"
+        )
+    if declared < MIN_SUPPORTED_SPI_VERSION:
+        raise IncompatiblePlugin(
+            f"was written for CoBirb SPI v{declared}, which this CoBirb no longer supports "
+            f"(oldest accepted: v{MIN_SUPPORTED_SPI_VERSION})"
+        )
 
 
 # --------------------------------------------------------------------------- #
