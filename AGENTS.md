@@ -167,9 +167,13 @@ the same "nothing but its brief" reason it withholds `AGENTS.md` and the repo ma
 
 ## 6c. Vision — attached images (`session.py`, `orchestrator.py`, `plugins/core/model.py`)
 
-`/image <path>` (TUI) queues a file onto the *next* submitted prompt — no caption argument; the
-message typed and sent next is the caption, when there is one, the same as attaching a file
-anywhere else.
+`/image <path>` (TUI) queues a file onto the *next* submitted prompt — the message typed and sent
+next is the caption, when there is one, the same as attaching a file anywhere else.
+`/image <path> <message>` does both at once and sends immediately: path and question on one line is
+what people reach for, and taking the whole argument as a filename failed with "no such file",
+blaming the file for a parsing rule. A quoted path wins; an unquoted argument that names an
+existing file is taken whole, so paths with spaces still work (`_split_image_argument`). Relative
+paths resolve against the session's `cwd`, not the process's.
 
 **The bytes live in `Session.images` (`{id: base64}`, keyed by content hash), inside the same
 encrypted blob as everything else**; `Turn.images` holds only `[{"id", "filename"}]` referencing it.

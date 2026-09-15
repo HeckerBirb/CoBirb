@@ -94,9 +94,12 @@ INTERACTIVE COMMANDS
   /remember <fact>   Save a fact into a catalogue you pick. A plain command,
                      not a model tool, so it works the same regardless of
                      what the model can do, and only fires when typed.
-  /image <path>      Attach an image to the next message you send. No
-                     caption argument — type your message normally, right
-                     after, the same as attaching a file anywhere else.
+  /image <path>      Attach an image to the next message you send — type
+                     your message normally, right after, the same as
+                     attaching a file anywhere else.
+  /image <path> <message>
+                     Or say both at once, and it sends straight away.
+                     Quote a path that contains spaces.
   ? or /help         Open this help. '/help <topic>' opens one topic.
 
 INTERACTIVE KEYS

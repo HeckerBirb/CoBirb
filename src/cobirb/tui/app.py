@@ -77,6 +77,47 @@ def _looks_like_an_image(data: bytes) -> bool:
         return True
     return any(data.startswith(magic) for magic in _IMAGE_MAGIC)
 
+
+def _split_image_argument(argument: str, cwd: str) -> tuple[str, str]:
+    """Split ``/image``'s argument into a path and whatever follows it.
+
+    Typing the path and the question on one line — ``/image shot.png what is
+    this?`` — is what people actually do, and taking the whole argument as a
+    filename turned that into "no such file: 'shot.png what is this?'", which
+    reads like the *file* is missing rather than like the command wanted only
+    a path. So the trailing text is now the message sent with the image.
+
+    Three shapes, in the order that avoids guessing wrong:
+
+    1. A quoted path (``/image "my screenshot.png" what is this?``) — explicit,
+       so it wins outright.
+    2. The whole argument naming a file that exists — which keeps an unquoted
+       path containing spaces working exactly as it did before.
+    3. Otherwise the first word is the path and the rest is the message.
+    """
+    argument = argument.strip()
+    if not argument:
+        return "", ""
+    if argument[0] in "\"'":
+        closing = argument.find(argument[0], 1)
+        if closing != -1:
+            return argument[1:closing], argument[closing + 1 :].strip()
+    if os.path.isfile(_resolve_image_path(argument, cwd)):
+        return argument, ""
+    path, _, message = argument.partition(" ")
+    return path, message.strip()
+
+
+def _resolve_image_path(path: str, cwd: str) -> str:
+    """Resolve ``/image``'s path against the session's working directory.
+
+    Not the process's — those are the same only when CoBirb was started from
+    the directory it is working in, and ``--cwd`` exists precisely so they
+    need not be.
+    """
+    expanded = os.path.expanduser(path)
+    return expanded if os.path.isabs(expanded) else os.path.join(cwd, expanded)
+
 # "Noah" (v0.9.0) — the default theme, the parrot's own five colours
 # (defined once in plugins.core.render, alongside the Rich styles that use
 # the same palette for the transcript — see that module's own comment).
@@ -487,6 +528,18 @@ class CoBirbApp(App[None]):
         if self._dispatch_command(prompt):
             return
 
+        self._send_prompt(prompt)
+
+    def _send_prompt(self, prompt: str) -> None:
+        """Show a prompt and start its turn.
+
+        Split out of ``on_input_submitted`` so ``/image <path> <message>``
+        sends its message by exactly the same route an ordinary submission
+        takes, rather than a parallel one that would drift away from it.
+        """
+        if self._turn_in_progress:
+            self._steer_current_turn(prompt)
+            return
         # After the built-ins, before the model: a custom command *is* a
         # prompt, so what it expands to is what gets sent and what the
         # transcript shows. Showing "/review" and sending 400 words would make
@@ -790,18 +843,22 @@ class CoBirbApp(App[None]):
         return "\n\n".join(block for block in blocks if block)
 
     def _cmd_image(self, argument: str) -> None:
-        """``/image <path>`` — attach an image to the next message you send.
+        """``/image <path> [message]`` — attach an image to a message.
 
-        No caption argument: nobody types a description of their own
-        screenshot. The message you type and send next *is* the caption,
-        when there is one — the same as attaching a file anywhere else.
+        With no trailing text the image is queued and the message you type
+        and send next carries it, the way attaching a file works anywhere
+        else. With trailing text, that text *is* the message and the turn
+        goes now — because typing the path and the question together is what
+        people reach for, and reading the whole line as a filename made that
+        fail with "no such file", which blames the file for a parsing rule.
         """
-        path = os.path.expanduser(argument.strip())
+        path, message = _split_image_argument(argument, self.cwd)
         if not path:
-            self.write_transcript(render.build_notice("Usage: /image <path>"))
+            self.write_transcript(render.build_notice("Usage: /image <path> [message]"))
             return
+        resolved = _resolve_image_path(path, self.cwd)
         try:
-            with open(path, "rb") as fh:
+            with open(resolved, "rb") as fh:
                 data = fh.read()
         except OSError as exc:
             self.write_transcript(render.build_notice(f"Could not read '{path}' — {exc}"))
@@ -809,7 +866,7 @@ class CoBirbApp(App[None]):
         if not _looks_like_an_image(data):
             self.write_transcript(render.build_notice(f"'{path}' doesn't look like an image CoBirb recognizes."))
             return
-        filename = os.path.basename(path)
+        filename = os.path.basename(resolved)
         self._pending_images.append({"filename": filename, "data": data})
         model = getattr(self.orchestrator, "model", None)
         if model is not None and not model.supports_vision():
@@ -819,10 +876,12 @@ class CoBirbApp(App[None]):
                     "this will be understood as text only. Switch with /model, or send anyway."
                 )
             )
-        else:
+        elif not message:
             self.write_transcript(
                 render.build_notice(f"\U0001f4ce {filename} queued — attach more with /image, or send your message.")
             )
+        if message:
+            self._send_prompt(message)
 
     def _take_pending_images(self) -> "list[dict[str, Any]] | None":
         """Pop this turn's queued attachments and shape them for
@@ -1080,6 +1139,15 @@ class CoBirbApp(App[None]):
         # would also discard any "always allow" approvals from this session).
         if self.orchestrator is not None:
             self.orchestrator.model = wiring.build_model(name, self.cwd)
+            # And forget the window the *previous* model reported.
+            # `_context_budget` asks the provider once and remembers, on the
+            # reasoning that a window cannot change mid-run — true of a run,
+            # untrue of a session, because this line swaps the provider under
+            # it. Left stale, a switch away from a small-window model kept
+            # compacting against the old budget for the rest of the session,
+            # which is enough on its own to elide an attached image. Back to
+            # None means "ask the new provider", unless config states one.
+            self.orchestrator.context_tokens = Config().get("context_tokens")
         self.write_transcript(render.build_notice(f"Model set to {name}."))
 
     # ------------------------------------------------------------------ #

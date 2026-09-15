@@ -4,6 +4,22 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.12.1]
+
+- **`/image <path> <message>` now works.** Typing the path and the question on one line is what
+  people reach for, and reading the whole line as a filename failed with
+  `No such file or directory: 'docs/cobirb.png What is this image?'` — which blames the file for a
+  parsing rule. The first word is the path and the rest is the message, sent with the image in one
+  go. A quoted path wins outright, and an unquoted path that *does* name an existing file is still
+  taken whole, so paths containing spaces keep working.
+- **`/image` resolves a relative path against the session's working directory**, not the directory
+  CoBirb happened to be launched from — `--cwd` exists precisely so those can differ.
+- **Switching model with `/model` no longer keeps the previous model's context window.**
+  `_context_budget` asks the provider once and remembers, which is true within a run and wrong
+  across a session: `/model` swaps the provider under it. Switching away from a small-window model
+  left every later turn compacting against the old budget — enough on its own to elide an attached
+  image, since one is priced at 1500 tokens against a stale 2048-token budget.
+
 ## [0.12.0]
 
 - **An attached image now survives a resume.** Attach one, quit, reopen the session, and the model

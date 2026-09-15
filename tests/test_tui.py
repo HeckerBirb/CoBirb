@@ -32,7 +32,7 @@ from cobirb import cli, help_text, memory, paths, session
 from cobirb.plugins.core import render
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 from cobirb.runtime import commands, personas, plugins, sessions, wiring
-from cobirb.tui.app import CoBirbApp
+from cobirb.tui.app import CoBirbApp, _split_image_argument
 from cobirb.tui.panes import PluginsPane, SessionsPane
 from cobirb.tui.screens import (
     ApprovalModal,
@@ -2787,3 +2787,47 @@ async def test_attaching_an_image_writes_nothing_beside_the_session(tmp_path, mo
         await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
     assert set(os.listdir(tmp_path)) == before
+
+
+async def test_a_corrected_image_after_a_typo_still_reaches_the_model_two_step(tmp_path, monkeypatch):
+    """Belt and braces for the reported sequence: even when a first /image
+    fails outright, a corrected one still reaches the model."""
+    builds = []
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(record=builds))
+    png = tmp_path / "cobirb.png"
+    png.write_bytes(_PNG_BYTES)
+
+    app = _make_app(cwd=str(tmp_path))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/image nope.png")            # a genuinely missing file
+        assert "Could not read" in _transcript_text(app)
+
+        await _submit(pilot, app, "/image cobirb.png")
+        await _submit(pilot, app, "What is this image?")
+        await _until(pilot, lambda: bool(builds))
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
+
+        assert builds[0]["built"].calls[0]["images"][0]["filename"] == "cobirb.png"
+
+
+async def test_switching_model_forgets_the_old_ones_context_window(monkeypatch):
+    """_context_budget asks the provider once and remembers — fine within a
+    run, wrong across a /model switch, which swaps the provider under it. Left
+    stale, a switch away from a small-window model kept compacting against the
+    old budget for the rest of the session."""
+    from cobirb.context import history_budget
+
+    orchestrator = _StubOrchestrator()
+    orchestrator.context_tokens = 4096  # what a small-window model reported
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
+    monkeypatch.setattr(wiring, "build_model", lambda name, cwd=None, config=None: object())
+    monkeypatch.setattr(wiring, "resolve_model_name", lambda name, cwd: name)
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.orchestrator = orchestrator
+        app._apply_selected_model("a-much-larger-model")
+
+        assert orchestrator.context_tokens is None  # i.e. "ask the new provider"
