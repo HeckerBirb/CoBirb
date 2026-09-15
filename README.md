@@ -1,5 +1,11 @@
 # CoBirb 🦜
 
+[![tests](https://github.com/HeckerBirb/CoBirb/actions/workflows/tests.yml/badge.svg)](https://github.com/HeckerBirb/CoBirb/actions/workflows/tests.yml)
+[![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](https://www.python.org/downloads/)
+[![license](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+![telemetry](https://img.shields.io/badge/telemetry-none-brightgreen)
+![network](https://img.shields.io/badge/outbound%20network-off%20by%20default-brightgreen)
+
 A privacy-first, agentic coding CLI for local LLMs and your eyes only.
 
 ![CoBirb's interactive mode](docs/images/cobirb.png)
