@@ -17,7 +17,7 @@ from textual.reactive import reactive
 from textual.selection import Selection
 from textual.strip import Strip
 from textual.message import Message
-from textual.widgets import Input, RichLog, Static, TextArea
+from textual.widgets import RichLog, Static, TextArea
 
 from ..plugins.core import render
 

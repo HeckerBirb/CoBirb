@@ -59,13 +59,14 @@ not let it quietly pick a default, narrow a feature or rule an approach out. Rai
 | `policy.py` | Permissions, shell-command scanning, audit log. |
 | `session.py` | `Turn`/`Session`, encrypted `SessionManager`, schema migration, `fork_session`. |
 | `context.py` | Fitting history into the model's window. |
+| `memory.py` | Memory-catalogue *files*: read, write, encrypt, rename, delete. |
 | `checkpoints.py` | Pre-edit file snapshots behind `/undo` and `/diff`. |
 | `redaction.py` | Credential stripping for tool output and audit args. |
 | `config.py` / `paths.py` | The single config file; every `~/.cobirb` path derived in one place. |
 | `typing/spi.py` | **The plugin contract.** All SPI interfaces + shared dataclasses. |
 | `plugins/loader.py` | Discovery (entry points + local dirs), fail-closed. |
 | `plugins/core/` | Built-ins: `tools`, `model`, `io`, `crypto`, `persona`, `render`, `repomap`, `ignores`. |
-| `runtime/` | Composition layer both front-ends share: `wiring`, `plugins`, `models`, `personas`, `commands`, `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`. |
+| `runtime/` | Composition layer both front-ends share: `wiring`, `plugins`, `models`, `personas`, `commands`, `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues` (which catalogues a session has open — see §6b). |
 | `mcp/` | stdio MCP client (`client`) and its tool adapter (`tools`). |
 | `flock/` | Multi-agent runs: `charter`, `brainy`, `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. |
 | `tui/` | Textual app: `app`, `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. |
@@ -158,9 +159,10 @@ not a model tool** — a tool would either be unreachable for a model without to
 get called on every turn with no memory of already having asked, so this fires exactly once, exactly
 when typed, regardless of what the model can do.
 
-Loaded catalogues (`CoBirbApp.loaded_catalogues`, session-lifetime only, never auto-loaded just
-because they exist on disk) are composed into the system prompt fresh on every `Orchestrator.run()`
-call (`CoBirbApp._memory_system_prompt`) rather than baked into the orchestrator at construction —
+Which catalogues are open is `runtime.catalogues.CatalogueStore` (`app.catalogues`), not the app:
+none of that bookkeeping touches a widget. Session-lifetime only, never auto-loaded just because
+they exist on disk. Its `system_prompt()` is composed in fresh on every `Orchestrator.run()` call
+rather than baked into the orchestrator at construction —
 the same staleness that killed the old header panel would hit a memory block computed once and
 never revisited. **Never reaches a Worker Birb**: `build_subagent` passes `project_context=""` for
 the same "nothing but its brief" reason it withholds `AGENTS.md` and the repo map.

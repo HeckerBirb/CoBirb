@@ -32,6 +32,27 @@ class CatalogueError(ValueError):
     verbatim — wrong password, a name already taken, a missing file."""
 
 
+def _validate_name(name: str) -> str:
+    """Return ``name`` if it is a catalogue name, or raise.
+
+    A name becomes a filename directly, so it has to *be* a name and not a
+    path: ``../../escaped`` otherwise wrote a catalogue outside
+    ``~/.cobirb/memories`` entirely, and a name with a separator in it wrote
+    into a subdirectory that ``discover_catalogues`` would never list again.
+    Typed by a person into a dialog rather than produced by a model, so this
+    is a mistake to catch rather than an attack to repel — but the check
+    costs nothing and the failure was silent.
+    """
+    name = name.strip()
+    if not name:
+        raise CatalogueError("a catalogue needs a name")
+    if name != os.path.basename(name) or name in (os.curdir, os.pardir) or os.sep in name:
+        raise CatalogueError(f"'{name}' is not a usable name — a catalogue name is not a path")
+    if name.startswith("."):
+        raise CatalogueError("a catalogue name cannot start with a dot")
+    return name
+
+
 @dataclass
 class CatalogueFile:
     """One catalogue found on disk, without opening it — just what the
@@ -196,9 +217,7 @@ def create(directory: str, name: str, crypto: Any, password: "str | None") -> Me
     encrypts it. Refuses if a catalogue by this name already exists under
     either extension — a create is never a silent overwrite.
     """
-    name = name.strip()
-    if not name:
-        raise CatalogueError("a catalogue needs a name")
+    name = _validate_name(name)
     os.makedirs(directory, exist_ok=True)
     if _existing_path(directory, name):
         raise CatalogueError(f"a catalogue named '{name}' already exists")
@@ -262,9 +281,7 @@ def delete(path: str) -> None:
 def rename(path: str, new_name: str) -> str:
     """Rename the catalogue at ``path`` to ``new_name``, keeping its
     encryption suffix. Returns the new path."""
-    new_name = new_name.strip()
-    if not new_name:
-        raise CatalogueError("a catalogue needs a name")
+    new_name = _validate_name(new_name)
     directory = os.path.dirname(path)
     if _existing_path(directory, new_name):
         raise CatalogueError(f"a catalogue named '{new_name}' already exists")

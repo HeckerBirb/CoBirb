@@ -2563,8 +2563,8 @@ async def test_remembering_into_an_unencrypted_catalogue_writes_the_fact():
         options.action_select()
         await _until(pilot, lambda: not isinstance(app.screen, RememberModal))
 
-        assert app.loaded_catalogues["work"].facts == ["keep commits short"]
-        reloaded = memory.load(app.loaded_catalogues["work"].path, AesGcmScryptSessionCrypto())
+        assert app.catalogues.loaded["work"].facts == ["keep commits short"]
+        reloaded = memory.load(app.catalogues.loaded["work"].path, AesGcmScryptSessionCrypto())
         assert reloaded.facts == ["keep commits short"]
 
 
@@ -2586,9 +2586,9 @@ async def test_remembering_into_a_locked_catalogue_prompts_for_a_password_first(
 
         app.screen.query_one("#prompt-value", Input).value = "hunter2"
         await pilot.press("enter")
-        await _until(pilot, lambda: not isinstance(app.screen, RememberModal) and "secret" in app.loaded_catalogues)
+        await _until(pilot, lambda: not isinstance(app.screen, RememberModal) and "secret" in app.catalogues.loaded)
 
-        assert app.loaded_catalogues["secret"].facts == ["a private fact"]
+        assert app.catalogues.loaded["secret"].facts == ["a private fact"]
 
 
 async def test_memories_command_opens_the_catalogues_modal():
@@ -2612,8 +2612,8 @@ async def test_memories_new_creates_an_unencrypted_catalogue_on_blank_passwords(
         await pilot.click("#new-catalogue-create")
         await _until(pilot, lambda: isinstance(app.screen, MemoryCataloguesModal))
 
-        assert "work" in app.loaded_catalogues
-        assert app.loaded_catalogues["work"].encrypted is False
+        assert "work" in app.catalogues.loaded
+        assert app.catalogues.loaded["work"].encrypted is False
 
 
 async def test_memories_new_rejects_mismatched_passwords_without_creating_anything():
@@ -2633,7 +2633,10 @@ async def test_memories_new_rejects_mismatched_passwords_without_creating_anythi
 
         assert isinstance(app.screen, NewCatalogueModal)  # still open, not dismissed
         assert "match" in _static_text(app, "#new-catalogue-error")
-        assert memory.discover_catalogues(paths.memories_dir()) == []
+        # Nothing was created. Not "the directory is empty" — /memories
+        # legitimately creates the always-present public catalogue on the
+        # way in; what must not exist is the one the user was refused.
+        assert "personal" not in {c.name for c in memory.discover_catalogues(paths.memories_dir())}
 
 
 async def test_memories_selecting_a_loaded_row_unloads_it():
@@ -2641,7 +2644,7 @@ async def test_memories_selecting_a_loaded_row_unloads_it():
     async with app.run_test() as pilot:
         await pilot.pause()
         cat = memory.create(paths.memories_dir(), "work", AesGcmScryptSessionCrypto(), None)
-        app.loaded_catalogues["work"] = cat
+        app.catalogues.loaded["work"] = cat
 
         await _submit(pilot, app, "/memories")
         await _until(pilot, lambda: isinstance(app.screen, MemoryCataloguesModal))
@@ -2652,7 +2655,7 @@ async def test_memories_selecting_a_loaded_row_unloads_it():
         options.action_select()
         await pilot.pause()
 
-        assert "work" not in app.loaded_catalogues
+        assert "work" not in app.catalogues.loaded
 
 
 async def test_a_loaded_catalogue_reaches_the_system_prompt_but_is_dropped_when_empty(monkeypatch):
@@ -2663,7 +2666,7 @@ async def test_a_loaded_catalogue_reaches_the_system_prompt_but_is_dropped_when_
     async with app.run_test() as pilot:
         await pilot.pause()
         cat = memory.MemoryCatalogue(name="work", path="/tmp/work.md", encrypted=False, facts=["fact one"])
-        app.loaded_catalogues["work"] = cat
+        app.catalogues.loaded["work"] = cat
 
         await _submit(pilot, app, "hello")
         await _until(pilot, lambda: bool(builds))
@@ -2831,3 +2834,31 @@ async def test_switching_model_forgets_the_old_ones_context_window(monkeypatch):
         app._apply_selected_model("a-much-larger-model")
 
         assert orchestrator.context_tokens is None  # i.e. "ask the new provider"
+
+
+async def test_memories_creates_the_public_catalogue_on_first_use():
+    """"There is always a default public catalogue" was true only in the
+    tests: nothing in the app ever called ensure_public_exists, so a fresh
+    install opened /memories on an empty list."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert memory.discover_catalogues(paths.memories_dir()) == []
+
+        await _submit(pilot, app, "/memories")
+        await _until(pilot, lambda: isinstance(app.screen, MemoryCataloguesModal))
+
+        assert [c.name for c in memory.discover_catalogues(paths.memories_dir())] == ["public"]
+
+
+async def test_remember_has_somewhere_to_save_on_a_fresh_install():
+    """The same gap from the other side: /remember offered a picker with no
+    catalogues in it, so the fact had nowhere to go."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/remember the user prefers tabs")
+        await _until(pilot, lambda: isinstance(app.screen, RememberModal))
+
+        options = app.screen.query_one("#remember-options", OptionList)
+        assert [options.get_option_at_index(i).id for i in range(options.option_count)] == ["public"]

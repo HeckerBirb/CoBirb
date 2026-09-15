@@ -4,6 +4,28 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.12.2]
+
+Housekeeping pass: two real bugs, and the catalogue bookkeeping moved out of the app.
+
+- **Fixed: the always-present public catalogue was never created.** `memory.ensure_public_exists`
+  had no callers outside the tests, so a fresh install opened `/memories` on an empty list and
+  `/remember` offered nowhere to put the fact. Both commands now create it on first use, which is
+  what "lazily, on first use" claimed all along.
+- **Fixed: a catalogue name was used as a filename unchecked.** `../../escaped` wrote a catalogue
+  outside `~/.cobirb/memories` entirely, and a name containing a separator wrote into a
+  subdirectory `discover_catalogues` would never list again. A name must now be a name.
+- **`CatalogueStore` (`runtime/catalogues.py`), extracted from `CoBirbApp`.** Ten methods of
+  catalogue bookkeeping were living among tabs, modals and worker threads without touching a single
+  widget. They have one reason to change and it is not "the screen changed", so they now have their
+  own home; the app keeps thin forwarders for the modals, and `tui/app.py` loses 145 lines.
+- **`MemoryCataloguesModal` and `RememberModal` share a base class.** Reading the catalogues,
+  rendering them loaded-first, showing an inline error and the unlock-then-continue dance were the
+  same code twice.
+- `policy._read_target` is now `_target_path` — it has always served the write tools too, so the
+  name claimed a narrower job than it does, in the one module where being exact matters most.
+- Removed seven genuinely dead imports; the two that survive are marked as the re-exports they are.
+
 ## [0.12.1]
 
 - **`/image <path> <message>` now works.** Typing the path and the question on one line is what

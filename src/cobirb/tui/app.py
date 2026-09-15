@@ -35,11 +35,12 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
 from textual.theme import Theme
-from textual.widgets import Footer, Header, RichLog, TabbedContent, TabPane
+from textual.widgets import Footer, Header, TabbedContent, TabPane
 
-from .. import memory, paths, session
+from .. import memory, session
 from ..help_text import HELP_TEXT, HELP_TOPICS
 from ..runtime import commands, personas, plugins, wiring
+from ..runtime.catalogues import CatalogueStore
 from ..runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
 from ..runtime.export import write_export
 from ..config import Config
@@ -229,12 +230,10 @@ class CoBirbApp(App[None]):
         # for the rest of the session instead of each turn forgetting what
         # was approved during the previous one.
         self.orchestrator: Orchestrator | None = None
-        # Catalogues unlocked this session (by /memories or a /remember
-        # prompt) — held in memory only, for the life of the process. The
-        # always-present Public catalogue is *not* auto-loaded: existing on
-        # disk and feeding context are separate things.
-        self.loaded_catalogues: dict[str, memory.MemoryCatalogue] = {}
-        self._memory_crypto: Any | None = None
+        # Which memory catalogues are open, and everything that follows
+        # from that (see runtime.catalogues). Not a widget's business, so
+        # not a method of this class.
+        self.catalogues = CatalogueStore(cwd)
         # Queued by /image, consumed by the very next submitted prompt (see
         # _run_turn) — attach, then type your message normally, the way
         # attaching a file works everywhere. [{"filename", "data": bytes}].
@@ -744,6 +743,7 @@ class CoBirbApp(App[None]):
     # Memory catalogues
     # ------------------------------------------------------------------ #
     def _cmd_memories(self, argument: str) -> None:
+        self._ensure_public_catalogue()
         self.push_screen(MemoryCataloguesModal())
 
     def _cmd_remember(self, argument: str) -> None:
@@ -760,87 +760,55 @@ class CoBirbApp(App[None]):
         if not fact:
             self.write_transcript(render.build_notice("Usage: /remember <fact to save>"))
             return
+        self._ensure_public_catalogue()
         self.push_screen(RememberModal(fact))
 
-    def memory_catalogue_rows(self) -> "list[memory.CatalogueFile]":
-        return memory.discover_catalogues()
+    def _ensure_public_catalogue(self) -> None:
+        """Create the always-present Public catalogue if it isn't there yet.
 
-    def _get_memory_crypto(self) -> Any:
-        """The crypto backend catalogues use — resolved once and reused,
-        the same object sessions already resolve via ``plugins.build_crypto``."""
-        if self._memory_crypto is None:
-            config = Config()
-            _, discovered, _ = plugins.discover_plugins(self.cwd, config)
-            self._memory_crypto, _ = plugins.build_crypto(config, discovered)
-        return self._memory_crypto
+        "Lazily, on first use" is what ``memory.ensure_public_exists``
+        promises, and this is the first use — both commands that show the
+        catalogue list call it. Without this the promise was never kept by
+        anything but the tests: a fresh install opened ``/memories`` on an
+        empty list, and ``/remember`` offered nowhere to put the fact.
+
+        A failure here is reported, not raised: an unwritable memories
+        directory should cost the Public catalogue, never the command.
+        """
+        try:
+            self.catalogues.ensure_public()
+        except OSError as exc:  # noqa: BLE001 - reported, never fatal
+            self.write_transcript(render.build_notice(f"Could not create the public catalogue — {exc}"))
+
+    # Catalogue bookkeeping lives in CatalogueStore, not here — none of it
+    # touches a widget. These two remain because the modals ask the *app*
+    # for them (`cast("CoBirbApp", self.app)`), and forwarding is cheaper
+    # than teaching every screen where the store lives.
+    def memory_catalogue_rows(self) -> "list[memory.CatalogueFile]":
+        return self.catalogues.rows()
 
     def memory_load(self, row: "memory.CatalogueFile", password: "str | None") -> str:
-        """Load ``row`` into ``loaded_catalogues``. Returns "" on success, or
-        an error message to show inline (never raises into the modal)."""
-        try:
-            catalogue = memory.load(row.path, self._get_memory_crypto(), password)
-        except memory.CatalogueError as exc:
-            return str(exc)
-        self.loaded_catalogues[catalogue.name] = catalogue
-        return ""
+        return self.catalogues.load(row, password)
 
     def memory_unload(self, name: str) -> None:
-        self.loaded_catalogues.pop(name, None)
+        self.catalogues.unload(name)
 
     def memory_create(self, name: str, password: str) -> str:
-        try:
-            catalogue = memory.create(paths.memories_dir(), name, self._get_memory_crypto(), password)
-        except memory.CatalogueError as exc:
-            return str(exc)
-        self.loaded_catalogues[catalogue.name] = catalogue
-        return ""
+        return self.catalogues.create(name, password)
 
     def memory_delete(self, name: str) -> str:
-        row = next((r for r in self.memory_catalogue_rows() if r.name == name), None)
-        if row is None:
-            return f"No catalogue named '{name}'."
-        memory.delete(row.path)
-        self.loaded_catalogues.pop(name, None)
-        return ""
+        return self.catalogues.delete(name)
 
     def memory_rename(self, name: str, new_name: str) -> str:
-        row = next((r for r in self.memory_catalogue_rows() if r.name == name), None)
-        if row is None:
-            return f"No catalogue named '{name}'."
-        try:
-            new_path = memory.rename(row.path, new_name)
-        except memory.CatalogueError as exc:
-            return str(exc)
-        catalogue = self.loaded_catalogues.pop(name, None)
-        if catalogue is not None:
-            catalogue.name = new_name
-            catalogue.path = new_path
-            self.loaded_catalogues[new_name] = catalogue
-        return ""
+        return self.catalogues.rename(name, new_name)
 
     def memory_remember(self, catalogue_name: str, fact: str) -> None:
-        """Append ``fact`` to the (already-loaded) catalogue named
-        ``catalogue_name`` and save it, then report what happened."""
-        catalogue = self.loaded_catalogues.get(catalogue_name)
-        if catalogue is None:
-            self.write_transcript(render.build_notice(f"'{catalogue_name}' is not loaded."))
-            return
-        memory.append_fact(catalogue, fact)
-        memory.save(catalogue, self._get_memory_crypto())
-        self.write_transcript(render.build_notice(f"Remembered, in '{catalogue_name}'."))
-
-    def _memory_system_prompt(self) -> str:
-        """This turn's contribution to the system prompt from every loaded
-        catalogue — Brainy Birb's own context, never a Worker Birb's brief
-        (see ``runtime.wiring.build_subagent``, which gets no project
-        context at all for the same reason).
-
-        Built fresh on every call rather than cached: a catalogue loaded or
-        appended to mid-session must be reflected on the very next turn, not
-        only on the one after the orchestrator happens to be rebuilt.
-        """
-        blocks = [c.render() for c in self.loaded_catalogues.values()]
-        return "\n\n".join(block for block in blocks if block)
+        """Save the fact, then say what happened — the one part of this that
+        is the app's job rather than the store's."""
+        error = self.catalogues.remember(catalogue_name, fact)
+        self.write_transcript(
+            render.build_notice(error or f"Remembered, in '{catalogue_name}'.")
+        )
 
     def _cmd_image(self, argument: str) -> None:
         """``/image <path> [message]`` — attach an image to a message.
@@ -1009,7 +977,7 @@ class CoBirbApp(App[None]):
             # `cobirb.session` (the Sessions-tab code below needs it), and a
             # same-named local here would shadow it for the rest of this
             # method.
-            memory_block = self._memory_system_prompt()
+            memory_block = self.catalogues.system_prompt()
             system = f"{self.system}\n\n{memory_block}" if memory_block else self.system
             images = self._take_pending_images()
             turn_result = self.orchestrator.run(

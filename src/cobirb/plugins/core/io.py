@@ -13,7 +13,7 @@ from typing import Any
 
 from rich.console import Console
 
-from ...typing.spi import DECISION_ALWAYS, DECISION_DENY, DECISION_ONCE, DECISIONS, I_OAdapter
+from ...typing.spi import DECISION_ALWAYS, DECISION_DENY, DECISION_ONCE, I_OAdapter
 from . import render
 
 

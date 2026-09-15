@@ -21,16 +21,14 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import time
-from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from .config import Config
 from .help_text import HELP_TEXT, HELP_TOPICS
 from .orchestrator import render_through
 from .policy import PermissionError
 from .plugins.core import render
-from .runtime import commands, personas, plugins, sessions, wiring
+from .runtime import personas, plugins, sessions, wiring
 from .plugins.core import TerminalIO
 from .runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
 from .runtime.plugin_install import PluginInstallError, install_plugin, list_installed, remove_plugin
@@ -41,8 +39,10 @@ from .runtime.bootstrap import ensure_home
 from .runtime.models import describe_roles
 from .session import SessionManager, fork_session
 from .runtime.headless import EXIT_DENIED, EXIT_ERROR, EXIT_OK, HeadlessIO, HeadlessResult, describe_context
-from .runtime.personas import NO_PERSONA
-from .runtime.plugins import PluginsSummary, ToolInfo, describe_plugins
+from .runtime.plugins import describe_plugins
+# Re-exported, not used here: tui.panes annotates with PluginsSummary and
+# test_render imports both through this module.
+from .runtime.plugins import PluginsSummary, ToolInfo  # noqa: F401
 from .typing import spi as cobirb_typing
 from .plugins.core import persona_shapes_voice  # noqa: F401  (re-exported)
 

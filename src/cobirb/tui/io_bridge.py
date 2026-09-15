@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from ..plugins.core import render
-from ..typing.spi import DECISION_ALWAYS, DECISION_DENY, DECISION_ONCE, DECISIONS, I_OAdapter
+from ..typing.spi import DECISION_DENY, DECISIONS, I_OAdapter
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, avoids an import cycle
     from .app import CoBirbApp

@@ -216,3 +216,27 @@ def test_a_catalogue_is_never_world_readable_even_for_an_instant(tmp_path, crypt
 def test_an_encrypted_catalogue_is_created_private_too(tmp_path, crypto):
     cat = memory.create(str(tmp_path), "secret", crypto, "pw")
     assert stat.S_IMODE(os.stat(cat.path).st_mode) == 0o600
+
+
+@pytest.mark.parametrize("name", ["../escaped", "../../escaped", "a/b", ".hidden", "..", "   "])
+def test_a_catalogue_name_must_be_a_name_not_a_path(tmp_path, crypto, name):
+    """A name becomes a filename directly. '../../escaped' used to write a
+    catalogue outside the memories directory entirely, and a name with a
+    separator wrote into a subdirectory discover_catalogues never lists."""
+    with pytest.raises(memory.CatalogueError):
+        memory.create(str(tmp_path), name, crypto, None)
+
+
+def test_rename_refuses_a_path_for_a_name(tmp_path, crypto):
+    cat = memory.create(str(tmp_path), "work", crypto, None)
+    with pytest.raises(memory.CatalogueError):
+        memory.rename(cat.path, "../escaped")
+
+
+def test_a_refused_name_writes_nothing_anywhere(tmp_path, crypto):
+    inner = tmp_path / "memories"
+    inner.mkdir()
+    with pytest.raises(memory.CatalogueError):
+        memory.create(str(inner), "../../escaped", crypto, None)
+    assert list(tmp_path.parent.glob("escaped*")) == []
+    assert list(inner.iterdir()) == []

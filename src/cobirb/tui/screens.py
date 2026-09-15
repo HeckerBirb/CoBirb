@@ -10,7 +10,7 @@ terminal prompt, it fails closed: escape means deny.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, cast
 
 from rich.text import Text
 from textual.app import ComposeResult
@@ -379,19 +379,75 @@ class NewCatalogueModal(ModalScreen[Optional[tuple[str, str]]]):
         self.dismiss(None)
 
 
-class MemoryCataloguesModal(ModalScreen[None]):
+class _CataloguePickerModal(ModalScreen[None]):
+    """What ``/memories`` and ``/remember`` both are: a catalogue list that
+    can unlock what it lists.
+
+    Subclasses supply the two widget ids and their own layout; everything
+    below — reading the catalogues, rendering them loaded-first, showing an
+    inline error, and the unlock-then-continue dance — is the same job in
+    both, and was the same code twice before this existed.
+
+    Every file and crypto operation is delegated to ``CoBirbApp`` (the same
+    ``cast("CoBirbApp", self.app)`` pattern the Plugins pane already uses),
+    so these screens stay presentation and nothing else.
+    """
+
+    OPTIONS_ID: ClassVar[str] = ""
+    ERROR_ID: ClassVar[str] = ""
+
+    def _app(self) -> "CoBirbApp":
+        return cast("CoBirbApp", self.app)
+
+    def on_mount(self) -> None:
+        self._refresh()
+        self.query_one(self.OPTIONS_ID, OptionList).focus()
+
+    def _refresh(self, error: str = "") -> None:
+        app = self._app()
+        options = self.query_one(self.OPTIONS_ID, OptionList)
+        options.clear_options()
+        for option in _ordered_catalogue_options(app.memory_catalogue_rows(), app.catalogues.loaded):
+            options.add_option(option)
+        self.query_one(self.ERROR_ID, Static).update(error)
+
+    def _row_for(self, name: str) -> "memory.CatalogueFile | None":
+        return next((r for r in self._app().memory_catalogue_rows() if r.name == name), None)
+
+    def _chosen_name(self, event: OptionList.OptionSelected) -> "str | None":
+        """The catalogue a selection names, or ``None`` for the separator."""
+        name = event.option_id
+        return None if not name or name == _SEPARATOR_ID else name
+
+    def _unlock_then(self, row: "memory.CatalogueFile", then: "Callable[[], None]") -> None:
+        """Ask for ``row``'s password, load it, and continue — or re-show
+        this picker with the error, which is what keeps a mistyped password
+        from costing whatever the user had already typed."""
+
+        def unlock(password: "str | None") -> None:
+            if not password:
+                return
+            error = self._app().memory_load(row, password)
+            if error:
+                self._refresh(error)
+            else:
+                then()
+
+        self.app.push_screen(
+            TextPromptModal("Unlock catalogue", f"Password for '{row.name}':", password=True), unlock
+        )
+
+
+class MemoryCataloguesModal(_CataloguePickerModal):
     """``/memories``: load, unload, rename, delete, or create catalogues.
 
-    Delegates every actual file/crypto operation to ``CoBirbApp`` (the same
-    ``cast("CoBirbApp", self.app)`` pattern the Plugins pane already uses) and
-    only re-renders its own list afterward — one dialog stays open across
-    several actions rather than reopening per operation.
+    One dialog stays open across several actions rather than reopening per
+    operation.
     """
 
     BINDINGS = [Binding("escape", "close", "Close", show=True)]
-
-    def __init__(self) -> None:
-        super().__init__()
+    OPTIONS_ID = "#memory-options"
+    ERROR_ID = "#memory-error"
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="memory-dialog"):
@@ -408,21 +464,6 @@ class MemoryCataloguesModal(ModalScreen[None]):
                 yield Button("Delete", id="memory-delete", variant="error")
                 yield Button("Close", id="memory-close")
 
-    def on_mount(self) -> None:
-        self._refresh()
-        self.query_one("#memory-options", OptionList).focus()
-
-    def _app(self) -> "CoBirbApp":
-        return cast("CoBirbApp", self.app)
-
-    def _refresh(self, error: str = "") -> None:
-        app = self._app()
-        options = self.query_one("#memory-options", OptionList)
-        options.clear_options()
-        for option in _ordered_catalogue_options(app.memory_catalogue_rows(), app.loaded_catalogues):
-            options.add_option(option)
-        self.query_one("#memory-error", Static).update(error)
-
     def _highlighted_name(self) -> "str | None":
         options = self.query_one("#memory-options", OptionList)
         if options.highlighted is None:
@@ -431,30 +472,24 @@ class MemoryCataloguesModal(ModalScreen[None]):
         return None if option_id == _SEPARATOR_ID else option_id
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Selecting a catalogue toggles it: loaded ones unload, the rest
+        load (asking for a password first when they need one)."""
         event.stop()
-        name = event.option_id
-        if not name or name == _SEPARATOR_ID:
+        name = self._chosen_name(event)
+        if name is None:
             return
         app = self._app()
-        if name in app.loaded_catalogues:
+        if name in app.catalogues.loaded:
             app.memory_unload(name)
             self._refresh()
             return
-        row = next((r for r in app.memory_catalogue_rows() if r.name == name), None)
+        row = self._row_for(name)
         if row is None:
             return
-        if not row.encrypted:
-            error = app.memory_load(row, None)
-            self._refresh(error)
-            return
-
-        def unlock(password: "str | None") -> None:
-            if password:
-                self._refresh(app.memory_load(row, password))
-
-        self.app.push_screen(
-            TextPromptModal("Unlock catalogue", f"Password for '{name}':", password=True), unlock
-        )
+        if row.encrypted:
+            self._unlock_then(row, self._refresh)
+        else:
+            self._refresh(app.memory_load(row, None))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
@@ -502,7 +537,7 @@ class MemoryCataloguesModal(ModalScreen[None]):
         self.dismiss(None)
 
 
-class RememberModal(ModalScreen[None]):
+class RememberModal(_CataloguePickerModal):
     """``/remember <fact>``: pick which catalogue to save ``fact`` into.
 
     Selecting a locked-and-unloaded catalogue prompts for its password right
@@ -511,6 +546,8 @@ class RememberModal(ModalScreen[None]):
     """
 
     BINDINGS = [Binding("escape", "cancel", "Cancel", show=True)]
+    OPTIONS_ID = "#remember-options"
+    ERROR_ID = "#remember-error"
 
     def __init__(self, fact: str) -> None:
         super().__init__()
@@ -524,52 +561,28 @@ class RememberModal(ModalScreen[None]):
             yield OptionList(id="remember-options")
             yield Static("", id="remember-error")
 
-    def on_mount(self) -> None:
-        self._refresh()
-        self.query_one("#remember-options", OptionList).focus()
-
-    def _app(self) -> "CoBirbApp":
-        return cast("CoBirbApp", self.app)
-
-    def _refresh(self, error: str = "") -> None:
-        app = self._app()
-        options = self.query_one("#remember-options", OptionList)
-        options.clear_options()
-        for option in _ordered_catalogue_options(app.memory_catalogue_rows(), app.loaded_catalogues):
-            options.add_option(option)
-        self.query_one("#remember-error", Static).update(error)
-
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Save into the chosen catalogue, opening it first if it isn't
+        already — which for a locked one means asking for its password."""
         event.stop()
-        name = event.option_id
-        if not name or name == _SEPARATOR_ID:
+        name = self._chosen_name(event)
+        if name is None:
             return
         app = self._app()
-        row = next((r for r in app.memory_catalogue_rows() if r.name == name), None)
-        if name not in app.loaded_catalogues:
-            if row is not None and row.encrypted:
-
-                def unlock(password: "str | None") -> None:
-                    if not password:
-                        return
-                    error = app.memory_load(row, password)
-                    if error:
-                        self._refresh(error)
-                    else:
-                        self._save_and_close(name)
-
-                self.app.push_screen(
-                    TextPromptModal("Unlock catalogue", f"Password for '{name}':", password=True), unlock
-                )
-                return
-            if row is not None:
-                # Unencrypted and not yet loaded — nothing to unlock, just
-                # open it before writing to it.
-                error = app.memory_load(row, None)
-                if error:
-                    self._refresh(error)
-                    return
-        self._save_and_close(name)
+        if name in app.catalogues.loaded:
+            self._save_and_close(name)
+            return
+        row = self._row_for(name)
+        if row is None:
+            return
+        if row.encrypted:
+            self._unlock_then(row, lambda: self._save_and_close(name))
+            return
+        error = app.memory_load(row, None)
+        if error:
+            self._refresh(error)
+        else:
+            self._save_and_close(name)
 
     def _save_and_close(self, name: str) -> None:
         self._app().memory_remember(name, self._fact)

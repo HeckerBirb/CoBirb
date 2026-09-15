@@ -199,15 +199,21 @@ def _glob_base(pattern: str) -> str:
     return "/".join(base) or "."
 
 
-def _read_target(tool_name: str, arguments: dict[str, Any]) -> str | None:
-    """The path a read-only tool call is about to touch, as written.
+def _target_path(tool_name: str, arguments: dict[str, Any]) -> str | None:
+    """The path a path-scoped tool call is about to touch, as written.
 
-    Each read tool names its target differently — ``glob`` takes a
-    ``pattern``, ``grep``'s ``path`` is optional and defaults to the working
-    directory the way the tool itself defaults it — so the mapping lives here
-    rather than being guessed at the call site. ``None`` means the call
-    doesn't name a readable target at all, which is treated as "cannot
-    verify", and therefore denied.
+    Serves reads *and* writes — it was called ``_read_target`` while both
+    ``_scoped_allowed`` and ``path_scope`` already used it for the write
+    tools too, so the name quietly claimed a narrower job than it does, in
+    the one module where being exact about what is being permitted matters
+    most.
+
+    Each tool names its target differently — ``glob`` takes a ``pattern``,
+    ``grep``'s ``path`` is optional and defaults to the working directory the
+    way the tool itself defaults it — so the mapping lives here rather than
+    being guessed at the call site. ``None`` means the call doesn't name a
+    resolvable target at all, which is treated as "cannot verify", and
+    therefore denied.
     """
     if tool_name == "glob":
         pattern = arguments.get("pattern")
@@ -316,7 +322,7 @@ class Policy:
         self, tool_name: str, arguments: dict[str, Any], approved: set[str]
     ) -> bool:
         """Whether a path-scoped call falls inside one of ``approved``."""
-        target = _read_target(tool_name, arguments)
+        target = _target_path(tool_name, arguments)
         if target is None:
             return False
         resolved = self._resolve(target)
@@ -330,7 +336,7 @@ class Policy:
         names nothing resolvable, in which case there is no scope to offer and
         the answer can only apply to this one call.
         """
-        target = _read_target(tool_name, arguments)
+        target = _target_path(tool_name, arguments)
         if target is None:
             return None
         resolved = self._resolve(target)
