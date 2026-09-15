@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.12.6]
+
+- **Fixed: the upgrade tests failed in CI.** They created throwaway git repositories and then
+  named the `main` branch by hand, which only works on a machine whose git config sets
+  `init.defaultBranch`. `git init` otherwise produces `master`, so the tests passed locally and
+  failed on the runner. Each test repository now names its initial branch explicitly, so the
+  suite no longer depends on whoever is running it.
+
 ## [0.12.5]
 
 - **Fixed: `cobirb --upgrade` left the checkout on a detached `HEAD`.** It checked the tag out

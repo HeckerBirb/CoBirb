@@ -140,6 +140,13 @@ def test_upgrade_reports_no_release_tags_at_all(monkeypatch):
 # own docstring says a metadata refresh should be, not something this test
 # needs to prove on top of the git side.
 # --------------------------------------------------------------------------- #
+# Named explicitly when each test repository is created, never inherited from
+# whoever is running the suite: `git init`'s default branch is `master` unless
+# a machine's own config says otherwise, so a test that assumes `main` passes
+# for the author and fails in CI.
+_BRANCH = "main"
+
+
 def _git(*args, cwd):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
@@ -156,7 +163,7 @@ def _real_repo(tmp_path):
     shape a real CoBirb checkout has (a git clone tracking a real remote)."""
     origin = tmp_path / "origin.git"
     work = tmp_path / "work"
-    _git("init", "--bare", "-q", str(origin), cwd=tmp_path)
+    _git("init", "--bare", "-q", "-b", _BRANCH, str(origin), cwd=tmp_path)
     _git("clone", "-q", str(origin), str(work), cwd=tmp_path)
     _git("config", "user.email", "test@example.com", cwd=work)
     _git("config", "user.name", "Test", cwd=work)
@@ -236,7 +243,7 @@ def _on_branch_behind_the_tag(tmp_path):
     """A checkout sitting on its branch, one tagged release behind — what a
     person upgrading normally has."""
     work = _real_repo(tmp_path)
-    _git("checkout", "-q", "main", cwd=work)
+    _git("checkout", "-q", _BRANCH, cwd=work)
     _git("reset", "-q", "--hard", "v0.7.0", cwd=work)
     return work
 
@@ -249,9 +256,9 @@ def test_upgrading_from_a_branch_stays_on_that_branch(monkeypatch, tmp_path):
 
     result = upgrade()
 
-    assert _branch_of(work) == "main"
-    assert result.branch == "main"
-    assert "Still on main" in result.describe()
+    assert _branch_of(work) == _BRANCH
+    assert result.branch == _BRANCH
+    assert f"Still on {_BRANCH}" in result.describe()
 
 
 def test_the_branch_actually_moved_to_the_tagged_commit(monkeypatch, tmp_path):
@@ -292,7 +299,7 @@ def test_a_branch_with_its_own_commits_detaches_rather_than_moving_them(monkeypa
     (work / "mine.txt").write_text("local work")
     _git("add", ".", cwd=work)
     _git("commit", "-q", "-m", "local work", cwd=work)
-    mine = subprocess.run(["git", "rev-parse", "main"], cwd=work,
+    mine = subprocess.run(["git", "rev-parse", _BRANCH], cwd=work,
                           capture_output=True, text=True, check=True).stdout.strip()
 
     monkeypatch.setattr(upgrade_module, "_find_repo_root", lambda: str(work))
@@ -303,7 +310,7 @@ def test_a_branch_with_its_own_commits_detaches_rather_than_moving_them(monkeypa
 
     assert result.branch == ""
     assert "not on a branch" in result.describe()
-    still = subprocess.run(["git", "rev-parse", "main"], cwd=work,
+    still = subprocess.run(["git", "rev-parse", _BRANCH], cwd=work,
                            capture_output=True, text=True, check=True).stdout.strip()
     assert still == mine  # the local commit is still on main, untouched
 
@@ -318,7 +325,7 @@ def test_upgrading_works_from_a_clone_that_has_never_fetched(monkeypatch, tmp_pa
     silently, leaving the branch behind and the checkout detached.
     """
     origin, work, other = tmp_path / "origin.git", tmp_path / "work", tmp_path / "other"
-    _git("init", "--bare", "-q", str(origin), cwd=tmp_path)
+    _git("init", "--bare", "-q", "-b", _BRANCH, str(origin), cwd=tmp_path)
     _git("clone", "-q", str(origin), str(other), cwd=tmp_path)
     _git("config", "user.email", "test@example.com", cwd=other)
     _git("config", "user.name", "Test", cwd=other)
@@ -336,7 +343,7 @@ def test_upgrading_works_from_a_clone_that_has_never_fetched(monkeypatch, tmp_pa
     (other / "pyproject.toml").write_text('[project]\nname = "fake"\nversion = "0.8.0"\n')
     _git("commit", "-q", "-am", "v0.8.0", cwd=other)
     _git("tag", "v0.8.0", cwd=other)
-    _git("push", "-q", "origin", "main", cwd=other)
+    _git("push", "-q", "origin", _BRANCH, cwd=other)
     _git("push", "-q", "--tags", "origin", cwd=other)
 
     assert "v0.8.0" not in _git_out("tag", cwd=work)  # the user has never seen it
@@ -347,6 +354,6 @@ def test_upgrading_works_from_a_clone_that_has_never_fetched(monkeypatch, tmp_pa
 
     result = upgrade()
 
-    assert result.branch == "main"
-    assert _branch_of(work) == "main"
+    assert result.branch == _BRANCH
+    assert _branch_of(work) == _BRANCH
     assert _git_out("rev-parse", "HEAD", cwd=work) == _git_out("rev-parse", "v0.8.0", cwd=work)
