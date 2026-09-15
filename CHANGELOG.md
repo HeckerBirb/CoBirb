@@ -4,6 +4,13 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.12.7]
+
+- **Status badges in the README.** The tests badge is live from the Actions workflow; the Python
+  row matches `requires-python` and the CI matrix, the licence matches `LICENSE`, and the two
+  privacy badges restate invariants the codebase holds. No version badge until a release badge
+  would be telling the truth.
+
 ## [0.12.6]
 
 - **Fixed: the upgrade tests failed in CI.** They created throwaway git repositories and then
