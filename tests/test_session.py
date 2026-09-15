@@ -448,47 +448,6 @@ def test_fork_session_wrong_password_is_rejected(tmp_path):
 # --------------------------------------------------------------------------- #
 # Attached images
 # --------------------------------------------------------------------------- #
-def test_attach_and_read_image_round_trips(manager):
-    image_id = manager.attach_image(b"pretend-png-bytes", "pw")
-    assert manager.read_image(image_id, "pw") == b"pretend-png-bytes"
-
-
-def test_attach_image_deduplicates_by_content(manager):
-    first = manager.attach_image(b"same bytes", "pw")
-    second = manager.attach_image(b"same bytes", "pw")
-    assert first == second
-    assert len(os.listdir(manager.images_dir())) == 1
-
-
-def test_attach_image_reuses_the_derived_key_across_calls(manager):
-    manager.attach_image(b"one", "pw")
-    key_after_first = manager._image_key_cache
-    manager.attach_image(b"two", "pw")
-    assert manager._image_key_cache is key_after_first
-
-
-def test_read_image_with_wrong_password_fails(manager):
-    image_id = manager.attach_image(b"secret bytes", "pw")
-    # A fresh manager, so the key cache from `manager` above isn't reused —
-    # this exercises decrypt_bytes/derive_key from a cold start.
-    other = SessionManager(manager.path, AesGcmScryptSessionCrypto(), persona="noah")
-    other.session = manager.session
-    with pytest.raises(Exception):
-        other.read_image(image_id, "wrong-password")
-
-
-def test_image_key_salt_is_generated_once_and_persisted(manager):
-    manager.attach_image(b"one", "pw")
-    salt = manager.session.image_key_salt
-    assert salt
-    manager.attach_image(b"two", "pw")
-    assert manager.session.image_key_salt == salt
-
-
-def test_images_dir_is_a_sibling_of_the_session_file(manager):
-    assert manager.images_dir() == manager.path[: -len(".json")] + ".images"
-
-
 def test_turn_images_field_round_trips_through_to_dict_and_from_dict():
     turn = Turn(role="user", content="see attached", images=[{"id": "abc123", "filename": "shot.png"}])
     restored = Turn.from_dict(turn.to_dict())
@@ -501,3 +460,63 @@ def test_turn_digest_is_unaffected_by_images():
     with_images = Turn(role="user", content="x", images=[{"id": "a", "filename": "f"}])
     without_images = Turn(role="user", content="x", images=None)
     assert with_images.digest() == without_images.digest()
+
+
+def test_attached_image_bytes_live_inside_the_encrypted_session(tmp_path):
+    """The bytes ride in the session's own blob, not a sibling file — which
+    is what lets a resumed session hand the image back to the model without
+    a password the orchestrator never has."""
+    path = str(tmp_path / "s.json")
+    crypto = AesGcmScryptSessionCrypto()
+    manager = SessionManager.create(path, crypto, persona="noah", password="pw")
+    manager.session.images["abc"] = "QUJD"
+    manager.session.add(Turn(role="user", content="see this", images=[{"id": "abc", "filename": "s.png"}]))
+    manager.save("pw")
+
+    # Nothing readable on disk, and no sibling directory at all.
+    with open(path, "rb") as fh:
+        assert b"QUJD" not in fh.read()
+    assert not os.path.exists(str(tmp_path / "s.images"))
+
+    reloaded = SessionManager.load(path, crypto, "pw")
+    assert reloaded.session.images == {"abc": "QUJD"}
+
+
+def test_a_session_written_before_images_existed_still_loads(tmp_path):
+    path = str(tmp_path / "old.json")
+    crypto = AesGcmScryptSessionCrypto()
+    manager = SessionManager.create(path, crypto, persona="noah", password="pw")
+    manager.save("pw")
+    # Strip the key the way a file written by an older CoBirb would lack it.
+    payload = json.loads(crypto.decrypt(open(path, "rb").read(), "pw"))
+    payload.pop("images")
+    with open(path, "wb") as fh:
+        fh.write(crypto.encrypt(json.dumps(payload), "pw"))
+
+    assert SessionManager.load(path, crypto, "pw").session.images == {}
+
+
+def test_forking_a_session_carries_its_images(tmp_path):
+    path = str(tmp_path / "s.json")
+    crypto = AesGcmScryptSessionCrypto()
+    manager = SessionManager.create(path, crypto, persona="noah", password="pw")
+    manager.session.images["abc"] = "QUJD"
+    manager.session.add(Turn(role="user", content="see this", images=[{"id": "abc", "filename": "s.png"}]))
+    manager.save("pw")
+
+    branch = fork_session(path, crypto, "pw")
+    assert branch.session.images == {"abc": "QUJD"}
+
+
+def test_forking_before_an_attachment_does_not_carry_its_bytes(tmp_path):
+    path = str(tmp_path / "s.json")
+    crypto = AesGcmScryptSessionCrypto()
+    manager = SessionManager.create(path, crypto, persona="noah", password="pw")
+    manager.session.images["abc"] = "QUJD"
+    manager.session.add(Turn(role="user", content="plain turn"))
+    manager.session.add(Turn(role="user", content="with image", images=[{"id": "abc", "filename": "s.png"}]))
+    manager.save("pw")
+
+    # Branch at the opening turn, before the attachment ever happened.
+    branch = fork_session(path, crypto, "pw", up_to_turn=0)
+    assert branch.session.images == {}

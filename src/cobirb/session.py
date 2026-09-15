@@ -140,10 +140,10 @@ class Turn:
     # replayed into context (see Orchestrator._build_context).
     phase: str | None = None
     # Images attached to this turn: [{"id": <content hash>, "filename": <original
-    # basename>}, ...]. The bytes themselves live encrypted alongside the
-    # session (see SessionManager.attach_image) — this is only the reference.
-    # No alt-text/description field: nobody types a caption for their own
-    # screenshot, and a model-written one would need a model call this class
+    # basename>}, ...]. The bytes live in ``Session.images``, keyed by that id,
+    # inside the same encrypted blob as everything else — this is the reference
+    # into it. No alt-text/description field: nobody types a caption for their
+    # own screenshot, and a model-written one would need a model call this class
     # has no business making. Deliberately *not* covered by digest() below —
     # see that method's docstring for why.
     images: "list[dict[str, str]] | None" = None
@@ -241,13 +241,22 @@ class Session:
     # branch found months from now still says plainly where it came from and
     # at which turn.
     forked_from: str | None = None
-    # Base64 salt for deriving this session's attachment key (see
-    # SessionManager.attach_image/read_image) — generated once, on first
-    # attachment, and reused for the rest of the session's life so every
-    # image doesn't pay its own scrypt derivation. Not secret; it travels in
-    # the plaintext JSON like everything else here, which is fine — the
-    # salt alone derives nothing without the password.
-    image_key_salt: str | None = None
+    # Every image attached anywhere in this conversation: {id: base64 bytes},
+    # keyed by content hash so the same screenshot attached twice is stored
+    # once. Turns hold only the id (see Turn.images).
+    #
+    # **Inside the session, not beside it**, and that placement is the whole
+    # design. These bytes were briefly kept as separately-encrypted files in a
+    # sibling directory, which meant the layer that assembles what the model
+    # sees could never read them back: SessionManager deliberately does not
+    # retain a password (see its __init__), and neither does Orchestrator — so
+    # a resumed session could only ever show the model a "[image: x.png]"
+    # marker where the image used to be. Living in the session payload, they
+    # are already decrypted by the time `load()` returns, by the same
+    # AES-256-GCM under the same password as every other field here. Same
+    # protection, one mechanism instead of two, and the images survive a
+    # resume, which was the point.
+    images: dict[str, str] = field(default_factory=dict)
 
     def add(self, turn: Turn) -> None:
         self.turns.append(turn)
@@ -267,7 +276,7 @@ class Session:
             "validation": self.validation,
             "flock": self.flock,
             "forked_from": self.forked_from,
-            "image_key_salt": self.image_key_salt,
+            "images": self.images,
         }
 
     @classmethod
@@ -287,7 +296,7 @@ class Session:
             validation=data.get("validation"),
             flock=data.get("flock"),
             forked_from=data.get("forked_from"),
-            image_key_salt=data.get("image_key_salt"),
+            images=data.get("images") or {},
         )
 
 
@@ -363,67 +372,6 @@ class SessionManager:
         blob = self.crypto.encrypt(plaintext, password)
         _write_blob(self.path, blob)
         return blob
-
-    def images_dir(self) -> str:
-        """Where this session's attached images live: a sibling directory,
-        not a subtree of ``~/.cobirb/sessions`` specifically — a session
-        opened via an explicit ``--session PATH`` elsewhere on disk gets its
-        images right next to it, the same as the session file itself does.
-        """
-        base, _ = os.path.splitext(self.path)
-        return f"{base}.images"
-
-    def _image_key(self, password: str) -> bytes | None:
-        """This session's attachment key, derived once and cached — or
-        ``None`` if the crypto backend has no fast path (see crypto.py's
-        ``derive_key``), in which case callers fall back to plain
-        ``encrypt``/``decrypt`` per attachment."""
-        if self.session is None:
-            return None
-        derive = getattr(self.crypto, "derive_key", None)
-        if derive is None:
-            return None
-        if getattr(self, "_image_key_cache", None) is not None:
-            return self._image_key_cache
-        if not self.session.image_key_salt:
-            self.session.image_key_salt = base64.b64encode(os.urandom(16)).decode("ascii")
-        salt = base64.b64decode(self.session.image_key_salt)
-        self._image_key_cache = derive(password, salt)
-        return self._image_key_cache
-
-    def attach_image(self, data: bytes, password: str) -> str:
-        """Encrypt ``data`` and store it, returning its content-hash id.
-
-        Deduplicates by content: attaching the same bytes twice reuses the
-        same id and does not write a second copy.
-        """
-        image_id = hashlib.sha256(data).hexdigest()
-        directory = self.images_dir()
-        os.makedirs(directory, exist_ok=True)
-        path = os.path.join(directory, image_id)
-        if os.path.isfile(path):
-            return image_id
-        key = self._image_key(password)
-        encrypt_bytes = getattr(self.crypto, "encrypt_bytes", None)
-        if key is not None and encrypt_bytes is not None:
-            blob = encrypt_bytes(data, key)
-        else:
-            blob = self.crypto.encrypt(base64.b64encode(data).decode("ascii"), password)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(blob)
-        return image_id
-
-    def read_image(self, image_id: str, password: str) -> bytes:
-        """Decrypt and return a previously attached image's bytes."""
-        path = os.path.join(self.images_dir(), image_id)
-        with open(path, "rb") as fh:
-            blob = fh.read()
-        key = self._image_key(password)
-        decrypt_bytes = getattr(self.crypto, "decrypt_bytes", None)
-        if key is not None and decrypt_bytes is not None:
-            return decrypt_bytes(blob, key)
-        return base64.b64decode(self.crypto.decrypt(blob, password))
 
     def _verify_hashes(self, session: Session) -> None:
         """Raise if any stored turn's content no longer matches its hash."""
@@ -547,6 +495,16 @@ def fork_session(
         validation=None if truncated else source.validation,
         flock=source.flock,
         forked_from=f"{path}@turn{lineage_turn}",
+        # Only the images the kept turns actually reference. A branch taken
+        # from before an attachment shouldn't carry its bytes around — and a
+        # branch taken from after it must, or the turn that shows the model a
+        # screenshot would come back as a note saying one used to be there.
+        images={
+            image["id"]: source.images[image["id"]]
+            for turn in kept
+            for image in (turn.images or [])
+            if image.get("id") in source.images
+        },
     )
     branch_manager = SessionManager(branch_path, crypto, source.working_dir, source.persona)
     branch_manager.session = branch

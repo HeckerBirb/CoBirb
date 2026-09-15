@@ -826,27 +826,27 @@ class CoBirbApp(App[None]):
 
     def _take_pending_images(self) -> "list[dict[str, Any]] | None":
         """Pop this turn's queued attachments and shape them for
-        ``Orchestrator.run(images=...)``: content-hash id, filename, and the
-        base64 data to send this call only. Persists an encrypted copy
-        alongside the session first, when there is one to persist into —
-        ``SessionManager`` never retains a password, so this is the one
-        place that can, because it's the one place that already has it.
+        ``Orchestrator.run(images=...)``: content-hash id, filename, base64.
+
+        Nothing is written to disk here. The orchestrator files the bytes in
+        ``Session.images``, which is saved — encrypted — with the rest of the
+        session. This used to encrypt each image into a sibling directory
+        itself, which needed the session password, needed a crypto backend
+        that may not exist (an unsaved session has none, and calling into it
+        raised mid-turn), and produced files nothing could ever read back.
         """
         pending = self._pending_images
         self._pending_images = []
         if not pending:
             return None
-        payload = []
-        for item in pending:
-            data = item["data"]
-            image_id = hashlib.sha256(data).hexdigest()
-            manager = getattr(self.orchestrator, "session", None)
-            if manager is not None:
-                image_id = manager.attach_image(data, self.password)
-            payload.append(
-                {"id": image_id, "filename": item["filename"], "data": base64.b64encode(data).decode("ascii")}
-            )
-        return payload
+        return [
+            {
+                "id": hashlib.sha256(item["data"]).hexdigest(),
+                "filename": item["filename"],
+                "data": base64.b64encode(item["data"]).decode("ascii"),
+            }
+            for item in pending
+        ]
 
     def _cmd_plan(self, argument: str) -> None:
         self.plan_mode, message = commands.apply_plan_toggle(argument, self.plan_mode)

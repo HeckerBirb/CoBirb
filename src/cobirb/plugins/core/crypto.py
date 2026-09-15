@@ -159,60 +159,6 @@ class AesGcmScryptSessionCrypto(SessionCrypto):
         ).encode()
         return _MAGIC + base64.b64encode(header) + b"\n" + base64.b64encode(salt + nonce + ciphertext)
 
-    # ------------------------------------------------------------------ #
-    # Attachment encryption: derive once, reuse the key.
-    #
-    # These are *not* part of the ``SessionCrypto`` ABC (see typing/spi.py's
-    # "additive only" rule for a frozen SPI) — a new abstract method would
-    # break every third-party crypto plugin the moment core called it. They
-    # exist only here, called via ``getattr(crypto, "derive_key", None)``,
-    # the same duck-typed-optional-hook pattern ``cancel()`` already uses.
-    # A plugin that hasn't heard of them still works, through encrypt()/
-    # decrypt() re-deriving the key each time — correct, just slower.
-    #
-    # The reason to have them at all: encrypt()/decrypt() each pay a full
-    # scrypt derivation (deliberately ~a few hundred ms). That is correct
-    # once, to unlock a session — it is wrong per attached image. A session
-    # with a dozen screenshots would cost several seconds of pure KDF work
-    # just to open, which is a property of scrypt being intentionally slow,
-    # not something more CPU fixes. Deriving once and reusing the key for
-    # every attachment is the actual fix.
-    # ------------------------------------------------------------------ #
-    def derive_key(self, password: str, salt: bytes) -> bytes:
-        """Derive this backend's current-cost scrypt key. Used to encrypt
-        session attachments (images) without re-deriving per attachment."""
-        backend = self._backend
-        if backend is None:
-            raise RuntimeError(
-                "Crypto backend unavailable. Install the 'cryptography' library."
-            )
-        return backend.scrypt_derive(password.encode(), salt, _SCRYPT_N, _SCRYPT_R, _SCRYPT_P)
-
-    def encrypt_bytes(self, plaintext: bytes, key: bytes) -> bytes:
-        """AES-256-GCM over an already-derived key. No KDF header: unlike a
-        session or catalogue file, an attachment blob trusts the session's
-        own header for how the key it was handed was derived — it is
-        ``nonce || ciphertext`` and nothing else. A fresh nonce every call,
-        since a key is being reused across many of these."""
-        backend = self._backend
-        if backend is None:
-            raise RuntimeError(
-                "Crypto backend unavailable. Install the 'cryptography' library."
-            )
-        nonce, ciphertext = backend.aes256_gcm_encrypt(plaintext, key)
-        return nonce + ciphertext
-
-    def decrypt_bytes(self, blob: bytes, key: bytes) -> bytes:
-        backend = self._backend
-        if backend is None:
-            raise RuntimeError(
-                "Crypto backend unavailable. Install the 'cryptography' library."
-            )
-        if len(blob) <= _NONCE_LEN:
-            raise ValueError("this attachment is too short to be genuine")
-        nonce, ciphertext = blob[:_NONCE_LEN], blob[_NONCE_LEN:]
-        return backend.aes256_gcm_decrypt(ciphertext, key, nonce)
-
     def decrypt(self, blob: bytes, password: str) -> str:
         backend = self._backend
         if backend is None:

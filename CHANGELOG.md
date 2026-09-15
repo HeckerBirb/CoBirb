@@ -4,6 +4,35 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.12.0]
+
+- **An attached image now survives a resume.** Attach one, quit, reopen the session, and the model
+  can still see it — which is what v0.11.0 was supposed to do and didn't. Its images lived as
+  separately-encrypted files in a `<session>.images/` sibling directory, and that could never
+  work: neither `SessionManager` nor `Orchestrator` retains a password, so the layer that builds
+  the model's context had no way to decrypt them. A resumed session showed a `[image: x.png]`
+  marker where the picture had been, and nothing ever read those files back at all.
+  - The bytes now live in `Session.images` (`{id: base64}`, deduplicated by content hash) **inside
+    the session's own encrypted blob**. Same AES-256-GCM, same password, one mechanism instead of
+    two — and already decrypted by the time `load()` returns. `crypto.py`'s `derive_key`/
+    `encrypt_bytes`/`decrypt_bytes`, `SessionManager.attach_image`/`read_image`/`images_dir` and
+    `Session.image_key_salt` are all deleted; the SPI was never touched, so no plugin breaks.
+  - Every image-bearing turn is resolved against that table, not just the newest, so an image stays
+    visible for as long as its turn does. Old ones fall back to a `[image: filename]` marker in
+    compaction pass 1; recent ones are never elided. Compaction prices an image at a flat 1500
+    tokens rather than its base64 length (a 1 MB screenshot would otherwise look like 350k tokens).
+  - `fork_session` carries exactly the images the branch's kept turns reference.
+- **Fixed: `/image` crashed the turn in the default (no `--session`) configuration.** From the
+  second turn onward it raised `'NoneType' object has no attribute 'encrypt'` — the orchestrator
+  manufactures its own `SessionManager` after turn one, and that one has no crypto backend. The
+  error was swallowed by the TUI's catch-all and the user's message never reached the model.
+- **Fixed: `/image` created a stray `..images/` directory in the working tree** in that same
+  configuration, writing into the user's repository.
+- **Fixed: a multi-line `/remember` silently lost every line after the first.** The prompt box is a
+  multi-line editor; continuation lines are now indented in the `.md` and read back correctly.
+- **Fixed: memory catalogues existed world-writable (`0666`) for a window** between creation and
+  `chmod`. Created with `os.open(..., 0o600)` now, matching `session._write_blob`.
+
 ## [0.11.0]
 
 - **Vision: attach an image with `/image <path>`.** No caption argument — nobody types a

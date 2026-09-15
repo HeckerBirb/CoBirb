@@ -143,11 +143,14 @@ prompt → model call → tool calls (policy-gated) → results into history →
 ## 6b. Memory catalogues (`memory.py`)
 
 Named lists of facts fed into the system prompt, each one file under `paths.memories_dir()`:
-`<name>.md` (plaintext, `0600`) or `<name>.md.enc` (password-protected, the same crypto backend
+`<name>.md` (plaintext) or `<name>.md.enc` (password-protected, the same crypto backend
 sessions use — see §6). `public.md` always exists and is created lazily on first use; anything
 else is created explicitly through `/memories`. A catalogue's `.md` body is a flat `- fact` bullet
-list — no metadata, no timestamps, no source, because this text is read straight into a system
-prompt and should read like a list a person would actually write.
+list, continuation lines indented two spaces — no metadata, no timestamps, no source, because this
+text is read straight into a system prompt and should read like a list a person would actually
+write. Both kinds are created `0600` via `os.open`, never `open()` + `chmod`: a public catalogue is
+plaintext *and* feeds the system prompt, so a umask-width window in which another local account can
+write to it is a window in which they can put words in the model's mouth.
 
 `/memories` (TUI) loads, unloads, renames, deletes, or creates catalogues; `/remember <fact>` saves
 a fact into one, prompting for its password there if it's locked. Both are **plain slash commands,
@@ -166,20 +169,29 @@ the same "nothing but its brief" reason it withholds `AGENTS.md` and the repo ma
 
 `/image <path>` (TUI) queues a file onto the *next* submitted prompt — no caption argument; the
 message typed and sent next is the caption, when there is one, the same as attaching a file
-anywhere else. `Turn.images` persists only `[{"id": <content hash>, "filename"}]`, never bytes;
-the encrypted bytes live in a sibling directory next to the session file (`SessionManager.
-images_dir()` — `<session>.images/<id>`), under a key derived from the session password *once*
-and cached (`SessionManager._image_key`, `crypto.py`'s `derive_key`/`encrypt_bytes`/`decrypt_bytes`
-— duck-typed extras, deliberately **not** added to the frozen `SessionCrypto` ABC; a crypto plugin
-without them still works via plain `encrypt`/`decrypt`, just slower).
+anywhere else.
 
-**Only the newest turn's images are ever sent as bytes.** `Orchestrator._build_context` walks
-`session.turns` fresh every call: the last turn's `images` (when `Orchestrator.run(images=...)` was
-given data for this call) keeps the real base64 payload; every earlier image-bearing turn is
-rewritten in place to a plain `[image: filename]` text marker. Nothing is ever resent, and nothing
-in `context.py`'s `compact()` needs to know images exist at all. `_build_messages`
-(`plugins/core/model.py`) attaches an entry's data to Ollama's native `images` field only when
-`supports_vision()` is true — read off the same cached `/api/show` payload `context_window()`
+**The bytes live in `Session.images` (`{id: base64}`, keyed by content hash), inside the same
+encrypted blob as everything else**; `Turn.images` holds only `[{"id", "filename"}]` referencing it.
+That placement is the design, not an implementation detail. They were briefly separate
+AES-GCM files in a `<session>.images/` sibling directory, and that could not work: neither
+`SessionManager` nor `Orchestrator` retains a password (both by deliberate design), so the layer
+that assembles the model's context could never decrypt them — a resumed session could only ever
+show a `[image: x.png]` marker where the image had been, and nothing ever called `read_image` at
+all. Living in the session payload, images are already decrypted when `load()` returns, under the
+same password and cipher as every other field. **Do not move them back out.**
+
+`Orchestrator._build_context` resolves every image-bearing turn against that table, not just the
+newest — an attachment is part of the conversation the way its text is, so a resumed session shows
+the model the image again. An id with no bytes behind it (hand-edited session, a branch taken
+before the attachment) degrades to a `[image: filename]` marker rather than failing the turn.
+`fork_session` carries exactly the images its kept turns reference. `context.py` prices an image at
+a flat `_IMAGE_TOKENS = 1500` (**never** `estimate_tokens(base64)` — a 1 MB screenshot would price
+at ~350 000 tokens and stampede compaction) and `_elide_image` drops old ones to a marker in
+compaction pass 1, so recent images — the one you are actually discussing — always survive.
+
+`_build_messages` (`plugins/core/model.py`) attaches data to Ollama's native `images` field only
+when `supports_vision()` is true — read off the same cached `/api/show` payload `context_window()`
 already uses, checking `capabilities` for `"vision"`, since most local models cannot see images at
 all and CoBirb has to ask rather than assume. `/export` shows a `📎 filename` marker, never bytes.
 
@@ -421,5 +433,9 @@ manifest never got built and shouldn't be revisited without a fresh reason.
   permission layer exists to ask about it.
 - **A configured MCP server can do whatever it likes with the arguments it receives.** Its env is
   minimal by default and its tools are pre-approved by nothing, but nothing detects egress.
+- **An attached image makes its session file bigger by roughly the image's size**, and every save
+  rewrites the whole blob. Accepted deliberately: AES runs at GB/s so this is disk, not latency,
+  and the alternative (bytes outside the session) is what made images unreadable on resume in the
+  first place — see §6c. No size cap on `/image`; the format sniff only asks "is this an image".
 - **`redact_secrets` matches formats, not names** — no `password=` heuristics. It will miss a
   bespoke credential format, and an agent asked to *edit* a credentials file needs it turned off.

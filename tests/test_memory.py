@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import stat
 
 import pytest
 
@@ -152,3 +153,66 @@ def test_render_names_the_catalogue_and_lists_facts():
     assert "work" in rendered
     assert "fact one" in rendered
     assert "fact two" in rendered
+
+
+def test_a_multi_line_fact_survives_a_round_trip(tmp_path, crypto):
+    """The prompt box is a multi-line editor, so /remember accepts newlines.
+    Written flat, everything after the first line was silently dropped on
+    reload — the file looked fine and half the memory was gone."""
+    cat = memory.create(str(tmp_path), "work", crypto, None)
+    memory.append_fact(cat, "line one\nline two\nline three")
+    memory.save(cat, crypto)
+
+    assert memory.load(cat.path, crypto).facts == ["line one\nline two\nline three"]
+
+
+def test_a_multi_line_fact_survives_in_an_encrypted_catalogue(tmp_path, crypto):
+    cat = memory.create(str(tmp_path), "secret", crypto, "pw")
+    memory.append_fact(cat, "first\nsecond")
+    memory.save(cat, crypto)
+
+    assert memory.load(cat.path, crypto, "pw").facts == ["first\nsecond"]
+
+
+def test_several_facts_including_a_multi_line_one_stay_separate(tmp_path, crypto):
+    cat = memory.create(str(tmp_path), "work", crypto, None)
+    memory.append_fact(cat, "plain one")
+    memory.append_fact(cat, "multi\nline")
+    memory.append_fact(cat, "plain two")
+    memory.save(cat, crypto)
+
+    assert memory.load(cat.path, crypto).facts == ["plain one", "multi\nline", "plain two"]
+
+
+def test_a_catalogue_is_never_world_readable_even_for_an_instant(tmp_path, crypto, monkeypatch):
+    """open()+chmod leaves the file at the umask's mode until the chmod
+    lands — 0666 on a permissive umask, i.e. world *writable*. A public
+    catalogue is plaintext and is read straight into the system prompt, so
+    that window is one in which another local account can put words in the
+    model's mouth.
+
+    Run under a genuinely permissive umask, because that is the only setting
+    under which the old code was wrong.
+    """
+    seen = []
+    real_chmod = os.chmod
+
+    def watching_chmod(path, mode, *args, **kwargs):
+        seen.append(stat.S_IMODE(os.stat(path).st_mode))
+        return real_chmod(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(os, "chmod", watching_chmod)
+    previous = os.umask(0o000)
+    try:
+        cat = memory.create(str(tmp_path), "public", crypto, None)
+        memory.save(cat, crypto)
+    finally:
+        os.umask(previous)
+
+    assert seen == []  # no chmod-after-create window to observe in the first place
+    assert stat.S_IMODE(os.stat(cat.path).st_mode) == 0o600
+
+
+def test_an_encrypted_catalogue_is_created_private_too(tmp_path, crypto):
+    cat = memory.create(str(tmp_path), "secret", crypto, "pw")
+    assert stat.S_IMODE(os.stat(cat.path).st_mode) == 0o600

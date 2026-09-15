@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from cobirb.context import (
     DEFAULT_CONTEXT_TOKENS,
+    _size,
     compact,
     estimate_tokens,
     history_budget,
@@ -195,3 +196,41 @@ def test_the_reserve_does_not_scale_absurdly_with_the_window():
     # Whatever the window, something is always held back for the reply.
     for window in (4096, 8192, 32768, 131072):
         assert history_budget(window) < window
+
+
+# --------------------------------------------------------------------------- #
+# Attached images
+# --------------------------------------------------------------------------- #
+def _image_turn(content, filename="shot.png"):
+    return {"role": "user", "content": content,
+            "images": [{"id": "a", "filename": filename, "data": "AAAA"}]}
+
+
+def test_an_image_counts_towards_the_budget():
+    """Not by its base64 length — a 1 MB screenshot priced by the character
+    rule would look like 350k tokens and panic compaction on its own."""
+    plain = [{"role": "user", "content": "hi"}]
+    with_image = [_image_turn("hi")]
+    assert _size(with_image) > _size(plain)
+    assert _size(with_image) - _size(plain) == 1500
+
+
+def test_an_old_image_is_elided_when_the_session_outgrows_its_budget():
+    turns = [_image_turn("look at this")] + [
+        {"role": "user", "content": f"turn {n}"} for n in range(30)
+    ]
+    compacted, report = compact(turns, budget_tokens=200)
+
+    kept = [t for t in compacted if "look at this" in str(t.get("content"))]
+    if kept:  # survived the drop pass — then it must at least have lost its bytes
+        assert not kept[0].get("images")
+        assert "elided" in kept[0]["content"]
+    assert report.changed
+
+
+def test_a_recent_image_is_never_elided():
+    turns = [{"role": "user", "content": "x" * 4000} for _ in range(10)] + [_image_turn("recent")]
+    compacted, _ = compact(turns, budget_tokens=900)
+
+    recent = [t for t in compacted if "recent" in str(t.get("content"))]
+    assert recent and recent[0].get("images")

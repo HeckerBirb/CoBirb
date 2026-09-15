@@ -1490,7 +1490,9 @@ def test_the_persisted_turn_never_carries_image_bytes():
     assert persisted.images == [{"id": "abc", "filename": "shot.png"}]
 
 
-def test_an_older_image_bearing_turn_degrades_to_a_text_marker():
+def test_an_image_is_still_there_on_later_turns_in_the_same_session():
+    """An attachment is part of the conversation the way its text is — it
+    does not evaporate the moment another turn happens."""
     model = _WindowedModel(window=8192)
     orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
 
@@ -1499,8 +1501,56 @@ def test_an_older_image_bearing_turn_degrades_to_a_text_marker():
 
     sent = json.loads(model.contexts[-1])
     first_turn = next(t for t in sent if t["content"].startswith("first"))
-    assert "images" not in first_turn
-    assert "[image: one.png]" in first_turn["content"]
+    assert first_turn["images"] == [{"id": "a", "filename": "one.png", "data": "AAAA"}]
+
+
+def test_an_image_survives_saving_and_resuming_the_session(tmp_path):
+    """The experience this whole design exists for: attach, quit, come back,
+    and the model can still see it."""
+    path = str(tmp_path / "s.json")
+    crypto = AesGcmScryptSessionCrypto()
+    manager = SessionManager.create(path, crypto, ".", "none", "pw")
+    first = Orchestrator(model=_WindowedModel(window=8192), tools={}, policy=Policy(),
+                         session=manager, crypto=crypto)
+    first.run("what is this?", "sys", cwd="/tmp",
+              images=[{"id": "a", "filename": "one.png", "data": "AAAA"}])
+    manager.save("pw")
+
+    resumed_model = _WindowedModel(window=8192)
+    resumed = Orchestrator(model=resumed_model, tools={}, policy=Policy(),
+                           session=SessionManager.load(path, crypto, "pw", ".", "none"), crypto=crypto)
+    resumed.run("and now?", "sys", cwd="/tmp")
+
+    sent = json.loads(resumed_model.contexts[0])
+    original = next(t for t in sent if t["content"].startswith("what is this"))
+    assert original["images"] == [{"id": "a", "filename": "one.png", "data": "AAAA"}]
+
+
+def test_the_same_image_attached_twice_is_stored_once():
+    model = _WindowedModel(window=8192)
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
+
+    for _ in range(2):
+        orchestrator.run("again", "sys", cwd="/tmp",
+                         images=[{"id": "a", "filename": "one.png", "data": "AAAA"}])
+
+    assert list(orchestrator.session.session.images) == ["a"]
+
+
+def test_an_image_whose_bytes_are_missing_degrades_to_a_marker():
+    """A hand-edited session shouldn't fail a turn — it should say the image
+    was there and carry on."""
+    model = _WindowedModel(window=8192)
+    manager = SessionManager.create("x", None, ".", "none")
+    manager.session.add(Turn(role="user", content="look", images=[{"id": "gone", "filename": "x.png"}]))
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), session=manager)
+
+    orchestrator.run("next", "sys", cwd="/tmp")
+
+    sent = json.loads(model.contexts[0])
+    turn = next(t for t in sent if t["content"].startswith("look"))
+    assert "images" not in turn
+    assert "[image: x.png]" in turn["content"]
 
 
 def test_no_images_means_no_images_key_at_all():
@@ -1513,7 +1563,9 @@ def test_no_images_means_no_images_key_at_all():
     assert "images" not in sent[0]
 
 
-def test_live_images_do_not_leak_into_a_later_unrelated_run():
+def test_an_earlier_turns_image_is_not_attributed_to_a_later_one():
+    """The image belongs to the turn it was attached to, and to no other —
+    a later prompt with nothing attached carries no images key at all."""
     model = _WindowedModel(window=8192)
     orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
 

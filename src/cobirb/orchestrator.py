@@ -223,13 +223,6 @@ class Orchestrator:
         # report. Derived here rather than sniffed out of turn text later,
         # because "was this denied?" should be a fact and not a string match.
         self.last_run_tool_calls: list[dict[str, Any]] = []
-        # Set for the duration of one run() call: [{"id","filename","data"}]
-        # for whatever was attached to *this* turn, "data" being base64. Read
-        # by _build_context to attach real bytes to the newest turn only —
-        # every earlier image-bearing turn gets a plain [image: filename]
-        # marker instead, so nothing is ever resent. Cleared when run()
-        # returns; it does not apply to any later, unrelated turn.
-        self._live_images: "list[dict[str, str]] | None" = None
         # The last verification run, for the headless report and /verify.
         self.last_verification = None
         # What the last _build_context had to throw away, for /context.
@@ -272,10 +265,10 @@ class Orchestrator:
         ``images``, when given, is ``[{"id", "filename", "data"}]`` for
         whatever was attached to this specific prompt — ``data`` is base64,
         already-plaintext bytes the caller read off local disk (see
-        ``tui.app.CoBirbApp._cmd_image``). Only *this* turn's images are ever
-        sent as bytes; every earlier image-bearing turn already collapsed to
-        a plain ``[image: filename]`` marker by the time this method returns
-        (see ``_build_context``), so nothing is ever resent to the model.
+        ``tui.app.CoBirbApp._cmd_image``). The bytes are stored into
+        ``Session.images`` and so travel with the session from then on: a
+        resumed conversation shows the model the image again, not a note
+        saying there used to be one.
 
         Stops as soon as the model gives a plain-text reply with no further
         tool calls (that reply becomes ``session.summary``), or after
@@ -320,7 +313,6 @@ class Orchestrator:
         # would throw away a message the user was just told had landed.
         self._clear_steer_queue()
         self._turn_active = True
-        self._live_images = images or None
         try:
             return self._run_body(
                 prompt=prompt,
@@ -333,7 +325,6 @@ class Orchestrator:
             )
         finally:
             self._turn_active = False
-            self._live_images = None
 
     def _run_body(
         self,
@@ -681,11 +672,17 @@ class Orchestrator:
         # opening turn of *this* run.
         if self.session is None:
             self.session = SessionManager.create(session_path or ".", self.crypto, cwd, persona)
-        # Only {id, filename} is persisted — never the bytes. The encrypted
-        # copy is written separately (CoBirbApp._cmd_image, which has the
-        # session password this class is never handed); this dataclass only
-        # ever holds a reference to it.
-        stored_images = [{"id": i["id"], "filename": i["filename"]} for i in images] if images else None
+        # The turn keeps a reference; the bytes go in the session's own image
+        # table, keyed by content hash — so the same screenshot attached twice
+        # is stored once, and everything rides inside the one encrypted blob
+        # (see Session.images for why that placement, not a sibling file).
+        stored_images = None
+        if images:
+            session = self.session.session
+            for image in images:
+                if image.get("data"):
+                    session.images[image["id"]] = image["data"]
+            stored_images = [{"id": i["id"], "filename": i["filename"]} for i in images]
         self.session.session.add(Turn(role="user", content=prompt, images=stored_images))
         return self.session.session
 
@@ -721,17 +718,26 @@ class Orchestrator:
         wasn't enough.
         """
         turns = []
-        last_index = len(session.turns) - 1
-        for index, t in enumerate(session.turns):
+        for t in session.turns:
             entry: dict[str, Any] = {"role": t.role, "content": t.content, "tool_use": t.tool_use}
             if t.images:
-                if index == last_index and self._live_images:
-                    # The wire-format entry for *this* call only — never
-                    # persisted (see _open_session), never resent once this
-                    # run ends and a later one rebuilds this list afresh.
-                    entry["images"] = self._live_images
-                else:
-                    marker = " ".join(f"[image: {img.get('filename') or 'attachment'}]" for img in t.images)
+                # Resolved against the session's own (already-decrypted) image
+                # table, for *every* image-bearing turn rather than only the
+                # newest. An attachment is part of the conversation the same
+                # way its text is: resume a session and the model sees the
+                # image again. Bytes that have gone missing (a hand-edited
+                # session, a turn branched away from its table) degrade to a
+                # marker rather than failing the turn.
+                resolved = [
+                    {**img, "data": session.images[img["id"]]}
+                    for img in t.images
+                    if img.get("id") in session.images
+                ]
+                if resolved:
+                    entry["images"] = resolved
+                missing = [img for img in t.images if img.get("id") not in session.images]
+                if missing:
+                    marker = " ".join(f"[image: {img.get('filename') or 'attachment'}]" for img in missing)
                     entry["content"] = f"{entry['content']}\n{marker}".strip() if entry["content"] else marker
             turns.append(entry)
         turns, report = compact(turns, self._context_budget())

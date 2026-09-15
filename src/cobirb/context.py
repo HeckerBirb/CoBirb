@@ -106,6 +106,16 @@ class CompactionReport:
         return f"{used}; {self.kept_turns} of {self.total_turns} turns kept, " + ", ".join(parts) + "."
 
 
+# What one attached image costs the model, nominally. Deliberately *not*
+# `estimate_tokens(base64)`: a 1 MB screenshot is ~1.4 M base64 characters,
+# which the character rule would price at ~350 000 tokens, and a single
+# screenshot would then look like it had blown a 128k window on its own. A
+# vision encoder charges a bounded amount per image regardless of file size,
+# and this is that order of magnitude. Better a stable approximation than a
+# number that is wrong by two orders and drives compaction from panic.
+_IMAGE_TOKENS = 1500
+
+
 def _size(turns: list[dict[str, Any]]) -> int:
     """Estimated token cost of a turn list, counting the structural overhead
     of the roles and tool-call records rather than just the prose."""
@@ -113,6 +123,7 @@ def _size(turns: list[dict[str, Any]]) -> int:
     for turn in turns:
         total += estimate_tokens(str(turn.get("content") or ""))
         total += estimate_tokens(str(turn.get("tool_use") or ""))
+        total += _IMAGE_TOKENS * len(turn.get("images") or [])
         total += 4  # role and message framing
     return total
 
@@ -133,6 +144,22 @@ def _elide(turn: dict[str, Any]) -> dict[str, Any]:
         **turn,
         "content": f"[earlier {label} elided to fit the context window — {size} characters]",
     }
+
+
+def _elide_image(turn: dict[str, Any]) -> dict[str, Any]:
+    """Drop a turn's attached images, leaving a note that they were there.
+
+    The counterpart of ``_elide`` for attachments, and it exists for the same
+    reason: an old image is the single most expensive thing in a long
+    session's history, and the model needs to know an image *was* attached
+    far more than it needs to see it again ten turns later. The recent ones
+    (inside ``_KEEP_RECENT``) are never touched, so the image you are
+    actually discussing stays visible.
+    """
+    names = " ".join(f"[image: {img.get('filename') or 'attachment'} elided to fit the context window]"
+                     for img in turn.get("images") or [])
+    content = str(turn.get("content") or "")
+    return {**turn, "content": f"{content}\n{names}".strip() if content else names, "images": None}
 
 
 _TRIM_MARK = "\n[…"
@@ -182,9 +209,15 @@ def compact(
         return _size(working) <= budget_tokens
 
     def elide_at(index: int) -> bool:
-        """Elide the tool result at ``index`` if there is one worth eliding."""
+        """Elide the tool result — or the attached image — at ``index``."""
         nonlocal elided
         turn = working[index]
+        # Images first: one of them outweighs most tool results, and unlike a
+        # tool result there is no size threshold worth checking.
+        if turn.get("images"):
+            working[index] = _elide_image(turn)
+            elided += 1
+            return True
         if turn.get("role") != "tool" or "elided to fit" in str(turn.get("content") or ""):
             return False
         if len(str(turn.get("content") or "")) < _ELIDE_MIN_CHARS:

@@ -2740,3 +2740,50 @@ async def test_the_transcript_shows_a_marker_for_a_queued_image(tmp_path, monkey
         await _submit(pilot, app, f"/image {png}")
         await _submit(pilot, app, "what is this")
         await _until(pilot, lambda: "shot.png" in _transcript_text(app))
+
+
+async def test_an_image_on_a_later_turn_works_without_a_session(monkeypatch):
+    """The default configuration: no --session. The orchestrator manufactures
+    a SessionManager of its own after turn 1, and that one has no crypto
+    backend — so attaching an image on turn 2 used to raise mid-turn
+    ('NoneType' object has no attribute 'encrypt'), swallow the user's
+    message, and leave a stray '..images' directory in the working tree."""
+    builds = []
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(record=builds))
+
+    app = _make_app(session_path=None, password=None)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "first, no image")
+        await _until(pilot, lambda: bool(builds))
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
+
+        import tempfile, pathlib
+        png = pathlib.Path(tempfile.mkdtemp()) / "shot.png"
+        png.write_bytes(_PNG_BYTES)
+
+        await _submit(pilot, app, f"/image {png}")
+        await _submit(pilot, app, "second, with image")
+        await _until(pilot, lambda: len(builds[0]["built"].calls) == 2)
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
+
+        assert "could not complete" not in _transcript_text(app)
+        assert builds[0]["built"].calls[1]["images"][0]["filename"] == "shot.png"
+
+
+async def test_attaching_an_image_writes_nothing_beside_the_session(tmp_path, monkeypatch):
+    """Bytes belong in the session blob. Nothing is written next to it, and
+    above all nothing is written into the working tree."""
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build())
+    png = tmp_path / "shot.png"
+    png.write_bytes(_PNG_BYTES)
+    before = set(os.listdir(tmp_path))
+
+    app = _make_app(cwd=str(tmp_path))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, f"/image {png}")
+        await _submit(pilot, app, "what is this")
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
+
+    assert set(os.listdir(tmp_path)) == before

@@ -64,8 +64,9 @@ class MemoryCatalogue:
         an empty heading."""
         if not self.facts:
             return ""
-        body = "\n".join(f"- {fact}" for fact in self.facts)
-        return f"From memory catalogue '{self.name}':\n{body}"
+        # The same bullet/indent shape the file uses, so a multi-line fact
+        # reads as one item in the prompt rather than running into the next.
+        return f"From memory catalogue '{self.name}':\n{_render_facts(self.facts)}"
 
 
 def _plain_path(directory: str, name: str) -> str:
@@ -96,11 +97,45 @@ def ensure_public_exists() -> str:
     return path
 
 
+def _render_facts(facts: list[str]) -> str:
+    """Facts as the catalogue's markdown body.
+
+    A fact spanning several lines is written as one bullet with its
+    continuation lines indented, because the prompt box is a multi-line
+    editor and ``/remember`` accepts exactly what was typed into it. Written
+    flat, the second line was not a bullet, so reading the file back silently
+    dropped everything after the first line — the file looked fine and the
+    memory was half gone.
+    """
+    lines = []
+    for fact in facts:
+        head, *rest = fact.split("\n")
+        lines.append(f"- {head}")
+        lines.extend(f"  {line}" for line in rest)
+    return "\n".join(lines)
+
+
+def _write(path: str, data: bytes) -> None:
+    """Write a catalogue, readable only by its owner, with no window in which
+    it isn't.
+
+    ``os.open`` with the mode rather than ``open()`` + ``os.chmod``: the
+    latter leaves the file at the umask's mode until the chmod lands, which
+    on a permissive umask is 0666 — world *writable*. That matters more here
+    than for a session blob: a public catalogue is plaintext by design, and
+    its contents are read straight into the system prompt, so a window in
+    which another local account can write to it is a window in which they can
+    put words in the model's mouth. Same reasoning as ``session._write_blob``.
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
+
+
 def _write_plain(path: str, facts: list[str]) -> None:
-    body = "\n".join(f"- {fact}" for fact in facts)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(body + ("\n" if body else ""))
-    os.chmod(path, 0o600)
+    body = _render_facts(facts)
+    _write(path, (body + ("\n" if body else "")).encode("utf-8"))
 
 
 def _read_plain(path: str) -> list[str]:
@@ -110,13 +145,20 @@ def _read_plain(path: str) -> list[str]:
 
 
 def _parse_facts(text: str) -> list[str]:
-    facts = []
+    """Read a catalogue body back into facts.
+
+    A line starting with ``-`` opens a fact; an indented line continues the
+    one before it (see ``_render_facts``). Anything else — a stray heading, a
+    note someone typed into the file by hand — is ignored rather than turned
+    into a fact nobody wrote.
+    """
+    facts: list[str] = []
     for line in text.splitlines():
-        line = line.strip()
-        if line.startswith("- "):
-            facts.append(line[2:].strip())
-        elif line.startswith("-"):
-            facts.append(line[1:].strip())
+        stripped = line.strip()
+        if stripped.startswith("-"):
+            facts.append(stripped[1:].strip())
+        elif facts and line.startswith("  ") and stripped:
+            facts[-1] = f"{facts[-1]}\n{stripped}"
     return facts
 
 
@@ -162,10 +204,7 @@ def create(directory: str, name: str, crypto: Any, password: "str | None") -> Me
         raise CatalogueError(f"a catalogue named '{name}' already exists")
     if password:
         path = _encrypted_path(directory, name)
-        blob = crypto.encrypt("", password)
-        with open(path, "wb") as fh:
-            fh.write(blob)
-        os.chmod(path, 0o600)
+        _write(path, crypto.encrypt("", password))
         return MemoryCatalogue(name=name, path=path, encrypted=True, facts=[], password=password)
     path = _plain_path(directory, name)
     _write_plain(path, [])
@@ -202,13 +241,9 @@ def save(catalogue: MemoryCatalogue, crypto: Any) -> None:
     same contract every other caller of ``crypto.encrypt`` already relies on.
     """
     if catalogue.encrypted:
-        text = "\n".join(f"- {fact}" for fact in catalogue.facts)
-        blob = crypto.encrypt(text, catalogue.password or "")
-        with open(catalogue.path, "wb") as fh:
-            fh.write(blob)
+        _write(catalogue.path, crypto.encrypt(_render_facts(catalogue.facts), catalogue.password or ""))
     else:
         _write_plain(catalogue.path, catalogue.facts)
-    os.chmod(catalogue.path, 0o600)
 
 
 def append_fact(catalogue: MemoryCatalogue, text: str) -> None:
