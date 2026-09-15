@@ -152,22 +152,31 @@ class StdioClient:
         self._notify("notifications/initialized", {})
 
     def close(self) -> None:
-        """Stop the server, politely then not."""
+        """Stop the server, politely then not.
+
+        **End the process before closing its pipes**, in that order. A reader
+        thread sitting in ``for line in process.stdout`` holds that stream's
+        lock, and closing the stream from here waits for the read in flight to
+        finish — which, for a server that has stopped answering but not
+        exited, means waiting as long as that server happens to live. Ending
+        the process first makes the blocked read return EOF immediately, so
+        the close that follows is instant.
+        """
         process, self._process = self._process, None
         if process is None:
             return
-        for stream in (process.stdin, process.stdout, process.stderr):
-            try:
-                if stream is not None:
-                    stream.close()
-            except OSError:
-                pass
         try:
             process.terminate()
             process.wait(timeout=5)
         except (subprocess.TimeoutExpired, OSError):
             try:
                 process.kill()
+            except OSError:
+                pass
+        for stream in (process.stdin, process.stdout, process.stderr):
+            try:
+                if stream is not None:
+                    stream.close()
             except OSError:
                 pass
 

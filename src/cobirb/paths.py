@@ -1,11 +1,11 @@
 """Where CoBirb keeps things on disk.
 
-Every path under the user's CoBirb home is derived here. Five modules used to
-each spell out ``os.environ.get("COBIRB_HOME", os.path.expanduser("~"))`` and
-then join their own subpath onto it, which is how user personas ended up
-looked for in ``~/cobirb/`` while config, sessions, the audit log and local
-plugins all lived in ``~/.cobirb/`` — a persona put where every other CoBirb
-file lives was silently never found.
+Every path under the user's CoBirb home is derived here, so ``COBIRB_HOME`` is
+read in exactly one place and config, sessions, personas, the audit log and
+local plugins can never disagree about where the tree is. A module that spells
+the lookup out for itself is one typo away from writing into a directory
+nothing else ever looks in — a file silently absent rather than reported
+missing.
 
 Everything here is a function, not a module constant: ``COBIRB_HOME`` is read
 at call time so relocating it takes effect immediately, which is also how the
@@ -33,10 +33,10 @@ def cobirb_dir() -> str:
 def config_path() -> str:
     """The config file — the only one there is.
 
-    CoBirb used to also read a ``cobirb.json`` from the working directory and
-    let it override this. It no longer does, and no longer looks: see
-    ``cobirb.config`` for why a repository must not be able to configure the
-    tool that is about to run inside it.
+    Configuration comes from here and nowhere else. No ``cobirb.json`` in the
+    working directory is read, merged, or even looked for: see ``cobirb.config``
+    for why a repository must not be able to configure the tool that is about
+    to run inside it.
     """
     return os.path.join(cobirb_dir(), "config.json")
 

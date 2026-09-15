@@ -28,10 +28,10 @@ from textual.widgets.option_list import Option
 
 from conftest import StubSession, StubSessionManager
 
-from cobirb import cli, help_text, memory, paths, session
+from cobirb import cli, memory, paths, session
 from cobirb.plugins.core import render
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
-from cobirb.runtime import commands, personas, plugins, sessions, wiring
+from cobirb.runtime import personas, plugins, wiring
 from cobirb.tui.app import CoBirbApp
 from cobirb.tui.attachments import split_argument as _split_image_argument
 from cobirb.tui.panes import PluginsPane, SessionsPane
@@ -209,11 +209,10 @@ async def test_status_bar_shows_persona_model_plan_mode_and_cwd():
 
 
 async def test_the_status_bar_has_a_row_of_its_own_above_the_footer():
-    """Regression test: the status bar and the key-binding Footer were
-    originally both docked to the bottom edge, which put them on the *same*
-    row — the Footer painted over the status line, so it was never actually
-    visible even though querying it returned perfectly good text. They now
-    share one two-row docked container."""
+    """The status bar and the key-binding Footer share one two-row docked
+    container. Docking both to the bottom edge puts them on the *same* row,
+    where the Footer paints over the status line — invisible on screen even
+    though querying it returns perfectly good text."""
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -253,9 +252,8 @@ async def test_next_tab_cycles_through_every_tab_and_wraps():
 
 
 async def test_the_sessions_and_plugins_tabs_hold_real_panes_not_placeholders():
-    """Regression guard: both tabs used to carry a static "coming later"
-    message; they're live views now (see PluginsPane/SessionsPane tests
-    further down) and must never regress back to a placeholder."""
+    """Both tabs are live views (see PluginsPane/SessionsPane tests further
+    down), and must never become a static "coming later" placeholder."""
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -299,9 +297,8 @@ async def test_a_blank_submission_never_builds_an_orchestrator(monkeypatch):
 
 
 async def test_the_orchestrator_is_built_once_and_reused_across_turns(monkeypatch):
-    """Regression guard carried over from the scrolling loop: rebuilding per
-    turn would discard the Policy, so an "always allow this" approval would
-    silently stop applying on the next turn."""
+    """Rebuilding per turn would discard the Policy, so an "always allow this"
+    approval would silently stop applying on the next turn."""
     builds = []
     orchestrator = _StubOrchestrator()
     monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator, record=builds))
@@ -412,11 +409,11 @@ async def test_nothing_is_saved_when_no_session_path_was_given(monkeypatch):
 # --------------------------------------------------------------------------- #
 # Cancelling a turn (Ctrl+C) and quitting mid-turn (Ctrl+Q).
 #
-# Regression coverage for a real bug: a `shell` call that hangs (a command
-# that doesn't produce output until you interact with it, a game loop, a
-# server — anything that doesn't exit on its own) used to leave the input
-# disabled with no way out short of waiting up to its 5-minute timeout, and
-# even quitting the app blocked for that same span, because Textual/
+# A `shell` call that hangs (a command that doesn't produce output until you
+# interact with it, a game loop, a server — anything that doesn't exit on its
+# own) must not leave the input disabled with no way out short of its 5-minute
+# timeout, nor block quitting for that same span, which it otherwise does
+# because Textual/
 # asyncio's shutdown waits for the worker thread to actually return. See
 # ShellTool.cancel_running() (tools.py) for the other half of the fix.
 # --------------------------------------------------------------------------- #
@@ -1508,7 +1505,7 @@ async def test_resuming_discards_an_already_built_orchestrator(monkeypatch):
     session through an orchestrator built before the switch.
 
     Also a regression test for real: submitting either of the new-session
-    prompts (a plain ``Input.Submitted``) used to bubble past the modal to
+    prompts (a plain ``Input.Submitted``) otherwise bubble past the modal to
     the App's own ``on_input_submitted`` — the chat box's handler — silently
     running the typed session name or password as a stray chat prompt on
     whatever orchestrator was already active. See TextPromptModal's
@@ -1534,7 +1531,7 @@ async def test_resuming_discards_an_already_built_orchestrator(monkeypatch):
         await pilot.press("enter")
         await _until(pilot, lambda: app.orchestrator is None)
 
-        # Neither prompt was run as a chat turn against the old orchestrator.
+        # Neither prompt was run as a chat turn against the active orchestrator.
         assert [(c["prompt"], c["persona"]) for c in orchestrator.calls] == [("hello", "CoBirb")]
 
 
@@ -2203,8 +2200,8 @@ async def test_the_tui_draws_nothing_for_begin_stream(monkeypatch):
 # --------------------------------------------------------------------------- #
 # Resuming a session shows the conversation you are rejoining.
 #
-# It used to leave the transcript blank: the turns were loaded and fed to the
-# model, so it knew what had been said, but none of it was on screen.
+# Without it the transcript is blank: the turns are loaded and fed to the
+# model, so it knows what was said, while none of it is on screen.
 # --------------------------------------------------------------------------- #
 def _session_with_turns(*turns) -> SimpleNamespace:
     return SimpleNamespace(session=SimpleNamespace(turns=list(turns), persona="none"))
@@ -2295,7 +2292,7 @@ async def test_resuming_from_the_sessions_tab_replays_and_returns_to_the_convers
 
         text = _transcript_text(app)
         assert "earlier question" in text and "earlier answer" in text
-        # Switching conversations clears the old one rather than stacking them.
+        # Switching conversations clears the previous one rather than stacking them.
         assert "CoBirb ready." not in text
         assert app.query_one(TabbedContent).active == "current"
 
@@ -2749,9 +2746,9 @@ async def test_the_transcript_shows_a_marker_for_a_queued_image(tmp_path, monkey
 async def test_an_image_on_a_later_turn_works_without_a_session(monkeypatch):
     """The default configuration: no --session. The orchestrator manufactures
     a SessionManager of its own after turn 1, and that one has no crypto
-    backend — so attaching an image on turn 2 used to raise mid-turn
-    ('NoneType' object has no attribute 'encrypt'), swallow the user's
-    message, and leave a stray '..images' directory in the working tree."""
+    backend — so attaching an image on turn 2 must not reach into it, which
+    raises mid-turn ('NoneType' object has no attribute 'encrypt'), swallows
+    the user's message, and leaves a stray '..images' directory behind."""
     builds = []
     monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(record=builds))
 
@@ -2863,3 +2860,71 @@ async def test_remember_has_somewhere_to_save_on_a_fresh_install():
 
         options = app.screen.query_one("#remember-options", OptionList)
         assert [options.get_option_at_index(i).id for i in range(options.option_count)] == ["public"]
+
+
+# --------------------------------------------------------------------------- #
+# /image argument parsing
+# --------------------------------------------------------------------------- #
+def test_split_image_argument_takes_the_first_word_as_the_path(tmp_path):
+    """`/image shot.png what is this?` is what people type. Reading the whole
+    line as a filename reports "no such file: 'shot.png what is this?'",
+    blaming the file for a parsing rule."""
+    assert _split_image_argument("shot.png what is this?", str(tmp_path)) == (
+        "shot.png", "what is this?"
+    )
+
+
+def test_split_image_argument_keeps_a_bare_path_bare(tmp_path):
+    assert _split_image_argument("shot.png", str(tmp_path)) == ("shot.png", "")
+
+
+def test_split_image_argument_keeps_an_unquoted_path_with_spaces_working(tmp_path):
+    """An existing file wins over the split, so a path with spaces in it keeps
+    behaving as it would with no message after it."""
+    (tmp_path / "my screenshot.png").write_bytes(_PNG_BYTES)
+    assert _split_image_argument("my screenshot.png", str(tmp_path)) == ("my screenshot.png", "")
+
+
+def test_split_image_argument_honours_quotes(tmp_path):
+    assert _split_image_argument('"my shot.png" what is this?', str(tmp_path)) == (
+        "my shot.png", "what is this?"
+    )
+
+
+def test_split_image_argument_is_empty_for_nothing(tmp_path):
+    assert _split_image_argument("   ", str(tmp_path)) == ("", "")
+
+
+async def test_image_with_a_message_attaches_and_sends_in_one_go(tmp_path, monkeypatch):
+    """Path and question on one line: the image is attached and the message is
+    sent, without the user having to discover the two-step flow."""
+    builds = []
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(record=builds))
+    (tmp_path / "cobirb.png").write_bytes(_PNG_BYTES)
+
+    app = _make_app(cwd=str(tmp_path))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/image cobirb.png What is this image?")
+        await _until(pilot, lambda: bool(builds))
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
+
+        assert "Could not read" not in _transcript_text(app)
+        call = builds[0]["built"].calls[0]
+        assert call["prompt"] == "What is this image?"
+        assert call["images"][0]["filename"] == "cobirb.png"
+
+
+async def test_a_relative_image_path_resolves_against_the_session_cwd(tmp_path, monkeypatch):
+    """--cwd exists so the working directory and the directory CoBirb was
+    launched from need not be the same."""
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build())
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "cobirb.png").write_bytes(_PNG_BYTES)
+    monkeypatch.chdir(tmp_path.parent)  # process cwd is somewhere else entirely
+
+    app = _make_app(cwd=str(tmp_path))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/image docs/cobirb.png")
+        assert [i.filename for i in app.attachments.pending] == ["cobirb.png"]

@@ -7,7 +7,6 @@ a test that stubbed the policy would be testing nothing.
 """
 from __future__ import annotations
 
-import json
 
 from conftest import write_config
 

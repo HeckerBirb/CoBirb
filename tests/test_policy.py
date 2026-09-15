@@ -173,9 +173,9 @@ def test_read_grant_does_not_imply_write(tmp_path):
 
 
 def test_grant_widens_a_call_to_its_own_directory(tmp_path):
-    """`grant` is what an "always" answer applies. It used to hand a write
-    tool the entire filesystem, which is a great deal more than the question
-    appeared to be asking — now it grants the directory, like a read."""
+    """`grant` is what an "always" answer applies: the directory, like a read.
+    Handing a write tool the entire filesystem would be a great deal more than
+    the question appeared to be asking."""
     policy = Policy(cwd=str(tmp_path))
 
     policy.grant("read_file", {"path": "docs/a.txt"})
@@ -231,9 +231,9 @@ def test_find_exec_is_refused_even_when_find_is_allowed():
 # --------------------------------------------------------------------------- #
 # Chained-command bypass (regression).
 #
-# `is_allowed` used to inspect only the first block of a shell command while
-# ShellTool handed the *entire* string to subprocess with shell=True. So an
-# allowed binary could smuggle a denied one in behind a separator:
+# ShellTool hands the *entire* string to subprocess with shell=True, so
+# `is_allowed` must inspect every block of a shell command. Checking only the
+# first lets an allowed binary smuggle a denied one in behind a separator:
 # "git status; rm -rf /" was approved on the strength of "git" and then ran
 # both commands. Every segment must be permitted in its own right.
 # --------------------------------------------------------------------------- #
@@ -292,8 +292,8 @@ def test_unparseable_command_is_denied():
 
 
 def test_leading_separator_does_not_bypass_the_allow_list():
-    """A command starting with a separator used to parse to zero words,
-    which the old code treated as "nothing to check" and allowed."""
+    """A command starting with a separator parses to zero words, which must
+    not be read as "nothing to check" and allowed."""
     policy = Policy()  # nothing allowed at all
 
     assert not policy.is_allowed("shell", {"command": ";rm -rf /"})

@@ -40,11 +40,11 @@ def resolve_session(session_arg: str | None, password_arg: Any) -> tuple[str | N
     Returns ``(session_path, password)``, both ``None`` when this run isn't a
     session at all.
 
-    ``--password``/``-w`` on its own used to be inert in interactive mode:
-    the password was only ever read when ``--session`` also named a path, so
-    ``cobirb -w`` ran an ordinary throwaway conversation and nothing was
-    saved. Asking for a password is asking for an encrypted session, so one
-    is now created under ``~/.cobirb/sessions`` named for the current time.
+    ``--password``/``-w`` on its own is not inert: asking for a password is
+    asking for an encrypted session, so one is created under
+    ``~/.cobirb/sessions`` named for the current time. Reading the password
+    only when ``--session`` also named a path would make ``cobirb -w`` an
+    ordinary throwaway conversation that saves nothing.
 
     ``-w <password>`` takes the password from the command line, and ``-w``
     alone prompts for it without echo. The command-line form is what makes

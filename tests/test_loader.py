@@ -105,9 +105,9 @@ def test_load_plugins_empty(monkeypatch, tmp_path):
 def test_load_plugins_entry_point_failure_is_captured_not_raised(monkeypatch, tmp_path):
     """A broken entry point must be reported, never crash discovery (fail-closed).
 
-    Regression test: ``kind`` used to be referenced in the except-block before
-    the inner loop ever bound it, so a failing ``ep.load()`` raised NameError
-    instead of being recorded as an error.
+    ``kind`` must not be referenced in the except-block before the inner loop
+    binds it, or a failing ``ep.load()`` raises NameError instead of being
+    recorded as an error.
     """
     import cobirb.plugins.loader as loader_mod
 

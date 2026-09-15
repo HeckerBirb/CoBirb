@@ -10,11 +10,10 @@ Two decisions worth knowing about:
 **It is capped, but generously.** This text rides on *every* request for the
 whole session, so an unbounded file is still worth guarding against — a
 100 KB contributing guide is a quarter of a 128k window spent before the
-conversation starts. The cap was originally 2,000 characters, sized for a
-4,096-token window that CoBirb's users do not have; at 32k it comfortably
-sends a real project's conventions whole, which is the point of reading them
-at all. Truncation is announced rather than silent, and the budget is
-configurable.
+conversation starts. The cap is sized for the window CoBirb's users actually
+have rather than a 4,096-token one: at 32k it comfortably sends a real
+project's conventions whole, which is the point of reading them at all.
+Truncation is announced rather than silent, and the budget is configurable.
 
 **It does not walk up the tree.** Only the working directory is read. Walking
 up to a git root sounds helpful right up until a monorepo's top-level

@@ -16,26 +16,22 @@ The salt and nonce are not secret and travel with the ciphertext.
 
 **The blob says how it was made.** A versioned blob is ``b"cobirb1"`` + a
 base64 JSON header naming the KDF and its cost + a newline + the base64 of
-``salt || nonce || ciphertext``. That header is the v0.7.0 hardening change,
-and it exists for one reason: the original format was bare base64 with nowhere
-to record its parameters, which meant the cost constants could never be raised
-— doing so would have silently orphaned every session file already written.
-Blobs without the marker are pre-v0.7.0 and are read with the parameters that
-era used (N=2**14); they keep opening, and are written back in the new format
-the next time the session is saved.
+``salt || nonce || ciphertext``. The header is what makes the cost constants
+changeable at all: a format that cannot describe its own parameters can never
+raise them, because doing so silently orphans every file already written. A
+blob with no marker is read at the interactive parameters (N=2**14) and
+written back in the versioned format the next time the session is saved.
 
-Note on post-quantum crypto: earlier design notes called for wrapping the key
-in an ML-KEM-768 (Kyber) seal. That's a key *encapsulation* mechanism for two
-parties exchanging a shared secret over a public key — it defends against a
-future quantum computer breaking today's RSA/ECC key exchange ("harvest now,
-decrypt later"). A session file has no such exchange: it's one user
-encrypting to themselves with a password, no counterparty, no public key.
-AES-256 is already considered quantum-resistant for that case (Grover's
-algorithm only halves its effective strength, leaving 128 bits), and a
-KEM derived from the same password wouldn't raise the cost of a password-
-guessing attack — it would just add ceremony around the same weak point.
-So there's no KEM here; this is a vetted, standard AES-256-GCM + scrypt
-implementation, deliberately not the PQ seal the original design imagined.
+No post-quantum KEM here, and that is deliberate rather than an omission. An
+ML-KEM-768 (Kyber) seal is a key *encapsulation* mechanism for two parties
+exchanging a shared secret over a public key, defending against a future
+quantum computer breaking today's RSA/ECC key exchange ("harvest now, decrypt
+later"). A session file has no such exchange: one user encrypting to
+themselves with a password, no counterparty, no public key. AES-256 is already
+considered quantum-resistant for that case (Grover's algorithm only halves its
+effective strength, leaving 128 bits), and a KEM derived from the same password
+would not raise the cost of a password-guessing attack — only add ceremony
+around the same weak point.
 """
 from __future__ import annotations
 
@@ -57,22 +53,21 @@ _NONCE_LEN = 12
 # for a file that sits on disk indefinitely rather than a login that happens
 # constantly. The cost is paid once, when a session is unlocked.
 #
-# Raising this was only possible because the blob now records which parameters
-# produced it (see the format note below). Before that, these constants were
-# effectively permanent: change them and every session file ever written stops
-# decrypting, with no way to tell which ones were which.
+# Changeable only because the blob records which parameters produced it (see
+# the format note above). Without that record these constants are effectively
+# permanent: change them and every session file already written stops
+# decrypting, with no way to tell which ones were written under which cost.
 _SCRYPT_N = 2**17
 _SCRYPT_R = 8
 _SCRYPT_P = 1
 
-# What v0.1.0–v0.6.0 wrote: RFC 7914 "interactive" parameters, ~16 MiB. Kept
-# so those files still open. Never used for new writes.
+# RFC 7914 "interactive" parameters, ~16 MiB — what a blob carrying no header
+# is read at. Never used for new writes.
 _LEGACY_SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 
 # Blob format marker. Versioned blobs are `b"cobirb1"` + one JSON header line
-# + the raw bytes; anything without the marker is a pre-v0.7.0 blob, which was
-# bare base64 with no room to say anything about itself. That omission is the
-# finding this addresses: a crypto format that cannot describe its own
+# + the raw bytes; anything without the marker is bare base64, with no room to
+# say anything about itself. A crypto format that cannot describe its own
 # parameters can never change them, which means it can never be strengthened.
 _MAGIC = b"cobirb1"
 _FORMAT_VERSION = 1
@@ -81,11 +76,10 @@ _FORMAT_VERSION = 1
 def _split(blob: bytes) -> tuple[dict[str, int], bytes]:
     """Separate a blob's KDF parameters from its ciphertext.
 
-    Two formats, and both have to keep working: a pre-v0.7.0 blob is bare
-    base64 with nothing to say about how it was derived, so it is taken as
-    the legacy parameters — which is exactly what it was. A versioned blob
-    states them, and is read back at whatever cost it was written with, not
-    whatever cost is current.
+    Two formats, and both have to keep working. An unmarked blob is bare
+    base64 with nothing to say about how it was derived, so it is read at the
+    interactive parameters. A versioned blob states them, and is read back at
+    whatever cost it was written with, not whatever cost is current.
 
     A header from a *newer* format version is refused rather than guessed at,
     on the same reasoning as the session schema: failing to open a file is
@@ -112,12 +106,10 @@ def _split(blob: bytes) -> tuple[dict[str, int], bytes]:
 class AesGcmScryptSessionCrypto(SessionCrypto):
     """Default session crypto. AES-256-GCM bulk cipher over a scrypt-derived key.
 
-    ``cryptography`` is a required dependency and is imported at module scope;
-    this docstring used to claim it was imported lazily so the core had no
-    hard dependency on it, which was never true of the shipped code. The
-    backend is still resolved at construction time and may come back ``None``,
-    so an install where the library is present but unusable fails when a
-    session is actually encrypted rather than at import.
+    ``cryptography`` is a required dependency, imported at module scope. The
+    backend is nevertheless resolved at construction time and may come back
+    ``None``, so an install where the library is present but unusable fails
+    when a session is actually encrypted rather than at import.
     """
 
     _AUTO = object()  # sentinel: "detect the backend" vs. an explicit (possibly None) override
@@ -170,9 +162,9 @@ class AesGcmScryptSessionCrypto(SessionCrypto):
         # Both of these say the same thing — this is not a session file — and
         # both exist because the alternative is a failure that *reads* like a
         # wrong password, sending whoever hit it to re-type a password that was
-        # never the problem. Undecodable base64 used to surface as binascii's
-        # "Incorrect padding"; a truncated blob used to slice into an empty
-        # salt and nonce and fail inside the cipher instead.
+        # never the problem. Undecodable base64 surfaces as binascii's
+        # "Incorrect padding" otherwise, and a truncated blob slices into an
+        # empty salt and nonce and fails inside the cipher instead.
         try:
             raw = base64.b64decode(body, validate=True)
         except (ValueError, binascii.Error) as exc:

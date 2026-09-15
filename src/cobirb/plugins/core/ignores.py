@@ -1,11 +1,11 @@
 """Honouring `.gitignore` when searching a project.
 
-`glob` and `grep` used to skip a hardcoded list of eight directory names.
-That covered `.venv` and `node_modules` and nothing else, so every search of a
-real project crawled `dist/`, `build/`, `target/`, `coverage/` and whatever
-else that project happens to generate — wasting time, and worse, spending
-context on generated files. It also read anything a user had deliberately kept
-out of version control, `.env` included.
+A hardcoded list of directory names is not enough for `glob` and `grep`. It
+covers `.venv` and `node_modules` and misses `dist/`, `build/`, `target/`,
+`coverage/` and whatever else a given project generates — so a search crawls
+them, wasting time and, worse, spending context on generated files. It also
+reads whatever the user deliberately kept out of version control, `.env`
+included.
 
 **A documented subset, not a git clone.** Supported: comments, blank lines,
 negation with `!`, directory-only patterns with a trailing `/`, anchoring with

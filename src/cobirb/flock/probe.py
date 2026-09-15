@@ -93,7 +93,7 @@ def _timed_call(provider: Any, prompt: str) -> tuple[float, float]:
 
 
 def probe_concurrency(
-    provider: Any, *, timeout: int = DEFAULT_TIMEOUT, prompt: str = _PROMPT
+    provider: Any, *, timeout: float = DEFAULT_TIMEOUT, prompt: str = _PROMPT
 ) -> ProbeResult:
     """Find out whether ``provider``'s endpoint answers two requests at once.
 

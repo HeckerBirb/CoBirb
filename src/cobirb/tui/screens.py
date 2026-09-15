@@ -386,7 +386,7 @@ class _CataloguePickerModal(ModalScreen[None]):
     Subclasses supply the two widget ids and their own layout; everything
     below — reading the catalogues, rendering them loaded-first, showing an
     inline error, and the unlock-then-continue dance — is the same job in
-    both, and was the same code twice before this existed.
+    both, and belongs in one place rather than two.
 
     Every file and crypto operation is delegated to ``CoBirbApp`` (the same
     ``cast("CoBirbApp", self.app)`` pattern the Plugins pane already uses),

@@ -1,12 +1,11 @@
 """Fitting a conversation into the model's context window.
 
-The orchestrator used to serialize *every* turn of a session on *every* model
-call. Nothing counted tokens, nothing was ever dropped, and nothing knew how
-big the window was. Read a few files and the request outgrew the window; the
-server then silently truncated from the front, so the model lost the task it
-was given and re-read files it had already read. From the user's side that
-reads as "it got dumb halfway through", which is the worst failure an agent
-has because it looks like the model's fault rather than the harness's.
+Sending every turn of a session on every model call is what this exists to
+prevent. Read a few files and the request outgrows the window; the server then
+silently truncates from the front, so the model loses the task it was given and
+re-reads files it has already read. From the user's side that reads as "it got
+dumb halfway through" — the worst failure an agent has, because it looks like
+the model's fault rather than the harness's.
 
 This module decides what to keep. Two passes, in this order, because they
 lose increasing amounts:
@@ -19,29 +18,28 @@ lose increasing amounts:
    leaving the opening request (the objective) and a recent working window.
 
 Deliberately no model call. Summarising the dropped turns would preserve more,
-but it costs a round trip on every compaction and can itself fail; a
-deterministic, testable rule that never makes things worse is the right
-version to build first. Real summarisation belongs on top of this later.
+but it costs a round trip on every compaction and can itself fail. A
+deterministic, testable rule that never makes things worse is what belongs
+underneath; summarisation can sit on top of it.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
-# Used only when the provider cannot say what window it has. Ollama's own
-# default is 4096, and an earlier version of this used that — reasoning that
-# guessing high would re-create the silent truncation this module exists to
-# prevent. That was the wrong fix for the right worry: CoBirb now *states*
-# `num_ctx` on every request (see `LocalModelProvider.context_window`), so the
-# server serves what is asked for and there is nothing to be timid about.
+# Used only when the provider cannot say what window it has. Not Ollama's own
+# 4096 default: CoBirb *states* `num_ctx` on every request (see
+# `LocalModelProvider.context_window`), so the server serves what is asked for
+# and there is nothing to be timid about. Guessing low would re-create the
+# silent truncation this module exists to prevent, one conversation at a time.
 # 32k is a floor for the rare case where nothing is discoverable, not an
 # expectation — the target hardware runs 128k comfortably.
 DEFAULT_CONTEXT_TOKENS = 32768
 
 # What the history must leave room for: the system prompt and project context,
 # the tool schemas, and the model's reply. An *absolute* allowance rather than
-# a fraction — the old 40% reserved 51k tokens on a 128k window, which is
-# absurd, while on a small one a fraction reserves too little to answer from.
+# a fraction: 40% of a 128k window would hold back 51k tokens, which is absurd,
+# while on a small window a fraction reserves too little to answer from.
 _RESERVE_MIN_TOKENS = 2048
 _RESERVE_MAX_TOKENS = 16384
 _RESERVE_FRACTION = 0.2

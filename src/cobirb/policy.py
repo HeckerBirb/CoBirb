@@ -103,9 +103,9 @@ class AuditLog:
         """Record one tool call, never at the cost of the call itself.
 
         An unwritable log path (a read-only volume, a full disk, a directory
-        that can't be created) used to take down the tool call this was only
-        observing. The trail is worth having, but not more than the work it
-        is a trail of — so a failure is reported once and stepped over.
+        that can't be created) must never take down the tool call this is only
+        observing. The trail is worth having, but not more than the work it is
+        a trail of — so a failure is reported once and stepped over.
         """
         if not self.enabled:
             return
@@ -419,7 +419,7 @@ class Policy:
         This log's whole problem is that it stores arguments verbatim —
         ``write_file``'s full content, ``shell``'s full command — in a
         plaintext file that outlives the session. Redacting here means turning
-        it on no longer means accepting a second copy of every key the agent
+        it on does not mean accepting a second copy of every key the agent
         happened to handle.
         """
         entry = {
@@ -453,8 +453,8 @@ class Policy:
                 self.allow_read_dir(directory)
                 return
         if tool_name in WRITE_TOOLS:
-            # Narrower than it used to be: "always" on an edit used to hand
-            # over write_file everywhere, which is a great deal more than the
+            # Scoped to the directory, and to the write tools only. Granting
+            # write_file everywhere would be a great deal more than the
             # question appeared to be asking.
             directory = self.path_scope(tool_name, arguments)
             if directory is not None:

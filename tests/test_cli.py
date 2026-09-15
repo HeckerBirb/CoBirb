@@ -36,9 +36,9 @@ def test_parse_allow_tools_bare_names():
 
 
 def test_parse_allow_tools_narrows_shell_scope_by_argument():
-    """Regression test: entry.partition("(") leaves the closing paren
-    attached to the argument ("shell(git)" -> arg "git)", not "git"),
-    which silently broke every documented --allow-tool='shell(git)'-style
+    """entry.partition("(") leaves the closing paren attached to the
+    argument ("shell(git)" -> arg "git)", not "git"), which silently breaks
+    every documented --allow-tool='shell(git)'-style
     example (README, cli.py's own --help text) — the parsed scope never
     matched a real command's first word, so it never actually allowed
     anything despite looking like it should."""
@@ -127,11 +127,10 @@ def test_build_orchestrator_applies_allow_tool_overrides_to_the_policy(tmp_path)
 
 
 def test_build_orchestrator_audit_log_is_off_by_default(tmp_path):
-    """Regression test: the audit log used to write unconditionally — a
-    second, unencrypted, plaintext copy of every write_file/edit_file/
-    apply_patch/shell call's full arguments, directly at odds with sessions
-    being encrypted at rest. It must stay off unless "audit_log": true is
-    set in config."""
+    """The audit log must stay off unless "audit_log": true is set. Writing
+    unconditionally would keep a second, unencrypted, plaintext copy of every
+    write_file/edit_file/apply_patch/shell call's full arguments — directly at
+    odds with sessions being encrypted at rest."""
     persona = Persona(name="Noah")
     orchestrator = wiring.build_orchestrator(str(tmp_path), persona, {})
     assert orchestrator.policy.audit.enabled is False
@@ -180,10 +179,9 @@ def test_build_orchestrator_rejects_wrong_password_on_existing_session(tmp_path)
 
 
 def test_run_with_session_records_user_prompt(tmp_path):
-    """Regression test: Orchestrator._open_session used to skip recording the
-    user's prompt whenever a SessionManager was pre-injected (i.e. every
-    --session run built via _build_orchestrator), so a resumed session's
-    transcript silently lost the user's side of the conversation."""
+    """Orchestrator._open_session records the user's prompt even when a
+    SessionManager was pre-injected (i.e. every --session run). Skipping it
+    there loses the user's side of a resumed session's transcript."""
     session_path = str(tmp_path / "session.json")
     persona = Persona(name="Noah")
 
@@ -517,8 +515,7 @@ def test_main_persona_flag_selects_the_requested_persona(monkeypatch):
 
 def test_main_defaults_cwd_to_current_directory(monkeypatch):
     """Resolved to the real, absolute directory — not the literal string
-    "." (which used to reach the header panel and status bar verbatim as
-    "CoBirb · model · .")."""
+    ".", which reaches the status bar verbatim as "CoBirb · model · ."."""
     captured = {}
 
     def fake_run_one_shot(
@@ -544,12 +541,10 @@ def test_main_one_shot_without_session_never_prompts_for_a_password(monkeypatch)
 
 
 def test_main_one_shot_with_session_prompts_for_a_password(monkeypatch, tmp_path):
-    """Regression test: one-shot mode used to only prompt for a password
-    when --password was *also* given, so `cobirb -p ... --session foo.json`
-    (a documented, reasonable invocation) would run the whole task and then
-    crash with an unhandled AttributeError trying to encrypt with a None
-    password when saving. A session path must always mean a password is
-    requested, matching interactive mode's existing behavior below."""
+    """A session path always means a password is requested, matching
+    interactive mode below. Prompting only when --password was *also* given
+    leaves `cobirb -p ... --session foo.json` running the whole task and then
+    failing to encrypt with a None password when it saves."""
     monkeypatch.setattr(sessions, "read_password", lambda: "typed-secretly")
     captured = {}
 
@@ -585,9 +580,9 @@ def test_main_interactive_with_session_prompts_for_a_password(monkeypatch, tmp_p
 # --------------------------------------------------------------------------- #
 # -w / --password: asking for a password is asking for a session.
 #
-# --password used to be inert on its own — the password was only ever read
-# when --session also named a path, so `cobirb -w` ran an ordinary throwaway
-# conversation and saved nothing at all.
+# --password is not inert on its own. Reading it only when --session also
+# names a path would make `cobirb -w` an ordinary throwaway conversation that
+# saves nothing at all.
 # --------------------------------------------------------------------------- #
 def test_password_alone_starts_a_session_under_the_sessions_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
@@ -826,9 +821,9 @@ def test_run_one_shot_does_not_save_when_no_session_path_was_given(monkeypatch):
 
 # --------------------------------------------------------------------------- #
 # System prompt: the only channel through which persona data reaches the
-# model. It used to carry just the name and species, leaving tone, phrasings,
-# emoji density and squawks as inert data no persona could actually act on —
-# while the prompt itself claimed the model had been given them.
+# model. Carrying only the name and species would leave tone, phrasings,
+# emoji density and squawks as inert data no persona could act on — while the
+# prompt itself claims the model has been given them.
 # --------------------------------------------------------------------------- #
 def test_system_prompt_carries_every_persona_field():
     persona = Persona(
@@ -1372,9 +1367,8 @@ def test_resolve_model_name_swallows_a_broken_model_build(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Slash-command helpers. These were inline in the old scrolling interactive
-# loop; they were lifted out (returning their message instead of printing it)
-# so the Textual TUI could reuse the exact same logic and wording rather than
+# Slash-command helpers. They return their message rather than printing it,
+# so both front-ends share the exact same logic and wording instead of each
 # reimplementing it. See cobirb/tui/app.py's on_input_submitted.
 # --------------------------------------------------------------------------- #
 def test_apply_persona_switch_with_no_argument_lists_personas_and_changes_nothing():
@@ -1523,11 +1517,11 @@ def test_run_tui_reports_a_missing_textual_instead_of_crashing(monkeypatch, caps
 # --------------------------------------------------------------------------- #
 # Resuming a session that won't unlock.
 #
-# The failure used to happen inside the running app: a wrong password took you
-# all the way in — full-screen UI, a model to pick — and then reported itself
-# into the transcript of a session that had never opened. If a session was
-# asked for and can't be unlocked there is nothing to interact with, so
-# nothing should start.
+# The failure must happen before the app starts. A wrong password that takes
+# you all the way in — full-screen UI, a model to pick — then reports itself
+# into the transcript of a session that never opened. If a session was asked
+# for and can't be unlocked there is nothing to interact with, so nothing
+# should start.
 # --------------------------------------------------------------------------- #
 class _NeverRunsApp:
     """Records that it was constructed, and fails the test if it is run."""

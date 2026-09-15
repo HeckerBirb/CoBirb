@@ -187,19 +187,18 @@ class Turn:
         Covers ``tool_use`` and ``phase`` as well as the text: ``tool_use``
         records which tool ran with which arguments, so a hash over the
         prose alone would happily accept a session whose recorded
-        ``read_file`` call had been rewritten into a ``shell`` one; ``phase``
+        ``read_file`` call rewritten into a ``shell`` one; ``phase``
         records which stage of a plan-mode run a turn came from, so the
         same rewrite risk applies to relabeling a "plan" turn as "validate"
         after the fact. Serialized with sorted keys so the digest is stable
         across runs.
 
-        Deliberately does **not** cover ``images``: this formula is compared
-        against a hash stored by whatever CoBirb version wrote the file, so
-        adding a field to it would fail every session written before this
-        one existed the moment it's reopened — not a hypothetical, an actual
-        regression this avoids. Images are a reference to supplementary
-        content, not a record of what the agent did, so leaving them out is
-        an acceptable, deliberate gap rather than a hole in the guarantee.
+        Deliberately does **not** cover ``images``. This formula is compared
+        against a hash stored by whichever CoBirb wrote the file, so adding a
+        field to it fails every session written by a CoBirb that hashed
+        without it. Images reference supplementary content rather than record
+        what the agent did, so leaving them out is a deliberate gap rather
+        than a hole in the guarantee.
         """
         payload = json.dumps(
             {"role": self.role, "content": self.content, "tool_use": self.tool_use, "phase": self.phase},
@@ -217,9 +216,9 @@ class Session:
     created_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     working_dir: str = "."
     # "none" rather than "noah": personas are opt-in, so a session that
-    # doesn't record one must reload without one. This defaulted to "noah"
-    # from before that changed, which meant a persona-less session file came
-    # back wearing a costume nobody had asked for.
+    # doesn't record one reloads without one. Defaulting to a named persona
+    # here would bring a persona-less session back wearing a costume nobody
+    # asked for.
     persona: str = "none"
     turns: list[Turn] = field(default_factory=list)
     summary: str | None = None
@@ -245,16 +244,15 @@ class Session:
     # once. Turns hold only the id (see Turn.images).
     #
     # **Inside the session, not beside it**, and that placement is the whole
-    # design. These bytes were briefly kept as separately-encrypted files in a
-    # sibling directory, which meant the layer that assembles what the model
-    # sees could never read them back: SessionManager deliberately does not
-    # retain a password (see its __init__), and neither does Orchestrator — so
-    # a resumed session could only ever show the model a "[image: x.png]"
-    # marker where the image used to be. Living in the session payload, they
-    # are already decrypted by the time `load()` returns, by the same
-    # AES-256-GCM under the same password as every other field here. Same
-    # protection, one mechanism instead of two, and the images survive a
-    # resume, which was the point.
+    # design. Separately-encrypted files in a sibling directory would be
+    # unreadable to the layer that assembles what the model sees:
+    # SessionManager deliberately does not retain a password (see its
+    # __init__), and neither does Orchestrator, so a resumed session could
+    # only ever show a "[image: x.png]" marker where the image belongs. Living
+    # in the session payload, these bytes are already decrypted by the time
+    # `load()` returns, under the same AES-256-GCM and the same password as
+    # every other field here — same protection, one mechanism instead of two,
+    # and an image that survives a resume.
     images: dict[str, str] = field(default_factory=dict)
 
     def add(self, turn: Turn) -> None:
@@ -497,7 +495,7 @@ def fork_session(
         # Only the images the kept turns actually reference. A branch taken
         # from before an attachment shouldn't carry its bytes around — and a
         # branch taken from after it must, or the turn that shows the model a
-        # screenshot would come back as a note saying one used to be there.
+        # screenshot would come back as a note saying one belongs there.
         images={
             image["id"]: source.images[image["id"]]
             for turn in kept

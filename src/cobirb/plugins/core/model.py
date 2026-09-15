@@ -96,13 +96,12 @@ def _build_messages(system: str, context: str, *, include_images: bool = False) 
     multi-turn Ollama ``messages`` array, instead of flattening the whole
     conversation into a single opaque "user" message.
 
-    That flattening was the root cause of the tool-calling loop never
-    converging: a "tool" result appeared out of nowhere, with no preceding
-    assistant message announcing the tool call it answers, so the model had
-    no signal a prior call was already satisfied and would just repeat it.
-    The SPI leaves ``context`` as a compact string and makes each provider
-    responsible for how it unpacks it; here that packing is JSON, parsed back
-    into role-tagged messages.
+Flattening is what stops a tool-calling loop converging: a "tool" result
+    arrives out of nowhere, with no preceding assistant message announcing the
+    call it answers, so the model has no signal a prior call was satisfied and
+    simply repeats it. The SPI leaves ``context`` as a compact string and makes
+    each provider responsible for how it unpacks it; here that packing is JSON,
+    parsed back into role-tagged messages.
 
     An empty ``system`` produces **no system message at all**, rather than an
     empty one. That distinction is the whole of ``respect_model_system``: an
@@ -151,11 +150,10 @@ def _build_messages(system: str, context: str, *, include_images: bool = False) 
             images = turn.get("images")
             if images and include_images:
                 # Ollama's native image field: base64 strings alongside the
-                # message they belong to. Orchestrator._build_context only
-                # ever puts real data here for the newest turn — an older
-                # image-bearing turn has already collapsed to a text marker
-                # in `content` by the time this runs, so there is usually
-                # nothing left here to attach for it.
+                # message they belong to. An entry carrying no `data` is a
+                # reference whose bytes are not in this session (see
+                # Orchestrator._build_context, which turns those into a text
+                # marker instead), so it contributes nothing here.
                 data = [img["data"] for img in images if img.get("data")]
                 if data:
                     message["images"] = data
@@ -169,12 +167,12 @@ def _unreachable(base_url: str, exc: Exception, model: str = "") -> RuntimeError
     ``urllib.error.HTTPError`` is a *subclass* of ``URLError``, so a single
     ``except URLError`` catches both "nothing is listening" and "the server
     answered, and the answer was no" — and reports them identically. That is
-    how a model the server does not have came back as "Is Ollama running?",
-    with the real reason (Ollama says ``model "x" not found, try pulling it
-    first``) sitting unread in the response body.
+    how a model the server does not have reports as "Is Ollama running?", with
+    the real reason (Ollama says ``model "x" not found, try pulling it first``)
+    sitting unread in the response body.
 
-    So: a transport failure keeps the old message, because "is it running" is
-    the right question then. An HTTP status is reported as what it is, with
+    So: a transport failure asks "is it running", because that is the right
+    question then. An HTTP status is reported as what it is, with
     the server's own words, because the server has already said what is wrong
     and repeating it beats guessing.
     """
@@ -417,10 +415,9 @@ class LocalModelProvider(ModelProvider):
 
         **CoBirb asks for a window rather than guessing at one.** Ollama uses
         its own modest default (4096) when a Modelfile doesn't set ``num_ctx``,
-        and an earlier version of this therefore refused to believe a model's
-        advertised ``context_length`` — packing a request against 131072 that
-        the server would then silently truncate is exactly the failure
-        ``cobirb.context`` exists to prevent.
+        so a client that merely *reads* a model's advertised ``context_length``
+        packs requests against 131072 that the server then silently truncates —
+        exactly the failure ``cobirb.context`` exists to prevent.
 
         That was solving the wrong problem. ``/api/chat`` accepts
         ``options.num_ctx``, so the window is not something to discover

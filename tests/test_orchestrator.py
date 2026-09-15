@@ -124,10 +124,9 @@ def test_run_tool_dispatch(tmp_path):
 
 
 def test_tool_call_and_result_both_recorded_with_matching_tool_use(tmp_path):
-    """Regression test for the tool-calling loop that never converged: the
-    model's *decision* to call a tool must be recorded as its own assistant
-    turn (with tool_use), immediately before the tool's result turn — not
-    just the result appearing with nothing announcing it."""
+    """The model's *decision* to call a tool is recorded as its own assistant
+    turn (with tool_use), immediately before the tool's result turn. A result
+    appearing with nothing announcing it is what stops the loop converging."""
     (tmp_path / "a.txt").write_text("hello")
     policy = Policy()
     policy.allow("read_file")
@@ -229,10 +228,9 @@ def test_default_policy_permits_nothing():
 
 
 def test_build_default_policy_audit_log_is_off_unless_requested(tmp_path, monkeypatch):
-    """Regression test: an always-on audit log would duplicate file
-    contents/diffs/shell commands into an unencrypted trail, at odds with
-    sessions being encrypted at rest — it must stay opt-in end to end,
-    including through this factory."""
+    """An always-on audit log would duplicate file contents, diffs and shell
+    commands into an unencrypted trail, at odds with sessions being encrypted
+    at rest. It stays opt-in end to end, including through this factory."""
     monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
     policy = build_default_policy()
     policy.log("write_file", {"path": "x", "content": "secret"}, cwd=str(tmp_path))
@@ -311,9 +309,9 @@ def test_run_streams_live_through_io_when_supported():
     # *that* streaming happened correctly.
     #
     # Nothing but the model's own words goes through render(): the persona
-    # label used to be written into the stream here, which made it part of
-    # the text every renderer received. How a reply is introduced is the I/O
-    # adapter's business — see the begin_stream hook below.
+    # Writing the label into the stream here would make it part of the text
+    # every renderer receives. How a reply is introduced is the I/O adapter's
+    # business — see the begin_stream hook below.
     assert len(io.rendered) > 1
     assert "".join(io.rendered) == "Hello there\n"
     # The final turn still gets the fully assembled content.
@@ -516,8 +514,8 @@ def test_broken_confirm_denies_rather_than_crashing(tmp_path):
 
 
 def test_tool_that_raises_is_reported_to_the_model_not_fatal(tmp_path):
-    """Regression: a tool raising used to propagate out of run() and tear
-    down the whole session. Models routinely emit a mistyped argument name
+    """A tool raising must not propagate out of run() and tear down the whole
+    session. Models routinely emit a mistyped argument name
     (``{"file": ...}`` instead of ``{"path": ...}``), which tools surface as
     a KeyError — that has to come back as a failed tool result the model can
     correct, not end the run."""
@@ -820,10 +818,10 @@ def test_plan_mode_falls_back_to_plain_render_without_the_hooks(tmp_path):
 
 
 def test_plan_mode_renders_the_act_answer_before_validation(tmp_path):
-    """Regression test: the validate phase's panel used to appear before
-    the answer it was validating, because the act phase's final answer was
-    only ever printed by the CLI after run() fully returned — by which
-    point the validate phase (rendered live, from inside run()) had
+    """The validate phase's panel must not appear before the answer it is
+    validating. Leaving the act phase's final answer to the CLI to print
+    after run() returns puts it after the validate phase, which renders
+    live from inside run() and by then has
     already shown its own panel. The orchestrator must render the act
     answer itself, in order, before running validate. See cli.py's
     end-to-end test of the same regression against a real TerminalIO."""
@@ -911,11 +909,10 @@ def test_plan_mode_does_not_double_render_a_streamed_phase():
 # --------------------------------------------------------------------------- #
 # begin_stream: how a streamed reply is introduced.
 #
-# The orchestrator used to write f"{persona}: " straight into the stream via
-# io.render(), which made the persona label part of the text every renderer
-# received. Once replies were marked with "> ", transcripts read
-# "> CoBirb: hello" — the label had been baked into the content and no
-# renderer could tell it apart from what the model actually said.
+# Writing f"{persona}: " straight into the stream via io.render() would make
+# the persona label part of the text every renderer receives. With replies
+# marked "> ", a transcript would read "> CoBirb: hello" — the label baked
+# into the content, indistinguishable from what the model actually said.
 # --------------------------------------------------------------------------- #
 class _StreamAwareIO(_RecordingIO):
     def __init__(self):
@@ -986,7 +983,7 @@ def test_the_persona_label_still_reaches_the_spinner():
 # --------------------------------------------------------------------------- #
 # Context compaction (see cobirb/context.py).
 #
-# The orchestrator used to serialize every turn of the session on every model
+# Serializing every turn of the session on every model
 # call, with no token budget at all. A long session outgrew the window, the
 # server truncated from the front, and the model lost the task it was given.
 # --------------------------------------------------------------------------- #
@@ -1195,8 +1192,8 @@ def test_shell_declares_no_writes_because_it_cannot_know(tmp_path):
 
 def test_a_credential_in_a_tool_result_never_reaches_the_model(tmp_path):
     """End to end, and the point of the whole feature: one read_file on a
-    .env used to put a live key in the prompt, the session and the audit log
-    at once."""
+    .env otherwise puts a live key into the prompt, the session and the audit
+    log at once."""
     (tmp_path / ".env").write_text("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n")
     policy = Policy()
     policy.allow("read_file")

@@ -192,7 +192,7 @@ def test_a_catalogue_is_never_world_readable_even_for_an_instant(tmp_path, crypt
     model's mouth.
 
     Run under a genuinely permissive umask, because that is the only setting
-    under which the old code was wrong.
+    under which that window is observable.
     """
     seen = []
     real_chmod = os.chmod
@@ -220,9 +220,9 @@ def test_an_encrypted_catalogue_is_created_private_too(tmp_path, crypto):
 
 @pytest.mark.parametrize("name", ["../escaped", "../../escaped", "a/b", ".hidden", "..", "   "])
 def test_a_catalogue_name_must_be_a_name_not_a_path(tmp_path, crypto, name):
-    """A name becomes a filename directly. '../../escaped' used to write a
+    """A name becomes a filename directly, so '../../escaped' would write a
     catalogue outside the memories directory entirely, and a name with a
-    separator wrote into a subdirectory discover_catalogues never lists."""
+    separator into a subdirectory discover_catalogues never lists."""
     with pytest.raises(memory.CatalogueError):
         memory.create(str(tmp_path), name, crypto, None)
 

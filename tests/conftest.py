@@ -11,6 +11,29 @@ import os
 
 import pytest
 
+from cobirb.plugins.core import crypto as crypto_module
+
+# scrypt's interactive cost (RFC 7914), ~16 MiB — see `_fast_key_derivation`.
+_TEST_SCRYPT_N = 2**14
+
+
+@pytest.fixture(autouse=True)
+def _fast_key_derivation(monkeypatch):
+    """Derive session keys at scrypt's interactive cost for the suite.
+
+    The shipped cost is deliberately expensive — ~128 MiB and about 200 ms per
+    derivation — and several hundred tests here open or save an encrypted
+    session or memory catalogue. Paying it every time spends minutes of every
+    run demonstrating that scrypt is slow on purpose, which is not a claim any
+    of those tests are making.
+
+    Only the work factor moves. The cipher, the blob format, the header that
+    records which parameters produced a blob, and the full encrypt/decrypt
+    round trip are all still exercised for real. ``tests/test_crypto.py``
+    restores the shipped cost, because there the KDF itself is the subject.
+    """
+    monkeypatch.setattr(crypto_module, "_SCRYPT_N", _TEST_SCRYPT_N)
+
 
 @pytest.fixture(autouse=True)
 def _isolated_cobirb_home(tmp_path, monkeypatch):
@@ -26,8 +49,8 @@ def write_config(home, data) -> str:
     layer, so tests that want a setting in force write it here. Worth a shared
     helper because the location is a *rule* now rather than one of two options
     (see ``cobirb.config``): a test that reached for a project-local file would
-    be asserting on something CoBirb deliberately no longer reads, and would
-    pass for the wrong reason if that ever came back.
+    be asserting on something CoBirb deliberately does not read, and would
+    pass for the wrong reason if that ever changed.
     """
     directory = os.path.join(str(home), ".cobirb")
     os.makedirs(directory, exist_ok=True)

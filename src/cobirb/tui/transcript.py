@@ -99,11 +99,10 @@ class TranscriptView:
     def render_history(self, turns: list[Any], label: str, persona_name: str) -> None:
         """Replay a resumed conversation into the transcript.
 
-        Resuming used to drop you into an empty screen: the conversation was
-        loaded and fed to the model, so it knew what had been said, but you
-        couldn't see any of it. Every comparable CLI shows the thread you are
-        rejoining, and a session you can't read is most of the reason to keep
-        one.
+        Without this, resuming drops you into an empty screen: the
+        conversation is loaded and fed to the model, so it knows what was
+        said, while you can see none of it. A session you can't read is most
+        of the reason not to keep one.
 
         Bracketed by dim rules so restored turns are never mistaken for
         something that just happened.

@@ -150,11 +150,10 @@ class WorkerPane(Vertical):
         super().__init__(id=f"worker-{worker_id}", classes="worker-pane")
         self._worker_id = worker_id
         self._scope = scope
-        # Remembered, not just rendered. The app used to keep a parallel
-        # dict of exactly this so it could roll the flock up onto the
-        # activity line, which meant the same fact lived in two places and
-        # could disagree — a worker whose pane had gone still counted in the
-        # roll-up. The pane that shows a state is the thing that has it.
+        # Remembered, not just rendered. The pane that shows a state is the
+        # thing that has it: a second copy kept elsewhere for the activity
+        # roll-up would be the same fact in two places, free to disagree —
+        # a worker whose pane is gone still counting in the summary.
         self.state = "waiting"
 
     def compose(self) -> ComposeResult:

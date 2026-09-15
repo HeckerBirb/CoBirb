@@ -111,12 +111,15 @@ def test_an_unreachable_endpoint_is_reported_not_raised():
 
 
 def test_a_probe_that_never_finishes_gives_up():
+    # The endpoint stalls for longer than the probe is willing to wait, which
+    # is the whole condition under test — a few hundred milliseconds proves it
+    # exactly as well as a few seconds would.
     class _Hanging(_Server):
         def _chunks(self):
-            time.sleep(30)
+            time.sleep(0.6)
             yield "x"
 
-    result = probe_concurrency(_Hanging(parallel=True), timeout=1)
+    result = probe_concurrency(_Hanging(parallel=True), timeout=0.2)
 
     assert result.concurrent is None
-    assert "within 1s" in result.detail
+    assert "within 0.2s" in result.detail

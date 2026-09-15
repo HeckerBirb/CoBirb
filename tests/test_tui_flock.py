@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 
 import pytest
-from textual.widgets import Input, TabbedContent
+from textual.widgets import TabbedContent
 
 from cobirb.flock.charter import parse_charter
 from cobirb.flock.run import FlockRun
@@ -498,9 +498,9 @@ async def test_the_activity_line_rolls_up_every_worker_not_just_the_last_event()
 
 
 async def test_a_worker_with_no_pane_left_is_not_in_the_roll_up():
-    """The app used to keep its own dict of worker states alongside the panes,
-    so an event for a worker whose pane had gone still counted in the activity
-    line. Read off the panes, a ghost simply isn't there."""
+    """The roll-up is read off the panes themselves, so a ghost simply isn't
+    there. A separate dict of worker states kept alongside them would still
+    count an event for a worker whose pane is gone."""
     app = _make_app()
     async with app.run_test() as pilot:
         pane = await _flock_tab(pilot, app)

@@ -5,9 +5,8 @@ real temp JSON files, not the private ``_load`` helper — that is an
 implementation detail Config could refactor away without its observable
 behaviour changing at all.
 
-The tests that used to be here about a user layer and a repo layer merging are
-gone with the layering. **There is one config file, in the user's home
-directory.** A repository cannot configure CoBirb, and the tests immediately
+**There is one config file, in the user's home directory.** No user layer, no
+repo layer, nothing merged. A repository cannot configure CoBirb, and the tests immediately
 below assert that as a property rather than an absence — a repo layer coming
 back by accident is exactly the kind of regression that would otherwise pass
 unnoticed until it granted something.
@@ -77,8 +76,8 @@ def test_a_cobirb_json_is_not_even_opened(tmp_path, monkeypatch):
 
 
 def test_config_takes_no_working_directory(tmp_path):
-    """Not a stylistic point: a `cwd` parameter that no longer selects anything
-    is an invitation to assume it still does."""
+    """Not a stylistic point: a `cwd` parameter that selects nothing is an
+    invitation to assume it does."""
     import inspect
 
     assert list(inspect.signature(Config.__init__).parameters) == ["self", "user_path"]
@@ -195,9 +194,9 @@ def test_the_bundled_example_config_is_valid_and_loadable(tmp_path):
 # The home tree
 # --------------------------------------------------------------------------- #
 def test_every_cobirb_path_sits_under_one_home(tmp_path, monkeypatch):
-    """Five modules used to resolve COBIRB_HOME independently and join their
-    own subpath onto it, which is how user personas ended up in ~/cobirb/
-    while everything else used ~/.cobirb/. One derivation, one tree."""
+    """One derivation, one tree. Modules resolving COBIRB_HOME independently
+    and joining their own subpath onto it is how personas end up in ~/cobirb/
+    while everything else uses ~/.cobirb/."""
     from cobirb import paths
 
     monkeypatch.setenv("COBIRB_HOME", str(tmp_path))

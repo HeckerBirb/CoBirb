@@ -1,9 +1,9 @@
 """Which model plays which part.
 
-CoBirb used to have exactly one model: whatever ``--model`` or ``models.default
-.name`` resolved to, used for everything. That is the right shape for a single
-agent and the wrong shape for the flock (§12), where an orchestrator holds the
-plan and workers do the legwork — two jobs with genuinely different demands.
+One model for everything — whatever ``--model`` or ``models.default.name``
+resolves to — is the right shape for a single agent and the wrong shape for the
+flock, where an orchestrator holds the plan and workers do the legwork: two jobs
+with genuinely different demands.
 Holding a plan across a long conversation wants the largest model that fits;
 writing one function against a stated interface does not, and running several
 of those at once is the whole point of fanning out.
@@ -21,7 +21,7 @@ So a *role* is what gets resolved here, not a model name:
 
 **Every role inherits from ``default``**, field by field — a role that names
 only a model still gets the default's ``base_url``, and a config that names no
-roles at all behaves exactly as it did before this existed. That inheritance is
+roles at all is served entirely by ``default``. That inheritance is
 the reason this is worth a module: the alternative is every role needing a full
 copy of the endpoint settings, and endpoints that drift apart by omission.
 

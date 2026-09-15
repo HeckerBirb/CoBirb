@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
 
 from cobirb.flock import branch
 from cobirb.plugins.core import AesGcmScryptSessionCrypto

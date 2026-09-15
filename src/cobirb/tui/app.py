@@ -1,9 +1,8 @@
 """``CoBirbApp`` — interactive mode as a full-screen Textual application.
 
-Interactive mode used to be a scrolling ``input()`` loop. It is now a real
-terminal app: a persistent tab bar, a header, a live status footer, a boxed
-input, a transcript of Rich panels, and tool approval as a modal instead of a
-``[y]es / [a]lways / [N]o:`` line.
+Interactive mode is a real terminal app: a persistent tab bar, a live status
+footer, a boxed input, a transcript of Rich panels, and tool approval as a
+modal rather than a ``[y]es / [a]lways / [N]o:`` line.
 
 What it is *not* is a second copy of the CLI. Every bit of wiring one-shot
 mode does — ``wiring.build_orchestrator``, ``personas.load_persona``,
@@ -402,12 +401,11 @@ class CoBirbApp(App[None]):
         # the session log unreadable to the person who wrote it.
         prompt = self._expand_custom(prompt)
         self.write_user_prompt(prompt)
-        # Left enabled, on purpose: this used to disable the box until the
-        # turn finished — the old loop's "continue? [y/N]" gate, with nothing
-        # to confirm since the box just comes back. Mid-turn steering is what
-        # it stays open *for* now: submitting again before this one finishes
-        # is routed above to _steer_current_turn rather than piling up a
-        # second, overlapping run_turn.
+        # Left enabled, on purpose. Disabling the box until the turn
+        # finished would be a "continue? [y/N]" gate with nothing to confirm.
+        # Mid-turn steering is what it stays open *for*: submitting again
+        # before this one finishes is routed above to _steer_current_turn
+        # rather than piling up a second, overlapping run_turn.
         self._turn_in_progress = True
         self._run_turn(prompt)
 
@@ -705,7 +703,7 @@ class CoBirbApp(App[None]):
             # reasoning that a window cannot change mid-run — true of a run,
             # untrue of a session, because this line swaps the provider under
             # it. Left stale, a switch away from a small-window model kept
-            # compacting against the old budget for the rest of the session,
+            # compacting against the previous budget for the rest of the session,
             # which is enough on its own to elide an attached image. Back to
             # None means "ask the new provider", unless config states one.
             self.orchestrator.context_tokens = Config().get("context_tokens")

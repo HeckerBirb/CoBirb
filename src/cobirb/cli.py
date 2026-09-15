@@ -10,10 +10,10 @@ Three modes:
   encrypted session on disk.
 
 This module parses arguments, prints help, and runs the one-shot mode. The
-wiring it used to also contain — persona resolution, plugin slots, building
-an orchestrator, resolving a session — lives in ``cobirb.runtime``, because
-interactive mode needs exactly the same wiring and was reaching into this
-module's private functions to get it.
+wiring — persona resolution, plugin slots, building an orchestrator, resolving
+a session — lives in ``cobirb.runtime``, because interactive mode needs
+exactly the same wiring and neither front-end should reach into the other's
+private functions to get it.
 
 """
 from __future__ import annotations
@@ -76,10 +76,9 @@ def _render_user_prompt(prompt: str) -> None:
     """Echo what the user asked, marked the way interactive mode marks it.
 
     Goes through a Rich ``Console`` rather than ``_render``'s bare ``print``
-    so the ``>`` is coloured and a multi-line prompt is indented under it —
-    the two renderers are supposed to look identical (see
-    ``plugins.core.render``), and this was the last place still printing a
-    bare "You:" label.
+    so the ``>`` is coloured and a multi-line prompt is indented under it.
+    The two renderers are meant to look identical — see
+    ``plugins.core.render``.
     """
     from rich.console import Console
 
@@ -138,9 +137,9 @@ def _run_one_shot(
             io_factory=io_factory,
         )
     except Exception as exc:  # noqa: BLE001 - a bad password must not traceback
-        # Chiefly a session that wouldn't decrypt. Wiring failures used to
-        # escape here as an unhandled traceback, which for the commonest
-        # cause (a mistyped password) is a terrible way to be told.
+        # Chiefly a session that wouldn't decrypt. An unhandled traceback is
+        # a terrible way to be told about the commonest cause of that — a
+        # mistyped password.
         message = f"could not open {session_path} — {sessions.session_open_error(exc)}"
         if as_json:
             report.error = message
@@ -669,10 +668,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     # Resolved once, to an absolute path, rather than passing the literal
-    # string "." at every call site below: that used to reach the header
-    # panel and status bar verbatim (`CoBirb · model · .`), which is
-    # technically correct — every path is joined against the real
-    # process cwd regardless — but reads as a bug rather than "here".
+    # string "." to every call site below. A bare "." reaches the status bar
+    # verbatim (`CoBirb · model · .`) — technically correct, since every path
+    # is joined against the real process cwd regardless, but it reads as a
+    # bug rather than as "here".
     cwd = os.path.abspath(args.cwd) if args.cwd else os.getcwd()
 
     if args.subcommand == "help":

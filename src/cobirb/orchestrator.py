@@ -102,10 +102,9 @@ def render_through(
     The I/O adapter contract is four methods, but both shipped adapters also
     expose a set of richer, duck-typed rendering hooks (``render_answer``,
     ``render_tool_call``, ``render_plan``, ...). Anything that wants one has
-    to probe for it and cope with its absence, and that probe had been
-    written out five times across three modules, each with a slightly
-    different fallback and a docstring explaining why it wasn't one of the
-    others.
+    to probe for it and cope with its absence. Written out per call site,
+    that probe multiplies across modules, each copy with a slightly different
+    fallback — so it lives here once instead.
 
     ``fallback`` is a callable supplied by the caller rather than a format
     string decided here: what a hookless adapter should be shown is the
@@ -268,7 +267,7 @@ class Orchestrator:
         ``tui.app.CoBirbApp._cmd_image``). The bytes are stored into
         ``Session.images`` and so travel with the session from then on: a
         resumed conversation shows the model the image again, not a note
-        saying there used to be one.
+        saying one belongs there.
 
         Stops as soon as the model gives a plain-text reply with no further
         tool calls (that reply becomes ``session.summary``), or after
@@ -627,12 +626,12 @@ class Orchestrator:
             if chunk:
                 if not started:
                     # Tell the adapter a reply is starting and let *it* decide
-                    # what to draw. This used to render f"{label}: " straight
-                    # into the stream, which meant the persona name became
-                    # part of the text the renderer received — so once replies
-                    # were marked with "> " the transcript read
-                    # "> CoBirb: hello" instead of "> hello". Chrome is the
-                    # adapter's business; the orchestrator only knows *when*
+                    # what to draw. Rendering f"{label}: " into the stream
+                    # here would make the persona name part of the text the
+                    # renderer receives, so a transcript that marks replies
+                    # with "> " would read "> CoBirb: hello" instead of
+                    # "> hello". Chrome is the adapter's business; the
+                    # orchestrator only knows *when*
                     # the first token arrived, which is the one thing an
                     # adapter can't work out for itself.
                     begin = getattr(self.io, "begin_stream", None)

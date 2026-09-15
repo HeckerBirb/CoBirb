@@ -57,8 +57,8 @@ _MAX_PARSE_BYTES = 512 * 1024
 
 # The default output budget. Still bounded, because this becomes a session
 # turn and a message in every following request — but sized for the window the
-# target hardware actually runs, not the 4,096 tokens an earlier version of
-# this assumed. Roughly 4,000 tokens: enough to outline a real project.
+# target hardware actually runs rather than a 4,096-token guess. Roughly
+# 4,000 tokens: enough to outline a real project.
 DEFAULT_BUDGET_CHARS = 16000
 
 _MAX_SYMBOLS_PER_FILE = 24

@@ -156,9 +156,9 @@ def test_supports_streaming_is_true():
 def _streaming_server(chunks):
     """A local NDJSON server, since streaming now uses http.client directly.
 
-    These tests used to monkeypatch ``urllib.request.urlopen``; the switch to
-    ``http.client`` (so a stuck read can be interrupted by shutting the socket)
-    means that mock is never reached, so they run against a real socket now —
+    Streaming goes through ``http.client`` (so a stuck read can be interrupted
+    by shutting the socket), which a ``urllib.request.urlopen`` mock never
+    reaches — so these run against a real socket,
     which also exercises the chunked-transfer reading the mock never did.
 
     ``chat()`` calls ``/api/show`` before *every* request, streaming or not —
@@ -477,9 +477,9 @@ def test_build_messages_falls_back_for_non_json_context():
 # Respecting the model's own Modelfile SYSTEM directive.
 #
 # Ollama accepts one system message per request and sending one *replaces*
-# whatever SYSTEM the model was built with. CoBirb used to send one on every
-# single turn, so a model created with `ollama create` around a custom SYSTEM
-# behaved differently inside CoBirb than it did in `ollama run` — the user's
+# whatever SYSTEM the model was built with. Sending one on every turn makes a
+# model created with `ollama create` around a custom SYSTEM behave differently
+# inside CoBirb than it does in `ollama run` — the user's
 # own configuration was silently overridden and there was no way to turn that
 # off.
 # --------------------------------------------------------------------------- #

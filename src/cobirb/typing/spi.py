@@ -80,7 +80,7 @@ def check_spi_version(plugin: Any) -> None:
         )
     if declared < MIN_SUPPORTED_SPI_VERSION:
         raise IncompatiblePlugin(
-            f"was written for CoBirb SPI v{declared}, which this CoBirb no longer supports "
+            f"was written for CoBirb SPI v{declared}, which this CoBirb does not support "
             f"(oldest accepted: v{MIN_SUPPORTED_SPI_VERSION})"
         )
 

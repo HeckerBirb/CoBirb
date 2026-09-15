@@ -4,6 +4,28 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.12.4]
+
+- **Fixed: closing an unresponsive MCP server blocked for as long as that server lived.**
+  `StdioClient.close()` closed the pipes before ending the process, and a reader thread sitting
+  in `for line in process.stdout` holds that stream's lock — so the close waited for a read that
+  was never going to return. Terminating first makes the blocked read hit EOF immediately.
+  A 30-second shutdown is now 2.
+- **Docs.** `docs/` gains eleven short how-to pages — install, first run, commands, CLI, config,
+  permissions, sessions, memory, images, the Flock, plugins & MCP — linked from the README. The
+  screenshot moved to `docs/images/`.
+- **Tests run in half the time** (207s to 98s, ~5/s to ~10/s), with no coverage removed:
+  - Session keys derive at scrypt's interactive cost across the suite. `test_crypto.py` restores
+    the shipped cost, since there the KDF is the subject. The cipher, blob format and round trip
+    are still exercised for real everywhere.
+  - The probe's give-up path is asserted in 1.2s instead of 60 — the fake endpoint stalls for
+    longer than the probe waits, which is the whole condition, and needs no more than that.
+    `probe_concurrency(timeout=...)` is typed `float` now, since it is a duration.
+- **Restored seven `/image` argument-parsing tests** that were removed by accident along with a
+  debug test in v0.12.1. The behaviour shipped correctly; its tests did not.
+- Comments and docstrings across `src/` and `tests/` now describe what the code does rather than
+  what it once did.
+
 ## [0.12.3]
 
 `tui/app.py` was 1648 lines and the home of everything the interactive app could do. It is now

@@ -23,10 +23,10 @@ class CobirbTool(Tool):
 
     Subclasses declare their machine name as the ``NAME`` class attribute and
     inherit ``name()`` from here. The SPI declares ``name`` as a *method*, and
-    the built-ins used to override it with a plain string instead — a
-    different type than the interface promised, which meant every consumer had
-    to branch on ``callable(tool.name)`` and the one that forgot serialized a
-    bound method into a request payload. Declaring the value and the accessor
+    overriding it with a plain string would be a different type than the
+    interface promises, forcing every consumer to branch on
+    ``callable(tool.name)`` — and the one that forgets serializes a bound
+    method into a request payload. Declaring the value and the accessor
     separately keeps the terse per-tool declaration without breaking the
     contract a plugin author reads.
     """
@@ -85,9 +85,8 @@ class CobirbTool(Tool):
 #
 # The *file* is not bounded. read_file pages: a call that stops early says
 # which lines it returned and what offset continues from, so an arbitrarily
-# large file can be read in full, in pieces the window can hold. An earlier
-# version only truncated, which meant a large file could be read from the top
-# and never finished.
+# large file can be read in full, in pieces the window can hold. Truncating
+# alone would leave a large file readable from the top and never finishable.
 _MAX_READ_BYTES = 256 * 1024
 _MAX_GREP_MATCHES = 500
 
@@ -778,11 +777,10 @@ class RepoMapTool(CobirbTool):
 
 
 _DEFAULT_SHELL_TIMEOUT = 300
-# A ceiling as well as a default. The timeout used to be read straight out of
-# the arguments with no declared parameter and no bound, so it was invisible
-# to the model that might set it and unbounded if one guessed at it — a large
-# enough value would have made a hung command effectively unkillable except
-# by cancelling the turn.
+# A ceiling as well as a default. Read straight out of the arguments with no
+# declared parameter and no bound, a timeout is invisible to the model that
+# might set it and unbounded if one guesses at it — a large enough value makes
+# a hung command effectively unkillable except by cancelling the turn.
 _MAX_SHELL_TIMEOUT = 600
 
 

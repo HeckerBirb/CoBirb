@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-from cobirb import memory
 from cobirb.runtime.catalogues import CatalogueStore
 
 

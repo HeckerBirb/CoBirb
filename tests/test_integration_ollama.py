@@ -84,10 +84,9 @@ def test_live_streaming_yields_content():
 
 
 def test_live_tool_call_round_trip(tmp_path):
-    """Regression test for the real bug this project shipped once: a tool
-    call must actually execute and the loop must converge to a final
-    answer, not loop calling the same tool forever. Requires a model with
-    real tool-calling support."""
+    """A tool call must actually execute and the loop must converge to a
+    final answer, rather than calling the same tool forever. Requires a
+    model with real tool-calling support."""
     (tmp_path / "note.txt").write_text("the secret word is banana")
 
     registry = ToolRegistry(str(tmp_path))

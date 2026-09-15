@@ -24,9 +24,9 @@ def test_create_adds_opening_turn(manager):
 
 
 def test_create_records_the_persona_and_working_dir_on_the_session(tmp_path):
-    """Regression test: SessionManager.create stored ``persona``/``working_dir``
-    on the manager but never passed them into the ``Session`` object it
-    builds, so every created session's saved JSON silently recorded "noah"
+    """SessionManager.create must pass ``persona``/``working_dir`` into the
+    ``Session`` it builds, not just store them on the manager — otherwise
+    every created session's saved JSON silently records "noah"
     and "." regardless of what was actually passed — caught by the TUI's
     Sessions tab, which resumes a session under the persona it names."""
     path = str(tmp_path / "s.json")
@@ -100,9 +100,9 @@ def test_turn_digest_is_stable():
 
 
 def test_tamper_detected_when_only_tool_use_is_rewritten(tmp_path):
-    """Regression: the turn digest hashed role+content only, so a session
-    whose recorded ``read_file`` call was rewritten into a ``shell`` one
-    loaded clean — the tool history is exactly the part worth forging."""
+    """The turn digest covers tool_use, not just role+content: a session whose
+    recorded ``read_file`` call is rewritten into a ``shell`` one must not load
+    clean, because the tool history is exactly the part worth forging."""
     path = str(tmp_path / "session.json")
     crypto = AesGcmScryptSessionCrypto()
     m = SessionManager.create(path, crypto, password="pw")
@@ -127,8 +127,8 @@ def test_digest_is_stable_across_equivalent_tool_use_orderings():
 
 
 def test_session_from_dict_defaults_created_at_when_missing():
-    """Every other field defaults; created_at used to deserialize to None
-    and then get written back out as null."""
+    """Every other field defaults, and created_at must not deserialize to None
+    and then be written back out as null."""
     session = Session.from_dict({"turns": []})
     assert session.created_at
     assert session.to_dict()["created_at"]
@@ -194,7 +194,7 @@ def test_session_validation_defaults_to_none():
 
 # --------------------------------------------------------------------------- #
 # The Sessions tab's directory conventions (default_sessions_dir,
-# discover_sessions) — used to list/resume/create sessions without needing
+# discover_sessions) — lists, resumes and creates sessions without needing
 # --session <path> up front. See cobirb.tui.panes.SessionsPane.
 # --------------------------------------------------------------------------- #
 def test_default_sessions_dir_uses_cobirb_home(monkeypatch, tmp_path):
@@ -245,8 +245,8 @@ def test_discover_sessions_reports_size_and_path(tmp_path):
 
 def test_a_session_without_a_persona_reloads_without_one(tmp_path):
     """Personas are opt-in, so a session file that records none must come
-    back with none. This defaulted to "noah" from before that changed, which
-    put a costume on a model the user had never asked to dress up."""
+    back with none. Defaulting to a named persona here puts a costume on a
+    model the user never asked to dress up."""
     session = Session.from_dict({"turns": []})
 
     assert session.persona == "none"

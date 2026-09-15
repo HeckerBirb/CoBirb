@@ -68,9 +68,9 @@ def load_plugins(entry_points: im.EntryPoints | None = None) -> tuple[dict[str, 
             if not os.path.isdir(path):
                 continue
             # The try sits inside the interface loop so the failing kind is
-            # actually known. It used to wrap the loop and key the error on
+            # actually known. Wrapping the loop instead would key the error on
             # `kind` after the fact — a variable that leaks out of a for
-            # statement, so every failure was filed under whichever interface
+            # statement, filing every failure under whichever interface
             # happened to be tried first regardless of the real cause.
             for kind, base in _INTERFACES.items():
                 try:

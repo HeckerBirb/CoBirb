@@ -246,8 +246,8 @@ def test_a_reply_is_marked_once_and_its_later_lines_are_indented_under_it():
 
 
 def test_a_reply_is_still_rendered_as_markdown():
-    """Marking the reply must not cost the formatting a panel used to give
-    it — code blocks and lists are the reason markdown is rendered at all."""
+    """Marking the reply must not cost it the formatting a panel gives —
+    code blocks and lists are the reason markdown is rendered at all."""
     out = _plain(render.build_assistant_message("Try:\n\n- **one**\n- two"))
 
     assert "•" in out  # a rendered bullet, not a literal "-"

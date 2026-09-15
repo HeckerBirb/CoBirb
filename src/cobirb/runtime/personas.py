@@ -170,11 +170,10 @@ def persona_key(persona: cobirb_typing.Persona) -> str:
 def load_json(path: str) -> dict[str, Any] | None:
     """Read a persona file, or ``None`` if it can't be read.
 
-    A malformed persona file used to traceback out of the whole run. It is
-    reported and treated as a persona that couldn't be found — which lands
-    on the same "continuing without one" path a typo already takes, and for
-    the same reason: a broken costume is not worth losing the conversation
-    over.
+    A malformed persona file must not traceback out of the whole run. It is
+    reported and treated as a persona that couldn't be found — the same
+    "continuing without one" path a typo takes, and for the same reason: a
+    broken costume is not worth losing the conversation over.
     """
     import json
 

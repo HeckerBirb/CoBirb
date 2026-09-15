@@ -4,20 +4,19 @@
 read a `cobirb.json` from the working directory, does not merge one over this
 one, and does not look for one. A repository cannot configure CoBirb at all.
 
-That used to be a two-layer merge with repo-overrides-user precedence, which is
-the conventional shape and was the wrong one here. Configuration is not
-preference in this tool — it decides what is pre-approved, which directories
-may be read or written, which commands run at lifecycle points, and which
-subprocesses start. A repository able to contribute any of that means cloning a
-repository and running CoBirb inside it lets its author influence the
-permission model, before the model is asked anything and with no prompt able to
-intervene. That was not hypothetical: a committed `cobirb.json` naming
-``allow_tools`` pre-approved those tools silently.
+The conventional shape — a two-layer merge where the repository overrides the
+user — is the wrong one here. Configuration is not preference in this tool: it
+decides what is pre-approved, which directories may be read or written, which
+commands run at lifecycle points, and which subprocesses start. A repository
+able to contribute any of that would mean cloning it and running CoBirb inside
+lets its author influence the permission model, before the model is asked
+anything and with no prompt able to intervene. A committed `cobirb.json` naming
+``allow_tools`` would pre-approve those tools silently.
 
-The narrower fixes — exempting the dangerous keys, or prompting once to trust a
-directory — both leave the same shape in place and rely on the list of
-dangerous keys staying correct forever. Removing the layer is the version with
-no ongoing obligation attached.
+The narrower defences — exempting the dangerous keys, or prompting once to
+trust a directory — leave that shape in place and rely on the list of dangerous
+keys staying correct forever. Having no such layer is the version with no
+ongoing obligation attached.
 
 **What a repository may still do is describe itself.** `AGENTS.md` project
 instructions, the repo map, and prompt files under `<project>/.cobirb/commands/`
@@ -41,11 +40,10 @@ from . import paths
 def _load(path: str | None) -> dict[str, Any]:
     """Read the config file, reporting and skipping anything unreadable.
 
-    A stray comma used to escape as a raw ``JSONDecodeError`` from whichever
+    A stray comma must not escape as a raw ``JSONDecodeError`` from whichever
     command happened to construct a ``Config`` — which is all of them,
-    including ``cobirb help``, which never reads a config key. Everywhere else
-    in this codebase a broken input is reported and stepped over; this was the
-    exception.
+    including ``cobirb help``, which never reads a config key. A broken input
+    is reported and stepped over here, the same as everywhere else.
 
     Reported to stderr and skipped, rather than exiting: losing a run because
     the config has a typo in it would be a worse trade than running with

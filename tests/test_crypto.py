@@ -6,6 +6,21 @@ import pytest
 from cobirb.plugins.core import crypto as crypto_module
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 
+# Captured at import, before conftest's `_fast_key_derivation` lowers it for
+# the rest of the suite.
+_SHIPPED_SCRYPT_N = crypto_module._SCRYPT_N
+
+
+@pytest.fixture(autouse=True)
+def _shipped_key_derivation(monkeypatch):
+    """This module is about the KDF, so it runs at the cost CoBirb ships.
+
+    Overrides conftest's suite-wide reduction: a test that checks which
+    parameters a blob records, or that a headerless blob is read at the
+    interactive cost, means nothing if the current cost is already that.
+    """
+    monkeypatch.setattr(crypto_module, "_SCRYPT_N", _SHIPPED_SCRYPT_N)
+
 
 # --------------------------------------------------------------------------- #
 # Encryption round-trip (genuine AES-256-GCM via the cryptography library)
@@ -51,9 +66,9 @@ def test_same_password_derives_different_keys_per_encryption():
     blob2 = crypto.encrypt('{"content": "same"}', "shared-password")
 
     # Through the format's own parser rather than re-slicing the bytes here.
-    # This test used to base64-decode the whole blob and take the first 16
-    # bytes, which encoded the wire layout a second time — so adding the
-    # parameter header broke the test without anything about salts changing.
+    # Read through the module's own splitter rather than base64-decoding the
+    # blob and slicing the first 16 bytes: encoding the wire layout a second
+    # time here makes a format change break this test over nothing.
     def salt_of(blob):
         _, body = crypto_module._split(blob)
         return crypto_module.base64.b64decode(body)[: crypto_module._SALT_LEN]
@@ -79,13 +94,13 @@ def test_backend_unavailable_raises_runtime_error():
 
 # --------------------------------------------------------------------------- #
 # Versioned blob format (v0.7.0 hardening). The original format was bare
-# base64 with nowhere to record its own KDF parameters, which meant the cost
-# could never be raised without silently orphaning every file already written.
+# base64 with nowhere to record its own KDF parameters, so the cost cannot be
+# raised without silently orphaning every file already written.
 # --------------------------------------------------------------------------- #
 def _legacy_blob(plaintext: str, password: str) -> bytes:
     """A blob in exactly the shape v0.1.0–v0.6.0 wrote: no marker, no header,
-    and derived at the old cost. Built here rather than captured as a fixture
-    so it stays readable and obviously equivalent to the old code path."""
+    and derived at the interactive cost. Built here rather than captured as a
+    fixture so it stays readable and obviously equivalent to that path."""
     import base64
     import os
 
@@ -125,7 +140,7 @@ def test_a_new_blob_records_the_parameters_it_was_written_with():
 
 def test_a_blob_is_read_at_the_cost_it_was_written_with_not_the_current_one(monkeypatch):
     """The property that makes raising the cost safe at all: an old file is
-    derived with the old parameters even after the constants move on."""
+    derived with the parameters it names even after the constants move on."""
     crypto = AesGcmScryptSessionCrypto()
     blob = crypto.encrypt('{"x": 1}', "pw")
 
@@ -155,8 +170,8 @@ def test_a_blob_from_a_newer_format_is_refused_rather_than_misread(monkeypatch):
     ],
 )
 def test_a_file_that_is_not_a_session_says_so_rather_than_looking_like_a_bad_password(blob, expected):
-    """These all used to surface as binascii errors or failures from inside the
-    cipher — which read as "wrong password" and send someone off to re-type a
+    """Left alone these surface as binascii errors or failures from inside the
+    cipher, which read as "wrong password" and send someone off to re-type a
     password that was never the problem."""
     crypto = AesGcmScryptSessionCrypto()
 

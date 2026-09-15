@@ -1,9 +1,8 @@
 """Composition: turn config, plugins and CLI arguments into an Orchestrator.
 
-This is the application's composition root. It lived in cli.py, which meant
-interactive mode had to import a dozen of its private functions to build the
-same object; it is a module in its own right so every front-end can wire a
-run the same way.
+This is the application's composition root, and a module in its own right so
+that every front-end wires a run the same way rather than reaching into
+another's internals to build the same object.
 """
 from __future__ import annotations
 
@@ -33,14 +32,14 @@ def build_model(model_name: str | None, cwd: str | None = None, config: Config |
 
     A thin front for ``models.build_for_role(ROLE_ORCHESTRATOR, ...)``, kept
     because every front-end calls it and the role it wants is always the same
-    one. What used to be a fixed resolution chain is now the orchestrator role
-    resolving through its own key and then the default — see
-    ``runtime.models``, which also explains why a role rather than a name.
+    one. The orchestrator role resolves through its own key and then the
+    default — see ``runtime.models``, which also explains why a role rather
+    than a name.
 
     ``cwd`` is accepted and unused: configuration comes from the user's home
     directory and nothing else (see ``cobirb.config``), so the working
-    directory no longer selects anything here. The parameter stays because
-    every front-end passes it and removing it buys nothing.
+    directory selects nothing here. The parameter stays because every
+    front-end passes it and removing it buys nothing.
 
     No models are embedded by default; the provider talks to a local Ollama
     (or other OpenAI-compatible) server once a model name is supplied.
@@ -92,9 +91,9 @@ def _project_context(cwd: str, config: Config) -> str:
     and making them ask twice would be silly. And an outline of the codebase,
     because a model that knows where things live stops guessing at filenames.
 
-    The map used to be available only as a tool, on the reasoning that a
-    permanent one would crowd a small context window. That reasoning does not
-    apply to the hardware CoBirb targets: a few thousand tokens of orientation
+    The map is injected rather than left as a tool the model must think to
+    call. A permanent map would crowd a small context window, but that does
+    not apply to the hardware CoBirb targets: a few thousand tokens of orientation
     against a 128k window is cheap, and having it there from the first turn is
     most of why this kind of grounding works. The tool stays, for a subtree or
     a refresh after the layout changes.
@@ -154,8 +153,7 @@ def build_orchestrator(
     """Wire the core: registry -> provider -> policy -> orchestrator.
 
     The system prompt is deliberately not a parameter: it belongs to a turn,
-    not to the wiring, and travels through ``Orchestrator.run()``. One used
-    to be accepted here and silently ignored.
+    not to the wiring, and travels through ``Orchestrator.run()``.
 
     ``io_factory`` builds the default I/O adapter, and defaults to the
     scrolling ``TerminalIO`` every text-mode caller wants. Interactive mode

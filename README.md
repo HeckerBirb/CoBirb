@@ -2,7 +2,7 @@
 
 A privacy-first, agentic coding CLI for local LLMs and your eyes only.
 
-![CoBirb's interactive mode](docs/cobirb.png)
+![CoBirb's interactive mode](docs/images/cobirb.png)
 
 > **Privacy-first by design.**
 
@@ -125,7 +125,7 @@ Being straight about the edges, since the rest of this page makes strong claims:
   makes outbound requests on its own schedule. None of that is malicious; all of it is trust
   rather than enforcement. `llama-server`, LM Studio and vLLM have the same shape. **CoBirb will
   not close this itself** — it is a client of an OpenAI-compatible endpoint and deliberately does
-  not run models (an embedded GGUF runtime was designed and dropped; see §12.1 of
+  not run models (an embedded GGUF runtime was considered and dropped; see §17 of
   [`AGENTS.md`](./AGENTS.md)). Where inference happens is yours to choose, including an endpoint
   you wrote. If the endpoint's trustworthiness matters to you, that is a property to fix in the
   endpoint, and it is fixable — `llama-server` will bind a Unix socket instead of a port
@@ -160,6 +160,11 @@ Being straight about the edges, since the rest of this page makes strong claims:
 
 ## Documentation
 
+- [docs/](./docs/) — short how-to pages: [install](./docs/install.md),
+  [first run](./docs/first-run.md), [commands](./docs/commands.md), [CLI](./docs/cli.md),
+  [config](./docs/config.md), [permissions](./docs/permissions.md),
+  [sessions](./docs/sessions.md), [memory](./docs/memory.md), [images](./docs/images.md),
+  [the Flock](./docs/flock.md), [plugins & MCP](./docs/plugins-and-mcp.md).
 - [AGENTS.md](./AGENTS.md) — the single source of truth: architecture, the plugin SPI,
   the security design, and the working conventions.
 - [CHANGELOG.md](./CHANGELOG.md) — release history.

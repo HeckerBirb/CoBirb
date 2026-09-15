@@ -2,8 +2,9 @@
 
 ``/image`` attaches; the next prompt carries them. That is a small amount of
 state with a clear lifetime — queued, then taken exactly once by the turn that
-sends them — and it was previously a bare list on ``CoBirbApp`` with the
-reading, sniffing and payload-shaping spread across two of its methods.
+sends them. Kept here rather than as a bare list on the app, with the
+reading, sniffing and payload-shaping in one place rather than spread across
+the methods that happen to need them.
 
 Nothing here writes to disk. The bytes go to the orchestrator, which files
 them in ``Session.images`` and saves them encrypted with the rest of the

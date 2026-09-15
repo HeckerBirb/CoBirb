@@ -76,9 +76,8 @@ def _make_patch(old_text: str, new_text: str) -> str:
 
 
 def test_apply_patch_replaces_line_in_place(tmp_path):
-    """Regression test: the old implementation ignored hunk position
-    entirely, appending added lines to the end of the file instead of
-    replacing the removed line in place."""
+    """Hunk position is honoured: an added line replaces the removed one in
+    place, rather than being appended to the end of the file."""
     f = tmp_path / "a.txt"
     f.write_text("alpha\nbeta\ngamma\n")
     patch = _make_patch("alpha\nbeta\ngamma\n", "alpha\ndelta\ngamma\n")
@@ -237,13 +236,11 @@ def test_shell_times_out_a_command_that_never_exits():
 
 
 def test_shell_timeout_also_kills_a_backgrounded_descendant(tmp_path):
-    """Regression test for the real bug this was built to fix: a command
-    that backgrounds or forks something long-running (a game loop, a
-    server — anything that doesn't exit on its own) used to leave that
-    descendant running as an orphan once the immediate shell process was
-    gone, and the CLI reported "timed out" this reported even though
-    something was still alive and (depending on what it does) could still
-    be holding resources or a stray pipe open."""
+    """A command that backgrounds or forks something long-running (a game
+    loop, a server — anything that doesn't exit on its own) must not leave
+    that descendant orphaned when the immediate shell process is gone.
+    Reporting "timed out" while something is still alive leaves it holding
+    resources or a stray pipe open."""
     marker = tmp_path / "still-running"
     tool = _mk_tool(ShellTool)
 
@@ -360,12 +357,12 @@ def test_registry_custom_tool_extension():
 # why this was broken for so long without any test catching it: self._cwd
 # was stored on every tool but only ShellTool ever actually used it. A
 # model normally emits relative paths ("note.txt", not the full absolute
-# path), which used to resolve against the real OS process's cwd instead
-# of whatever --cwd the tool was configured with — silently reading/
-# writing the wrong location whenever the two differed. Found via a live
-# integration test (see test_integration_ollama.py) that runs the
-# orchestrator from a different directory than the target cwd, the way a
-# real `cobirb --cwd <other dir>` invocation does.
+# path), which must resolve against whatever --cwd the tool was configured
+# with rather than the real OS process's cwd — otherwise it silently reads
+# and writes the wrong location whenever the two differ. Also covered live
+# (see test_integration_ollama.py), which runs the orchestrator from a
+# different directory than the target cwd, the way a real
+# `cobirb --cwd <other dir>` invocation does.
 # --------------------------------------------------------------------------- #
 def test_read_file_relative_path_resolves_against_configured_cwd(tmp_path):
     (tmp_path / "a.txt").write_text("hello")
@@ -446,8 +443,9 @@ def test_registry_rejects_a_tool_whose_name_is_not_a_method():
 
 
 def test_grep_reports_an_invalid_regex_as_such(tmp_path):
-    """re.error isn't an OSError, so it used to escape grep's handler and
-    reach the model as a generic "tool failed" with nothing actionable."""
+    """re.error isn't an OSError, so grep has to catch it explicitly —
+    otherwise it reaches the model as a generic "tool failed" with nothing
+    actionable in it."""
     result = GrepTool(str(tmp_path)).execute({"pattern": "([unclosed"})
 
     assert not result.ok
@@ -490,8 +488,8 @@ def test_a_large_file_is_paged_rather_than_merely_cut_off(tmp_path):
     """One *call* is bounded, because a single read taking half the context
     window is rarely what anyone wanted. The *file* is not: a call that stops
     early says what offset continues from, so an arbitrarily large file can be
-    read in full. An earlier version only truncated, which meant a large file
-    could be read from the top and never finished."""
+    read in full. Truncating alone would leave a large file readable from the
+    top and never finishable."""
     big = tmp_path / "big.txt"
     big.write_text("".join(f"line {n}\n" for n in range(60_000)))
     tool = ReadFileTool(str(tmp_path))

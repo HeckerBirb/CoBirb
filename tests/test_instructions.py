@@ -97,9 +97,9 @@ def test_config_can_raise_the_budget(tmp_path):
 # --------------------------------------------------------------------------- #
 # The repo map in the project context.
 #
-# It used to be tool-only, on the reasoning that a permanent map would crowd a
-# small window. That came from an assumed 4,096-token budget the target
-# hardware does not have.
+# Injected rather than tool-only: a permanent map would crowd a
+# small window — which assumes a 4,096-token budget the target hardware does
+# not have.
 # --------------------------------------------------------------------------- #
 def test_the_codebase_outline_is_in_the_project_context_by_default(tmp_path):
     (tmp_path / "engine.py").write_text("class Engine:\n    def start(self): pass\n")

@@ -314,11 +314,10 @@ class TranscriptLog(RichLog):
 class PromptInput(TextArea):
     """The message box: wraps, grows to 8 lines, then scrolls.
 
-    A ``TextArea`` rather than an ``Input``, and the change cost two keys.
-    ``PromptInput`` used to extend ``Input``, whose docstring said why that
-    worked: *"``Input`` is single-line, so it binds neither arrow key itself
-    and both are free to mean 'walk the history'."* A multi-line box takes
-    both arrows back, and takes ``enter`` with it.
+    A ``TextArea`` rather than an ``Input``, and that choice costs two keys.
+    A single-line ``Input`` binds neither arrow key itself, leaving both free
+    to mean "walk the history"; a multi-line box takes both arrows back, and
+    takes ``enter`` with it.
 
     **Enter submits; shift+enter, alt+enter and ctrl+j insert a newline.**
     Three keys for one action because shift+enter is the one people reach for
@@ -380,7 +379,7 @@ class PromptInput(TextArea):
         self._draft = ""
 
     # ------------------------------------------------------------------ #
-    # Value, named as the old widget named it
+    # Value, under the name every caller and test already uses
     # ------------------------------------------------------------------ #
     @property
     def value(self) -> str:

@@ -1,0 +1,65 @@
+# CLI
+
+```bash
+cobirb                                   # the full-screen app
+cobirb -p "what does main.py do?"        # one shot, then exit
+cobirb help config                       # help on one topic
+```
+
+## Modes
+
+| Flag | Does |
+|---|---|
+| *(none)* | Interactive app |
+| `-p`, `--prompt TEXT` | Run one prompt, print, exit |
+| `--session PATH` | Open an encrypted session |
+| `-w`, `--password [PW]` | Encrypted session. Omit the value to be prompted without echo |
+
+## Options
+
+| Flag | Does |
+|---|---|
+| `--model NAME` | Which model, this run |
+| `--persona NAME` | `noah`, `professional`, `neighbor`, `kawaii`, or your own |
+| `--allow-tool SPEC` | Pre-approve a tool. Repeatable. `read_file` or `shell(git status)` |
+| `--plan-mode on\|off` | Plan → act → validate as separate phases |
+| `--system-prompt off\|harness` | Whether CoBirb adds its own system block |
+| `--cwd DIR` | Work somewhere other than here |
+| `--headless` | Never prompt; refuse anything not pre-approved |
+| `--output text\|json` | `json` prints one machine-readable object and nothing else |
+| `--export PATH` | Write a session out as markdown |
+| `--branch PATH` | Fork a session into a new file |
+| `--branch-at N` | With `--branch`: keep turns `0..N` |
+| `--upgrade [TAG]` | Move to a tagged release |
+| `--force` | With `--upgrade`: allow going backwards |
+
+## Subcommands
+
+```bash
+cobirb help [topic]      # commands, config, flock, hooks, mcp, model,
+                         # persona, plan, plugin, plugins, session, tools
+cobirb models            # how each role resolves
+cobirb commands          # your custom commands here
+cobirb flock -p "..."    # a flock run without the app
+cobirb plugin install <dir> [--replace]
+cobirb plugin list
+cobirb plugin remove <name>
+```
+
+## Scripting it
+
+```bash
+cobirb -p "run the tests and report" \
+  --headless --output json \
+  --allow-tool='shell(python -m pytest)'
+```
+
+Exit codes: `0` clean, `1` failed, `2` completed but something was refused (`--headless` only).
+
+## Environment
+
+| Variable | Does |
+|---|---|
+| `COBIRB_HOME` | Relocate the whole `~/.cobirb` tree |
+| `COBIRB_MODEL_NAME` | Default model |
+| `COBIRB_OLLAMA_URL` | Default endpoint |

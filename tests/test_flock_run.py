@@ -9,7 +9,6 @@ from __future__ import annotations
 import sys
 import textwrap
 
-import pytest
 
 from cobirb import cli
 from cobirb.flock.brainy import PROPOSE_CHARTER
