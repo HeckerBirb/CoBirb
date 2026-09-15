@@ -475,3 +475,59 @@ async def _settle(pilot, predicate, tries: int = 60) -> None:
             return
         await pilot.pause()
     raise AssertionError("condition never became true")
+
+
+# --------------------------------------------------------------------------- #
+# The activity roll-up, read off the panes themselves
+# --------------------------------------------------------------------------- #
+async def test_the_activity_line_rolls_up_every_worker_not_just_the_last_event():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        pane = await _flock_tab(pilot, app)
+        await pane.begin(_CHARTER)
+        await pilot.pause()
+
+        app._apply_flock_event("started", _CHARTER.workers[0])
+        await pilot.pause()
+
+        summary = pane.activity_summary()
+        assert "a running" in summary
+        # The others are still listed, waiting — during a fan-out the question
+        # is "is anything still going", which needs all of them visible.
+        assert summary.count("·") == len(_CHARTER.workers) - 1
+
+
+async def test_a_worker_with_no_pane_left_is_not_in_the_roll_up():
+    """The app used to keep its own dict of worker states alongside the panes,
+    so an event for a worker whose pane had gone still counted in the activity
+    line. Read off the panes, a ghost simply isn't there."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        pane = await _flock_tab(pilot, app)
+        await pane.begin(_CHARTER)
+        await pilot.pause()
+
+        app._apply_flock_event("finished", WorkerReport(worker_id="ghost", ok=True))
+        await pilot.pause()
+
+        assert "ghost" not in pane.activity_summary()
+
+
+async def test_the_roll_up_is_empty_before_a_flock_lays_out_any_panes():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        pane = await _flock_tab(pilot, app)
+        assert pane.activity_summary() == ""
+
+
+async def test_a_pane_remembers_the_state_it_is_showing():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        pane = await _flock_tab(pilot, app)
+        await pane.begin(_CHARTER)
+        await pilot.pause()
+
+        worker = pane.pane("a")
+        assert worker.state == "waiting"
+        worker.set_state("running")
+        assert worker.state == "running"

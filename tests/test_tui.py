@@ -32,7 +32,8 @@ from cobirb import cli, help_text, memory, paths, session
 from cobirb.plugins.core import render
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 from cobirb.runtime import commands, personas, plugins, sessions, wiring
-from cobirb.tui.app import CoBirbApp, _split_image_argument
+from cobirb.tui.app import CoBirbApp
+from cobirb.tui.attachments import split_argument as _split_image_argument
 from cobirb.tui.panes import PluginsPane, SessionsPane
 from cobirb.tui.screens import (
     ApprovalModal,
@@ -2699,7 +2700,7 @@ async def test_image_rejects_a_file_that_is_not_an_image(tmp_path):
         await pilot.pause()
         await _submit(pilot, app, f"/image {not_an_image}")
         assert "doesn't look like an image" in _transcript_text(app)
-        assert app._pending_images == []
+        assert app.attachments.pending == []
 
 
 async def test_image_reports_a_missing_file():
@@ -2720,7 +2721,7 @@ async def test_a_queued_image_rides_the_next_submitted_prompt(tmp_path, monkeypa
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, f"/image {png}")
-        assert app._pending_images and app._pending_images[0]["filename"] == "shot.png"
+        assert app.attachments.pending and app.attachments.pending[0].filename == "shot.png"
 
         await _submit(pilot, app, "what is this")
         await _until(pilot, lambda: bool(builds))
@@ -2729,7 +2730,7 @@ async def test_a_queued_image_rides_the_next_submitted_prompt(tmp_path, monkeypa
         images = builds[0]["built"].calls[0]["images"]
         assert images[0]["filename"] == "shot.png"
         assert images[0]["data"]  # base64, non-empty
-        assert app._pending_images == []  # consumed, not left queued for a later turn
+        assert app.attachments.pending == []  # consumed, not left queued for a later turn
 
 
 async def test_the_transcript_shows_a_marker_for_a_queued_image(tmp_path, monkeypatch):

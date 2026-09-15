@@ -69,7 +69,7 @@ not let it quietly pick a default, narrow a feature or rule an approach out. Rai
 | `runtime/` | Composition layer both front-ends share: `wiring`, `plugins`, `models`, `personas`, `commands`, `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues` (which catalogues a session has open — see §6b). |
 | `mcp/` | stdio MCP client (`client`) and its tool adapter (`tools`). |
 | `flock/` | Multi-agent runs: `charter`, `brainy`, `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. |
-| `tui/` | Textual app: `app`, `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. |
+| `tui/` | Textual app: `app` (the application itself — mount, input, the turn, workers, actions), `slash_commands` (what each `/command` does, as `(app, argument)` functions + the `COMMANDS` table), `transcript` (everything written to the transcript, and the flush-before-write ordering rule), `attachments` (images queued by `/image` for the next message), `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. |
 | `help_text.py` | The prose `cobirb help [topic]` prints. |
 | `personas/*.json` | Bundled personas: `professional`, `neighbor`, `kawaii`. |
 | `tests/` | One file per module; `conftest.py` isolates `COBIRB_HOME` for every test. |

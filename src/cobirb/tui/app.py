@@ -22,14 +22,11 @@ modes, which a full-screen app's stderr is invisible to).
 """
 from __future__ import annotations
 
-import base64
-import hashlib
 import os
 import threading
 import time
 from typing import Any
 
-from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -41,8 +38,10 @@ from .. import memory, session
 from ..help_text import HELP_TEXT, HELP_TOPICS
 from ..runtime import commands, personas, plugins, wiring
 from ..runtime.catalogues import CatalogueStore
-from ..runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
-from ..runtime.export import write_export
+from . import slash_commands
+from .attachments import PendingAttachments
+from .transcript import TranscriptView
+from ..runtime.custom_commands import expand_custom_command
 from ..config import Config
 from ..orchestrator import Orchestrator, render_through
 from ..plugins.core import persona_shapes_voice, render
@@ -56,68 +55,13 @@ from .screens import (
     ApprovalModal,
     ConfirmModal,
     HelpModal,
-    MemoryCataloguesModal,
     ModelPickerModal,
     PersonaPickerModal,
-    RememberModal,
     TextPromptModal,
 )
 from .widgets import ActivityBar, PromptInput, StatusBar, StreamPreview, TranscriptLog
 
 _TAB_ORDER = ["current", "flock", "sessions", "plugins"]
-
-# Magic-byte prefixes for the image formats CoBirb recognizes via /image.
-# A sniff, not a size cap: the point is "is this actually an image", not
-# "is this small enough" — CoBirb's hardware baseline has no business
-# picking a byte limit, and nothing here does.
-_IMAGE_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"BM")
-
-
-def _looks_like_an_image(data: bytes) -> bool:
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return True
-    return any(data.startswith(magic) for magic in _IMAGE_MAGIC)
-
-
-def _split_image_argument(argument: str, cwd: str) -> tuple[str, str]:
-    """Split ``/image``'s argument into a path and whatever follows it.
-
-    Typing the path and the question on one line — ``/image shot.png what is
-    this?`` — is what people actually do, and taking the whole argument as a
-    filename turned that into "no such file: 'shot.png what is this?'", which
-    reads like the *file* is missing rather than like the command wanted only
-    a path. So the trailing text is now the message sent with the image.
-
-    Three shapes, in the order that avoids guessing wrong:
-
-    1. A quoted path (``/image "my screenshot.png" what is this?``) — explicit,
-       so it wins outright.
-    2. The whole argument naming a file that exists — which keeps an unquoted
-       path containing spaces working exactly as it did before.
-    3. Otherwise the first word is the path and the rest is the message.
-    """
-    argument = argument.strip()
-    if not argument:
-        return "", ""
-    if argument[0] in "\"'":
-        closing = argument.find(argument[0], 1)
-        if closing != -1:
-            return argument[1:closing], argument[closing + 1 :].strip()
-    if os.path.isfile(_resolve_image_path(argument, cwd)):
-        return argument, ""
-    path, _, message = argument.partition(" ")
-    return path, message.strip()
-
-
-def _resolve_image_path(path: str, cwd: str) -> str:
-    """Resolve ``/image``'s path against the session's working directory.
-
-    Not the process's — those are the same only when CoBirb was started from
-    the directory it is working in, and ``--cwd`` exists precisely so they
-    need not be.
-    """
-    expanded = os.path.expanduser(path)
-    return expanded if os.path.isabs(expanded) else os.path.join(cwd, expanded)
 
 # "Noah" (v0.9.0) — the default theme, the parrot's own five colours
 # (defined once in plugins.core.render, alongside the Rich styles that use
@@ -234,10 +178,12 @@ class CoBirbApp(App[None]):
         # from that (see runtime.catalogues). Not a widget's business, so
         # not a method of this class.
         self.catalogues = CatalogueStore(cwd)
-        # Queued by /image, consumed by the very next submitted prompt (see
+        # Queued by /image, taken by the very next submitted prompt (see
         # _run_turn) — attach, then type your message normally, the way
-        # attaching a file works everywhere. [{"filename", "data": bytes}].
-        self._pending_images: list[dict[str, Any]] = []
+        # attaching a file works everywhere.
+        self.attachments = PendingAttachments()
+        # How anything reaches the transcript, and in what order.
+        self.transcript = TranscriptView(self)
         # Set for the duration of a flock engagement. The Event is what
         # ctrl+c sets: a model call in flight cannot be interrupted, so
         # stopping means no further Worker Birbs start.
@@ -249,7 +195,6 @@ class CoBirbApp(App[None]):
         self._flock_canceller: "Canceller | None" = None
         # Worker id -> state, for the activity line's roll-up. Reset per
         # engagement so a previous flock's workers do not linger in it.
-        self._flock_states: dict[str, str] = {}
         # Resolved once, for the status bar — the orchestrator that would
         # know the real name doesn't exist yet at mount time.
         self.resolved_model_name = wiring.resolve_model_name(model_name, cwd)
@@ -348,113 +293,25 @@ class CoBirbApp(App[None]):
     # Main-thread UI operations. TuiIO reaches every one of these through
     # App.call_from_thread; none may be called from a worker thread directly.
     # ------------------------------------------------------------------ #
+    # The transcript is a view of its own (tui/transcript.py). These stay
+    # as forwarders because TuiIO, the panes and the flock bridge all write
+    # through the app, and the ordering rule they rely on lives in the view.
     def write_transcript(self, renderable: Any) -> None:
-        """Append a finished renderable to the transcript.
-
-        Flushes the streaming preview first so the reading order matches the
-        order things happened: the model's streamed reasoning, and only then
-        the panel for the tool call it led to.
-        """
-        self._flush_stream()
-        self.query_one("#transcript", TranscriptLog).write(renderable)
-
-    def render_history(self, turns: list[Any], label: str) -> None:
-        """Replay a resumed conversation into the transcript.
-
-        Resuming used to drop you into an empty screen: the conversation was
-        loaded and fed to the model, so it knew what had been said, but you
-        couldn't see any of it. Every comparable CLI shows the thread you are
-        rejoining, and a session you can't read is most of the reason to keep
-        one.
-
-        Bracketed by dim rules so restored turns are never mistaken for
-        something that just happened.
-        """
-        log = self.query_one("#transcript", TranscriptLog)
-        if not turns:
-            log.write(render.build_notice(f"{label} — no turns yet; your next message starts it."))
-            return
-        log.write(Text(""))
-        log.write(render.build_history_divider(f"{label} · {len(turns)} earlier turn(s)"))
-        for turn in turns:
-            self._replay_turn(log, turn)
-        log.write(Text(""))
-        log.write(render.build_history_divider("end of restored history"))
-        # No trailing blank: whatever comes next writes its own leading one
-        # (see write_user_prompt), and two would open a gap.
-
-    def _replay_turn(self, log: TranscriptLog, turn: Any) -> None:
-        """Write one saved turn, matching how it looked when it happened."""
-        role = getattr(turn, "role", "")
-        content = getattr(turn, "content", "") or ""
-        tool_use = getattr(turn, "tool_use", None)
-        phase = getattr(turn, "phase", None)
-
-        if role == "tool":
-            # The tool turn records the result; the call that produced it is
-            # on the turn itself, so one panel shows both.
-            call = (tool_use or [{}])[0]
-            log.write(
-                render.build_tool_call_panel(
-                    call.get("name", "?"), call.get("arguments", {}) or {}, content, replayed=True
-                )
-            )
-            return
-
-        if role == "user":
-            log.write(Text(""))
-            log.write(render.build_user_message(content))
-            log.write(Text(""))
-            return
-
-        if not content.strip():
-            # An assistant turn whose only purpose was to announce a tool
-            # call — the call itself is rendered by the tool turn that
-            # follows, so an empty bubble here would be noise.
-            return
-        if phase == "plan":
-            log.write(render.build_plan_panel(self.persona.name, content))
-        elif phase == "validate":
-            log.write(render.build_validation_panel(self.persona.name, content))
-        else:
-            log.write(render.build_assistant_message(content))
-
-    def write_user_prompt(self, prompt: str) -> None:
-        """Append what the user just sent, fenced by blank lines.
-
-        The blank line on each side is the point: without it a prompt sat
-        flush against the panel above and the reply below, and the whole
-        transcript read as one undifferentiated column. Spacing here rather
-        than inside ``build_user_message`` keeps the renderable itself
-        composable — ``TerminalIO`` spaces its own output with newlines.
-        """
-        self._flush_stream()
-        log = self.query_one("#transcript", TranscriptLog)
-        log.write(Text(""))
-        log.write(render.build_user_message(prompt))
-        for item in self._pending_images:
-            log.write(Text(f"\U0001f4ce {item['filename']}", style="dim"))
-        log.write(Text(""))
+        self.transcript.write(renderable)
 
     def append_stream(self, text: str) -> None:
-        self.query_one("#streaming-preview", StreamPreview).append(text)
+        self.transcript.append_stream(text)
 
     def _flush_stream(self) -> None:
-        """Move anything buffered mid-stream into the transcript for good.
+        self.transcript.flush_stream()
 
-        A streamed final answer is never re-rendered as a panel (the
-        orchestrator sets ``last_turn_streamed`` precisely so it isn't shown
-        twice), so if this didn't run the reply would vanish from the
-        transcript when the preview cleared.
-        """
-        preview = self.query_one("#streaming-preview", StreamPreview)
-        text = preview.take()
-        if text.strip():
-            # Marked the same way a non-streamed reply is, so the transcript
-            # reads uniformly whether or not the model streamed it.
-            self.query_one("#transcript", TranscriptLog).write(
-                render.build_streamed_message(text.rstrip("\n"))
-            )
+    def write_user_prompt(self, prompt: str) -> None:
+        self.transcript.write_user_prompt(
+            prompt, [item.filename for item in self.attachments.pending]
+        )
+
+    def render_history(self, turns: list[Any], label: str) -> None:
+        self.transcript.render_history(turns, label, self.persona.name)
 
     def set_busy(self, label: str) -> None:
         """The orchestrator is waiting on the model.
@@ -503,7 +360,7 @@ class CoBirbApp(App[None]):
         message submitted *while one is running* gets routed differently:
         not as a new prompt or a slash command, but as ``Orchestrator.steer()``
         redirecting the turn already in flight. A flock engagement still
-        disables the box outright (``_cmd_flock``) — steering a flock is a
+        disables the box outright (``slash_commands.cmd_flock``) — steering a flock is a
         different, unbuilt question, not this one.
         """
         prompt = event.value.strip()
@@ -606,7 +463,7 @@ class CoBirbApp(App[None]):
         if not prompt.startswith("/"):
             return False
         name, _, argument = prompt.partition(" ")
-        handler = self._COMMANDS.get(name)
+        handler = slash_commands.COMMANDS.get(name)
         if handler is None:
             return False
         handler(self, argument.strip())
@@ -638,147 +495,9 @@ class CoBirbApp(App[None]):
         get written, and a cache would mean restarting to test a one-line
         change.
         """
-        if not prompt.startswith("/") or prompt.partition(" ")[0] in self._COMMANDS:
+        if not prompt.startswith("/") or prompt.partition(" ")[0] in slash_commands.COMMANDS:
             return prompt
         return expand_custom_command(prompt, self.cwd)
-
-    def _cmd_help(self, argument: str) -> None:
-        self.action_help(argument)
-
-    def _cmd_model(self, argument: str) -> None:
-        if argument:
-            self.write_transcript(
-                render.build_notice("Usage: /model — lists available models to choose from.")
-            )
-            return
-        self._select_model_worker(auto=False)
-
-    def _cmd_persona(self, argument: str) -> None:
-        # Bare /persona opens the picker, exactly like bare /model; /persona
-        # <name> still switches directly, so anything scripted or recalled
-        # from history keeps working.
-        if argument:
-            self._apply_persona(argument)
-        else:
-            self.pick_persona()
-
-    def _cmd_context(self, argument: str) -> None:
-        """How much of the model's window this session is using.
-
-        Worth surfacing rather than leaving in the log: on a local model the
-        window is usually far smaller than people expect, and this is where
-        they find that out before it degrades an answer.
-        """
-        if self.orchestrator is None:
-            self.write_transcript(
-                render.build_notice("No turns yet — the context budget is measured on the first one.")
-            )
-            return
-        report = self.orchestrator.last_compaction
-        self.write_transcript(
-            render.build_notice(report.describe() if report else "Nothing sent to the model yet.")
-        )
-
-    def _cmd_undo(self, argument: str) -> None:
-        """Put back the files the last changing turn altered.
-
-        Reports what it actually restored rather than saying "done": `shell`
-        cannot declare what it writes, so anything a command did is outside
-        this, and a user told "undone" who then finds otherwise is worse off
-        than one told exactly which files came back.
-        """
-        checkpoints = getattr(self.orchestrator, "checkpoints", None)
-        if checkpoints is None:
-            self.write_transcript(
-                render.build_notice("Undo is off for this session (\"checkpoints\": false).")
-            )
-            return
-        self.write_transcript(render.build_notice(checkpoints.undo_last().describe()))
-
-    def _cmd_diff(self, argument: str) -> None:
-        """Everything the agent has changed this session, as one diff.
-
-        Built from the undo snapshots, not from git: it works in a directory
-        that is not a repository, and it shows *the agent's* changes rather
-        than conflating them with whatever the user had already edited.
-        """
-        checkpoints = getattr(self.orchestrator, "checkpoints", None)
-        if checkpoints is None:
-            self.write_transcript(
-                render.build_notice("No change tracking this session (\"checkpoints\": false).")
-            )
-            return
-        diff = checkpoints.session_diff()
-        if not diff.strip():
-            self.write_transcript(render.build_notice("No files have been changed this session."))
-            return
-        self.write_transcript(render.build_preview_panel("this session", diff))
-
-    def _cmd_export(self, argument: str) -> None:
-        """Write this session out as markdown.
-
-        Says plainly that the result is plaintext. The session stays
-        encrypted; this is a copy the user asked for, and the whole reason to
-        ask for one is to give it to someone.
-        """
-        manager = getattr(self.orchestrator, "session", None)
-        session_data = getattr(manager, "session", None)
-        if session_data is None or not session_data.turns:
-            self.write_transcript(render.build_notice("Nothing to export yet."))
-            return
-        name = argument.strip() or f"cobirb-session-{time.strftime('%Y%m%d-%H%M%S')}.md"
-        try:
-            written = write_export(session_data, name)
-        except OSError as exc:
-            self.write_transcript(render.build_notice(f"Could not export — {exc}"))
-            return
-        self.write_transcript(
-            render.build_notice(
-                f"Exported {len(session_data.turns)} turn(s) to {written}. "
-                "That file is plaintext; the session itself stays encrypted."
-            )
-        )
-
-    # ------------------------------------------------------------------ #
-    # Memory catalogues
-    # ------------------------------------------------------------------ #
-    def _cmd_memories(self, argument: str) -> None:
-        self._ensure_public_catalogue()
-        self.push_screen(MemoryCataloguesModal())
-
-    def _cmd_remember(self, argument: str) -> None:
-        """``/remember <fact>`` — save a fact into a catalogue of the user's
-        choosing.
-
-        Deliberately a plain slash command, not a model tool: a tool would
-        either be unreachable for a model that can't call tools at all, or
-        get called on every turn with no memory of having already asked —
-        this fires exactly once, exactly when typed, regardless of what the
-        model can do.
-        """
-        fact = argument.strip()
-        if not fact:
-            self.write_transcript(render.build_notice("Usage: /remember <fact to save>"))
-            return
-        self._ensure_public_catalogue()
-        self.push_screen(RememberModal(fact))
-
-    def _ensure_public_catalogue(self) -> None:
-        """Create the always-present Public catalogue if it isn't there yet.
-
-        "Lazily, on first use" is what ``memory.ensure_public_exists``
-        promises, and this is the first use — both commands that show the
-        catalogue list call it. Without this the promise was never kept by
-        anything but the tests: a fresh install opened ``/memories`` on an
-        empty list, and ``/remember`` offered nowhere to put the fact.
-
-        A failure here is reported, not raised: an unwritable memories
-        directory should cost the Public catalogue, never the command.
-        """
-        try:
-            self.catalogues.ensure_public()
-        except OSError as exc:  # noqa: BLE001 - reported, never fatal
-            self.write_transcript(render.build_notice(f"Could not create the public catalogue — {exc}"))
 
     # Catalogue bookkeeping lives in CatalogueStore, not here — none of it
     # touches a widget. These two remain because the modals ask the *app*
@@ -809,132 +528,6 @@ class CoBirbApp(App[None]):
         self.write_transcript(
             render.build_notice(error or f"Remembered, in '{catalogue_name}'.")
         )
-
-    def _cmd_image(self, argument: str) -> None:
-        """``/image <path> [message]`` — attach an image to a message.
-
-        With no trailing text the image is queued and the message you type
-        and send next carries it, the way attaching a file works anywhere
-        else. With trailing text, that text *is* the message and the turn
-        goes now — because typing the path and the question together is what
-        people reach for, and reading the whole line as a filename made that
-        fail with "no such file", which blames the file for a parsing rule.
-        """
-        path, message = _split_image_argument(argument, self.cwd)
-        if not path:
-            self.write_transcript(render.build_notice("Usage: /image <path> [message]"))
-            return
-        resolved = _resolve_image_path(path, self.cwd)
-        try:
-            with open(resolved, "rb") as fh:
-                data = fh.read()
-        except OSError as exc:
-            self.write_transcript(render.build_notice(f"Could not read '{path}' — {exc}"))
-            return
-        if not _looks_like_an_image(data):
-            self.write_transcript(render.build_notice(f"'{path}' doesn't look like an image CoBirb recognizes."))
-            return
-        filename = os.path.basename(resolved)
-        self._pending_images.append({"filename": filename, "data": data})
-        model = getattr(self.orchestrator, "model", None)
-        if model is not None and not model.supports_vision():
-            self.write_transcript(
-                render.build_notice(
-                    f"\U0001f4ce {filename} queued — the current model doesn't support vision, so "
-                    "this will be understood as text only. Switch with /model, or send anyway."
-                )
-            )
-        elif not message:
-            self.write_transcript(
-                render.build_notice(f"\U0001f4ce {filename} queued — attach more with /image, or send your message.")
-            )
-        if message:
-            self._send_prompt(message)
-
-    def _take_pending_images(self) -> "list[dict[str, Any]] | None":
-        """Pop this turn's queued attachments and shape them for
-        ``Orchestrator.run(images=...)``: content-hash id, filename, base64.
-
-        Nothing is written to disk here. The orchestrator files the bytes in
-        ``Session.images``, which is saved — encrypted — with the rest of the
-        session. This used to encrypt each image into a sibling directory
-        itself, which needed the session password, needed a crypto backend
-        that may not exist (an unsaved session has none, and calling into it
-        raised mid-turn), and produced files nothing could ever read back.
-        """
-        pending = self._pending_images
-        self._pending_images = []
-        if not pending:
-            return None
-        return [
-            {
-                "id": hashlib.sha256(item["data"]).hexdigest(),
-                "filename": item["filename"],
-                "data": base64.b64encode(item["data"]).decode("ascii"),
-            }
-            for item in pending
-        ]
-
-    def _cmd_plan(self, argument: str) -> None:
-        self.plan_mode, message = commands.apply_plan_toggle(argument, self.plan_mode)
-        self.query_one(StatusBar).plan_mode = self.plan_mode
-        self.write_transcript(render.build_notice(message))
-
-    def _cmd_flock(self, argument: str) -> None:
-        """``/flock <objective>`` — divide a piece of work between several agents.
-
-        Refused while an ordinary turn is running, and while another flock is:
-        both would put two agents into the same working tree with no partition
-        between them, which is the one thing the whole design exists to
-        prevent.
-        """
-        if not argument.strip():
-            self.write_transcript(
-                render.build_notice(
-                    "Usage: /flock <objective>, e.g. /flock add CSV export to the reporting "
-                    "tool. Brainy Birb plans it and you approve the charter before anything "
-                    "runs. See /help flock."
-                )
-            )
-            return
-        if self._turn_in_progress:
-            self.write_transcript(
-                render.build_notice("Wait for the current turn to finish before starting a flock.")
-            )
-            return
-        if self._flock_stop is not None:
-            self.write_transcript(render.build_notice("A flock is already running."))
-            return
-        self.query_one(TabbedContent).active = "flock"
-        self._turn_in_progress = True
-        self.query_one("#prompt-input", PromptInput).disabled = True
-        self._flock_stop = threading.Event()
-        self._flock_canceller = Canceller()
-        self._flock_states = {}
-        self.set_activity("Brainy Birb is planning…")
-        self._run_flock(argument.strip())
-
-    def _cmd_commands(self, argument: str) -> None:
-        """List the prompt files that are available as commands here."""
-        self.write_transcript(
-            render.build_notice(describe_commands(discover_commands(self.cwd)))
-        )
-
-    _COMMANDS = {
-        "/help": _cmd_help,
-        "/model": _cmd_model,
-        "/persona": _cmd_persona,
-        "/plan": _cmd_plan,
-        "/context": _cmd_context,
-        "/undo": _cmd_undo,
-        "/export": _cmd_export,
-        "/diff": _cmd_diff,
-        "/commands": _cmd_commands,
-        "/flock": _cmd_flock,
-        "/memories": _cmd_memories,
-        "/remember": _cmd_remember,
-        "/image": _cmd_image,
-    }
 
     def _on_turn_finished(self) -> None:
         self._turn_in_progress = False
@@ -979,7 +572,7 @@ class CoBirbApp(App[None]):
             # method.
             memory_block = self.catalogues.system_prompt()
             system = f"{self.system}\n\n{memory_block}" if memory_block else self.system
-            images = self._take_pending_images()
+            images = self.attachments.take()
             turn_result = self.orchestrator.run(
                 prompt,
                 system,
@@ -1212,31 +805,27 @@ class CoBirbApp(App[None]):
         self.call_from_thread(self._apply_flock_event, kind, payload)
 
     def _apply_flock_event(self, kind: str, payload) -> None:
+        """Route one supervisor event onto the worker's pane, then refresh
+        the roll-up. A worker whose pane has gone is not an error — it simply
+        drops out of the summary, which now reads off the panes themselves."""
         pane = self.query_one(FlockPane)
-        worker_id = getattr(payload, "id", None) or getattr(payload, "worker_id", "")
-        if kind == "started":
-            self._flock_states[worker_id] = "running"
-            worker = pane.pane(payload.id)
-            if worker is not None:
+        worker = pane.pane(getattr(payload, "id", None) or getattr(payload, "worker_id", ""))
+        if worker is not None:
+            if kind == "started":
                 worker.set_state("running")
-        elif kind == "finished":
-            self._flock_states[worker_id] = "done" if payload.complete else "failed"
-            worker = pane.pane(payload.worker_id)
-            if worker is not None:
+            elif kind == "finished":
                 worker.set_state("done" if payload.complete else "failed")
                 worker.write(render.build_notice(payload.describe()))
-        elif kind == "reviewed":
-            worker = pane.pane(payload.worker_id)
-            if worker is not None:
+            elif kind == "reviewed":
                 # A clean review leaves a "done" alone; an unclean one demotes
                 # it, because an acceptance check passing is not the same as
                 # the work standing up to review.
                 if not payload.clean:
                     worker.set_state("flagged")
-                    self._flock_states[worker_id] = "flagged"
                 worker.write(render.build_notice(payload.describe()))
-        if self._flock_states:
-            self.set_activity("Flock running", self._flock_activity())
+        summary = pane.activity_summary()
+        if summary:
+            self.set_activity("Flock running", summary)
 
     def flock_progress(self, text: str) -> None:
         """Progress from the flock itself. Main thread only."""
@@ -1254,18 +843,6 @@ class CoBirbApp(App[None]):
         bar = self.query_one(ActivityBar)
         bar.activity = activity
         bar.detail = detail
-
-    def _flock_activity(self) -> str:
-        """A roll-up of who is doing what, for the activity line.
-
-        The whole flock on one line rather than only the most recent event:
-        during a fan-out the interesting question is not "what just happened"
-        but "is anything still going", and that needs every worker visible at
-        once.
-        """
-        order = {"running": 0, "waiting": 1, "flagged": 2, "failed": 3, "done": 4}
-        states = sorted(self._flock_states.items(), key=lambda kv: (order.get(kv[1], 9), kv[0]))
-        return " · ".join(f"{name} {state}" for name, state in states)
 
     def flock_write(self, worker_id: str, renderable) -> None:
         """One renderable into one Worker Birb's pane. Main thread only."""

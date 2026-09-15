@@ -150,6 +150,12 @@ class WorkerPane(Vertical):
         super().__init__(id=f"worker-{worker_id}", classes="worker-pane")
         self._worker_id = worker_id
         self._scope = scope
+        # Remembered, not just rendered. The app used to keep a parallel
+        # dict of exactly this so it could roll the flock up onto the
+        # activity line, which meant the same fact lived in two places and
+        # could disagree — a worker whose pane had gone still counted in the
+        # roll-up. The pane that shows a state is the thing that has it.
+        self.state = "waiting"
 
     def compose(self) -> ComposeResult:
         yield Static(self._title("waiting"), classes="worker-title")
@@ -174,6 +180,7 @@ class WorkerPane(Vertical):
         return Text(f"[{self._worker_id}] {state}", style=colours.get(state, "bold"))
 
     def set_state(self, state: str) -> None:
+        self.state = state
         self.query_one(".worker-title", Static).update(self._title(state))
 
     def write(self, renderable) -> None:
@@ -217,6 +224,21 @@ class FlockPane(Vertical):
             return self.query_one(f"#worker-{worker_id}", WorkerPane)
         except Exception:  # noqa: BLE001 - a pane that is gone is not an error
             return None
+
+    def activity_summary(self) -> str:
+        """A roll-up of who is doing what, for the activity line.
+
+        The whole flock on one line rather than only the most recent event:
+        during a fan-out the interesting question is not "what just happened"
+        but "is anything still going", and that needs every worker visible at
+        once. Read off the panes themselves, so it can only ever describe
+        workers that are actually on screen.
+        """
+        order = {"running": 0, "waiting": 1, "flagged": 2, "failed": 3, "done": 4}
+        panes = sorted(
+            self.query(WorkerPane), key=lambda p: (order.get(p.state, 9), p._worker_id)
+        )
+        return " · ".join(f"{pane._worker_id} {pane.state}" for pane in panes)
 
     async def clear(self) -> None:
         await self.query_one("#flock-workers", HorizontalScroll).remove_children()

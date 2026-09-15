@@ -4,6 +4,32 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.12.3]
+
+`tui/app.py` was 1648 lines and the home of everything the interactive app could do. It is now
+1225, and three of the things it was doing have somewhere of their own to live.
+
+- **`tui/slash_commands.py`** — what each `/command` does. Fourteen `_cmd_*` methods made the app
+  the home of exporting markdown, toggling plan mode and starting a flock, on top of being the
+  Textual application. They were already plain functions of `(app, argument)` — the dispatch table
+  held *unbound* methods and called them `handler(self, argument)` — so this changed how they are
+  stored, not how they work. The app keeps `_dispatch_command`, which is a routing decision about
+  input rather than the behaviour of any one command.
+- **`tui/transcript.py`** — `TranscriptView`: everything written to the transcript, and the
+  ordering rule they all depend on (flush the streamed reply before writing anything else, or a
+  tool-call panel lands above the reasoning that led to it). Takes the persona name and a message's
+  attachments as arguments rather than reading them off the app, so it changes when the transcript
+  changes and not when the application's fields do.
+- **`tui/attachments.py`** — `PendingAttachments`: the images `/image` has queued for the next
+  message, with the reading, format sniffing and payload shaping that were spread across two app
+  methods. `AttachmentError` carries a sentence, because every failure it can have is one a person
+  should read.
+- **Fixed: the flock's activity roll-up could name a worker that wasn't there.** `WorkerPane`
+  rendered its state without remembering it, so the app kept a parallel `_flock_states` dict to
+  build the roll-up from — the same fact in two places, and only one of them noticed when a pane
+  was gone. The pane that shows a state now has it, `FlockPane.activity_summary()` reads off the
+  panes, and the dict is deleted.
+
 ## [0.12.2]
 
 Housekeeping pass: two real bugs, and the catalogue bookkeeping moved out of the app.
