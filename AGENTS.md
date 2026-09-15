@@ -345,12 +345,23 @@ no reliable post-install hook).
 **Releases** — `cobirb --upgrade [tag]` fetches tags in the checkout CoBirb is installed from,
 resolves the highest `vX.Y.Z` (or the named one, `v` optional), refuses a downgrade without
 `--force` and a dirty working tree outright, then re-runs `pip install -e .`. Only works for an
-editable install of a git clone.
+editable install of a git clone. **It fast-forwards the current branch onto the tag rather than
+checking the tag out**, because a detached `HEAD` swallows the next commit anyone makes in that
+checkout. Detaching is the fallback when there is no branch, or the branch carries commits the
+tag doesn't, and `UpgradeResult.branch`/`describe()` says which happened.
 
 ## 15. Conventions
 
 - **Docstrings explain *why*.** This is the house style and the reason the code is navigable. When
   you fix a subtle bug, the reason it was a bug goes in the docstring or a comment there.
+- **Changing behaviour means updating `docs/`, in the same change.** Those pages state what
+  CoBirb does — flags, commands, config keys, defaults, what a command prints — so they are tied
+  to the implementation rather than describing it loosely, and a page that has drifted is worse
+  than no page: it is the first thing a user reads and they have no way to know it is stale.
+  Adding or renaming a `/command`, a CLI flag or a config key, or changing what one of them does,
+  is not finished until the matching page says so. `docs/README.md` is the index of which page
+  covers what. Keep them short and current — they are the user's first read, not a second
+  reference manual.
 - `from __future__ import annotations` in every module.
 - Source code cites other source (`see X`), never a documentation file.
 - **Keep the core thin.** Feature logic that lands in `orchestrator.py` probably belongs in a tool,

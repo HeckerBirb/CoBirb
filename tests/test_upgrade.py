@@ -63,6 +63,10 @@ def _stub_git(monkeypatch, *, tags: list[str] = ()):
     )
     monkeypatch.setattr(upgrade_module, "_tag_exists", lambda tag, *, cwd: tag in tags)
     monkeypatch.setattr(upgrade_module, "_run_pip", lambda *args: "")
+    # Detached by default here; the branch-keeping path has its own tests
+    # against a real repository below, where git can actually answer.
+    monkeypatch.setattr(upgrade_module, "_current_branch", lambda *, cwd: "")
+    monkeypatch.setattr(upgrade_module, "_can_fast_forward_to", lambda tag, *, cwd: False)
 
 
 def test_upgrade_with_no_tag_picks_the_highest_by_version_not_by_listing_order(monkeypatch):
@@ -140,6 +144,13 @@ def _git(*args, cwd):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
+def _git_out(*args, cwd) -> str:
+    """Same, but for the answer rather than the side effect."""
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
 def _real_repo(tmp_path):
     """A bare 'origin' plus a clone of it, with two tagged commits — the
     shape a real CoBirb checkout has (a git clone tracking a real remote)."""
@@ -202,3 +213,140 @@ def test_upgrade_against_a_real_remote_refuses_a_dirty_tree(monkeypatch, tmp_pat
 
     with pytest.raises(UpgradeError, match="uncommitted changes"):
         upgrade()
+
+
+# --------------------------------------------------------------------------- #
+# Staying on the branch.
+#
+# Checking a tag out directly detaches HEAD, which silently swallows the next
+# commit anyone makes in that checkout — it belongs to no branch, so `git push`
+# has nothing to send. These run against a real repository because the whole
+# question is what git actually does to HEAD.
+# --------------------------------------------------------------------------- #
+def _branch_of(work) -> str:
+    """The branch checked out in ``work``, or "" when HEAD is detached."""
+    done = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+        cwd=work, capture_output=True, text=True,
+    )
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def _on_branch_behind_the_tag(tmp_path):
+    """A checkout sitting on its branch, one tagged release behind — what a
+    person upgrading normally has."""
+    work = _real_repo(tmp_path)
+    _git("checkout", "-q", "main", cwd=work)
+    _git("reset", "-q", "--hard", "v0.7.0", cwd=work)
+    return work
+
+
+def test_upgrading_from_a_branch_stays_on_that_branch(monkeypatch, tmp_path):
+    work = _on_branch_behind_the_tag(tmp_path)
+    monkeypatch.setattr(upgrade_module, "_find_repo_root", lambda: str(work))
+    monkeypatch.setattr(upgrade_module, "_running_version", lambda: "0.7.0")
+    monkeypatch.setattr(upgrade_module, "_run_pip", lambda *args: "")
+
+    result = upgrade()
+
+    assert _branch_of(work) == "main"
+    assert result.branch == "main"
+    assert "Still on main" in result.describe()
+
+
+def test_the_branch_actually_moved_to_the_tagged_commit(monkeypatch, tmp_path):
+    """Staying on the branch is only useful if the branch arrived."""
+    work = _on_branch_behind_the_tag(tmp_path)
+    monkeypatch.setattr(upgrade_module, "_find_repo_root", lambda: str(work))
+    monkeypatch.setattr(upgrade_module, "_running_version", lambda: "0.7.0")
+    monkeypatch.setattr(upgrade_module, "_run_pip", lambda *args: "")
+
+    upgrade()
+
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=work,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    tagged = subprocess.run(["git", "rev-parse", "v0.8.0"], cwd=work,
+                            capture_output=True, text=True, check=True).stdout.strip()
+    assert head == tagged
+
+
+def test_an_already_detached_checkout_is_left_detached_and_says_so(monkeypatch, tmp_path):
+    """Nothing to guess at: there is no branch to keep, so the result names
+    the state rather than leaving someone to discover it."""
+    work = _real_repo(tmp_path)  # this fixture lands on a tag, detached
+    monkeypatch.setattr(upgrade_module, "_find_repo_root", lambda: str(work))
+    monkeypatch.setattr(upgrade_module, "_running_version", lambda: "0.7.0")
+    monkeypatch.setattr(upgrade_module, "_run_pip", lambda *args: "")
+
+    result = upgrade()
+
+    assert _branch_of(work) == ""
+    assert result.branch == ""
+    assert "not on a branch" in result.describe()
+
+
+def test_a_branch_with_its_own_commits_detaches_rather_than_moving_them(monkeypatch, tmp_path):
+    """A fast-forward would be a lie here — the branch has work the tag does
+    not. Detach, and say so, rather than rewriting where the branch points."""
+    work = _on_branch_behind_the_tag(tmp_path)
+    (work / "mine.txt").write_text("local work")
+    _git("add", ".", cwd=work)
+    _git("commit", "-q", "-m", "local work", cwd=work)
+    mine = subprocess.run(["git", "rev-parse", "main"], cwd=work,
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+    monkeypatch.setattr(upgrade_module, "_find_repo_root", lambda: str(work))
+    monkeypatch.setattr(upgrade_module, "_running_version", lambda: "0.7.0")
+    monkeypatch.setattr(upgrade_module, "_run_pip", lambda *args: "")
+
+    result = upgrade()
+
+    assert result.branch == ""
+    assert "not on a branch" in result.describe()
+    still = subprocess.run(["git", "rev-parse", "main"], cwd=work,
+                           capture_output=True, text=True, check=True).stdout.strip()
+    assert still == mine  # the local commit is still on main, untouched
+
+
+def test_upgrading_works_from_a_clone_that_has_never_fetched(monkeypatch, tmp_path):
+    """The fast-forward needs the tagged commit to exist locally, and a user
+    who has not touched git since cloning does not have it. `upgrade()` fetches
+    before it resolves anything, and fetching a tag brings the objects it
+    points to — so the release is reachable without the user syncing first.
+
+    Worth pinning: narrowing or reordering that fetch would break this
+    silently, leaving the branch behind and the checkout detached.
+    """
+    origin, work, other = tmp_path / "origin.git", tmp_path / "work", tmp_path / "other"
+    _git("init", "--bare", "-q", str(origin), cwd=tmp_path)
+    _git("clone", "-q", str(origin), str(other), cwd=tmp_path)
+    _git("config", "user.email", "test@example.com", cwd=other)
+    _git("config", "user.name", "Test", cwd=other)
+    (other / "pyproject.toml").write_text('[project]\nname = "fake"\n')
+    _git("add", ".", cwd=other)
+    _git("commit", "-q", "-m", "v0.7.0", cwd=other)
+    _git("tag", "v0.7.0", cwd=other)
+    _git("push", "-q", "--all", "origin", cwd=other)
+    _git("push", "-q", "--tags", "origin", cwd=other)
+
+    # The user clones here, at v0.7.0, and never runs git again.
+    _git("clone", "-q", str(origin), str(work), cwd=tmp_path)
+
+    # A newer release is cut and pushed by someone else.
+    (other / "pyproject.toml").write_text('[project]\nname = "fake"\nversion = "0.8.0"\n')
+    _git("commit", "-q", "-am", "v0.8.0", cwd=other)
+    _git("tag", "v0.8.0", cwd=other)
+    _git("push", "-q", "origin", "main", cwd=other)
+    _git("push", "-q", "--tags", "origin", cwd=other)
+
+    assert "v0.8.0" not in _git_out("tag", cwd=work)  # the user has never seen it
+
+    monkeypatch.setattr(upgrade_module, "_find_repo_root", lambda: str(work))
+    monkeypatch.setattr(upgrade_module, "_running_version", lambda: "0.7.0")
+    monkeypatch.setattr(upgrade_module, "_run_pip", lambda *args: "")
+
+    result = upgrade()
+
+    assert result.branch == "main"
+    assert _branch_of(work) == "main"
+    assert _git_out("rev-parse", "HEAD", cwd=work) == _git_out("rev-parse", "v0.8.0", cwd=work)

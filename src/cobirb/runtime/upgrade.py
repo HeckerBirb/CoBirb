@@ -5,10 +5,17 @@ or via ``pipx install --editable .`` for a global binary — see the README's
 install section). That means the checkout *is* the installation, and the only
 thing that ever needs to change to move to a different release is which
 commit that checkout has on disk. This module does exactly that and nothing
-more: fetch tags, pick one, ``git checkout`` it, and re-run the same install
-step so any dependency or entry-point change in the new tag actually takes —
-the same metadata-refresh ``pip install -e .`` caveat documented in the
-README's update section.
+more: fetch tags, pick one, move the checkout onto it, and re-run the same
+install step so any dependency or entry-point change in the new tag actually
+takes — the same metadata-refresh ``pip install -e .`` caveat documented in
+the README's update section.
+
+**Moving onto a tag without leaving the branch.** Checking a tag out directly
+detaches ``HEAD``, which is fine for someone only running CoBirb and a trap
+for anyone who also commits to it: the next commit belongs to no branch and
+``git push`` silently has nothing to send. Upgrading is not a request to leave
+your branch, so the branch is fast-forwarded onto the tagged commit where it
+can be, and detaching is the reported fallback — see ``_move_to``.
 
 **Why tags, not branches or commits.** A release is a tag (see
 ``AGENTS.md`` for the convention: every version bump gets a matching
@@ -68,11 +75,22 @@ class UpgradeResult:
     to_version: str
     tag: str
     already_current: bool = False
+    # The branch left checked out, or "" for a detached HEAD. Reported rather
+    # than assumed: a detached checkout silently swallows the next commit
+    # someone makes, so it has to be said out loud when it happens.
+    branch: str = ""
 
     def describe(self) -> str:
         if self.already_current:
             return f"Already at {self.tag} — nothing to do."
-        return f"Upgraded v{self.from_version} → v{self.to_version} ({self.tag})."
+        moved = f"Upgraded v{self.from_version} → v{self.to_version} ({self.tag})."
+        if self.branch:
+            return f"{moved} Still on {self.branch}."
+        return (
+            f"{moved} The checkout is not on a branch — it is detached at {self.tag}. "
+            "Run 'git checkout <branch>' before committing anything, or a commit made "
+            "here will belong to no branch."
+        )
 
 
 def _parse_version(tag: str) -> tuple[int, int, int]:
@@ -178,6 +196,61 @@ def _tag_exists(tag: str, *, cwd: str) -> bool:
     return check.returncode == 0
 
 
+def _current_branch(*, cwd: str) -> str:
+    """The branch checked out, or ``""`` for a detached ``HEAD``.
+
+    Like ``_tag_exists``, this treats a non-zero exit as an answer rather than
+    a failure: "not on a branch" is a normal state to be in, not an error to
+    report.
+    """
+    check = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=_GIT_TIMEOUT_SECONDS,
+    )
+    return check.stdout.strip() if check.returncode == 0 else ""
+
+
+def _can_fast_forward_to(tag: str, *, cwd: str) -> bool:
+    """Whether ``HEAD`` can reach ``tag`` by moving forward only — i.e. the
+    commit checked out is an ancestor of the tagged one."""
+    check = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", "HEAD", tag],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=_GIT_TIMEOUT_SECONDS,
+    )
+    return check.returncode == 0
+
+
+def _move_to(tag: str, *, cwd: str) -> str:
+    """Put the checkout at ``tag``, staying on the current branch when that is
+    possible. Returns the branch still checked out, or ``""`` if detached.
+
+    **Checking a tag out directly detaches ``HEAD``**, and a detached checkout
+    is a trap for anyone who also works on CoBirb itself: the next commit they
+    make belongs to no branch, so it is invisible to ``git push`` and easy to
+    lose. Upgrading is not a request to leave the branch you are on.
+
+    So when the branch can simply move forward onto the tagged commit — the
+    ordinary case of upgrading while sitting on an up-to-date branch — it is
+    fast-forwarded and stays checked out. Detaching is the fallback for the
+    cases where there is nothing else honest to do: already detached, a
+    downgrade, or a branch carrying commits the tag does not have. The result
+    says which happened, because a detached ``HEAD`` the user was not told
+    about is the whole problem.
+    """
+    branch = _current_branch(cwd=cwd)
+    if branch and _can_fast_forward_to(tag, cwd=cwd):
+        _run_git("merge", "--ff-only", tag, cwd=cwd)
+        return branch
+    _run_git("checkout", tag, cwd=cwd)
+    return ""
+
+
 def _resolve_tag(tag: str, *, cwd: str) -> str:
     """The exact, existing tag ref a person's ``--upgrade <tag>`` argument means.
 
@@ -212,9 +285,8 @@ def upgrade(tag: str | None = None, *, force: bool = False, remote: str = _DEFAU
     """Move this checkout to ``tag``, or the latest release tag if none is given.
 
     Refuses on a dirty working tree (see the module docstring for why) and on
-    a downgrade unless ``force`` is set. Leaves the checkout in a detached
-    ``HEAD`` at the target tag — the ordinary, well-understood result of
-    checking out a tag in any git project, not something CoBirb invents.
+    a downgrade unless ``force`` is set. Stays on the branch you are on
+    wherever that is possible, and says so when it cannot — see ``_move_to``.
     """
     repo_root = _find_repo_root()
 
@@ -246,7 +318,9 @@ def upgrade(tag: str | None = None, *, force: bool = False, remote: str = _DEFAU
             "that's a downgrade. Pass --force if that's actually what you want."
         )
 
-    _run_git("checkout", target_tag, cwd=repo_root)
+    branch = _move_to(target_tag, cwd=repo_root)
     _run_pip("install", "-e", repo_root)
 
-    return UpgradeResult(from_version=running_version, to_version=target_version, tag=target_tag)
+    return UpgradeResult(
+        from_version=running_version, to_version=target_version, tag=target_tag, branch=branch
+    )

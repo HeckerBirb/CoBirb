@@ -4,6 +4,24 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.12.5]
+
+- **Fixed: `cobirb --upgrade` left the checkout on a detached `HEAD`.** It checked the tag out
+  directly, which is harmless for someone only running CoBirb and a trap for anyone who also
+  commits to it — the next commit belongs to no branch, so `git push` silently has nothing to
+  send and the work is easy to lose. The current branch is now fast-forwarded onto the tagged
+  commit instead, leaving you where you were.
+  - Detaching remains the fallback where there is nothing else honest to do: already detached,
+    or a branch carrying commits the tag doesn't have. A branch with its own work is never moved.
+  - The result says which happened. `Upgraded v0.7.0 → v0.8.0 (v0.8.0). Still on main.` or, when
+    detached, what to run to get back on a branch.
+  - A clone that has never fetched upgrades fine: `upgrade()` fetches before it resolves
+    anything, and fetching a tag brings the commit it points to, so the fast-forward has a local
+    ref to move onto. Pinned by a test, since narrowing or reordering that fetch would break it
+    silently — the branch would simply stay behind and the checkout detach.
+- `AGENTS.md` §15 now states that a behaviour change is not finished until the matching page in
+  `docs/` is updated in the same change.
+
 ## [0.12.4]
 
 - **Fixed: closing an unresponsive MCP server blocked for as long as that server lived.**
