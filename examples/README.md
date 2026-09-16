@@ -3,7 +3,7 @@
 Configurations you can start from instead of `~/.cobirb/config.json` empty. Each page is one
 focused idea — copy the JSON block into your own config and adjust the paths and model names.
 
-## [configuration/](configuration/)
+## configuration/
 
 | Example | Demonstrates |
 |---|---|
