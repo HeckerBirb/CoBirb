@@ -3,20 +3,16 @@
 Thanks for considering it. CoBirb is a small, deliberate project — read on before sending a PR,
 it'll save both of us a round trip.
 
-## Start here
+## Ground rules
 
-[`AGENTS.md`](./AGENTS.md) is the single source of truth for the architecture, the plugin SPI,
-the security design and the working conventions. It's written for an agent working on the
-codebase, but it's the right first read for a human too — especially:
+A few things the project will not do, on purpose: no telemetry, no default network access, no
+tool running without your approval. A PR that reopens one of these needs a very good reason and a
+conversation first, not just code.
 
-- **§2, Invariants** — things the project will not do, on purpose (no telemetry, no default
-  network access, no silent tool execution). A PR that reopens one of these needs a very good
-  reason and a conversation first, not just code.
-- **§17, Decided — do not rebuild these** — features that were considered and deliberately
-  rejected (an embedded GGUF runtime, for one). If your idea is in there, it's been thought about;
-  make the case in an issue before writing code.
-- **§15, Conventions** and **§16, Testing** — house style, and what a well-formed test looks like
-  here.
+Some features have also already been proposed and deliberately turned down (an embedded model
+runtime, for one) — if an issue or PR review points you at one of these, that's why; it's been
+thought about, so the fastest path is to make the counter-case in the issue rather than resubmit
+the same idea.
 
 ## Setting up
 
@@ -48,9 +44,9 @@ No linter, formatter or type checker is configured — match the surrounding sty
 ## Plugins and personas
 
 If your contribution is a new capability rather than a core fix, check whether it belongs as a
-plugin instead — CoBirb has a Plugin SPI (§10 of `AGENTS.md`) specifically so most extensions
-don't need to touch the core at all. A persona is just data (`cobirb/personas/*.json`); adding one
-doesn't need a code change.
+plugin instead — CoBirb has a plugin interface specifically so most extensions don't need to touch
+the core at all. A persona is just data (`cobirb/personas/*.json`); adding one doesn't need a code
+change.
 
 ## Sending a pull request
 

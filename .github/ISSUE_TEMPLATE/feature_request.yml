@@ -5,11 +5,10 @@ body:
   - type: markdown
     attributes:
       value: |
-        Before requesting, it's worth a quick check of [`AGENTS.md`](../../AGENTS.md) §17,
-        "Decided — do not rebuild these" — a number of ideas (an embedded model runtime among
-        them) were already considered and deliberately turned down for reasons written down
-        there. If yours is in that list, the fastest path is to make the counter-case here rather
-        than open the same discussion cold.
+        Worth a quick search of existing/closed issues first — a number of ideas (an embedded
+        model runtime among them) have already been proposed and deliberately turned down. If
+        yours turns out to be one of those, the fastest path is to make the counter-case here
+        rather than open the same discussion cold.
 
   - type: textarea
     id: problem
