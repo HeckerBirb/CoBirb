@@ -168,6 +168,25 @@ def _check_referenced_things(report: Report, raw: dict[str, Any]) -> None:
 # --------------------------------------------------------------------------- #
 # 2. Environment
 # --------------------------------------------------------------------------- #
+def canonical_model(name: str) -> str:
+    """A model name as the endpoint lists it.
+
+    Ollama implies ``:latest`` when a tag is omitted — ``gemma4`` and
+    ``gemma4:latest`` are the same model, and both are accepted — but
+    ``list_models`` reports the fully-qualified form. Comparing the two as raw
+    strings therefore reports a perfectly working configuration as missing,
+    and tells the user to pull a model they already have.
+
+    Only the last path segment is examined for the tag separator, so a model
+    served from a registry with a port (``registry.example.com:5000/thing``)
+    is not mistaken for one that already carries a tag.
+    """
+    name = name.strip()
+    if not name:
+        return name
+    return name if ":" in name.rsplit("/", 1)[-1] else f"{name}:latest"
+
+
 def _check_models(report: Report, config: Config, build_provider: Callable[[str], Any]) -> None:
     """The endpoint answers, and the models named are actually pulled.
 
@@ -196,7 +215,7 @@ def _check_models(report: Report, config: Config, build_provider: Callable[[str]
         if not name:
             report.add(f"model ({role})", WARN, "none configured")
             continue
-        if available and name not in available:
+        if available and canonical_model(name) not in {canonical_model(m) for m in available}:
             report.add(
                 f"model ({role})", FAIL,
                 f"'{name}' is configured but not on the endpoint — 'ollama pull {name}'",

@@ -4,6 +4,15 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.13.1]
+
+- **Fixed: `cobirb doctor` reported a working model as missing when the tag was omitted.** Ollama
+  treats `gemma4` and `gemma4:latest` as the same model and serves either, but `list_models` only
+  ever reports the qualified form — so comparing them as raw strings told people to pull a model
+  they already had. An absent tag now means `:latest` on both sides of the comparison. A
+  *different* tag (`thing:70b` against `thing:9b`) is still a failure, and a genuinely absent
+  model still is too.
+
 ## [0.13.0] — At hand
 
 - **`@path` mentions.** Type `@` in the prompt box and a five-row picker appears; ↑/↓ to move,

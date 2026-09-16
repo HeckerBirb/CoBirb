@@ -208,3 +208,75 @@ def test_each_status_is_marked_distinctly(status, mark):
     report = doctor.Report()
     report.add("a check", status)
     assert mark in report.describe()
+
+
+# --------------------------------------------------------------------------- #
+# Model names and the implied ":latest" tag.
+#
+# Ollama treats `gemma4` and `gemma4:latest` as the same model and serves
+# either, but `list_models` only ever reports the qualified form. Comparing
+# them as raw strings tells someone to pull a model they already have.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("gemma4", "gemma4:latest"),
+        ("gemma4:latest", "gemma4:latest"),
+        ("ornith-1.5:9b", "ornith-1.5:9b"),
+        ("registry.example.com:5000/thing", "registry.example.com:5000/thing:latest"),
+        ("", ""),
+    ],
+)
+def test_a_missing_tag_means_latest(name, expected):
+    assert doctor.canonical_model(name) == expected
+
+
+def test_a_bare_name_matches_the_endpoints_latest_tag(tmp_path):
+    """The reported bug: `gemma4-unchained` configured, `gemma4-unchained:latest`
+    on the endpoint, and doctor calling it missing."""
+    report = _run(
+        tmp_path,
+        {"models": {"default": {"name": "gemma4-unchained"}}},
+        check_environment=True,
+        build_provider=lambda role: _Provider(available=["gemma4-unchained:latest"]),
+    )
+
+    assert report.ok
+    assert _check(report, "model (default)").status == doctor.OK
+
+
+def test_a_latest_tag_matches_an_endpoint_listing_without_one(tmp_path):
+    """The same confusion in the other direction."""
+    report = _run(
+        tmp_path,
+        {"models": {"default": {"name": "thing:latest"}}},
+        check_environment=True,
+        build_provider=lambda role: _Provider(available=["thing"]),
+    )
+
+    assert _check(report, "model (default)").status == doctor.OK
+
+
+def test_a_genuinely_absent_model_is_still_a_failure(tmp_path):
+    """The fix must not turn the check into one that always passes."""
+    report = _run(
+        tmp_path,
+        {"models": {"default": {"name": "never-pulled"}}},
+        check_environment=True,
+        build_provider=lambda role: _Provider(available=["gemma4:latest"]),
+    )
+
+    assert not report.ok
+    assert "never-pulled" in _check(report, "model (default)").detail
+
+
+def test_a_different_tag_of_a_present_model_is_still_a_failure(tmp_path):
+    """`thing:9b` is not `thing:latest` — only the *absent* tag is implied."""
+    report = _run(
+        tmp_path,
+        {"models": {"default": {"name": "thing:70b"}}},
+        check_environment=True,
+        build_provider=lambda role: _Provider(available=["thing:9b"]),
+    )
+
+    assert not report.ok
