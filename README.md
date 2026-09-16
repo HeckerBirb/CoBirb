@@ -123,6 +123,8 @@ This is enough to get started with Ollama (localhost:11434), default `SYSTEM` pr
 }
 ```
 
+More examples can be found in the [examples/](./examples/) dir.
+
 ## Disclaimer: what CoBirb does not protect you from
 
 Being straight about the edges, since the rest of this page makes strong claims:
