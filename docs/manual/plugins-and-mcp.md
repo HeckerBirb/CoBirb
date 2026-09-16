@@ -58,7 +58,7 @@ class MyTool(Tool):
 ```
 
 A plugin that fails to load is reported and skipped, never fatal. See
-[`AGENTS.md`](../AGENTS.md) for the full SPI and `cobirb help plugin`.
+[`AGENTS.md`](../../AGENTS.md) for the full SPI and `cobirb help plugin`.
 
 **Installing runs the plugin's code.** `pip` executes the package's own build backend before
 CoBirb has looked at a single class. No prompt can cover that — choosing to install *is* the

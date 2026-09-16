@@ -166,11 +166,12 @@ Being straight about the edges, since the rest of this page makes strong claims:
 
 ## Documentation
 
-- [docs/](./docs/) — short how-to pages: [install](./docs/install.md),
-  [first run](./docs/first-run.md), [commands](./docs/commands.md), [CLI](./docs/cli.md),
-  [config](./docs/config.md), [permissions](./docs/permissions.md),
-  [sessions](./docs/sessions.md), [memory](./docs/memory.md), [images](./docs/images.md),
-  [the Flock](./docs/flock.md), [plugins & MCP](./docs/plugins-and-mcp.md).
+- [docs/](./docs/) — short how-to pages: [install](./docs/manual/install.md),
+  [first run](./docs/manual/first-run.md), [commands](./docs/manual/commands.md),
+  [CLI](./docs/manual/cli.md), [config](./docs/manual/config.md),
+  [permissions](./docs/manual/permissions.md), [sessions](./docs/manual/sessions.md),
+  [memory](./docs/manual/memory.md), [images](./docs/manual/images.md),
+  [the Flock](./docs/manual/flock.md), [plugins & MCP](./docs/manual/plugins-and-mcp.md).
 - [AGENTS.md](./AGENTS.md) — the single source of truth: architecture, the plugin SPI,
   the security design, and the working conventions.
 - [CHANGELOG.md](./CHANGELOG.md) — release history.
