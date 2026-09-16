@@ -9,6 +9,7 @@ Short pages. Start at the top.
 | [Commands](commands.md) | Every `/command` in the app |
 | [CLI](cli.md) | Flags, subcommands, one-shot and headless modes |
 | [Config](config.md) | Every key in `~/.cobirb/config.json` |
+| [Checking your setup](doctor.md) | `cobirb doctor` — is everything ready? |
 | [Permissions](permissions.md) | What the agent may touch, and how you say so |
 | [Sessions](sessions.md) | Encrypted conversations you can resume |
 | [Memory](memory.md) | Facts CoBirb remembers between conversations |

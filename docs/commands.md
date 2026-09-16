@@ -22,6 +22,21 @@ Type these in the app. Anything else starting with `/` is tried as one of your o
 
 `?` on its own opens help too.
 
+## Mentioning a file
+
+Type `@` and start typing a filename. A list of up to five matches appears; **↑/↓** to move,
+**tab** or **enter** to pick, **escape** to dismiss.
+
+```
+summarise @src/main.py
+```
+
+The file is sent with your message. The transcript shows `@src/main.py`, not the whole file.
+
+Matching is fuzzy: letters must appear in order but needn't be adjacent, so `gba` finds
+`global.py`, `general_batch.py` and `gba.py` — with the exact name first. Ignored files
+(`.gitignore`, dotfiles) never appear.
+
 ## Your own commands
 
 Put a markdown or text file in `<project>/.cobirb/commands/`:

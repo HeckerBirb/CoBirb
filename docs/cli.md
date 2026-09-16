@@ -13,6 +13,7 @@ cobirb help config                       # help on one topic
 | *(none)* | Interactive app |
 | `-p`, `--prompt TEXT` | Run one prompt, print, exit |
 | `--session PATH` | Open an encrypted session |
+| `--continue` | Reopen the session you were last in. Implies `-w` |
 | `-w`, `--password [PW]` | Encrypted session. Omit the value to be prompted without echo |
 
 ## Options
@@ -32,12 +33,14 @@ cobirb help config                       # help on one topic
 | `--branch-at N` | With `--branch`: keep turns `0..N` |
 | `--upgrade [TAG]` | Move to a tagged release |
 | `--force` | With `--upgrade`: allow going backwards |
+| `--doctor` | Check everything is ready, then exit. Same as `cobirb doctor` |
 
 ## Subcommands
 
 ```bash
 cobirb help [topic]      # commands, config, flock, hooks, mcp, model,
                          # persona, plan, plugin, plugins, session, tools
+cobirb doctor            # is everything ready to go?
 cobirb models            # how each role resolves
 cobirb commands          # your custom commands here
 cobirb flock -p "..."    # a flock run without the app

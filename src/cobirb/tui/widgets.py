@@ -8,6 +8,8 @@ reaches them on Textual's main thread (see ``io_bridge.TuiIO``).
 from __future__ import annotations
 
 import os
+import re
+from typing import Any
 
 from rich.segment import Segment
 from rich.style import Style
@@ -311,6 +313,12 @@ class TranscriptLog(RichLog):
         return selection.extract(text), "\n"
 
 
+# A mention being typed: an "@" run sitting at the very end of what has been
+# typed so far. Anchored to the end because the picker is about the word under
+# the cursor — an "@" earlier in the line is already settled.
+_MENTION_IN_PROGRESS = re.compile(r"(?:^|(?<=[\s(\[{]))@([^\s@]*)$")
+
+
 class PromptInput(TextArea):
     """The message box: wraps, grows to 8 lines, then scrolls.
 
@@ -377,6 +385,10 @@ class PromptInput(TextArea):
         # None means "not walking the history"; otherwise an index into it.
         self._position: int | None = None
         self._draft = ""
+        # Set by the app once the picker exists. Duck-typed rather than typed
+        # against the widget: this box works perfectly well with no picker
+        # attached, and the tests exercise it that way.
+        self.mention_picker: Any = None
 
     # ------------------------------------------------------------------ #
     # Value, under the name every caller and test already uses
@@ -402,8 +414,12 @@ class PromptInput(TextArea):
         """Claim enter and the newline keys before ``TextArea`` inserts them.
 
         ``TextArea._on_key`` maps ``enter`` to inserting a newline, so this has
-        to run ahead of it rather than binding over it.
+        to run ahead of it rather than binding over it. An open mention picker
+        claims its own keys ahead of both: while a list of files is on screen,
+        up/down mean "choose", not "walk the history" or "move the cursor".
         """
+        if self._mention_key(event):
+            return
         if event.key == "enter":
             event.prevent_default()
             event.stop()
@@ -416,6 +432,66 @@ class PromptInput(TextArea):
             self.insert("\n")
             return
         await super()._on_key(event)
+        # After the key has been applied, not before: what matters is whether
+        # the text now ends in a half-typed mention.
+        self._sync_mention_picker()
+
+    # ------------------------------------------------------------------ #
+    # @path mentions
+    # ------------------------------------------------------------------ #
+    def _mention_key(self, event) -> bool:
+        """Handle one key on behalf of an open picker. Returns whether it did.
+
+        Only while the picker is actually showing something — with no list on
+        screen every one of these keys keeps its ordinary meaning.
+        """
+        picker = self.mention_picker
+        if picker is None or not picker.active:
+            return False
+        if event.key in ("up", "down"):
+            picker.move(-1 if event.key == "up" else 1)
+        elif event.key in ("enter", "tab"):
+            self._accept_mention()
+        elif event.key == "escape":
+            picker.close()
+        else:
+            return False
+        event.prevent_default()
+        event.stop()
+        return True
+
+    def _mention_query(self) -> "str | None":
+        """The half-typed mention immediately before the cursor, if any.
+
+        ``None`` when the cursor is not sitting at the end of an ``@`` run —
+        which is most of the time, and is what closes the picker again.
+        """
+        row, column = self.cursor_location
+        before = str(self.get_line(row))[:column]
+        match = _MENTION_IN_PROGRESS.search(before)
+        return match.group(1) if match else None
+
+    def _sync_mention_picker(self) -> None:
+        picker = self.mention_picker
+        if picker is None:
+            return
+        query = self._mention_query()
+        if query is None:
+            picker.close()
+        else:
+            picker.refresh_for(query)
+
+    def _accept_mention(self) -> None:
+        """Replace the half-typed mention with the highlighted path."""
+        picker = self.mention_picker
+        chosen = picker.current if picker else None
+        query = self._mention_query()
+        if chosen is None or query is None:
+            return
+        row, column = self.cursor_location
+        # +1 for the "@" itself, which is replaced along with what follows it.
+        self.replace(f"@{chosen} ", (row, column - len(query) - 1), (row, column))
+        picker.close()
 
     # ------------------------------------------------------------------ #
     # Growing

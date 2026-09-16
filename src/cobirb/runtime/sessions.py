@@ -34,7 +34,24 @@ def sessions_dir_display() -> str:
     return abbreviate_home(session_module.default_sessions_dir())
 
 
-def resolve_session(session_arg: str | None, password_arg: Any) -> tuple[str | None, str | None]:
+class NoSessionToContinue(Exception):
+    """``--continue`` was asked for and there is nothing to continue."""
+
+
+def most_recent_session() -> str | None:
+    """The session touched most recently, or ``None`` if there are none.
+
+    ``discover_sessions`` already sorts by modification time, so "the one I
+    was just in" is the first entry — the information was always there, it
+    simply had no command in front of it.
+    """
+    found = session_module.discover_sessions(session_module.default_sessions_dir())
+    return found[0].path if found else None
+
+
+def resolve_session(
+    session_arg: str | None, password_arg: Any, *, continue_last: bool = False
+) -> tuple[str | None, str | None]:
     """Work out which session file to use and which password unlocks it.
 
     Returns ``(session_path, password)``, both ``None`` when this run isn't a
@@ -51,7 +68,22 @@ def resolve_session(session_arg: str | None, password_arg: Any) -> tuple[str | N
     ``cobirb -w 1234`` work in one go; it is also visible in shell history
     and in ``ps``, which is why the bare form still exists and why the help
     text says so.
+
+    ``continue_last`` picks the most recently touched session and **implies a
+    password**: continuing a session means unlocking one, so asking for
+    ``--continue -w`` as two flags would be asking the same question twice.
+    An explicit ``-w <password>`` is still honoured, so the non-interactive
+    form keeps working.
     """
+    if continue_last:
+        path = most_recent_session()
+        if path is None:
+            raise NoSessionToContinue(
+                f"there are no sessions in {sessions_dir_display()} to continue — "
+                "start one with 'cobirb -w'."
+            )
+        password = str(password_arg) if password_arg not in (None, True, False) else read_password()
+        return path, password
     if not session_arg and not password_arg:
         return None, None
     if password_arg is True or password_arg is None:

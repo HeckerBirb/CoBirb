@@ -33,6 +33,7 @@ from cobirb.plugins.core import render
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 from cobirb.runtime import personas, plugins, wiring
 from cobirb.tui.app import CoBirbApp
+from cobirb.tui.mention_picker import MentionPicker
 from cobirb.tui.attachments import split_argument as _split_image_argument
 from cobirb.tui.panes import PluginsPane, SessionsPane
 from cobirb.tui.screens import (
@@ -2928,3 +2929,141 @@ async def test_a_relative_image_path_resolves_against_the_session_cwd(tmp_path, 
         await pilot.pause()
         await _submit(pilot, app, "/image docs/cobirb.png")
         assert [i.filename for i in app.attachments.pending] == ["cobirb.png"]
+
+
+# --------------------------------------------------------------------------- #
+# @path mentions: the picker, and what reaches the model
+# --------------------------------------------------------------------------- #
+def _mention_app(tmp_path, *names):
+    for name in names:
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"contents of {name}\n")
+    return _make_app(cwd=str(tmp_path))
+
+
+async def _type(pilot, app, text):
+    """Type into the prompt box key by key, so the picker sees each keystroke."""
+    app.query_one("#prompt-input", PromptInput).focus()
+    await pilot.press(*[c if c != " " else "space" for c in text])
+    await pilot.pause()
+
+
+async def test_typing_an_at_sign_opens_the_picker(tmp_path):
+    app = _mention_app(tmp_path, "global.py", "general_batch.py", "gba.py")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        picker = app.query_one("#mention-picker", MentionPicker)
+        assert not picker.active
+
+        await _type(pilot, app, "@gba")
+
+        assert picker.active
+        assert picker.rows[0] == "gba.py"   # the exact name wins
+
+
+async def test_the_picker_never_shows_more_than_five_rows(tmp_path):
+    app = _mention_app(tmp_path, *[f"file{n}.py" for n in range(20)])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _type(pilot, app, "@file")
+        assert len(app.query_one("#mention-picker", MentionPicker).rows) == 5
+
+
+async def test_the_picker_closes_when_the_mention_is_abandoned(tmp_path):
+    app = _mention_app(tmp_path, "a.py")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        picker = app.query_one("#mention-picker", MentionPicker)
+        await _type(pilot, app, "@a")
+        assert picker.active
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not picker.active
+
+
+async def test_a_space_ends_the_mention_and_closes_the_picker(tmp_path):
+    app = _mention_app(tmp_path, "a.py")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        picker = app.query_one("#mention-picker", MentionPicker)
+        await _type(pilot, app, "@a")
+        assert picker.active
+
+        await _type(pilot, app, " ")
+        assert not picker.active
+
+
+async def test_tab_accepts_the_highlighted_path(tmp_path):
+    app = _mention_app(tmp_path, "src/deep/module.py")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _type(pilot, app, "@module")
+        await pilot.press("tab")
+        await pilot.pause()
+
+        assert app.query_one("#prompt-input", PromptInput).value == "@src/deep/module.py "
+
+
+async def test_arrow_keys_move_the_highlight_while_the_picker_is_open(tmp_path):
+    app = _mention_app(tmp_path, "alpha.py", "alback.py")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        picker = app.query_one("#mention-picker", MentionPicker)
+        await _type(pilot, app, "@al")
+        first = picker.current
+
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert picker.current != first
+        assert picker.current in picker.rows
+
+
+async def test_enter_accepts_a_mention_rather_than_sending_the_message(tmp_path, monkeypatch):
+    """With the picker open, enter means "choose this one" — sending a
+    half-typed mention is never what was meant."""
+    builds = []
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(record=builds))
+    app = _mention_app(tmp_path, "chosen.py")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _type(pilot, app, "@chos")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert not builds  # nothing was sent
+        assert app.query_one("#prompt-input", PromptInput).value == "@chosen.py "
+
+
+async def test_the_model_gets_the_file_and_the_transcript_shows_the_mention(tmp_path, monkeypatch):
+    builds = []
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(record=builds))
+    app = _mention_app(tmp_path, "notes.md")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "summarise @notes.md")
+        await _until(pilot, lambda: bool(builds))
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
+
+        sent = builds[0]["built"].calls[0]["prompt"]
+        assert "contents of notes.md" in sent          # the model got the file
+        assert "@notes.md" in sent                      # and the sentence as written
+
+        shown = _transcript_text(app)
+        assert "@notes.md" in shown
+        assert "contents of notes.md" not in shown      # the transcript stays readable
+
+
+async def test_a_prompt_with_no_mention_reaches_the_model_unchanged(tmp_path, monkeypatch):
+    builds = []
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(record=builds))
+    app = _mention_app(tmp_path, "a.py")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "just a question")
+        await _until(pilot, lambda: bool(builds))
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
+
+        assert builds[0]["built"].calls[0]["prompt"] == "just a question"

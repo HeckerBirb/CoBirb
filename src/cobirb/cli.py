@@ -32,6 +32,7 @@ from .runtime import personas, plugins, sessions, wiring
 from .plugins.core import TerminalIO
 from .runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
 from .runtime.plugin_install import PluginInstallError, install_plugin, list_installed, remove_plugin
+from .runtime import doctor
 from .runtime.upgrade import UpgradeError, upgrade
 from .runtime.export import write_export
 from .flock.run import Asker, run_flock_session
@@ -490,6 +491,20 @@ def _run_plugin(verb: str | None, target: str | None, *, replace: bool, cwd: str
     return EXIT_OK
 
 
+def _run_doctor() -> int:
+    """``cobirb doctor`` — see 'runtime/doctor.py'.
+
+    Thin, the same way ``_run_upgrade`` is: every check lives in
+    ``runtime.doctor``, tested on its own. Exits non-zero only on an actual
+    failure — a warning is something worth knowing, not a broken install, and
+    a check command that fails the build over "you are one release behind"
+    would quickly be a check command nobody runs.
+    """
+    report = doctor.run()
+    print(report.describe())
+    return EXIT_OK if report.ok else EXIT_ERROR
+
+
 def _run_upgrade(tag: str | None, *, force: bool) -> int:
     """``cobirb --upgrade [tag] [--force]`` — see 'runtime/upgrade.py'.
 
@@ -515,9 +530,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "subcommand",
         nargs="?",
-        choices=["help", "models", "commands", "flock", "plugin"],
+        choices=["help", "models", "commands", "flock", "plugin", "doctor"],
         help="'help' for the overview, 'models' for how each role resolves, "
-        "'commands' for the custom commands available here, 'flock' to divide "
+        "'commands' for the custom commands available here, 'doctor' to check "
         "a piece of work between several agents, 'plugin' to install/list/remove "
         "a local plugin (see 'cobirb help flock'/'cobirb help plugin').",
     )
@@ -543,6 +558,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="With 'plugin install': overwrite an already-installed plugin of the same name.",
     )
     parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help=(
+            "Check that CoBirb is ready to go — config, endpoint, models, install — then "
+            "exit. Same as 'cobirb doctor'. Exits non-zero if something is actually broken."
+        ),
+    )
+    parser.add_argument(
         "--upgrade",
         nargs="?",
         const="",
@@ -564,6 +587,16 @@ def _build_parser() -> argparse.ArgumentParser:
     mode = parser.add_argument_group("modes")
     mode.add_argument("-p", "--prompt", help="One-shot prompt: run once then exit.")
     mode.add_argument("--session", metavar="PATH", help="Resume/continue an encrypted session at PATH.")
+    mode.add_argument(
+        "--continue",
+        dest="continue_last",   # "continue" is a keyword, so it cannot be the attribute name
+        action="store_true",
+        help=(
+            "Reopen the session you were last in, under ~/.cobirb/sessions. Implies "
+            "--password: continuing a session means unlocking one, so you are prompted "
+            "for it unless '-w <password>' already gave it."
+        ),
+    )
     mode.add_argument(
         "--password",
         "-w",
@@ -686,6 +719,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.upgrade is not None:
         return _run_upgrade(args.upgrade or None, force=args.force)
+    if args.doctor or args.subcommand == "doctor":
+        return _run_doctor()
     if args.force:
         # Said rather than ignored — see --branch-at's own check below for
         # why a flag that would otherwise silently do nothing gets a line.
@@ -732,7 +767,13 @@ def main(argv: list[str] | None = None) -> int:
     # Either flag alone is enough to mean "this is a session": a path always
     # needs a password to encrypt to, and a password with no path gets a new
     # session under ~/.cobirb/sessions rather than being silently ignored.
-    session_path, password = sessions.resolve_session(args.session, args.password)
+    try:
+        session_path, password = sessions.resolve_session(
+            args.session, args.password, continue_last=args.continue_last
+        )
+    except sessions.NoSessionToContinue as exc:
+        print(f"cobirb: {exc}", file=sys.stderr)
+        return EXIT_ERROR
 
     if args.export:
         return _run_export(args.export, session_path, password, cwd)

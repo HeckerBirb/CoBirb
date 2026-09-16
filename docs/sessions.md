@@ -18,6 +18,15 @@ Creates `~/.cobirb/sessions/session-<timestamp>.json`.
 cobirb --session ~/.cobirb/sessions/session-20260912-185817.json -w
 ```
 
+Or just pick up where you left off:
+
+```bash
+cobirb --continue
+```
+
+That reopens whichever session you touched most recently and asks for its password — no path to
+remember. Give the password inline with `-w hunter2` if you're scripting it.
+
 Or open the **Sessions** tab in the app and pick one — it lists what's there and can resume,
 branch or start a new one.
 

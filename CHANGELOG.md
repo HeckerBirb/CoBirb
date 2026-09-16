@@ -4,6 +4,36 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.13.0] — At hand
+
+- **`@path` mentions.** Type `@` in the prompt box and a five-row picker appears; ↑/↓ to move,
+  tab or enter to pick, escape to dismiss. The named file is sent with your message, so putting a
+  file in front of the model no longer costs a `read_file` call, an approval prompt and a second
+  round trip.
+  - **Fuzzy matching** — subsequence, the fzf/"Goto Anything" behaviour: letters must appear in
+    order but needn't be adjacent, so `gba` finds `global.py`, `general_batch.py` and `gba.py`.
+    Ranking is what makes it usable: an exact name wins outright, then a prefix, then letters
+    landing on word boundaries (`general_batch` above `global` for `gb`), then the rest.
+  - Expanded on the way to the model, never into the transcript — the transcript shows
+    `@src/main.py` as typed. Mentioned files are capped like any other read and go through the
+    same secret redaction; the candidate list honours the ignore rules `glob` and `grep` use.
+  - With the picker open, enter chooses rather than sends. Sending a half-typed mention is never
+    what was meant.
+- **`cobirb --continue`.** Reopens the session you were last in, and implies `--password` —
+  continuing a session means unlocking one, so asking for both flags would be asking twice. An
+  explicit `-w <password>` is still honoured, so it can be scripted.
+- **`cobirb doctor`** (also `cobirb --doctor`). One command for "am I ready to go", replacing five
+  failures that each surfaced somewhere different.
+  - **Config**: parses, every key is one CoBirb actually reads, values are the right type, and
+    what it references exists. The key check is the one that earns its keep — `Config.get` is a
+    plain lookup, so `redact_secret` for `redact_secrets` currently reads as redaction *off* while
+    it stays *on*, in total silence.
+  - **Environment**: endpoint reachable, every configured role's model actually pulled, and
+    whether it can see images. These are the checks that otherwise fail mid-turn.
+  - **Install**: version against the latest release, whether `--upgrade` can work here, and
+    whether the checkout is on a branch — a detached `HEAD` swallows the next commit made in it.
+  - Exits non-zero only on a real failure. A warning is worth knowing, not a broken install.
+
 ## [0.12.7]
 
 - **Status badges in the README.** The tests badge is live from the Actions workflow; the Python

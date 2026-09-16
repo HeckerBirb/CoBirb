@@ -66,10 +66,10 @@ not let it quietly pick a default, narrow a feature or rule an approach out. Rai
 | `typing/spi.py` | **The plugin contract.** All SPI interfaces + shared dataclasses. |
 | `plugins/loader.py` | Discovery (entry points + local dirs), fail-closed. |
 | `plugins/core/` | Built-ins: `tools`, `model`, `io`, `crypto`, `persona`, `render`, `repomap`, `ignores`. |
-| `runtime/` | Composition layer both front-ends share: `wiring`, `plugins`, `models`, `personas`, `commands`, `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues` (which catalogues a session has open — see §6b). |
+| `runtime/` | Composition layer both front-ends share: `wiring`, `plugins`, `models`, `personas`, `commands`, `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues` (which catalogues a session has open — see §6b), `mentions` (`@path` ranking + expansion), `doctor` (the readiness checks). |
 | `mcp/` | stdio MCP client (`client`) and its tool adapter (`tools`). |
 | `flock/` | Multi-agent runs: `charter`, `brainy`, `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. |
-| `tui/` | Textual app: `app` (the application itself — mount, input, the turn, workers, actions), `slash_commands` (what each `/command` does, as `(app, argument)` functions + the `COMMANDS` table), `transcript` (everything written to the transcript, and the flush-before-write ordering rule), `attachments` (images queued by `/image` for the next message), `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. |
+| `tui/` | Textual app: `app` (the application itself — mount, input, the turn, workers, actions), `slash_commands` (what each `/command` does, as `(app, argument)` functions + the `COMMANDS` table), `transcript` (everything written to the transcript, and the flush-before-write ordering rule), `attachments` (images queued by `/image` for the next message), `mention_picker` (the five-row `@path` list), `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. |
 | `help_text.py` | The prose `cobirb help [topic]` prints. |
 | `personas/*.json` | Bundled personas: `professional`, `neighbor`, `kawaii`. |
 | `tests/` | One file per module; `conftest.py` isolates `COBIRB_HOME` for every test. |
@@ -314,7 +314,11 @@ scopes, are reviewed, and Brainy Birb reports.
 `plugin install <path> [--replace] | list | remove <name>`. Flags: `-p/--prompt`, `--session`,
 `-w/--password`, `--model`, `--persona`, `--allow-tool` (repeatable, `name` or `name(arg)`),
 `--plan-mode on|off`, `--system-prompt off|harness`, `--export PATH`, `--branch PATH`,
-`--branch-at N`, `--headless`, `--output text|json`, `--cwd`, `--upgrade [TAG]`, `--force`.
+`--branch-at N`, `--headless`, `--output text|json`, `--cwd`, `--upgrade [TAG]`, `--force`,
+`--continue` (reopens the most recently touched session; implies a password), `--doctor`.
+Subcommand `doctor` is the same thing — `runtime/doctor.py` checks config keys/types/references,
+endpoint and model presence, and install/version/branch state, exiting non-zero only on a real
+failure.
 `cwd` is resolved to an absolute path once in `main()`. A flag that would silently do nothing
 (`--branch-at` without `--branch`, `--force` without `--upgrade`) is an error, not a no-op.
 
@@ -324,7 +328,9 @@ answered "no" got what they asked for.
 
 **TUI** — four tabs: Current, Flock, Sessions, Plugins. Slash commands `/help`, `/model`,
 `/persona`, `/plan`, `/context`, `/undo`, `/export`, `/diff`, `/commands`, `/flock`, `/memories`,
-`/remember`, `/image`; anything else
+`/remember`, `/image`; `@path` in the prompt box opens a five-row fuzzy picker
+(`tui/mention_picker.py`, ranked by `runtime/mentions.py`) and sends the named file with the
+message — expanded on the way to the model, never into the transcript. Anything else
 starting with `/` is tried as a custom command, then sent to the model unchanged. Keys: `f1` help,
 `f2` next tab, `ctrl+q` quit, `ctrl+c` copy selection else cancel the turn, `up`/`down` recall the
 last 100 prompts (memory only). The prompt box stays enabled during a turn — submitting again

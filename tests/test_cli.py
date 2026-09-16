@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 import pytest
 
@@ -1802,3 +1803,94 @@ def test_branch_reports_a_wrong_password_the_same_way_export_does(tmp_path, caps
     assert "could not open" in capsys.readouterr().err
 
     assert "Session saved" not in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# --continue: reopen the session you were last in.
+#
+# The information was always on disk — discover_sessions sorts by modification
+# time — it simply had no command in front of it, so getting back to yesterday
+# meant reading timestamps out of filenames.
+# --------------------------------------------------------------------------- #
+def _session_file(tmp_path, name, *, age_seconds=0):
+    """A file in the sessions directory, optionally backdated."""
+    directory = os.path.join(str(tmp_path), ".cobirb", "sessions")
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, name)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("{}")
+    if age_seconds:
+        stamp = time.time() - age_seconds
+        os.utime(path, (stamp, stamp))
+    return path
+
+
+def test_most_recent_session_is_the_one_last_touched(tmp_path, monkeypatch):
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    _session_file(tmp_path, "old.json", age_seconds=9000)
+    newest = _session_file(tmp_path, "new.json")
+
+    assert sessions.most_recent_session() == newest
+
+
+def test_continue_picks_the_most_recent_and_asks_for_a_password(tmp_path, monkeypatch):
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    _session_file(tmp_path, "old.json", age_seconds=9000)
+    newest = _session_file(tmp_path, "new.json")
+    monkeypatch.setattr(sessions, "read_password", lambda: "typed-secretly")
+
+    path, password = sessions.resolve_session(None, None, continue_last=True)
+
+    assert path == newest
+    assert password == "typed-secretly"
+
+
+def test_continue_honours_a_password_given_on_the_command_line(tmp_path, monkeypatch):
+    """The non-interactive form still works — otherwise --continue could
+    never be scripted."""
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    newest = _session_file(tmp_path, "new.json")
+
+    def fail():
+        raise AssertionError("should not prompt when -w gave the password")
+
+    monkeypatch.setattr(sessions, "read_password", fail)
+
+    path, password = sessions.resolve_session(None, "hunter2", continue_last=True)
+
+    assert (path, password) == (newest, "hunter2")
+
+
+def test_continue_with_nothing_to_continue_says_so(tmp_path, monkeypatch):
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    with pytest.raises(sessions.NoSessionToContinue, match="no sessions"):
+        sessions.resolve_session(None, None, continue_last=True)
+
+
+def test_main_reports_nothing_to_continue_rather_than_tracebacking(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+
+    code = cli.main(["--continue", "-p", "hello"])
+
+    assert code == 1
+    assert "no sessions" in capsys.readouterr().err
+
+
+def test_continue_reaches_the_orchestrator_with_that_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    newest = _session_file(tmp_path, "new.json")
+    captured = {}
+
+    def fake_build(cwd, persona, allow_overrides, session_path=None, password=None,
+                   model_name=None, io_factory=None):
+        captured["session_path"] = session_path
+        captured["password"] = password
+        return _StubOrchestrator()
+
+    monkeypatch.setattr(wiring, "build_orchestrator", fake_build)
+    monkeypatch.setattr(sessions, "read_password", lambda: "pw")
+
+    cli.main(["--continue", "-p", "hello"])
+
+    assert captured["session_path"] == newest
+    assert captured["password"] == "pw"

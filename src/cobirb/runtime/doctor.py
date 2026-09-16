@@ -1,0 +1,286 @@
+"""``cobirb doctor`` — the checks that answer "am I ready to go?".
+
+Every one of these already fails somewhere today. What they lack is a place to
+fail *early*, together, in one voice: a mistyped config key fails by silently
+doing nothing, a model that was never pulled fails mid-turn, and a checkout
+left on a detached ``HEAD`` fails by swallowing the next commit made in it.
+
+Three groups, cheapest first, because the cheap ones are also the ones most
+likely to be wrong:
+
+1. **Config** — parses, every key is real, values have the right shape, and
+   the things it points at exist.
+2. **Environment** — the endpoint answers, the named models are actually
+   there, and they can do what this configuration asks of them.
+3. **Install** — the version against the latest release, and whether the
+   checkout is in a state that can receive a commit.
+
+Nothing here changes anything. A check that repaired what it found would be a
+different command with a different name, and a much larger promise.
+"""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+from .. import paths
+from ..config import Config
+from ..policy import READ_TOOLS, WRITE_TOOLS
+from . import models as model_roles
+
+OK = "ok"
+WARN = "warn"
+FAIL = "fail"
+
+# Every key CoBirb reads from config.json. A key that is not here is either a
+# typo or a setting that no longer exists — both worth saying out loud, since
+# the alternative is that it silently does nothing (`Config.get` is a plain
+# lookup with no validation, so `redact_secret` for `redact_secrets` reads as
+# "off" while redaction stays on).
+KNOWN_KEYS = frozenset({
+    "models", "persona", "system_prompt", "plan_mode",
+    "allow_tools", "allow_read_dirs", "allow_write_dirs",
+    "checkpoints", "redact_secrets", "audit_log",
+    "instructions", "instructions_max_chars",
+    "repo_map", "repo_map_max_chars", "context_tokens",
+    "verify_command", "verify_timeout", "verify_fix_attempts",
+    "hooks", "mcp_servers", "plugins",
+})
+
+# What each key should look like, for the shape check. Only the keys whose
+# type being wrong would misbehave quietly rather than raise.
+_EXPECTED_TYPES: dict[str, tuple[type, ...]] = {
+    "models": (dict,), "plugins": (dict,), "hooks": (dict,), "mcp_servers": (dict,),
+    "allow_tools": (list,), "allow_read_dirs": (list,), "allow_write_dirs": (list,),
+    "checkpoints": (bool,), "redact_secrets": (bool,), "audit_log": (bool,),
+    "instructions": (bool,), "repo_map": (bool,), "plan_mode": (bool,),
+    "instructions_max_chars": (int,), "repo_map_max_chars": (int,),
+    "context_tokens": (int,), "verify_timeout": (int,), "verify_fix_attempts": (int,),
+    "persona": (str,), "system_prompt": (str,), "verify_command": (str,),
+}
+
+_TOOL_NAMES = READ_TOOLS | WRITE_TOOLS | {"shell"}
+
+
+@dataclass
+class Check:
+    """One question, its answer, and what to do about it."""
+
+    name: str
+    status: str
+    detail: str = ""
+
+    @property
+    def failed(self) -> bool:
+        return self.status == FAIL
+
+
+@dataclass
+class Report:
+    """Everything the checks found."""
+
+    checks: list[Check] = field(default_factory=list)
+
+    def add(self, name: str, status: str, detail: str = "") -> None:
+        self.checks.append(Check(name=name, status=status, detail=detail))
+
+    @property
+    def ok(self) -> bool:
+        """Whether anything outright failed. A warning is not a failure — it
+        is something worth knowing that does not stop a turn working."""
+        return not any(check.failed for check in self.checks)
+
+    def describe(self) -> str:
+        marks = {OK: "✓", WARN: "!", FAIL: "✗"}
+        lines = [
+            f"  {marks.get(check.status, '?')} {check.name}"
+            + (f" — {check.detail}" if check.detail else "")
+            for check in self.checks
+        ]
+        failures = sum(1 for check in self.checks if check.failed)
+        warnings = sum(1 for check in self.checks if check.status == WARN)
+        if failures:
+            summary = f"{failures} problem(s) to fix"
+        elif warnings:
+            summary = f"ready, with {warnings} thing(s) worth knowing"
+        else:
+            summary = "ready to go"
+        return "\n".join(lines) + f"\n\n{summary}."
+
+
+# --------------------------------------------------------------------------- #
+# 1. Config
+# --------------------------------------------------------------------------- #
+def _check_config(report: Report, config: Config, raw: "dict[str, Any] | None") -> None:
+    path = paths.config_path()
+    if raw is None:
+        report.add("config file", WARN, f"none at {path} — defaults apply")
+        return
+    report.add("config file", OK, path)
+
+    unknown = sorted(set(raw) - KNOWN_KEYS)
+    if unknown:
+        report.add(
+            "config keys",
+            FAIL,
+            f"not settings CoBirb reads: {', '.join(unknown)}. A key it does not know is "
+            "ignored in silence, so this is doing nothing at all",
+        )
+    else:
+        report.add("config keys", OK, f"{len(raw)} recognised")
+
+    wrong = [
+        f"{key} should be {' or '.join(t.__name__ for t in expected)}"
+        for key, expected in _EXPECTED_TYPES.items()
+        if key in raw and not isinstance(raw[key], expected)
+        # bool is an int in Python; an int key given True is still wrong.
+        or (key in raw and expected == (int,) and isinstance(raw[key], bool))
+    ]
+    if wrong:
+        report.add("config value types", FAIL, "; ".join(wrong))
+    else:
+        report.add("config value types", OK)
+
+    _check_referenced_things(report, raw)
+
+
+def _check_referenced_things(report: Report, raw: dict[str, Any]) -> None:
+    """Config can be perfectly well-formed and still point at nothing."""
+    problems: list[str] = []
+
+    for rule in raw.get("allow_tools") or []:
+        name = str(rule).split("(")[0].strip()
+        if name and name not in _TOOL_NAMES:
+            problems.append(f"allow_tools names '{name}', which is not a built-in tool")
+
+    for key in ("allow_read_dirs", "allow_write_dirs"):
+        for directory in raw.get(key) or []:
+            if not os.path.isdir(os.path.expanduser(str(directory))):
+                problems.append(f"{key} names '{directory}', which is not a directory")
+
+    if problems:
+        report.add("config references", WARN, "; ".join(problems))
+    else:
+        report.add("config references", OK)
+
+
+# --------------------------------------------------------------------------- #
+# 2. Environment
+# --------------------------------------------------------------------------- #
+def _check_models(report: Report, config: Config, build_provider: Callable[[str], Any]) -> None:
+    """The endpoint answers, and the models named are actually pulled.
+
+    These are the checks that otherwise fail mid-turn, which is the worst
+    moment to learn a model was never downloaded.
+    """
+    try:
+        provider = build_provider(model_roles.ROLE_ORCHESTRATOR)
+        available = provider.list_models()
+    except Exception as exc:  # noqa: BLE001 - an unreachable endpoint is an answer
+        report.add("model endpoint", FAIL, f"not reachable — {exc}")
+        return
+    report.add("model endpoint", OK, f"{len(available)} model(s) available")
+
+    for role in model_roles.ROLES:
+        # The configured name comes from `resolve_role`, which is what
+        # `cobirb models` already reports — the provider keeps its own name
+        # private, and asking it would be reaching past the front door.
+        try:
+            spec = model_roles.resolve_role(role, config)
+            role_provider = build_provider(role)
+        except Exception as exc:  # noqa: BLE001
+            report.add(f"model ({role})", WARN, str(exc))
+            continue
+        name = spec.name or ""
+        if not name:
+            report.add(f"model ({role})", WARN, "none configured")
+            continue
+        if available and name not in available:
+            report.add(
+                f"model ({role})", FAIL,
+                f"'{name}' is configured but not on the endpoint — 'ollama pull {name}'",
+            )
+            continue
+        detail = name
+        try:
+            if not role_provider.supports_vision():
+                detail += " (no vision — /image will be text only)"
+        except Exception:  # noqa: BLE001 - a capability we could not ask about is not a failure
+            pass
+        report.add(f"model ({role})", OK, detail)
+
+
+# --------------------------------------------------------------------------- #
+# 3. Install
+# --------------------------------------------------------------------------- #
+def _check_install(report: Report) -> None:
+    from . import upgrade as upgrade_module
+
+    try:
+        root = upgrade_module._find_repo_root()
+    except Exception as exc:  # noqa: BLE001 - not an editable clone; --upgrade won't work
+        report.add("install", WARN, str(exc))
+        return
+    report.add("install", OK, root)
+
+    branch = upgrade_module._current_branch(cwd=root)
+    if branch:
+        report.add("checkout", OK, f"on {branch}")
+    else:
+        report.add(
+            "checkout", WARN,
+            "not on a branch (detached HEAD) — a commit made here belongs to no branch "
+            "and 'git push' will not send it. 'git checkout <branch>' fixes it",
+        )
+
+    try:
+        running = upgrade_module._running_version()
+        latest = upgrade_module._latest_tag(cwd=root)
+    except Exception as exc:  # noqa: BLE001 - version currency is nice to know, never fatal
+        report.add("version", WARN, f"could not be compared — {exc}")
+        return
+    if upgrade_module._parse_version(latest) > upgrade_module._parse_version(running):
+        report.add("version", WARN, f"v{running} installed, {latest} released — 'cobirb --upgrade'")
+    else:
+        report.add("version", OK, f"v{running}")
+
+
+# --------------------------------------------------------------------------- #
+def run(
+    *,
+    config: Config | None = None,
+    build_provider: Callable[[str], Any] | None = None,
+    check_environment: bool = True,
+    check_install: bool = True,
+) -> Report:
+    """Run every check and report. Never raises, and never changes anything."""
+    config = config or Config()
+    report = Report()
+
+    raw: dict[str, Any] | None = None
+    path = paths.config_path()
+    if os.path.isfile(path):
+        import json
+
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                loaded = json.load(handle)
+            raw = loaded if isinstance(loaded, dict) else {}
+            if not isinstance(loaded, dict):
+                report.add("config file", FAIL, f"{path} is not a JSON object")
+                raw = None
+        except (OSError, ValueError) as exc:
+            report.add("config file", FAIL, f"{path} could not be read — {exc}")
+            raw = None
+    _check_config(report, config, raw)
+
+    if check_environment:
+        if build_provider is None:
+            def build_provider(role: str) -> Any:  # noqa: F811 - the default, resolved late
+                return model_roles.build_for_role(role, config)
+        _check_models(report, config, build_provider)
+
+    if check_install:
+        _check_install(report)
+    return report

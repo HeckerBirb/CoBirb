@@ -38,7 +38,9 @@ from ..help_text import HELP_TEXT, HELP_TOPICS
 from ..runtime import commands, personas, plugins, wiring
 from ..runtime.catalogues import CatalogueStore
 from . import slash_commands
+from ..runtime import mentions
 from .attachments import PendingAttachments
+from .mention_picker import MentionPicker
 from .transcript import TranscriptView
 from ..runtime.custom_commands import expand_custom_command
 from ..config import Config
@@ -215,6 +217,11 @@ class CoBirbApp(App[None]):
                 # action_cancel_turn is the Ctrl+C half of the same fix.
                 yield TranscriptLog(id="transcript", markup=False, highlight=False, wrap=True)
                 yield StreamPreview(id="streaming-preview")
+                # Above the box, not below: the box is already at the bottom
+                # of the screen, so a list under it would have nowhere to go.
+                yield MentionPicker(
+                    lambda: mentions.candidate_paths(self.cwd), id="mention-picker"
+                )
                 with Container(id="prompt-box"):
                     yield PromptInput(id="prompt-input")
             with TabPane("Flock", id="flock"):
@@ -263,7 +270,9 @@ class CoBirbApp(App[None]):
                 "/plan on|off toggles plan mode · ? or /help for help"
             )
         )
-        self.query_one("#prompt-input", PromptInput).focus()
+        prompt_input = self.query_one("#prompt-input", PromptInput)
+        prompt_input.mention_picker = self.query_one("#mention-picker", MentionPicker)
+        prompt_input.focus()
 
         self.refresh_plugins_pane()
         self.refresh_sessions_pane()
@@ -568,6 +577,12 @@ class CoBirbApp(App[None]):
             # `cobirb.session` (the Sessions-tab code below needs it), and a
             # same-named local here would shadow it for the rest of this
             # method.
+            # Mentions are expanded on the way to the model, not on the way
+            # to the transcript: the transcript shows "@src/main.py" the way
+            # it was typed, while the model receives the file with it.
+            prompt = mentions.expand(
+                prompt, self.cwd, redact_secrets=Config().get("redact_secrets") is not False
+            )
             memory_block = self.catalogues.system_prompt()
             system = f"{self.system}\n\n{memory_block}" if memory_block else self.system
             images = self.attachments.take()
