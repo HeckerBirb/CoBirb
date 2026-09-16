@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest something CoBirb doesn't do yet.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before requesting, it's worth a quick check of [`AGENTS.md`](../../AGENTS.md) §17,
+        "Decided — do not rebuild these" — a number of ideas (an embedded model runtime among
+        them) were already considered and deliberately turned down for reasons written down
+        there. If yours is in that list, the fastest path is to make the counter-case here rather
+        than open the same discussion cold.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What are you trying to do, and where does CoBirb currently fall short of it?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you'd like to see. Doesn't need to be a full design — a sketch is fine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other way to get there — a plugin, a config option, a different flag — and why it doesn't fit.
+
+  - type: dropdown
+    id: privacy-impact
+    attributes:
+      label: Does this touch CoBirb's privacy invariants?
+      description: No outbound network by default, no telemetry, no pre-approved tool execution. If yes, say how in the description above — this needs more scrutiny than a typical feature.
+      options:
+        - "No"
+        - "Yes"
+        - "Not sure"
+    validations:
+      required: true

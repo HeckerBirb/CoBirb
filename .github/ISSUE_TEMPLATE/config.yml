@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/HeckerBirb/CoBirb/security/advisories/new
+    about: Please report security issues privately here rather than in a public issue — see SECURITY.md.
+  - name: Documentation
+    url: https://github.com/HeckerBirb/CoBirb/tree/main/docs
+    about: Check the manual pages before filing — your question might already be answered.

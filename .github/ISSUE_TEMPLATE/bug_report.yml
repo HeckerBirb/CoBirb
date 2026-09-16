@@ -1,0 +1,66 @@
+name: Bug report
+description: Something in CoBirb doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The single most useful thing you can attach is the output of
+        `cobirb doctor` — it covers most of the "what version / what backend / what's configured"
+        questions in one command.
+
+        Found a **security** issue instead (credential leak, permission bypass, encryption flaw)?
+        Please don't file it here — see [SECURITY.md](../../SECURITY.md) for private reporting.
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: cobirb doctor output
+      description: Run `cobirb doctor` and paste the output. Redact anything you don't want shared (hostnames, model names, paths) — it won't affect diagnosis.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        Command I ran: ...
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps someone else could follow to see the same thing, including relevant config (from `~/.cobirb/config.json`, redacted of anything private).
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output / traceback / audit log
+      description: Paste any error output, traceback, or relevant lines from the audit log. Please double-check for anything sensitive before pasting — CoBirb redacts known credential patterns from its own output, but a raw traceback or terminal paste is your own to check.
+      render: text
+
+  - type: input
+    id: backend
+    attributes:
+      label: Model backend
+      description: e.g. Ollama, llama-server, LM Studio, vLLM — and roughly which model/size.
+      placeholder: "Ollama, qwen2.5-coder:14b"
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "e.g. Ubuntu 24.04, macOS 15, Windows 11 + WSL2"
