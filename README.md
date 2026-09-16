@@ -60,6 +60,8 @@ cobirb --upgrade
 cobirb --help
 ```
 
+Looking for a config to start from instead of an empty one? See [examples/](./examples/).
+
 ## Alternative installation method
 
 The Quick start above uses [pipx](https://pipx.pypa.io): `pipx install --editable .`, run once
@@ -174,6 +176,8 @@ Being straight about the edges, since the rest of this page makes strong claims:
   [the Flock](./docs/manual/flock.md), [plugins & MCP](./docs/manual/plugins-and-mcp.md).
 - [AGENTS.md](./AGENTS.md) — the single source of truth: architecture, the plugin SPI,
   the security design, and the working conventions.
+- [examples/](./examples/) — configurations to start from, each focused on one combination
+  of settings.
 - [CHANGELOG.md](./CHANGELOG.md) — release history.
 
 ## License
