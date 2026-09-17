@@ -85,17 +85,31 @@ normalise_version() {
     printf '%s' "$_v"
 }
 
-# The newest release, without calling the API: /releases/latest redirects to
-# /releases/tag/vX.Y.Z, so the resolved URL carries the answer. The API would
-# do as well until it rate-limits an unauthenticated caller at 60/hour, which
-# is a confusing way for an installer to fail.
+# The newest release.
+#
+# The API is asked first because it is the one that actually answers. The
+# tempting alternative — following the /releases/latest HTML redirect and
+# reading the tag off the resolved URL — depends on the release carrying
+# GitHub's "latest" flag, which is not set as reliably as it looks: a
+# repository's only published, non-draft, non-prerelease release can still
+# redirect to the releases index instead of to its own tag, and an index page
+# is not something an installer can act on. The redirect is kept as the
+# fallback for the one case where the API is the worse choice: an
+# unauthenticated caller that has spent its 60 requests an hour.
 resolve_latest() {
-    _url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
-        "https://github.com/$REPO/releases/latest") \
-        || die "could not reach GitHub to find the latest release."
-    _tag="${_url##*/}"
-    [ -n "$_tag" ] && [ "$_tag" != "latest" ] \
-        || die "GitHub did not name a latest release — pass --version explicitly."
+    _tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+        | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+    if [ -z "$_tag" ]; then
+        _url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+            "https://github.com/$REPO/releases/latest" 2>/dev/null) || _url=""
+        # Only a URL that names a tag. Anything else — the releases index, an
+        # error page — means "no answer", not a version called "releases".
+        case "$_url" in
+            */releases/tag/*) _tag="${_url##*/}" ;;
+        esac
+    fi
+    [ -n "$_tag" ] || die "could not work out the latest release — is there one published yet?
+Name a version explicitly with --version if you know it."
     normalise_version "$_tag"
 }
 

@@ -4,6 +4,16 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.14.1]
+
+- **Fixed: `install.sh` could not work out the latest release.** It read the tag off GitHub's
+  `/releases/latest` HTML redirect, which turns out to depend on a "latest" flag that is not set
+  as reliably as it looks — a repository's only published, non-draft, non-prerelease release can
+  still redirect to the releases *index*, and `releases` is not a version. The one-liner failed
+  with `'releases' is not a release version`. It now asks the API, which answers directly, and
+  keeps the redirect as a fallback for a caller that has spent its unauthenticated 60 requests an
+  hour. Naming a release explicitly (`--version v0.14.0`) was unaffected throughout.
+
 ## [0.14.0]
 
 - **A one-line install.** `curl -fsSL .../install.sh | bash` builds a virtualenv in
