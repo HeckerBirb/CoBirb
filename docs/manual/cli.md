@@ -31,7 +31,7 @@ cobirb help config                       # help on one topic
 | `--export PATH` | Write a session out as markdown |
 | `--branch PATH` | Fork a session into a new file |
 | `--branch-at N` | With `--branch`: keep turns `0..N` |
-| `--upgrade [TAG]` | Move to a tagged release |
+| `--upgrade [TAG]` | Move to another release — latest, or the one named. See [install](install.md) |
 | `--force` | With `--upgrade`: allow going backwards |
 | `--doctor` | Check everything is ready, then exit. Same as `cobirb doctor` |
 

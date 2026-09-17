@@ -73,7 +73,10 @@ where = ["src"]
 # tui/*.tcss is the Textual stylesheet the interactive app loads at runtime via
 # CSS_PATH — without it listed here, an installed (non-editable) CoBirb starts
 # interactive mode and immediately fails to find its own layout.
-cobirb = ["py.typed", "personas/*.json", "tui/*.tcss"]
+# install.sh ships inside the package so a managed install carries the script
+# that manages it: `--upgrade` runs the copy belonging to the version it is
+# running, rather than fetching one and hoping the two agree.
+cobirb = ["py.typed", "personas/*.json", "tui/*.tcss", "install.sh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

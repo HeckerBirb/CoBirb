@@ -23,8 +23,12 @@ outbound network unless the user explicitly asks for it.
    for. A repository may *describe* itself (`AGENTS.md`, repo map, `<project>/.cobirb/commands/`)
    but may never grant capability.
 3. **No outbound network by default.** Only the model provider talks to a socket (a local endpoint
-   the user configured), plus two explicitly-invoked exceptions: `cobirb --upgrade` (git fetch) and
-   MCP servers the user configured (local subprocesses).
+   the user configured), plus two explicitly-invoked exceptions: `cobirb --upgrade` and MCP servers
+   the user configured (local subprocesses). What `--upgrade` reaches depends on the install shape
+   it finds (§14, `runtime/upgrade.py`): a git remote for a checkout, or GitHub's release assets
+   plus PyPI for the dependencies when it delegates to `install.sh` on a managed install. The
+   install shape decides *which host*, never *whether* — it is still only ever a command somebody
+   typed, which is the whole of the exception.
 4. **Sessions are encrypted at rest.** Plaintext conversation exists in RAM only.
 5. **Fail closed.** No I/O adapter, an adapter that cannot ask, an adapter that raises, an
    unparseable shell command, a plugin that will not load → deny/skip, never proceed.
@@ -71,6 +75,7 @@ not let it quietly pick a default, narrow a feature or rule an approach out. Rai
 | `flock/` | Multi-agent runs: `charter`, `brainy`, `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. |
 | `tui/` | Textual app: `app` (the application itself — mount, input, the turn, workers, actions), `slash_commands` (what each `/command` does, as `(app, argument)` functions + the `COMMANDS` table), `transcript` (everything written to the transcript, and the flush-before-write ordering rule), `attachments` (images queued by `/image` for the next message), `mention_picker` (the five-row `@path` list), `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. |
 | `help_text.py` | The prose `cobirb help [topic]` prints. |
+| `install.sh` | The installer, shipped inside the package. Also the upgrader and downgrader — see §14. |
 | `personas/*.json` | Bundled personas: `professional`, `neighbor`, `kawaii`. |
 | `tests/` | One file per module; `conftest.py` isolates `COBIRB_HOME` for every test. |
 
@@ -317,8 +322,9 @@ scopes, are reviewed, and Brainy Birb reports.
 `--branch-at N`, `--headless`, `--output text|json`, `--cwd`, `--upgrade [TAG]`, `--force`,
 `--continue` (reopens the most recently touched session; implies a password), `--doctor`.
 Subcommand `doctor` is the same thing — `runtime/doctor.py` checks config keys/types/references,
-endpoint and model presence, and install/version/branch state, exiting non-zero only on a real
-failure.
+endpoint and model presence, and install shape/version (plus branch state for a checkout), exiting
+non-zero only on a real failure. It deliberately does not ask whether a newer release exists on a
+managed install: that is a request to GitHub, and doctor talks to the configured endpoint only.
 `cwd` is resolved to an absolute path once in `main()`. A flag that would silently do nothing
 (`--branch-at` without `--branch`, `--force` without `--upgrade`) is an error, not a no-op.
 
@@ -348,13 +354,32 @@ no reliable post-install hook).
 `COBIRB_MODEL_NAME`, `COBIRB_OLLAMA_URL`, `COBIRB_PROJECT_DIR` (local-plugin discovery root),
 `COBIRB_TEST_MODEL` (integration tests).
 
-**Releases** — `cobirb --upgrade [tag]` fetches tags in the checkout CoBirb is installed from,
-resolves the highest `vX.Y.Z` (or the named one, `v` optional), refuses a downgrade without
-`--force` and a dirty working tree outright, then re-runs `pip install -e .`. Only works for an
-editable install of a git clone. **It fast-forwards the current branch onto the tag rather than
-checking the tag out**, because a detached `HEAD` swallows the next commit anyone makes in that
-checkout. Detaching is the fallback when there is no branch, or the branch carries commits the
-tag doesn't, and `UpgradeResult.branch`/`describe()` says which happened.
+**Install shapes** — `upgrade.detect_install()` answers which of three is running, and everything
+about releases follows from it. `managed`: `install.sh` built a venv at `~/.local/share/cobirb`
+(overridable with `COBIRB_INSTALL_DIR`) and left a `cobirb` symlink in `~/.local/bin`, recording
+both in an `install.json` marker. `checkout`: a git clone that was `pip install -e`'d. `unmanaged`:
+anything else — someone's own venv, a distro package — where `--upgrade` refuses and names what
+would work instead. Managed is decided by the marker's `venv` matching `sys.prefix`, not by the
+marker existing: having a managed install *and* a clone to work in is ordinary, and the question is
+which interpreter is running.
+
+**Releases** — every version bump gets a `vX.Y.Z` tag (§2, invariant 9); `release.yml` builds a
+wheel and sdist on that tag push and attaches them, `SHA256SUMS` and `install.sh` to the GitHub
+release. `cobirb --upgrade [tag]` then routes on the install shape:
+
+- **Managed** — runs the `install.sh` that shipped *inside the running version's own wheel*,
+  forwarding `--version`/`--force`. **The script is the only implementation of "move to version
+  X"**, because it is also what a first-time user curls; resolving releases, guarding downgrades
+  and verifying checksums a second time in Python would be two implementations to keep in step. It
+  is copied to a tempfile before running because pip is about to rewrite the original underneath a
+  shell that reads scripts as it executes them. `UpgradeResult.describe()` is empty for this shape
+  — the script already narrated itself to the terminal.
+- **Checkout** — fetches tags, resolves the highest `vX.Y.Z` (or the named one, `v` optional),
+  refuses a downgrade without `--force` and a dirty working tree outright, then re-runs `pip
+  install -e .`. **It fast-forwards the current branch onto the tag rather than checking the tag
+  out**, because a detached `HEAD` swallows the next commit anyone makes in that checkout.
+  Detaching is the fallback when there is no branch, or the branch carries commits the tag
+  doesn't, and `UpgradeResult.branch`/`describe()` says which happened.
 
 ## 15. Conventions
 

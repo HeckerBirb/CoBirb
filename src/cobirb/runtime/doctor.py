@@ -12,8 +12,9 @@ likely to be wrong:
    the things it points at exist.
 2. **Environment** — the endpoint answers, the named models are actually
    there, and they can do what this configuration asks of them.
-3. **Install** — the version against the latest release, and whether the
-   checkout is in a state that can receive a commit.
+3. **Install** — which of the three install shapes this is (so you know
+   whether ``--upgrade`` can work at all), the version, and for a checkout
+   whether it is in a state that can receive a commit.
 
 Nothing here changes anything. A check that repaired what it found would be a
 different command with a different name, and a much larger promise.
@@ -236,11 +237,31 @@ def _check_models(report: Report, config: Config, build_provider: Callable[[str]
 def _check_install(report: Report) -> None:
     from . import upgrade as upgrade_module
 
-    try:
-        root = upgrade_module._find_repo_root()
-    except Exception as exc:  # noqa: BLE001 - not an editable clone; --upgrade won't work
-        report.add("install", WARN, str(exc))
+    install = upgrade_module.detect_install()
+
+    if install.kind == upgrade_module.MANAGED:
+        report.add("install", OK, f"managed — {install.venv}")
+        # Deliberately no "is there a newer release?" for this shape. Asking
+        # means a request to GitHub, and doctor talks to the endpoint you
+        # configured and nothing else. That question belongs to
+        # `cobirb --upgrade`, where somebody typed the command that asks it.
+        try:
+            report.add("version", OK, f"v{upgrade_module._running_version()}")
+        except Exception as exc:  # noqa: BLE001 - a version it can't read is worth saying, not fatal
+            report.add("version", WARN, f"could not be read — {exc}")
         return
+
+    if install.kind == upgrade_module.UNMANAGED:
+        report.add(
+            "install",
+            WARN,
+            "neither a managed install nor a git checkout, so 'cobirb --upgrade' "
+            "cannot work here. Upgrade it however you installed it, or switch to a "
+            f"self-upgrading install with:\n      {upgrade_module._INSTALL_COMMAND}",
+        )
+        return
+
+    root = install.root
     report.add("install", OK, root)
 
     branch = upgrade_module._current_branch(cwd=root)

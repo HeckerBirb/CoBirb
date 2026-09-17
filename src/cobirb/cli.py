@@ -517,7 +517,11 @@ def _run_upgrade(tag: str | None, *, force: bool) -> int:
     except UpgradeError as exc:
         print(f"cobirb: {exc}", file=sys.stderr)
         return EXIT_ERROR
-    print(result.describe())
+    # A managed upgrade describes itself as nothing: the installer it delegated
+    # to has already streamed the whole story to this terminal.
+    summary = result.describe()
+    if summary:
+        print(summary)
     return EXIT_OK
 
 
@@ -571,16 +575,16 @@ def _build_parser() -> argparse.ArgumentParser:
         const="",
         default=None,
         metavar="TAG",
-        help="Move this checkout to another tagged release, then exit: the latest by "
-        "default, or a specific one ('cobirb --upgrade v0.8.0'). Only works for the "
-        "ordinary install — a git clone, then 'pip install -e .' or 'pipx install "
-        "--editable .' — since that is the checkout this moves. Refuses a downgrade "
-        "unless --force says so, and refuses outright on uncommitted local changes.",
+        help="Move this install to another release, then exit: the latest by default, "
+        "or a specific one ('cobirb --upgrade v0.8.0'). An install.sh install re-runs "
+        "that installer; a git clone installed with 'pip install -e .' or 'pipx install "
+        "--editable .' moves the checkout. Refuses a downgrade unless --force says so, "
+        "and a checkout with uncommitted changes outright.",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="With --upgrade: allow moving to a tag older than the one currently "
+        help="With --upgrade: allow moving to a release older than the one currently "
         "running (a downgrade). Meaningless without --upgrade.",
     )
 

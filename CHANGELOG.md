@@ -4,6 +4,34 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **A one-line install.** `curl -fsSL .../install.sh | bash` builds a virtualenv in
+  `~/.local/share/cobirb`, installs a checksum-verified release into it, and puts `cobirb` on
+  your `PATH` at `~/.local/bin/cobirb`. No `sudo`, no `pipx`, no venv to activate, and nothing
+  written outside your home directory. Python 3.11+ is the only prerequisite. Previously the only
+  way in was a git clone plus knowing which of `pip install -e .` or `pipx` you wanted.
+  - The script is wrapped in a single function it calls on its last line, so a download that dies
+    halfway through executes nothing rather than the first half of an installer.
+  - The wheel is verified against the release's `SHA256SUMS` before anything is installed. A
+    mismatch aborts rather than retries.
+  - `--uninstall` removes the virtualenv and the symlink and **leaves `~/.cobirb/` alone** —
+    config, sessions and memory outlive any install.
+- **`cobirb --upgrade` now knows what kind of install it is in.** Managed (put there by
+  `install.sh`), a git checkout, or neither. A managed upgrade re-runs the installer that put it
+  there with a different `--version`, so **upgrading and downgrading are one operation**:
+  `cobirb --upgrade v0.13.0 --force` goes back the same way `cobirb --upgrade` goes forward. The
+  script stays the only implementation of "move to version X", because it is also what a
+  first-time user runs. An install that is neither shape is told so, and told what would work,
+  instead of failing with "could not find a git checkout".
+- **Releases carry artifacts.** A `vX.Y.Z` tag now builds a wheel and an sdist and attaches them,
+  `SHA256SUMS` and `install.sh` to the GitHub release. The tag is checked against the packaged
+  version first, so a release can't ship a wheel nobody can ask for by name.
+- **`cobirb doctor` reports the install shape**, and no longer warns that a perfectly good
+  managed install is "not an editable clone". It deliberately does not check whether a newer
+  release exists on a managed install: that means asking GitHub, and `doctor` talks to the
+  endpoint you configured and nothing else.
+
 ## [0.13.1]
 
 - **Fixed: `cobirb doctor` reported a working model as missing when the tag was omitted.** Ollama

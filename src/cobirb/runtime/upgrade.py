@@ -1,14 +1,32 @@
-"""``cobirb --upgrade [tag] [--force]`` — move a git checkout to another release.
+"""``cobirb --upgrade [tag] [--force]`` — move this install to another release.
 
-CoBirb is distributed as a git clone that gets ``pip install -e``'d (directly,
-or via ``pipx install --editable .`` for a global binary — see the README's
-install section). That means the checkout *is* the installation, and the only
-thing that ever needs to change to move to a different release is which
-commit that checkout has on disk. This module does exactly that and nothing
-more: fetch tags, pick one, move the checkout onto it, and re-run the same
-install step so any dependency or entry-point change in the new tag actually
-takes — the same metadata-refresh ``pip install -e .`` caveat documented in
-the README's update section.
+**There are three shapes an install can have, and this routes between them.**
+
+- ``managed`` — put there by ``install.sh``: a venv under
+  ``~/.local/share/cobirb`` with a ``cobirb`` symlink in ``~/.local/bin``.
+  Upgrading re-runs that same script with a different ``--version``.
+- ``checkout`` — a git clone that was ``pip install -e``'d (directly, or via
+  ``pipx install --editable .``). The checkout *is* the installation, so
+  upgrading means moving it onto another tag and re-running the install step.
+- ``unmanaged`` — anything else: someone's own venv, a distro package, a
+  plain ``pip install .`` into site-packages. Refused, with the command that
+  would actually work named in the refusal.
+
+**Why the managed path shells out instead of reimplementing the work.**
+``install.sh`` already resolves a release, downloads a wheel, verifies its
+checksum, installs it into the venv and rewrites the marker — and it has to,
+because it is also what a first-time user runs. Doing any of that a second
+time in Python would mean two implementations of "move to version X" that
+agree only as long as someone keeps them in step. So ``--upgrade`` on a
+managed install is a thin call into the script that installed it, and the
+downgrade guard lives there rather than here.
+
+For the checkout path, the only thing that ever needs to change to move to a
+different release is which commit that checkout has on disk: fetch tags, pick
+one, move the checkout onto it, and re-run the same install step so any
+dependency or entry-point change in the new tag actually takes — the same
+metadata-refresh ``pip install -e .`` caveat documented in the README's
+update section.
 
 **Moving onto a tag without leaving the branch.** Checking a tag out directly
 detaches ``HEAD``, which is fine for someone only running CoBirb and a trap
@@ -41,14 +59,19 @@ talks to a network by default, but only because a person typed it — the same
 justification ``cobirb plugin install`` already has for running arbitrary
 code. See AGENTS.md §2 for why that is still consistent with "no outbound
 network by default": the default is what happens without being asked, and
-this is never that.
+this is never that. Which host it talks to depends on the install shape — a
+git remote for a checkout, GitHub's release assets plus PyPI for the
+dependencies on a managed one — but not whether it talks at all.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from importlib import metadata as importlib_metadata
 
@@ -61,8 +84,30 @@ _TAG_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 # uses.
 _GIT_TIMEOUT_SECONDS = 60
 _PIP_TIMEOUT_SECONDS = 300
+# The installer's budget is larger than the bare pip one because it is doing
+# strictly more: resolving a release, downloading and checksumming a wheel,
+# building the venv on a first run, and only then installing CoBirb and its
+# three dependencies.
+_INSTALL_TIMEOUT_SECONDS = 600
 
 _DEFAULT_REMOTE = "origin"
+
+# The three install shapes — see the module docstring.
+MANAGED = "managed"
+CHECKOUT = "checkout"
+UNMANAGED = "unmanaged"
+
+# Where install.sh puts the venv it manages, and the marker it writes beside
+# it. Both honour the same environment overrides the script does, so pointing
+# one at a throwaway directory points the other there too.
+_DEFAULT_INSTALL_DIR = "~/.local/share/cobirb"
+_MARKER_NAME = "install.json"
+
+# Spelled once. It appears in a refusal, in `doctor`, and in the docs, and the
+# three disagreeing about how to install CoBirb would be its own small bug.
+_INSTALL_COMMAND = (
+    "curl -fsSL https://github.com/HeckerBirb/CoBirb/releases/latest/download/install.sh | bash"
+)
 
 
 class UpgradeError(Exception):
@@ -79,8 +124,15 @@ class UpgradeResult:
     # than assumed: a detached checkout silently swallows the next commit
     # someone makes, so it has to be said out loud when it happens.
     branch: str = ""
+    kind: str = CHECKOUT
 
     def describe(self) -> str:
+        # A managed upgrade has already narrated itself: install.sh streams
+        # what it resolved, downloaded, verified and installed straight to the
+        # terminal as it happens, which is what you want during a download.
+        # Summarising it again here would say the same thing twice.
+        if self.kind == MANAGED:
+            return ""
         if self.already_current:
             return f"Already at {self.tag} — nothing to do."
         moved = f"Upgraded v{self.from_version} → v{self.to_version} ({self.tag})."
@@ -91,6 +143,19 @@ class UpgradeResult:
             "Run 'git checkout <branch>' before committing anything, or a commit made "
             "here will belong to no branch."
         )
+
+
+@dataclass
+class Install:
+    """Which of the three shapes this running CoBirb has, and where it lives."""
+
+    kind: str
+    # The git checkout for CHECKOUT, the install directory for MANAGED, "" for
+    # UNMANAGED.
+    root: str = ""
+    venv: str = ""
+    version: str = ""
+    source: str = ""
 
 
 def _parse_version(tag: str) -> tuple[int, int, int]:
@@ -180,6 +245,135 @@ def _running_version() -> str:
         return importlib_metadata.version("cobirb")
     except importlib_metadata.PackageNotFoundError as exc:
         raise UpgradeError("CoBirb's own package metadata is missing — reinstall it first") from exc
+
+
+def _install_dir() -> str:
+    """The directory ``install.sh`` manages, resolved at call time.
+
+    ``COBIRB_INSTALL_DIR`` is the same override the script itself reads, so
+    moving one half of a managed install moves the other with it.
+    """
+    return os.path.expanduser(os.environ.get("COBIRB_INSTALL_DIR", _DEFAULT_INSTALL_DIR))
+
+
+def _read_marker(path: str) -> "dict | None":
+    """``install.json`` as a dict, or ``None`` if absent or unreadable.
+
+    Unreadable counts as absent rather than as an error. A truncated or
+    hand-edited marker should degrade to "this looks unmanaged" — which ends
+    in a refusal naming the fix — instead of failing the upgrade with a JSON
+    parse error nobody can act on.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            marker = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return marker if isinstance(marker, dict) else None
+
+
+def detect_install() -> Install:
+    """Which of the three shapes the CoBirb executing this code has.
+
+    Managed is checked first, and confirmed against ``sys.prefix`` rather than
+    taken on the marker's word: the marker only says a managed install exists
+    somewhere, not that it is the one currently running. Having both a managed
+    install and a clone to hack on is a perfectly ordinary thing to do, and
+    the question here is about this interpreter, not about what is on disk.
+    """
+    marker = _read_marker(os.path.join(_install_dir(), _MARKER_NAME))
+    if marker:
+        venv = str(marker.get("venv", ""))
+        if venv and os.path.realpath(venv) == os.path.realpath(sys.prefix):
+            return Install(
+                kind=MANAGED,
+                root=_install_dir(),
+                venv=venv,
+                version=str(marker.get("version", "")),
+                source=str(marker.get("source", "")),
+            )
+    try:
+        return Install(kind=CHECKOUT, root=_find_repo_root())
+    except UpgradeError:
+        return Install(kind=UNMANAGED)
+
+
+def _bundled_install_script() -> str:
+    """The ``install.sh`` that shipped inside *this* version's package.
+
+    Deliberately the bundled copy rather than a freshly downloaded one, so a
+    release carries the procedure for managing itself. A version that needs to
+    change how upgrading works can then do it, and have the change take effect
+    on the way out of that version rather than only for people who never
+    installed it.
+    """
+    script = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "install.sh"
+    )
+    if not os.path.isfile(script):
+        raise UpgradeError(
+            "this install is missing its own install.sh, which the managed upgrade path "
+            "runs. Reinstalling repairs it:\n"
+            f"  {_INSTALL_COMMAND}"
+        )
+    return script
+
+
+def _run_install_script(args: "list[str]") -> None:
+    """Run the bundled installer from a copy, with its output left streaming.
+
+    **From a copy** because pip is about to rewrite the original underneath
+    it. A shell reads a script as it executes rather than all at once, so
+    replacing the file mid-run can hand it the tail of a different file.
+
+    **Streaming** — no ``capture_output`` — because this downloads and
+    installs, and progress that only appears once the work has finished is not
+    progress.
+    """
+    script = _bundled_install_script()
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = os.path.join(tmp, "install.sh")
+        shutil.copyfile(script, copy)
+        try:
+            completed = subprocess.run(["sh", copy, *args], timeout=_INSTALL_TIMEOUT_SECONDS)
+        except FileNotFoundError as exc:
+            raise UpgradeError("no 'sh' on PATH — the installer needs a POSIX shell") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise UpgradeError(
+                f"the installer timed out after {_INSTALL_TIMEOUT_SECONDS}s"
+            ) from exc
+    if completed.returncode != 0:
+        raise UpgradeError("the installer did not finish — its output above says why.")
+
+
+def _managed_upgrade(install: Install, tag: "str | None", *, force: bool) -> UpgradeResult:
+    """Hand the whole job to ``install.sh``, then report what it ended up doing.
+
+    Every decision — resolving "latest", refusing a downgrade without
+    ``--force``, verifying the download — belongs to the script, which is also
+    what a first-time user runs. Re-deciding any of it here would be a second
+    implementation to keep in step with the first.
+    """
+    args: "list[str]" = []
+    if tag:
+        args += ["--version", tag]
+    if force:
+        args.append("--force")
+
+    _run_install_script(args)
+
+    # Read the outcome back off the marker rather than assuming the requested
+    # version is the installed one: the script exits successfully without
+    # changing anything when it was already there.
+    marker = _read_marker(os.path.join(install.root, _MARKER_NAME)) or {}
+    landed = str(marker.get("version", ""))
+    return UpgradeResult(
+        from_version=install.version,
+        to_version=landed,
+        tag=str(marker.get("tag", "")),
+        already_current=bool(landed) and landed == install.version,
+        kind=MANAGED,
+    )
 
 
 def _tag_exists(tag: str, *, cwd: str) -> bool:
@@ -282,14 +476,36 @@ def _latest_tag(*, cwd: str) -> str:
 
 
 def upgrade(tag: str | None = None, *, force: bool = False, remote: str = _DEFAULT_REMOTE) -> UpgradeResult:
-    """Move this checkout to ``tag``, or the latest release tag if none is given.
+    """Move this install to ``tag``, or to the latest release if none is given.
+
+    Routes on the install's shape — see the module docstring for the three and
+    why the managed one delegates rather than reimplements.
+    """
+    install = detect_install()
+
+    if install.kind == MANAGED:
+        return _managed_upgrade(install, tag, force=force)
+    if install.kind == CHECKOUT:
+        return _checkout_upgrade(install.root, tag, force=force, remote=remote)
+
+    raise UpgradeError(
+        "this CoBirb cannot upgrade itself: it is not the installer's managed install, "
+        "and there is no git checkout above it. If you installed it into a virtualenv "
+        "of your own, upgrade it the same way you installed it. To move to an install "
+        "that does upgrade itself:\n"
+        f"  {_INSTALL_COMMAND}"
+    )
+
+
+def _checkout_upgrade(
+    repo_root: str, tag: str | None, *, force: bool, remote: str
+) -> UpgradeResult:
+    """Move a git checkout onto ``tag``, or the latest release tag.
 
     Refuses on a dirty working tree (see the module docstring for why) and on
     a downgrade unless ``force`` is set. Stays on the branch you are on
     wherever that is possible, and says so when it cannot — see ``_move_to``.
     """
-    repo_root = _find_repo_root()
-
     status = _run_git("status", "--porcelain", cwd=repo_root)
     if status.strip():
         raise UpgradeError(

@@ -30,12 +30,25 @@ Starting from nothing, on a machine with [Ollama](https://ollama.com) installed:
 ```bash
 ollama pull qwen2.5-coder:14b     # or any other model you want to use, CoBirb doesn't judge
 
-git clone https://github.com/HeckerBirb/CoBirb && cd CoBirb
-
-pipx install --editable .         # adds a `cobirb` binary to PATH
+curl -fsSL https://github.com/HeckerBirb/CoBirb/releases/latest/download/install.sh | bash
 
 # Interactive: the full-screen app.
 cobirb
+```
+
+That builds a virtualenv in `~/.local/share/cobirb`, installs a checksum-verified release into
+it, and puts `cobirb` on your `PATH` at `~/.local/bin/cobirb`. No `sudo`, no `pipx`, nothing
+outside your home directory, and nothing to activate before you can use it. Python 3.11+ is the
+only prerequisite.
+
+Piping a script into a shell is a reasonable thing to be suspicious of — it is
+[`install.sh`](./src/cobirb/install.sh) in this repository, and reading it first is the better
+habit:
+
+```bash
+curl -fsSL https://github.com/HeckerBirb/CoBirb/releases/latest/download/install.sh -o install.sh
+less install.sh
+sh install.sh
 ```
 
 Everything else:
@@ -62,33 +75,64 @@ cobirb --help
 
 Looking for a config to start from instead of an empty one? See [examples/](./examples/).
 
-## Alternative installation method
-
-The Quick start above uses [pipx](https://pipx.pypa.io): `pipx install --editable .`, run once
-from the clone, puts a `cobirb` binary on your `PATH` with its three dependencies isolated in
-their own environment — no venv to remember to activate. `--editable` keeps it pointed at the
-clone, so a plain source change (yours, or `git pull`) needs nothing further.
-
-Prefer a plain venv instead if you're going to be editing CoBirb's own source:
+## Updating, pinning, and removing
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .      # or ".[dev]" for the test suite
+cobirb --upgrade                    # move to the latest release
+cobirb --upgrade v0.13.0            # move to a particular one
+cobirb --upgrade v0.13.0 --force    # ...including backwards
 ```
 
-Either way, only a **source change** is picked up automatically. A `pyproject.toml` change (a
-new dependency, a changed entry point, a version bump) needs `pip install -e .` — or `pipx
-install --editable .` again, over the same install — rerun: that's metadata pip snapshots once
-at install time, not something it reads fresh off the source on every run. It's cheap and
-idempotent, so re-running it after a `git pull` when you're unsure never hurts.
+`--upgrade` re-runs the installer that put CoBirb there, with a different version. Upgrading and
+downgrading are therefore the same operation, and the only difference is that going backwards
+refuses to happen unless `--force` says out loud that it should.
 
-**Staying current:** `cobirb --upgrade` moves this checkout to the latest tagged release —
-fetches, checks out the tag, and reinstalls, in one step. Name a specific release instead with
-`cobirb --upgrade v0.8.0`. It refuses to move to an *older* release than the one currently
-running unless you pass `--force`, and refuses outright on a checkout with uncommitted changes
-rather than guessing what to do with them. This is the one CoBirb command that talks to a
-network by default — allowed because you just typed it, the same reasoning `cobirb plugin
-install` already relies on to run a plugin's own code.
+Install a specific release in the first place by passing the same flag through the pipe:
+
+```bash
+curl -fsSL https://github.com/HeckerBirb/CoBirb/releases/latest/download/install.sh \
+  | bash -s -- --version v0.13.0
+```
+
+Removing it again:
+
+```bash
+curl -fsSL https://github.com/HeckerBirb/CoBirb/releases/latest/download/install.sh \
+  | bash -s -- --uninstall
+```
+
+That takes out the virtualenv and the `cobirb` symlink. **It does not touch `~/.cobirb/`** —
+your config, your sessions and your memory catalogues are yours, and they outlive any install.
+
+`--upgrade` is the one CoBirb command that talks to a network by default — allowed because you
+just typed it, the same reasoning `cobirb plugin install` already relies on to run a plugin's own
+code.
+
+## Installing from source
+
+For working on CoBirb itself, clone it and install it editable, so a source change needs nothing
+further to take effect:
+
+```bash
+git clone https://github.com/HeckerBirb/CoBirb && cd CoBirb
+
+pipx install --editable .           # a `cobirb` on PATH, deps isolated, no venv to activate
+# ...or, if you want the test suite in the same environment:
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+Only a **source change** is picked up automatically. A `pyproject.toml` change (a new dependency,
+a changed entry point, a version bump) needs the install command run again: that is metadata pip
+snapshots once at install time, not something it reads fresh off the source on every run. It's
+cheap and idempotent, so re-running it after a `git pull` when you're unsure never hurts.
+
+`cobirb --upgrade` works here too, and does the equivalent thing for a clone — fetches, moves the
+checkout onto the tag, reinstalls. It fast-forwards the branch you are on rather than detaching
+`HEAD`, and refuses outright if you have uncommitted changes rather than guessing what to do with
+them.
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) before sending a patch.
 
 ## Configuration
 

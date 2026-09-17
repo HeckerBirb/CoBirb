@@ -280,3 +280,58 @@ def test_a_different_tag_of_a_present_model_is_still_a_failure(tmp_path):
     )
 
     assert not report.ok
+
+
+# --------------------------------------------------------------------------- #
+# Install: which of the three shapes, and whether --upgrade can work here
+# --------------------------------------------------------------------------- #
+def _install_report(tmp_path, monkeypatch, install):
+    from cobirb.runtime import upgrade as upgrade_module
+
+    monkeypatch.setattr(upgrade_module, "detect_install", lambda: install)
+    return _run(tmp_path, {}, check_install=True)
+
+
+def test_a_managed_install_is_fine_rather_than_a_missing_checkout(tmp_path, monkeypatch):
+    """Installing with install.sh is an ordinary, supported way to have
+    CoBirb. Reporting it as "no git checkout found" would tell most users
+    something is wrong with a perfectly good install."""
+    from cobirb.runtime import upgrade as upgrade_module
+
+    report = _install_report(tmp_path, monkeypatch, upgrade_module.Install(
+        kind=upgrade_module.MANAGED, root="/x", venv="/x/venv", version="0.13.1",
+    ))
+
+    assert _check(report, "install").status == doctor.OK
+    assert "/x/venv" in _check(report, "install").detail
+    assert report.ok
+
+
+def test_a_managed_install_is_not_checked_against_the_latest_release(tmp_path, monkeypatch):
+    """Answering "is there a newer one?" means asking GitHub, and doctor talks
+    to the endpoint you configured and nothing else. `--upgrade` is where that
+    question gets asked, by someone who typed it."""
+    from cobirb.runtime import upgrade as upgrade_module
+
+    def _boom(**kwargs):
+        raise AssertionError("doctor reached for a release listing")
+
+    monkeypatch.setattr(upgrade_module, "_latest_tag", _boom)
+    report = _install_report(tmp_path, monkeypatch, upgrade_module.Install(
+        kind=upgrade_module.MANAGED, root="/x", venv="/x/venv", version="0.13.1",
+    ))
+
+    assert _check(report, "version").status == doctor.OK
+
+
+def test_an_unmanaged_install_warns_and_names_the_installer(tmp_path, monkeypatch):
+    from cobirb.runtime import upgrade as upgrade_module
+
+    report = _install_report(
+        tmp_path, monkeypatch, upgrade_module.Install(kind=upgrade_module.UNMANAGED)
+    )
+
+    check = _check(report, "install")
+    assert check.status == doctor.WARN
+    assert "install.sh" in check.detail
+    assert report.ok  # worth knowing, but nothing here is broken

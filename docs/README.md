@@ -4,7 +4,7 @@ Short pages. Start at the top.
 
 | Page | What's in it |
 |---|---|
-| [Install](manual/install.md) | Get a `cobirb` binary on your PATH |
+| [Install](manual/install.md) | Get a `cobirb` binary on your PATH, and update or remove it later |
 | [First run](manual/first-run.md) | Point it at a model, ask it something |
 | [Commands](manual/commands.md) | Every `/command` in the app |
 | [CLI](manual/cli.md) | Flags, subcommands, one-shot and headless modes |

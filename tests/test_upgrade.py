@@ -10,7 +10,10 @@ against an actual remote) — the part a mock can't prove — while still mockin
 """
 from __future__ import annotations
 
+import json
+import os
 import subprocess
+import sys
 
 import pytest
 
@@ -357,3 +360,214 @@ def test_upgrading_works_from_a_clone_that_has_never_fetched(monkeypatch, tmp_pa
     assert result.branch == _BRANCH
     assert _branch_of(work) == _BRANCH
     assert _git_out("rev-parse", "HEAD", cwd=work) == _git_out("rev-parse", "v0.8.0", cwd=work)
+
+
+# --------------------------------------------------------------------------- #
+# Which of the three install shapes is running (`detect_install`)
+# --------------------------------------------------------------------------- #
+def _managed_marker(tmp_path, monkeypatch, *, venv=None, version="0.13.1", raw=None):
+    """Point `COBIRB_INSTALL_DIR` at a throwaway directory holding a marker.
+
+    `venv` defaults to `sys.prefix` — i.e. "the interpreter running this test
+    *is* the managed one", which is the state a real managed install is in.
+    """
+    monkeypatch.setenv("COBIRB_INSTALL_DIR", str(tmp_path))
+    marker = tmp_path / "install.json"
+    if raw is not None:
+        marker.write_text(raw)
+        return marker
+    marker.write_text(json.dumps({
+        "kind": "managed",
+        "venv": venv if venv is not None else sys.prefix,
+        "version": version,
+        "tag": f"v{version}",
+        "source": "https://example.invalid/releases/tag/v" + version,
+    }))
+    return marker
+
+
+def test_detect_install_reports_managed_when_this_interpreter_is_the_managed_one(
+    tmp_path, monkeypatch
+):
+    _managed_marker(tmp_path, monkeypatch)
+
+    install = upgrade_module.detect_install()
+
+    assert install.kind == upgrade_module.MANAGED
+    assert install.version == "0.13.1"
+
+
+def test_detect_install_ignores_a_marker_for_some_other_venv(tmp_path, monkeypatch):
+    """Somebody can have a managed install *and* a clone they hack on. The
+    question is which one is executing, so a marker pointing somewhere other
+    than this interpreter is not an answer about this interpreter."""
+    _managed_marker(tmp_path, monkeypatch, venv=str(tmp_path / "some" / "other" / "venv"))
+    monkeypatch.setattr(upgrade_module, "_find_repo_root", lambda: "/fake/repo")
+
+    assert upgrade_module.detect_install().kind == upgrade_module.CHECKOUT
+
+
+def test_detect_install_treats_an_unreadable_marker_as_not_managed(tmp_path, monkeypatch):
+    """A hand-edited or truncated marker should land on a refusal that names
+    the fix, not a JSON parse error raised from inside an upgrade."""
+    _managed_marker(tmp_path, monkeypatch, raw="{ this is not json")
+    monkeypatch.setattr(
+        upgrade_module, "_find_repo_root", lambda: (_ for _ in ()).throw(UpgradeError("nope"))
+    )
+
+    assert upgrade_module.detect_install().kind == upgrade_module.UNMANAGED
+
+
+def test_detect_install_reports_unmanaged_with_no_marker_and_no_checkout(tmp_path, monkeypatch):
+    monkeypatch.setenv("COBIRB_INSTALL_DIR", str(tmp_path / "nothing-here"))
+    monkeypatch.setattr(
+        upgrade_module, "_find_repo_root", lambda: (_ for _ in ()).throw(UpgradeError("nope"))
+    )
+
+    assert upgrade_module.detect_install().kind == upgrade_module.UNMANAGED
+
+
+# --------------------------------------------------------------------------- #
+# The managed path hands the work to install.sh rather than redoing it
+# --------------------------------------------------------------------------- #
+def test_managed_upgrade_forwards_the_release_and_force_to_the_installer(tmp_path, monkeypatch):
+    _managed_marker(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(upgrade_module, "_run_install_script", lambda args: calls.append(args))
+
+    upgrade("v0.0.3", force=True)
+
+    assert calls == [["--version", "v0.0.3", "--force"]]
+
+
+def test_managed_upgrade_with_no_release_lets_the_installer_pick_latest(tmp_path, monkeypatch):
+    _managed_marker(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(upgrade_module, "_run_install_script", lambda args: calls.append(args))
+
+    upgrade()
+
+    assert calls == [[]]
+
+
+def test_managed_upgrade_reads_the_outcome_back_off_the_marker(tmp_path, monkeypatch):
+    """What landed is whatever the installer wrote, not what was asked for —
+    it exits successfully having done nothing when the version is already
+    there, and the result has to be able to say so."""
+    marker = _managed_marker(tmp_path, monkeypatch, version="0.13.1")
+
+    def _installer(args):
+        marker.write_text(json.dumps({"venv": sys.prefix, "version": "0.14.0", "tag": "v0.14.0"}))
+
+    monkeypatch.setattr(upgrade_module, "_run_install_script", _installer)
+
+    result = upgrade()
+
+    assert (result.from_version, result.to_version) == ("0.13.1", "0.14.0")
+    assert not result.already_current
+
+
+def test_a_managed_result_says_nothing_because_the_installer_already_did(tmp_path, monkeypatch):
+    """install.sh streams its own progress and summary straight to the
+    terminal. A second summary here would just say it all again."""
+    _managed_marker(tmp_path, monkeypatch)
+    monkeypatch.setattr(upgrade_module, "_run_install_script", lambda args: None)
+
+    assert upgrade().describe() == ""
+
+
+def test_a_failing_installer_is_an_upgrade_error(tmp_path, monkeypatch):
+    _managed_marker(tmp_path, monkeypatch)
+
+    def _boom(args):
+        raise UpgradeError("the installer did not finish — its output above says why.")
+
+    monkeypatch.setattr(upgrade_module, "_run_install_script", _boom)
+
+    with pytest.raises(UpgradeError, match="did not finish"):
+        upgrade()
+
+
+def test_an_unmanaged_install_is_refused_and_told_what_would_work(tmp_path, monkeypatch):
+    monkeypatch.setenv("COBIRB_INSTALL_DIR", str(tmp_path / "nothing-here"))
+    monkeypatch.setattr(
+        upgrade_module, "_find_repo_root", lambda: (_ for _ in ()).throw(UpgradeError("nope"))
+    )
+
+    with pytest.raises(UpgradeError, match="install.sh"):
+        upgrade()
+
+
+# --------------------------------------------------------------------------- #
+# The real install.sh — the decisions a mock of it could not prove
+# --------------------------------------------------------------------------- #
+def _run_installer(*args, install_dir, extra_env=None):
+    """The bundled install.sh, for real, against a throwaway install dir.
+
+    None of these reach the network: every path exercised here is a refusal or
+    an early exit that happens before the first download.
+    """
+    env = {**os.environ, "COBIRB_INSTALL_DIR": str(install_dir)}
+    env.update(extra_env or {})
+    return subprocess.run(
+        ["sh", upgrade_module._bundled_install_script(), *args],
+        capture_output=True, text=True, env=env, timeout=60,
+    )
+
+
+def test_the_installer_ships_inside_the_package():
+    """`--upgrade` on a managed install runs the copy that came with the
+    running version, so the wheel has to actually contain one."""
+    assert os.path.isfile(upgrade_module._bundled_install_script())
+
+
+def test_the_installer_is_valid_posix_shell():
+    """It is run with `sh`, not bash, and is piped to a shell by people who
+    have not read it. A syntax error is not something to find in production."""
+    checked = subprocess.run(
+        ["sh", "-n", upgrade_module._bundled_install_script()],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert checked.returncode == 0, checked.stderr
+
+
+def test_the_installer_refuses_a_version_that_is_not_a_release(tmp_path):
+    result = _run_installer("--version", "latest", install_dir=tmp_path)
+
+    assert result.returncode != 0
+    assert "not a release version" in result.stderr
+
+
+def test_the_installer_refuses_a_downgrade_without_force(tmp_path):
+    (tmp_path / "install.json").write_text(json.dumps({"venv": "/x", "version": "0.13.1"}))
+
+    result = _run_installer("--version", "v0.0.3", install_dir=tmp_path)
+
+    assert result.returncode != 0
+    assert "downgrade" in result.stderr
+
+
+def test_the_installer_does_nothing_when_the_version_is_already_there(tmp_path):
+    (tmp_path / "install.json").write_text(json.dumps({"venv": "/x", "version": "0.13.1"}))
+
+    result = _run_installer("--version", "v0.13.1", install_dir=tmp_path)
+
+    assert result.returncode == 0
+    assert "nothing to do" in result.stdout
+
+
+def test_the_installer_leaves_a_cobirb_home_alone_when_uninstalling(tmp_path):
+    """Config, sessions and memory outlive any install. The one thing an
+    uninstaller must not do is take them with it."""
+    install_dir = tmp_path / "install"
+    install_dir.mkdir()
+    (install_dir / "install.json").write_text(json.dumps({"venv": "/x", "version": "0.13.1"}))
+    home = tmp_path / ".cobirb"
+    home.mkdir()
+    (home / "config.json").write_text("{}")
+
+    result = _run_installer("--uninstall", install_dir=install_dir)
+
+    assert result.returncode == 0
+    assert not install_dir.exists()
+    assert (home / "config.json").exists()

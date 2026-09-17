@@ -1,0 +1,56 @@
+name: release
+
+# Every version bump gets a vX.Y.Z tag (AGENTS.md §2, invariant 9), and
+# install.sh resolves releases from those tags — so the tag push is the whole
+# trigger. An untagged bump is unreachable by design.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The tag is the release. A wheel built from a commit whose version says
+      # something else would install as a version nobody can ask for again,
+      # so the mismatch stops the release here rather than surfacing as a 404
+      # in install.sh later.
+      - name: Check the tag matches the packaged version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          packaged=$(python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          if [ "$tag" != "$packaged" ]; then
+            echo "tag $GITHUB_REF_NAME does not match pyproject version $packaged" >&2
+            exit 1
+          fi
+
+      - run: pip install build
+      - run: python -m build
+
+      - name: Checksum the artifacts
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS
+
+      # install.sh is served from the release as well as shipped inside the
+      # wheel: the copy here is what a first-time user curls, the copy in the
+      # wheel is what `cobirb --upgrade` runs afterwards.
+      - name: Stage the installer
+        run: cp src/cobirb/install.sh dist/install.sh
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+            dist/install.sh
+          generate_release_notes: true
