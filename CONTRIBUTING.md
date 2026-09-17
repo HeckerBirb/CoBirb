@@ -3,17 +3,6 @@
 Thanks for considering it. CoBirb is a small, deliberate project — read on before sending a PR,
 it'll save both of us a round trip.
 
-## Ground rules
-
-A few things the project will not do, on purpose: no telemetry, no default network access, no
-tool running without your approval. A PR that reopens one of these needs a very good reason and a
-conversation first, not just code.
-
-Some features have also already been proposed and deliberately turned down (an embedded model
-runtime, for one) — if an issue or PR review points you at one of these, that's why; it's been
-thought about, so the fastest path is to make the counter-case in the issue rather than resubmit
-the same idea.
-
 ## Setting up
 
 ```bash
