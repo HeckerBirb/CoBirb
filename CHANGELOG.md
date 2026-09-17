@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.14.2]
 
 - **Fixed: `~` in a path given to a tool was treated as a directory called `~`.** "Write it to
   `~/git/c2/x.py`" produced `<cwd>/~/git/c2/x.py` and reported success. `CobirbTool._resolve` now
