@@ -212,6 +212,24 @@ TextPromptModal {
     color: $text;
 }
 
+/* The /command picker: the same five rows, plus one line for the "5 of 18"
+   counter that says how many did not fit.
+
+   One row must stay one line. These rows carry a description as well as a
+   name, so on a narrow terminal a wrapped row would take two lines, push the
+   rows below it past max-height, and silently cost the reader a command —
+   worse than a description that trails off in an ellipsis. */
+#command-picker {
+    height: auto;
+    max-height: 6;
+    padding: 0 1;
+    margin: 0 1;
+    background: $panel;
+    color: $text;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
 MemoryCataloguesModal, RememberModal, NewCatalogueModal {
     align: center middle;
 }

@@ -318,6 +318,17 @@ class TranscriptLog(RichLog):
 # the cursor — an "@" earlier in the line is already settled.
 _MENTION_IN_PROGRESS = re.compile(r"(?:^|(?<=[\s(\[{]))@([^\s@]*)$")
 
+# A command being typed, matched against the *whole* message rather than the
+# word under the cursor — a far tighter rule than the one above, and
+# deliberately so. A slash only means a command as the first word of a message
+# (`CoBirbApp._dispatch_command` and `expand_custom_command` both require the
+# prompt to start with one), so "remind me to /clear later" is prose and always
+# has been. Everywhere else a slash is overwhelmingly a path, and offering a
+# command list halfway through `src/foo.py` would be noise on nearly every
+# message. Excluding "/" from the captured run is what closes the picker again
+# on the second slash of `/usr/bin`.
+_COMMAND_IN_PROGRESS = re.compile(r"^/([^\s/]*)$")
+
 
 class PromptInput(TextArea):
     """The message box: wraps, grows to 8 lines, then scrolls.
@@ -385,10 +396,16 @@ class PromptInput(TextArea):
         # None means "not walking the history"; otherwise an index into it.
         self._position: int | None = None
         self._draft = ""
-        # Set by the app once the picker exists. Duck-typed rather than typed
-        # against the widget: this box works perfectly well with no picker
+        # Set by the app once the pickers exist. Duck-typed rather than typed
+        # against the widgets: this box works perfectly well with neither
         # attached, and the tests exercise it that way.
+        #
+        # The two can never be open at once. A mention needs whitespace or a
+        # bracket in front of its "@", and the command rule refuses any
+        # whitespace at all before the cursor — so the states are mutually
+        # exclusive by construction rather than by arbitration.
         self.mention_picker: Any = None
+        self.command_picker: Any = None
 
     # ------------------------------------------------------------------ #
     # Value, under the name every caller and test already uses
@@ -418,7 +435,7 @@ class PromptInput(TextArea):
         claims its own keys ahead of both: while a list of files is on screen,
         up/down mean "choose", not "walk the history" or "move the cursor".
         """
-        if self._mention_key(event):
+        if self._picker_key(event):
             return
         if event.key == "enter":
             event.prevent_default()
@@ -433,32 +450,86 @@ class PromptInput(TextArea):
             return
         await super()._on_key(event)
         # After the key has been applied, not before: what matters is whether
-        # the text now ends in a half-typed mention.
+        # the text now ends in a half-typed mention or command.
         self._sync_mention_picker()
+        self._sync_command_picker()
+
+    # ------------------------------------------------------------------ #
+    # Pickers
+    # ------------------------------------------------------------------ #
+    def _picker_key(self, event) -> bool:
+        """Handle one key on behalf of an open picker. Returns whether it did.
+
+        Only while a picker is actually showing something — with no list on
+        screen every one of these keys keeps its ordinary meaning, which is
+        what leaves ``enter`` submitting and up/down walking the history.
+        """
+        for picker, accept in (
+            (self.command_picker, self._accept_command),
+            (self.mention_picker, self._accept_mention),
+        ):
+            if picker is None or not picker.active:
+                continue
+            if event.key in ("up", "down"):
+                picker.move(-1 if event.key == "up" else 1)
+            elif event.key in ("enter", "tab"):
+                accept()
+            elif event.key == "escape":
+                picker.close()
+            else:
+                return False
+            event.prevent_default()
+            event.stop()
+            return True
+        return False
+
+    # ------------------------------------------------------------------ #
+    # /commands
+    # ------------------------------------------------------------------ #
+    def _command_query(self) -> "str | None":
+        """The half-typed command, if the whole message is one and nothing else.
+
+        Deliberately asks about the entire text, not the word under the
+        cursor: see ``_COMMAND_IN_PROGRESS``. The cursor must also be at the
+        very end, so going back to edit an earlier character does not reopen a
+        list over text that is already settled.
+        """
+        row, column = self.cursor_location
+        if row != 0:
+            return None
+        text = self.text
+        if column != len(text):
+            return None
+        match = _COMMAND_IN_PROGRESS.match(text)
+        return match.group(1) if match else None
+
+    def _sync_command_picker(self) -> None:
+        picker = self.command_picker
+        if picker is None:
+            return
+        query = self._command_query()
+        if query is None:
+            picker.close()
+        else:
+            picker.refresh_for(query)
+
+    def _accept_command(self) -> None:
+        """Replace the half-typed command with the highlighted one.
+
+        Ends with a space, which both readies the box for an argument and
+        closes the picker on its own — the rule above refuses any whitespace,
+        so there is nothing further to dismiss.
+        """
+        picker = self.command_picker
+        chosen = picker.current if picker else None
+        if chosen is None or self._command_query() is None:
+            return
+        self.replace(f"/{chosen} ", (0, 0), (0, len(self.text)))
+        picker.close()
 
     # ------------------------------------------------------------------ #
     # @path mentions
     # ------------------------------------------------------------------ #
-    def _mention_key(self, event) -> bool:
-        """Handle one key on behalf of an open picker. Returns whether it did.
-
-        Only while the picker is actually showing something — with no list on
-        screen every one of these keys keeps its ordinary meaning.
-        """
-        picker = self.mention_picker
-        if picker is None or not picker.active:
-            return False
-        if event.key in ("up", "down"):
-            picker.move(-1 if event.key == "up" else 1)
-        elif event.key in ("enter", "tab"):
-            self._accept_mention()
-        elif event.key == "escape":
-            picker.close()
-        else:
-            return False
-        event.prevent_default()
-        event.stop()
-        return True
 
     def _mention_query(self) -> "str | None":
         """The half-typed mention immediately before the cursor, if any.

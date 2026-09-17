@@ -48,8 +48,13 @@ class Match:
     score: int
 
 
-def _subsequence_score(query: str, candidate: str) -> int | None:
+def subsequence_score(query: str, candidate: str) -> int | None:
     """Score ``candidate`` against ``query``, or ``None`` if it doesn't match.
+
+    Public because the ``/`` command picker ranks with it too
+    (``runtime/command_index.py``). The rule it encodes — what makes a fuzzy
+    match feel deliberate — is not specific to paths, and two copies of it
+    would be two things to keep feeling the same.
 
     Matching is a subsequence test — every character of the query appears in
     the candidate, in order. The score rewards the things that make a match
@@ -91,8 +96,8 @@ def rank(query: str, paths: list[str], limit: int = 5) -> list[Match]:
     matches: list[Match] = []
     for path in paths:
         name = os.path.basename(path)
-        by_name = _subsequence_score(query, name)
-        by_path = _subsequence_score(query, path)
+        by_name = subsequence_score(query, name)
+        by_path = subsequence_score(query, path)
         if by_name is None and by_path is None:
             continue
         score = max(by_name if by_name is not None else -10**6,

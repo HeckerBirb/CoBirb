@@ -39,10 +39,12 @@ if TYPE_CHECKING:
 
 
 def cmd_help(app: "CoBirbApp", argument: str) -> None:
+    """The help screen. `/help <topic>` for one topic."""
     app.action_help(argument)
 
 
 def cmd_model(app: "CoBirbApp", argument: str) -> None:
+    """Pick a model from what your endpoint offers."""
     if argument:
         app.write_transcript(
             render.build_notice("Usage: /model — lists available models to choose from.")
@@ -52,6 +54,7 @@ def cmd_model(app: "CoBirbApp", argument: str) -> None:
 
 
 def cmd_persona(app: "CoBirbApp", argument: str) -> None:
+    """Pick a persona. `/persona <name>` switches directly."""
     # Bare /persona opens the picker, exactly like bare /model; /persona
     # <name> still switches directly, so anything scripted or recalled
     # from history keeps working.
@@ -194,13 +197,15 @@ def _ensure_public_catalogue(app: "CoBirbApp") -> None:
 
 
 def cmd_memories(app: "CoBirbApp", argument: str) -> None:
+    """Load, create, rename or delete memory catalogues."""
     _ensure_public_catalogue(app)
     app.push_screen(MemoryCataloguesModal())
 
 
 def cmd_remember(app: "CoBirbApp", argument: str) -> None:
-    """``/remember <fact>`` — save a fact into a catalogue of the user's
-    choosing.
+    """Save a fact into a catalogue of the user's choosing.
+
+    ``/remember <fact>``.
 
     Deliberately a plain slash command, not a model tool: a tool would
     either be unreachable for a model that can't call tools at all, or
@@ -220,7 +225,9 @@ def cmd_remember(app: "CoBirbApp", argument: str) -> None:
 # Images
 # --------------------------------------------------------------------------- #
 def cmd_image(app: "CoBirbApp", argument: str) -> None:
-    """``/image <path> [message]`` — attach an image to a message.
+    """Attach an image to your next message.
+
+    ``/image <path> [message]``.
 
     With no trailing text the image is queued and the message you type
     and send next carries it, the way attaching a file works anywhere
@@ -256,13 +263,16 @@ def cmd_image(app: "CoBirbApp", argument: str) -> None:
 
 
 def cmd_plan(app: "CoBirbApp", argument: str) -> None:
+    """Plan, act and validate as three phases. `/plan on|off` toggles it."""
     app.plan_mode, message = command_helpers.apply_plan_toggle(argument, app.plan_mode)
     app.query_one(StatusBar).plan_mode = app.plan_mode
     app.write_transcript(render.build_notice(message))
 
 
 def cmd_flock(app: "CoBirbApp", argument: str) -> None:
-    """``/flock <objective>`` — divide a piece of work between several agents.
+    """Divide a piece of work between several agents.
+
+    ``/flock <objective>``.
 
     Refused while an ordinary turn is running, and while another flock is:
     both would put two agents into the same working tree with no partition

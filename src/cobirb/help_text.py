@@ -109,6 +109,9 @@ INTERACTIVE KEYS
   enter sends · shift+enter starts a new line (alt+enter or ctrl+j if your
   terminal cannot tell shift+enter from enter — many cannot). The box wraps
   and grows to 8 lines, then scrolls.
+  Typing '/' at the start of a message lists the commands, your own included;
+  '@' lists files. Both: up/down to move, tab or enter to pick, escape to
+  dismiss. A '/' anywhere but the start is just text.
   f1 help · f2 next tab · ctrl+q quit · up/down recall earlier prompts (the
   last 100, in memory only — nothing you type is written to disk); in a
   multi-line message they move the cursor, and recall from the first/last

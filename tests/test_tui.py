@@ -34,6 +34,8 @@ from cobirb.plugins.core import render
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 from cobirb.runtime import personas, plugins, wiring
 from cobirb.tui.app import CoBirbApp
+from cobirb.tui import slash_commands
+from cobirb.tui.command_picker import CommandPicker
 from cobirb.tui.mention_picker import MentionPicker
 from cobirb.tui.attachments import split_argument as _split_image_argument
 from cobirb.tui.panes import PluginsPane, SessionsPane
@@ -3107,3 +3109,180 @@ async def test_clear_marks_the_session_without_deleting_anything():
         assert [t.content for t in real.turns][0] == "something earlier"
         assert session_mod.turns_since_clear(real.turns) == []
         assert "1 turn(s) before this are still in the session file" in _transcript_text(app)
+
+
+# --------------------------------------------------------------------------- #
+# /command picker: what opens it, and what it refuses to open for
+# --------------------------------------------------------------------------- #
+def _command_picker(app):
+    return app.query_one("#command-picker", CommandPicker)
+
+
+async def test_typing_a_slash_opens_the_command_picker():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        picker = _command_picker(app)
+        assert not picker.active
+
+        await _type(pilot, app, "/")
+
+        assert picker.active
+        assert picker.rows[0] == "help"  # declaration order, /help first
+
+
+async def test_the_command_picker_narrows_as_you_type():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _type(pilot, app, "/cle")
+        assert _command_picker(app).rows == ["clear"]
+
+
+async def test_the_command_picker_never_shows_more_than_five_rows_and_counts_the_rest():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _type(pilot, app, "/")
+        picker = _command_picker(app)
+
+        assert len(picker.rows) == 5
+        assert picker.total > 5  # and the widget says so on screen
+
+
+async def test_a_slash_mid_sentence_does_not_open_the_picker():
+    """A command is only a command as the first word — "remind me to /clear
+    later" is prose, and has always been sent to the model as such."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        await _type(pilot, app, "remind me to /clear")
+
+        assert not _command_picker(app).active
+
+
+async def test_a_second_slash_closes_the_picker():
+    """The rule that keeps a path from summoning a command list. "/co" still
+    looks like a half-typed command; "/co/bin" cannot be one."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        picker = _command_picker(app)
+
+        await _type(pilot, app, "/co")
+        assert picker.active
+
+        await _type(pilot, app, "/bin")
+
+        assert not picker.active
+
+
+async def test_a_space_closes_the_command_picker():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        picker = _command_picker(app)
+        await _type(pilot, app, "/clear")
+        assert picker.active
+
+        await _type(pilot, app, " ")
+
+        assert not picker.active
+
+
+async def test_escape_dismisses_the_command_picker():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        picker = _command_picker(app)
+        await _type(pilot, app, "/cle")
+        assert picker.active
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert not picker.active
+
+
+async def test_picking_a_command_fills_the_box_ready_for_an_argument():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _type(pilot, app, "/cle")
+
+        await pilot.press("tab")
+        await pilot.pause()
+
+        assert app.query_one("#prompt-input", PromptInput).text == "/clear "
+        assert not _command_picker(app).active
+
+
+async def test_enter_picks_a_command_rather_than_sending_the_message(monkeypatch):
+    """A bare "/" resolves to /help rather than submitting a lone slash."""
+    sent = []
+    monkeypatch.setattr(CoBirbApp, "_send_prompt", lambda self, prompt: sent.append(prompt))
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _type(pilot, app, "/")
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.query_one("#prompt-input", PromptInput).text == "/help "
+        assert sent == []
+
+
+async def test_enter_still_submits_when_no_picker_is_open(monkeypatch):
+    sent = []
+    monkeypatch.setattr(CoBirbApp, "_send_prompt", lambda self, prompt: sent.append(prompt))
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        await _type(pilot, app, "just a message")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert sent == ["just a message"]
+
+
+async def test_a_custom_command_is_offered_with_its_source(tmp_path):
+    commands_dir = tmp_path / ".cobirb" / "commands"
+    commands_dir.mkdir(parents=True)
+    (commands_dir / "standup.md").write_text(
+        "---\ndescription: Summarise what changed today\n---\nSummarise.\n"
+    )
+    app = _make_app(cwd=str(tmp_path))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        await _type(pilot, app, "/stand")
+
+        assert _command_picker(app).rows == ["standup"]
+
+
+async def test_a_command_row_stays_one_line_on_a_narrow_terminal():
+    """These rows carry a description as well as a name. Left to wrap, one row
+    takes two lines on a narrow terminal, pushes the rows below it past the
+    picker's height, and silently costs the reader a command."""
+    app = _make_app()
+    async with app.run_test(size=(60, 30)) as pilot:
+        await pilot.pause()
+        await _type(pilot, app, "/")
+        picker = _command_picker(app)
+
+        expected = len(picker.rows) + (1 if picker.total > len(picker.rows) else 0)
+        assert picker.region.height == expected
+
+
+async def test_every_built_in_command_has_a_description_to_show():
+    """The picker is a discovery aid; a column of blank descriptions is not
+    one. Four of these were blank when it was first wired up."""
+    from cobirb.runtime.command_index import available_commands
+
+    entries = available_commands(slash_commands.COMMANDS, "/tmp")
+
+    blank = [entry.name for entry in entries if not entry.description]
+    assert blank == []

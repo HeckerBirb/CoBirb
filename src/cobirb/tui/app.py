@@ -38,8 +38,9 @@ from ..help_text import HELP_TEXT, HELP_TOPICS
 from ..runtime import commands, personas, plugins, wiring
 from ..runtime.catalogues import CatalogueStore
 from . import slash_commands
-from ..runtime import mentions
+from ..runtime import command_index, mentions
 from .attachments import PendingAttachments
+from .command_picker import CommandPicker
 from .mention_picker import MentionPicker
 from .transcript import TranscriptView
 from ..runtime.custom_commands import expand_custom_command
@@ -222,6 +223,12 @@ class CoBirbApp(App[None]):
                 yield MentionPicker(
                     lambda: mentions.candidate_paths(self.cwd), id="mention-picker"
                 )
+                yield CommandPicker(
+                    lambda: command_index.available_commands(
+                        slash_commands.COMMANDS, self.cwd
+                    ),
+                    id="command-picker",
+                )
                 with Container(id="prompt-box"):
                     yield PromptInput(id="prompt-input")
             with TabPane("Flock", id="flock"):
@@ -272,6 +279,7 @@ class CoBirbApp(App[None]):
         )
         prompt_input = self.query_one("#prompt-input", PromptInput)
         prompt_input.mention_picker = self.query_one("#mention-picker", MentionPicker)
+        prompt_input.command_picker = self.query_one("#command-picker", CommandPicker)
         prompt_input.focus()
 
         self.refresh_plugins_pane()

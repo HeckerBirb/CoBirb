@@ -23,6 +23,18 @@ Type these in the app. Anything else starting with `/` is tried as one of your o
 
 `?` on its own opens help too.
 
+## Finding them
+
+Type `/` at the start of a message and a list appears under the prompt box — five at a time, with
+a count of how many more match. `↑`/`↓` to move, `tab` or `enter` to pick, `escape` to dismiss.
+Keep typing to narrow it; `/cle` gets you to `/clear`.
+
+Your own [custom commands](#your-own-commands) are in the list too, tagged `user` or `project`, so
+they are findable without remembering what you called them.
+
+A slash only means a command as the **first word** of a message. "remind me to /clear later" is
+prose, no list appears, and it goes to the model as written — as it always has.
+
 ## Mentioning a file
 
 Type `@` and start typing a filename. A list of up to five matches appears; **↑/↓** to move,

@@ -4,6 +4,21 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Typing `/` lists the commands.** Five rows under the prompt box, the same shape the `@` file
+  picker already has: `↑`/`↓` to move, `tab` or `enter` to pick, `escape` to dismiss, and keep
+  typing to narrow. Each row carries the command's own one-line description, and a `5 of 15`
+  counter says how many more matched than fit.
+  - **Your own commands are in the list**, tagged `user` or `project`. They were previously
+    invisible unless you already knew their names or ran `/commands`.
+  - A slash only opens it as the **first word** of a message, so "remind me to /clear later" stays
+    prose and a path like `/usr/bin` closes it again at the second slash. That matches what
+    dispatch has always done — a command mid-sentence has never run.
+  - Descriptions come from the handlers' own docstrings rather than a list kept beside them; seven
+    commands that had no summary line, or led with their signature, now read properly in `/help`
+    too.
+
 ## [0.14.2]
 
 - **Fixed: `~` in a path given to a tool was treated as a directory called `~`.** "Write it to

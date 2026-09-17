@@ -70,10 +70,10 @@ not let it quietly pick a default, narrow a feature or rule an approach out. Rai
 | `typing/spi.py` | **The plugin contract.** All SPI interfaces + shared dataclasses. |
 | `plugins/loader.py` | Discovery (entry points + local dirs), fail-closed. |
 | `plugins/core/` | Built-ins: `tools`, `model`, `io`, `crypto`, `persona`, `render`, `repomap`, `ignores`. |
-| `runtime/` | Composition layer both front-ends share: `wiring`, `plugins`, `models`, `personas`, `commands`, `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues` (which catalogues a session has open — see §6b), `mentions` (`@path` ranking + expansion), `doctor` (the readiness checks). |
+| `runtime/` | Composition layer both front-ends share: `wiring`, `plugins`, `models`, `personas`, `commands`, `command_index` (what the `/` picker lists and how it ranks), `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues` (which catalogues a session has open — see §6b), `mentions` (`@path` ranking + expansion), `doctor` (the readiness checks). |
 | `mcp/` | stdio MCP client (`client`) and its tool adapter (`tools`). |
 | `flock/` | Multi-agent runs: `charter`, `brainy`, `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. |
-| `tui/` | Textual app: `app` (the application itself — mount, input, the turn, workers, actions), `slash_commands` (what each `/command` does, as `(app, argument)` functions + the `COMMANDS` table), `transcript` (everything written to the transcript, and the flush-before-write ordering rule), `attachments` (images queued by `/image` for the next message), `mention_picker` (the five-row `@path` list), `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. |
+| `tui/` | Textual app: `app` (the application itself — mount, input, the turn, workers, actions), `slash_commands` (what each `/command` does, as `(app, argument)` functions + the `COMMANDS` table), `transcript` (everything written to the transcript, and the flush-before-write ordering rule), `attachments` (images queued by `/image` for the next message), `mention_picker` (the five-row `@path` list), `command_picker` (the five-row `/command` list), `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. |
 | `help_text.py` | The prose `cobirb help [topic]` prints. |
 | `install.sh` | The installer, shipped inside the package. Also the upgrader and downgrader — see §14. |
 | `personas/*.json` | Bundled personas: `professional`, `neighbor`, `kawaii`. |
@@ -361,7 +361,18 @@ answered "no" got what they asked for.
 `/flock`, `/memories`, `/remember`, `/image`; `@path` in the prompt box opens a five-row fuzzy picker
 (`tui/mention_picker.py`, ranked by `runtime/mentions.py`) and sends the named file with the
 message — expanded on the way to the model, never into the transcript. Anything else
-starting with `/` is tried as a custom command, then sent to the model unchanged. Keys: `f1` help,
+starting with `/` is tried as a custom command, then sent to the model unchanged.
+
+**`/` opens the command picker** (`tui/command_picker.py`, listed and ranked by
+`runtime/command_index.py`) — the same five rows, plus a `5 of 15` counter, plus each command's own
+description, taken from the first line of its handler's docstring rather than a table kept beside
+them. Custom commands are included and tagged with their source; one shadowed by a built-in name is
+not, because the built-in is what would run. `_COMMAND_IN_PROGRESS` matches the **whole message**
+(`^/([^\s/]*)$`), not the word under the cursor as `@` does: a slash only means a command as the
+first word, so this keeps a path from summoning a list and leaves "remind me to /clear later" as
+prose. `command_index.rank` returns every match rather than a capped slice because the counter has
+to know how many did not fit, and `#command-picker` sets `text-wrap: nowrap` so a description can
+never wrap a row onto a second line and push another off the bottom. Keys: `f1` help,
 `f2` next tab, `ctrl+q` quit, `ctrl+c` copy selection else cancel the turn, `up`/`down` recall the
 last 100 prompts (memory only). The prompt box stays enabled during a turn — submitting again
 steers rather than queueing. Tool approval is a modal (`y` once / `a` always / `n`/escape deny) and
