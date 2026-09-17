@@ -8,7 +8,7 @@
 
 A privacy-first, agentic coding CLI for local LLMs and your eyes only.
 
-![CoBirb's interactive mode](docs/images/cobirb.png)
+![CoBirb's interactive mode](docs/images/cobirb-demo.gif)
 
 > **Privacy-first by design.**
 

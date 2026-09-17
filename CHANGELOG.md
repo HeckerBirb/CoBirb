@@ -4,8 +4,10 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.15.0]
 
+- **A demo GIF replaces the static screenshot in the README.** `docs/images/cobirb-demo.gif`
+  shows the interactive app actually being used rather than one frame of it.
 - **Typing `/` lists the commands.** Five rows under the prompt box, the same shape the `@` file
   picker already has: `↑`/`↓` to move, `tab` or `enter` to pick, `escape` to dismiss, and keep
   typing to narrow. Each row carries the command's own one-line description, and a `5 of 15`
