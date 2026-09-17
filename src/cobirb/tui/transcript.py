@@ -20,6 +20,7 @@ from typing import Any, Iterable
 from rich.text import Text
 
 from ..plugins.core import render
+from ..session import turns_since_clear
 from .widgets import StreamPreview, TranscriptLog
 
 
@@ -106,8 +107,17 @@ class TranscriptView:
 
         Bracketed by dim rules so restored turns are never mistaken for
         something that just happened.
+
+        Replays only what follows the most recent ``/clear``. Someone who
+        cleared a conversation and moved on to something else has said that
+        the earlier part is behind them; reopening the session and being shown
+        all of it again would be an unpleasant surprise, and would show a
+        conversation the model itself is no longer being given. The turns are
+        still in the session file — this is about what is put back on screen,
+        not about what was kept.
         """
         log = self._log
+        turns = turns_since_clear(turns)
         if not turns:
             log.write(render.build_notice(f"{label} — no turns yet; your next message starts it."))
             return

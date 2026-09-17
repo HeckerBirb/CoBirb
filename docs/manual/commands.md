@@ -11,6 +11,7 @@ Type these in the app. Anything else starting with `/` is tried as one of your o
 | `/plan on` · `/plan off` | Plan → act → validate as three separate phases. |
 | `/plan` | Say whether plan mode is on. |
 | `/context` | How much of the model's window this session is using. |
+| `/clear` | Start over from here — clears the screen and the model's context, deletes nothing. |
 | `/diff` | Everything the agent changed this session, as one diff. |
 | `/undo` | Put back the files the last turn changed. |
 | `/export [PATH]` | Write the session out as markdown (plaintext). |

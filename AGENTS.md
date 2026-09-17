@@ -116,6 +116,11 @@ prompt → model call → tool calls (policy-gated) → results into history →
   separate sets that never imply one another. `shell` is in neither: it cannot say what it touches.
 - Paths resolve with `realpath` against the policy's `cwd`, so `..`/symlinks cannot escape a grant;
   `_within` requires a separator so `/x/project-secrets` never matches a grant for `/x/project`.
+- **`Policy._resolve` and `CobirbTool._resolve` must mirror each other step for step** — `~`
+  expansion included. The policy's job is to say where a call will land *before* it is approved,
+  so any difference between the two is a permission check performed on a path the tool will not
+  use. They were once out of step on `~`: neither expanded it, so `~/notes/x.md` was gated, and
+  then written, as a directory literally named `~` under the cwd.
 - `shell` is checked **per command segment** (`git status; rm -rf /` is two commands, both must
   pass). Allow rules are either a bare binary (any arguments) or an exact multi-word prefix.
 - Refused outright as unverifiable: backticks, `$(...)`, subshells, unbalanced quotes, and
@@ -212,6 +217,16 @@ all and CoBirb has to ask rather than assume. `/export` shows a `📎 filename` 
 states `num_ctx` on every request, so the window is asked for rather than guessed. `history_budget`
 reserves 20 % clamped to 2048–16384 tokens. Estimation is `len(text) // 4`.
 
+`/clear` (`session.turns_since_clear`) sets where the conversation is read *from*. It appends a
+turn with `role == "clear"` and nothing else: no deletion, no schema bump, no migration — a role
+rather than a new `Turn` field because `Turn.digest()` is compared against a hash written by
+whichever CoBirb saved the file, so extending that formula would fail every older session. Two
+callers share the one helper and must not drift: `Orchestrator._build_context` (what the model is
+sent) and `tui/transcript.render_history` (what a resumed session redraws). A resumed session
+showing turns the model cannot see, or hiding ones it can, is worse than not having the feature.
+Everything before the marker stays in the file, so the session remains a complete record and
+`/export` still writes all of it.
+
 `compact()` runs four passes, in increasing order of loss, and short sessions return unchanged:
 1. Elide old tool results outside the last `_KEEP_RECENT = 6` turns (≥400 chars; keeps the call, drops the body).
 2. Drop a contiguous run of oldest turns after turn 0, never starting the remainder on an orphaned tool result, leaving a note.
@@ -231,6 +246,15 @@ what offset continues), 500 grep matches, 300 chars per matching line, 1000 list
 `shell` runs in its own process group (POSIX), default timeout 300 s clamped to 600 s, and exposes
 `cancel_running()` so the TUI's Ctrl+C can unstick it. `glob`/`grep` honour `.gitignore` plus a
 built-in vendor/cache list unless `include_ignored: true`.
+
+**Each `shell` call is its own process, so a `cd` does not survive it** — and reported as a bare
+`exit=0` that was indistinguishable from one that had. Two halves, both needed: an optional `cwd`
+argument (resolved through `_resolve`, so it honours `--cwd` and `~`) gives the model a stateless
+way to say where, and `_changes_directory_only()` appends a note to a line that is *only* `cd`s
+saying it did not persist. That detector is advisory and deliberately fail-**open** — it decides
+whether a result carries a note, never what may run — which is why it does not share an
+implementation with `policy._segments`, which must fail closed. Making the cwd genuinely
+persistent was not done: see §17's note on `ShellTool`'s per-call process state.
 
 ## 9. Model provider (`plugins/core/model.py`)
 
@@ -333,8 +357,8 @@ managed install: that is a request to GitHub, and doctor talks to the configured
 answered "no" got what they asked for.
 
 **TUI** — four tabs: Current, Flock, Sessions, Plugins. Slash commands `/help`, `/model`,
-`/persona`, `/plan`, `/context`, `/undo`, `/export`, `/diff`, `/commands`, `/flock`, `/memories`,
-`/remember`, `/image`; `@path` in the prompt box opens a five-row fuzzy picker
+`/persona`, `/plan`, `/context`, `/clear` (§7), `/undo`, `/export`, `/diff`, `/commands`,
+`/flock`, `/memories`, `/remember`, `/image`; `@path` in the prompt box opens a five-row fuzzy picker
 (`tui/mention_picker.py`, ranked by `runtime/mentions.py`) and sends the named file with the
 message — expanded on the way to the model, never into the transcript. Anything else
 starting with `/` is tried as a custom command, then sent to the model unchanged. Keys: `f1` help,

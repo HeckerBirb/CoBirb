@@ -29,7 +29,15 @@ from .runtime.hooks import (
     HookRunner,
 )
 from .runtime.verify import VerifySettings, run_verification
-from .session import PHASE_ACT, PHASE_PLAN, PHASE_VALIDATE, Session, SessionManager, Turn
+from .session import (
+    PHASE_ACT,
+    PHASE_PLAN,
+    PHASE_VALIDATE,
+    Session,
+    SessionManager,
+    Turn,
+    turns_since_clear,
+)
 from .typing import spi as cobirb_typing
 
 logger = logging.getLogger("cobirb")
@@ -715,9 +723,14 @@ class Orchestrator:
         ``cobirb.context``). A short session is returned unchanged; a long one
         loses its oldest tool results first and its oldest turns only if that
         wasn't enough.
+
+        Starts after the most recent ``/clear`` when there is one. That marker
+        is a point in the conversation rather than a deletion — the turns
+        before it are still in the session file — so this is the one place
+        that decides they are no longer part of what the model is answering.
         """
         turns = []
-        for t in session.turns:
+        for t in turns_since_clear(session.turns):
             entry: dict[str, Any] = {"role": t.role, "content": t.content, "tool_use": t.tool_use}
             if t.images:
                 # Resolved against the session's own (already-decrypted) image

@@ -50,6 +50,23 @@ cobirb --export session.md
 Or `/export` in the app. **The export is plaintext** — that's the point of asking for one. The
 session itself stays encrypted.
 
+## Start over without losing it
+
+```
+/clear
+```
+
+Clears the screen and the model's context together. Your next message starts a fresh
+conversation, and the model is no longer answering from what came before.
+
+**Nothing is deleted.** `/clear` records a marker turn — a point in the history, the way
+committing an emptied file is a new commit rather than a rewrite of the ones before it. The
+earlier turns stay in the session file, so it remains a complete record of what actually
+happened, and `/export` still writes all of it out.
+
+Reopening a cleared session picks up from the marker: you see what you saw when you left, not the
+whole conversation again.
+
 ## What's in the file
 
 AES-256-GCM over a key derived from your password with scrypt. The password is never stored.

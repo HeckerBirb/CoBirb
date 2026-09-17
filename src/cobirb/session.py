@@ -126,6 +126,32 @@ def discover_sessions(directory: str) -> list[SessionFile]:
     return files
 
 
+# The role of the marker `/clear` appends. A role rather than a new field on
+# `Turn`, and that is load-bearing: `Turn.digest()` is compared against a hash
+# written by whichever CoBirb saved the file, so adding a field to the formula
+# would fail every session written before it existed (see that docstring).
+# `role` is already part of the digest, so a marker costs no schema bump and
+# no migration — an older CoBirb reading one of these sees a turn with an
+# unfamiliar role and shows it, rather than failing to load the session.
+CLEAR_ROLE = "clear"
+
+
+def turns_since_clear(turns: "list[Any]") -> "list[Any]":
+    """The turns after the most recent ``/clear``, or all of them.
+
+    The single definition of what a clear marker means, shared by the two
+    places that must agree about it: the context the model is sent
+    (``Orchestrator._build_context``) and the history drawn on resume
+    (``tui/transcript.render_history``). If those disagreed, a resumed
+    session would show a conversation the model cannot see, or hide one it
+    can — and either is worse than not having the feature.
+    """
+    for index in range(len(turns) - 1, -1, -1):
+        if getattr(turns[index], "role", "") == CLEAR_ROLE:
+            return list(turns[index + 1:])
+    return list(turns)
+
+
 @dataclass
 class Turn:
     """A single user or assistant message."""
@@ -260,6 +286,17 @@ class Session:
 
     def add_text(self, role: str, content: str) -> None:
         self.add(Turn(role=role, content=content))
+
+    def add_clear(self) -> None:
+        """Mark "start over from here" — what ``/clear`` records.
+
+        A turn like any other, deliberately: clearing is a point in the
+        conversation, not a rewrite of it. Nothing before this is deleted,
+        so the session file remains a complete record of what happened for
+        anyone auditing or debugging it later; it is only what gets replayed
+        — to the model, and onto the screen — that starts here.
+        """
+        self.add(Turn(role=CLEAR_ROLE, content=""))
 
     def to_dict(self) -> dict[str, Any]:
         return {

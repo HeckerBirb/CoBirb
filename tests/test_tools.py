@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import difflib
+import os
 import threading
 import time
 from types import SimpleNamespace
@@ -772,3 +773,125 @@ def test_shell_output_keeps_both_ends_when_it_overflows(tmp_path):
     assert "THE VERY FIRST LINE" in result.content
     assert "THE VERY LAST LINE" in result.content
     assert "omitted" in result.content
+
+
+# --------------------------------------------------------------------------- #
+# `~` expansion.
+#
+# `~` is neither absolute nor meaningfully relative, so joining it to the
+# configured cwd made a directory *literally named* `~`: "write it to
+# ~/notes/x.md" silently produced `<cwd>/~/notes/x.md` and reported success.
+# `HOME` is redirected per test so none of this can touch a real one.
+# --------------------------------------------------------------------------- #
+def test_write_file_expands_a_leading_tilde_to_the_home_directory(tmp_path, monkeypatch):
+    home, work = tmp_path / "home", tmp_path / "work"
+    home.mkdir()
+    work.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    result = WriteFileTool(cwd=str(work)).execute({"path": "~/notes/x.md", "content": "hi"})
+
+    assert result.ok
+    assert (home / "notes" / "x.md").read_text() == "hi"
+    assert not (work / "~").exists()
+
+
+def test_read_file_expands_a_leading_tilde(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    (home / "a.txt").write_text("from home")
+
+    result = ReadFileTool(cwd=str(tmp_path / "elsewhere")).execute({"path": "~/a.txt"})
+
+    assert result.ok
+    assert result.content == "from home"
+
+
+def test_a_tilde_inside_a_name_is_not_a_home_reference(tmp_path):
+    """Only a *leading* `~` names a home directory. A file with one in the
+    middle of its name is an ordinary relative path."""
+    nested = tmp_path / "a~b"
+    nested.mkdir()
+
+    result = WriteFileTool(cwd=str(tmp_path)).execute({"path": "a~b/note.txt", "content": "x"})
+
+    assert result.ok
+    assert (nested / "note.txt").read_text() == "x"
+
+
+# --------------------------------------------------------------------------- #
+# `cd` does not survive a shell call, and says so.
+#
+# Each call is its own process, so `cd somewhere` moves a shell that exits
+# immediately afterwards. Reported as a bare `exit=0` that is indistinguishable
+# from success, it reads as a working directory change and the mistake only
+# surfaces when something later runs in the wrong place.
+# --------------------------------------------------------------------------- #
+def test_a_directory_change_does_not_carry_into_the_next_call(tmp_path):
+    """The reported behaviour: `cd` then `pwd` reports the original directory."""
+    (tmp_path / "sub").mkdir()
+    tool = ShellTool(cwd=str(tmp_path))
+
+    tool.execute({"command": "cd sub"})
+    after = tool.execute({"command": "pwd"})
+
+    assert os.path.realpath(after.content.splitlines()[1]) == os.path.realpath(str(tmp_path))
+
+
+def test_a_cd_only_command_says_it_did_not_persist(tmp_path):
+    (tmp_path / "sub").mkdir()
+
+    result = ShellTool(cwd=str(tmp_path)).execute({"command": "cd sub"})
+
+    assert result.ok
+    assert "next call starts in" in result.content
+
+
+def test_a_cd_chained_with_real_work_is_not_flagged(tmp_path):
+    """`cd build && make` is the thing that *does* work, so it must not be
+    told it doesn't."""
+    (tmp_path / "sub").mkdir()
+
+    result = ShellTool(cwd=str(tmp_path)).execute({"command": "cd sub && pwd"})
+
+    assert result.ok
+    assert "next call starts in" not in result.content
+    assert os.path.realpath(result.content.splitlines()[1]) == os.path.realpath(str(tmp_path / "sub"))
+
+
+def test_a_quoted_cd_is_not_a_directory_change(tmp_path):
+    """Only a command that really is a `cd`. `echo 'cd x'` prints a string."""
+    result = ShellTool(cwd=str(tmp_path)).execute({"command": "echo 'cd x'"})
+
+    assert result.ok
+    assert "next call starts in" not in result.content
+
+
+def test_shell_runs_in_the_cwd_argument_when_given(tmp_path):
+    """The stateless alternative to `cd`: say where, per call."""
+    (tmp_path / "sub").mkdir()
+
+    result = ShellTool(cwd=str(tmp_path)).execute({"command": "pwd", "cwd": "sub"})
+
+    assert result.ok
+    assert os.path.realpath(result.content.splitlines()[1]) == os.path.realpath(str(tmp_path / "sub"))
+
+
+def test_the_shell_cwd_argument_expands_a_tilde(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    result = ShellTool(cwd=str(tmp_path)).execute({"command": "pwd", "cwd": "~"})
+
+    assert result.ok
+    assert os.path.realpath(result.content.splitlines()[1]) == os.path.realpath(str(home))
+
+
+def test_a_missing_shell_cwd_is_reported_as_such(tmp_path):
+    """Rather than as whatever confusing error the shell would raise."""
+    result = ShellTool(cwd=str(tmp_path)).execute({"command": "pwd", "cwd": "nope"})
+
+    assert not result.ok
+    assert "No such directory" in result.content

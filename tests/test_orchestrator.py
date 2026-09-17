@@ -1573,3 +1573,31 @@ def test_an_earlier_turns_image_is_not_attributed_to_a_later_one():
     second_turn = sent[-1]
     assert second_turn["content"] == "second"
     assert "images" not in second_turn
+
+
+# --------------------------------------------------------------------------- #
+# /clear decides where the model reads the conversation from
+# --------------------------------------------------------------------------- #
+def test_context_starts_after_the_most_recent_clear():
+    """The contract `/clear` exists for: turns before the marker are still in
+    the session, and are no longer part of what the model is answering."""
+    orchestrator = Orchestrator(model=_DummyModel(), tools={}, policy=Policy())
+    session = orchestrator.run("first question", "sys", cwd="/tmp")
+    session.add_clear()
+    session.add_text("user", "unrelated new question")
+
+    context = json.loads(orchestrator._build_context(session))
+
+    contents = [turn["content"] for turn in context]
+    assert "unrelated new question" in contents
+    assert "first question" not in contents
+    assert len(session.turns) > len(context)  # nothing was deleted to achieve it
+
+
+def test_context_is_unchanged_by_a_session_that_was_never_cleared():
+    orchestrator = Orchestrator(model=_DummyModel(), tools={}, policy=Policy())
+    session = orchestrator.run("a question", "sys", cwd="/tmp")
+
+    context = json.loads(orchestrator._build_context(session))
+
+    assert len(context) == len(session.turns)

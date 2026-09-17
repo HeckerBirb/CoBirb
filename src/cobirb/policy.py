@@ -307,13 +307,22 @@ class Policy:
     # Directory-scoped reads
     # ------------------------------------------------------------------ #
     def _resolve(self, path: str) -> str:
-        """A path as the tools will actually resolve it: relative to this
-        policy's working directory, then fully resolved.
+        """A path as the tools will actually resolve it: ``~`` expanded,
+        relative to this policy's working directory, then fully resolved.
 
         ``realpath`` rather than ``abspath`` so that ``..`` and symlinks
         cannot be used to name a file outside an approved directory while
         looking like one inside it.
+
+        **This must mirror ``CobirbTool._resolve`` step for step.** The whole
+        point of this method is to decide, before approving a call, which file
+        that call will touch — so any difference between the two is a
+        permission check performed on a path the tool is not going to use.
+        ``~`` is expanded here for exactly that reason: the tool expands it,
+        therefore `~/x` must be gated as the file in the home directory it
+        will really become, not as a literal `~` directory under the cwd.
         """
+        path = os.path.expanduser(path)
         if not os.path.isabs(path):
             path = os.path.join(self.cwd, path)
         return os.path.realpath(path)

@@ -29,9 +29,10 @@ from ..plugins.core import render
 from ..runtime import commands as command_helpers
 from ..runtime.custom_commands import describe_commands, discover_commands
 from ..runtime.export import write_export
+from ..session import turns_since_clear
 from . import attachments
 from .screens import MemoryCataloguesModal, RememberModal
-from .widgets import PromptInput, StatusBar
+from .widgets import PromptInput, StatusBar, TranscriptLog
 
 if TYPE_CHECKING:
     from .app import CoBirbApp
@@ -113,6 +114,36 @@ def cmd_diff(app: "CoBirbApp", argument: str) -> None:
         app.write_transcript(render.build_notice("No files have been changed this session."))
         return
     app.write_transcript(render.build_preview_panel("this session", diff))
+
+
+def cmd_clear(app: "CoBirbApp", argument: str) -> None:
+    """Start over from here: clear the screen, and the model's context with it.
+
+    **Not a deletion.** The turns before this stay in the session file exactly
+    as they were; what changes is where the conversation is read from. Clearing
+    is a point in the history — the way committing an emptied file is a new
+    commit rather than a rewrite of the ones before it — so the record of what
+    happened survives for anyone auditing or debugging it, while the model and
+    the screen both start again from here.
+
+    Both halves matter together. Clearing the screen without clearing the
+    context leaves the model answering from a conversation the user believes is
+    gone; clearing the context without the screen leaves the user reading one
+    the model cannot see.
+    """
+    app.query_one("#transcript", TranscriptLog).clear()
+    session_data = getattr(getattr(app.orchestrator, "session", None), "session", None)
+    if session_data is None:
+        app.write_transcript(render.build_notice("Cleared — nothing had been said yet."))
+        return
+    dropped = len(turns_since_clear(session_data.turns))
+    session_data.add_clear()
+    app.write_transcript(
+        render.build_notice(
+            f"Cleared. The {dropped} turn(s) before this are still in the session file, "
+            "but are no longer sent to the model. Your next message starts fresh."
+        )
+    )
 
 
 def cmd_export(app: "CoBirbApp", argument: str) -> None:
@@ -278,6 +309,7 @@ COMMANDS: "dict[str, Callable[[CoBirbApp, str], None]]" = {
     "/persona": cmd_persona,
     "/plan": cmd_plan,
     "/context": cmd_context,
+    "/clear": cmd_clear,
     "/undo": cmd_undo,
     "/export": cmd_export,
     "/diff": cmd_diff,

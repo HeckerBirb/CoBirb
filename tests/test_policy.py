@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 
+from cobirb.plugins.core.tools import WriteFileTool
 from cobirb.policy import AuditLog, Policy, _segments
 
 
@@ -331,3 +332,55 @@ def test_a_write_grant_does_not_escape_sideways(tmp_path):
 
     assert not policy.is_allowed("write_file", {"path": "src-vendor/a.py"})
     assert not policy.is_allowed("write_file", {"path": "../outside.py"})
+
+
+# --------------------------------------------------------------------------- #
+# `~` is gated as the file it will actually become.
+#
+# Policy._resolve exists to answer "where will this call land?" before the
+# call is approved. If it expanded `~` differently from the tool that runs
+# afterwards, the approval prompt would name one path and the write would hit
+# another — so these pin the agreement, not just the expansion.
+# --------------------------------------------------------------------------- #
+def test_a_tilde_path_is_scoped_to_the_home_directory_not_the_cwd(tmp_path, monkeypatch):
+    home, work = tmp_path / "home", tmp_path / "work"
+    home.mkdir()
+    work.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    policy = Policy(cwd=str(work))
+
+    # Approving the working directory must not carry `~/secrets.txt` with it.
+    policy.allow_write_dir(str(work))
+    assert not policy.is_allowed("write_file", {"path": "~/secrets.txt"})
+
+    policy.allow_write_dir(str(home))
+    assert policy.is_allowed("write_file", {"path": "~/secrets.txt"})
+
+
+def test_the_approval_scope_offered_for_a_tilde_path_is_in_the_home(tmp_path, monkeypatch):
+    """The directory an "always" answer would approve has to be the real one:
+    offering `<cwd>/~` would grant a directory that is never written to."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    policy = Policy(cwd=str(tmp_path / "work"))
+
+    scope = policy.path_scope("write_file", {"path": "~/notes/x.md"})
+
+    assert scope == os.path.realpath(str(home / "notes"))
+
+
+def test_policy_and_tool_resolve_a_tilde_path_to_the_same_file(tmp_path, monkeypatch):
+    """The invariant the two _resolve methods exist to keep. Checked through
+    behaviour: the policy approves a directory, and the write lands in it."""
+    home, work = tmp_path / "home", tmp_path / "work"
+    home.mkdir()
+    work.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    policy = Policy(cwd=str(work))
+    policy.allow_write_dir(str(home))
+
+    assert policy.is_allowed("write_file", {"path": "~/x.txt"})
+    WriteFileTool(cwd=str(work)).execute({"path": "~/x.txt", "content": "landed"})
+
+    assert (home / "x.txt").read_text() == "landed"

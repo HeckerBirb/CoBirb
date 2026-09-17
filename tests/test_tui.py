@@ -29,6 +29,7 @@ from textual.widgets.option_list import Option
 from conftest import StubSession, StubSessionManager
 
 from cobirb import cli, memory, paths, session
+from cobirb import session as session_mod
 from cobirb.plugins.core import render
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 from cobirb.runtime import personas, plugins, wiring
@@ -3067,3 +3068,42 @@ async def test_a_prompt_with_no_mention_reaches_the_model_unchanged(tmp_path, mo
         await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert builds[0]["built"].calls[0]["prompt"] == "just a question"
+
+
+# --------------------------------------------------------------------------- #
+# /clear — the screen and the model's context, together
+# --------------------------------------------------------------------------- #
+async def test_clear_empties_the_transcript():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert "CoBirb ready." in _transcript_text(app)
+
+        await _submit(pilot, app, "/clear")
+
+        text = _transcript_text(app)
+        assert "CoBirb ready." not in text  # the greeting above it is gone
+        assert "Cleared" in text
+
+
+async def test_clear_marks_the_session_without_deleting_anything():
+    """Both halves of the promise in one place: the model stops seeing the
+    earlier turns, and the session file still has them.
+
+    A real `Session` behind stub plumbing — the session is what is under test,
+    the manager around it is not.
+    """
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        real = session_mod.Session()
+        real.add_text("user", "something earlier")
+        app.orchestrator = SimpleNamespace(
+            session=SimpleNamespace(session=real), close=lambda: None
+        )
+
+        await _submit(pilot, app, "/clear")
+
+        assert [t.content for t in real.turns][0] == "something earlier"
+        assert session_mod.turns_since_clear(real.turns) == []
+        assert "1 turn(s) before this are still in the session file" in _transcript_text(app)

@@ -82,6 +82,9 @@ INTERACTIVE COMMANDS
                      undo what a shell command did — see 'help tools'.
   /context           Show how much of the model's context window this
                      session is using, and what has been compacted away.
+  /clear             Start over from here: clears the screen and the
+                     model's context. Nothing is deleted — the turns
+                     before it stay in the session file.
   /plan on|off       Toggle plan mode mid-conversation.
   /plan              Show whether plan mode is currently on.
   /commands          List your own prompt files, invocable by name. Any

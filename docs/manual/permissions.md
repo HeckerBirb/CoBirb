@@ -56,6 +56,22 @@ prompt, so being strict costs a keystroke, not a capability.
 
 Narrow rules beat broad ones: `shell(git status)` over `shell(git)` over `shell`.
 
+### Each command is its own process
+
+A `cd` does not carry over to the next `shell` call — the shell it moved has already exited. Put
+it in the same command (`cd build && make`), or pass `cwd` to run one call somewhere else. A
+command that is *only* a `cd` says so in its result rather than reporting a bare success.
+
+## Paths and `~`
+
+A path a tool is given is resolved the same way whether it is being checked or used: `~` expands
+to your home directory, and anything else relative resolves against the working directory
+(`--cwd`, or where you started CoBirb).
+
+That matters for approvals. `~/notes/x.md` is gated as the file in your home directory it will
+really become — so approving the directory you are working in does **not** carry it, and an
+"always" answer to it approves `~/notes`, not something under your project.
+
 ## Headless
 
 `--headless` never prompts and refuses anything not already permitted. Exit code `2` means it

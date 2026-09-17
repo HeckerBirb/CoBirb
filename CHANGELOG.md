@@ -4,6 +4,28 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Fixed: `~` in a path given to a tool was treated as a directory called `~`.** "Write it to
+  `~/git/c2/x.py`" produced `<cwd>/~/git/c2/x.py` and reported success. `CobirbTool._resolve` now
+  expands it — and so does `Policy._resolve`, in the same change and for the same reason: the
+  policy exists to say where a call will land *before* it is approved, so the two resolving
+  differently would mean approving one path and writing another. A `~` path is now gated as the
+  file in your home directory it will really become, which also means approving your working
+  directory does not quietly carry it.
+- **Fixed: a `cd` in `shell` looked like it worked.** Each call is its own process, so `cd
+  somewhere` moved a shell that exited immediately after, and the next call started where the last
+  one did — reported as a bare `exit=0`, indistinguishable from having stuck, with the mistake
+  only surfacing when something later ran in the wrong place. A command that is *only* a `cd` now
+  says so in its result, and `shell` takes an optional `cwd` argument for running one call
+  somewhere else without a `cd` at all.
+- **`/clear`.** Starts the conversation over from here: clears the screen and the model's context
+  together. **Nothing is deleted** — it records a marker turn, a point in the history the way
+  committing an emptied file is a new commit rather than a rewrite of the ones before it. The
+  earlier turns stay in the session file, so it remains a complete record for auditing, and
+  `/export` still writes all of it out. Reopening a cleared session picks up from the marker
+  rather than replaying a conversation you had already put behind you.
+
 ## [0.14.1]
 
 - **Fixed: `install.sh` could not work out the latest release.** It read the tag off GitHub's

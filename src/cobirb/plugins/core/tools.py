@@ -69,7 +69,20 @@ class CobirbTool(Tool):
         instead of whatever --cwd/session cwd the tool was configured
         with, silently reading/writing the wrong location whenever the two
         differ.
+
+        ``~`` is expanded first, because it is neither absolute nor relative
+        to anything: joined as-is it becomes a *directory literally named*
+        ``~`` under the working directory, so "write it to ~/notes/x.md"
+        quietly produced ``<cwd>/~/notes/x.md`` and reported success. The
+        expansion has to happen before the ``isabs`` test, since ``~/x`` only
+        becomes absolute once expanded.
+
+        **``Policy._resolve`` resolves the same way and must keep doing so.**
+        It exists to answer "where will this call actually land?" before the
+        call is approved; the two drifting apart means a prompt naming one
+        path and a write hitting another.
         """
+        path = os.path.expanduser(path)
         if os.path.isabs(path):
             return path
         return os.path.join(self._cwd or ".", path)
@@ -796,6 +809,50 @@ def _shell_timeout(value: Any) -> float:
     return min(seconds, float(_MAX_SHELL_TIMEOUT))
 
 
+# Tokens the shell treats as the end of one command and the start of another.
+_SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
+
+
+def _changes_directory_only(command: str) -> bool:
+    """Whether every command on this line is a bare ``cd``.
+
+    Such a line does nothing that outlives it. Each ``shell`` call is its own
+    process (see ``ShellTool.execute``), so ``cd somewhere`` moves a shell
+    that exits a moment later, and the *next* call starts where this one did.
+    Reported as ``exit=0`` with no output, that is indistinguishable from
+    having worked, and the mistake only surfaces later when something reads
+    the wrong directory.
+
+    Deliberately fail-open and advisory: this decides whether a result
+    carries an explanatory note, never whether anything may run, so a line
+    this cannot read confidently returns ``False`` and simply says nothing.
+    That is the opposite of ``policy._segments``, which must fail *closed*
+    because it is deciding what is permitted — which is why the two do not
+    share an implementation.
+    """
+    import shlex
+
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token in _SHELL_SEPARATORS:
+            if current:
+                segments.append(current)
+            current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(current)
+    return bool(segments) and all(segment and segment[0] == "cd" for segment in segments)
+
+
 class ShellTool(CobirbTool):
     """Highest-privilege tool. Gated behind the permission layer.
 
@@ -825,13 +882,25 @@ class ShellTool(CobirbTool):
         self._cancel_requested = False
 
     def description(self) -> str:
-        return "Execute a shell command. Requires explicit approval."
+        return (
+            "Execute a shell command. Requires explicit approval. Each call runs in "
+            "its own process, so a directory change does not carry over to the next "
+            "one: chain it ('cd build && make') or pass 'cwd' instead."
+        )
 
     def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": "Shell command to execute."},
+                "cwd": {
+                    "type": "string",
+                    "description": (
+                        "Directory to run the command in, relative to the working "
+                        "directory unless absolute. Use this instead of a separate "
+                        "'cd', which does not persist between calls."
+                    ),
+                },
                 "timeout": {
                     "type": "number",
                     "description": (
@@ -849,12 +918,22 @@ class ShellTool(CobirbTool):
 
         command = arguments["command"]
         timeout = _shell_timeout(arguments.get("timeout"))
+
+        requested_cwd = arguments.get("cwd")
+        cwd = self._resolve(str(requested_cwd)) if requested_cwd else self._cwd
+        if cwd is not None and not os.path.isdir(cwd):
+            return ToolResult(
+                ok=False,
+                content=f"No such directory: {cwd}",
+                error="cwd not found",
+            )
+
         self._cancel_requested = False
         try:
             process = subprocess.Popen(
                 command,
                 shell=True,
-                cwd=self._cwd,
+                cwd=cwd,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -883,6 +962,16 @@ class ShellTool(CobirbTool):
         if timed_out:
             return ToolResult(ok=False, content="Command timed out.", error="timeout")
         content = f"exit={process.returncode}\n{_both_ends(f'{stdout}{stderr}', _MAX_SHELL_OUTPUT)}"
+        if process.returncode == 0 and _changes_directory_only(command):
+            # Said out loud because the alternative is a bare, successful
+            # `exit=0` that reads exactly like a directory change that stuck —
+            # and the mistake is then only discovered by whatever runs in the
+            # wrong place next.
+            content += (
+                f"\n[note: this changed the directory of the shell that has now exited. "
+                f"The next call starts in {cwd or os.getcwd()} again. Chain it into one "
+                f"command ('cd somewhere && ...') or pass 'cwd' to run it elsewhere.]"
+            )
         return ToolResult(ok=process.returncode == 0, content=content, meta={"returncode": process.returncode})
 
     @staticmethod

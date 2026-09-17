@@ -520,3 +520,63 @@ def test_forking_before_an_attachment_does_not_carry_its_bytes(tmp_path):
     # Branch at the opening turn, before the attachment ever happened.
     branch = fork_session(path, crypto, "pw", up_to_turn=0)
     assert branch.session.images == {}
+
+
+# --------------------------------------------------------------------------- #
+# /clear is a point in the history, not a rewrite of it.
+#
+# The turns before a clear stay in the file — the session remains a complete
+# record for auditing or debugging. What the marker changes is where the
+# conversation is *read* from, by the model and by the screen alike.
+# --------------------------------------------------------------------------- #
+def test_without_a_clear_marker_every_turn_counts():
+    session = Session()
+    session.add_text("user", "one")
+    session.add_text("assistant", "two")
+
+    assert [t.content for t in session_module.turns_since_clear(session.turns)] == ["one", "two"]
+
+
+def test_a_clear_marker_starts_the_conversation_after_it():
+    session = Session()
+    session.add_text("user", "before")
+    session.add_clear()
+    session.add_text("user", "after")
+
+    assert [t.content for t in session_module.turns_since_clear(session.turns)] == ["after"]
+
+
+def test_only_the_most_recent_clear_counts():
+    session = Session()
+    session.add_text("user", "first")
+    session.add_clear()
+    session.add_text("user", "second")
+    session.add_clear()
+    session.add_text("user", "third")
+
+    assert [t.content for t in session_module.turns_since_clear(session.turns)] == ["third"]
+
+
+def test_clearing_keeps_every_earlier_turn_in_the_session():
+    """The whole point: nothing is deleted. A session is still the record of
+    what happened, whatever was cleared off the screen."""
+    session = Session()
+    session.add_text("user", "sensitive context")
+    session.add_clear()
+
+    assert [t.content for t in session.turns][0] == "sensitive context"
+    assert len(session.turns) == 2
+
+
+def test_a_cleared_session_survives_a_save_and_reload(manager, tmp_path):
+    """The marker is an ordinary turn, so it round-trips through the encrypted
+    file and the tamper check like any other — no schema bump, no migration."""
+    manager.session.add_text("user", "before")
+    manager.session.add_clear()
+    manager.session.add_text("user", "after")
+    manager.save(password="pw")
+
+    reloaded = SessionManager.load(manager.path, AesGcmScryptSessionCrypto(), password="pw")
+
+    assert len(reloaded.session.turns) == 3
+    assert [t.content for t in session_module.turns_since_clear(reloaded.session.turns)] == ["after"]
