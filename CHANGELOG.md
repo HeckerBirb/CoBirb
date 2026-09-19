@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **`scripts/release.sh` cuts a release.** Bump level in, version bump and CHANGELOG heading out,
+  then a commit and a tag; `--push` to ship it, `--test` to run the suite first, neither by
+  default. Nothing changes for anyone using CoBirb — this is a maintainer script, and it exists
+  because the sequence had been run by hand five times and had grown a different set of
+  unnecessary checks around it each time.
+
 ## [0.15.1]
 
 - **Fixed: a flock round that went badly took the review down with it.** Brainy Birb's review runs
