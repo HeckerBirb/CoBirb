@@ -250,3 +250,53 @@ def test_flock_without_an_objective_says_what_it_needs(capsys, tmp_path):
 
     assert status != 0
     assert "needs an objective" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# The review phase and the charter tool have to agree about what exists
+# --------------------------------------------------------------------------- #
+def test_the_charter_tool_is_gone_once_planning_is_over(monkeypatch, tmp_path):
+    """It answers one question during planning; it is not a capability Brainy
+    Birb keeps for the rest of the session. Anything asked of it later — the
+    review phase especially — is therefore asking for a tool that is not
+    there."""
+    _skeleton(tmp_path)
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_charter_toml(tmp_path)))
+
+    run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": False), probe=False,
+    )
+
+    assert PROPOSE_CHARTER not in orchestrator.tools
+
+
+def test_the_review_prompt_warns_off_the_tool_it_no_longer_has():
+    """An overnight flock died here. The review runs on the same session as
+    planning, so BRAINY_RULES — "call propose_charter" — is still in context
+    along with Brainy Birb's own successful call. The prompt then asked for
+    "an amended charter", so a round that went badly produced the obedient
+    thing: a call to a deregistered tool, an "Unknown tool" result no amount
+    of re-reading could argue with, and the rest of the review turns spent
+    failing to recover.
+    """
+    from cobirb.flock.brainy import round_summary
+    from cobirb.flock.charter import Charter
+    from cobirb.flock.supervisor import FlockOutcome
+
+    text = round_summary(FlockOutcome(charter=Charter(objective="x", workers=[])))
+
+    assert PROPOSE_CHARTER in text
+    assert "no longer available" in text
+
+
+def test_the_review_still_asks_what_a_second_round_should_be():
+    """Warning the tool off must not cost the question itself — what the next
+    round should be is the most useful thing the verdict carries."""
+    from cobirb.flock.brainy import round_summary
+    from cobirb.flock.charter import Charter
+    from cobirb.flock.supervisor import FlockOutcome
+
+    text = round_summary(FlockOutcome(charter=Charter(objective="x", workers=[])))
+
+    assert "second round" in text

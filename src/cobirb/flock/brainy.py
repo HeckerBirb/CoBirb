@@ -245,6 +245,20 @@ def round_summary(outcome: FlockOutcome) -> str:
     the interesting cases are where they disagree — a worker whose acceptance
     check passed but whose review found a vacuous suite is the exact situation
     the review exists to surface, and it reads as success in the report alone.
+
+    **It has to say not to call ``propose_charter``, and that is not
+    defensive noise.** This runs on the same orchestrator and the same session
+    as the planning phase, so ``BRAINY_RULES`` — which tells Brainy Birb to
+    deliver a charter by calling that tool — is still in its context, along
+    with its own successful call from earlier. Meanwhile ``run._plan`` pops the
+    tool out of the registry as soon as planning ends. Ask for "an amended
+    charter" in those conditions and a round that went badly produces exactly
+    the obedient thing: a call to a tool that is no longer there, an "Unknown
+    tool" result the model cannot argue with, and the remaining review turns
+    spent failing to recover. Re-registering it would be worse rather than
+    better — nothing reads a second charter, because a round ends here by
+    design (``run.py``'s module docstring), so the call would succeed and be
+    silently discarded.
     """
     lines = [
         "The round has finished. Here is what each Worker Birb reported, and what "
@@ -260,9 +274,14 @@ def round_summary(outcome: FlockOutcome) -> str:
         "",
         "Write a short account for the user: what works now, what is still stubbed, "
         "and anything that looks like corner-cutting. Then say what a second round "
-        "should be — an amended charter if one assumption broke the design, or just "
-        "the affected workers re-briefed if the remaining work is isolated. Say "
-        "plainly if no second round is needed.",
+        "should be — the amended charter you would write if one assumption broke the "
+        "design, or just the affected workers re-briefed if the remaining work is "
+        "isolated. Say plainly if no second round is needed.",
+        "",
+        "DESCRIBE THAT SECOND ROUND IN PROSE. DO NOT CALL `propose_charter` — it "
+        "belonged to the planning phase and is no longer available to you. This round "
+        "is over; starting another is the user's decision, made from the account you "
+        "are writing now. What you write here is read by a person, not executed.",
         "",
         "A surviving mutant or a stub reversion that was not caught usually means a "
         "behaviour you specified has no test behind it. That is your omission to fix "
