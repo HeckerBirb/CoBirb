@@ -4,6 +4,19 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [0.15.1]
+
+- **Fixed: a flock round that went badly took the review down with it.** Brainy Birb's review runs
+  on the same session as its planning, so `BRAINY_RULES` — which says to deliver a charter by
+  calling `propose_charter` — was still in its context, as was its own successful call from
+  earlier. The review prompt then asked it for "an amended charter", while `_plan` deregisters that
+  tool the moment planning ends. So a round with anything to fix produced the obedient thing: a
+  call to a tool that was no longer there, an `Unknown tool` result no amount of re-reading could
+  argue with, and the rest of the review turns spent failing to recover. The review now asks for
+  the second round in prose and says plainly that the tool is gone. Re-registering it would have
+  been worse: a round ends here by design, so nothing reads a second charter and the call would
+  have succeeded and been discarded in silence.
+
 ## [0.15.0]
 
 - **A demo GIF replaces the static screenshot in the README.** `docs/images/cobirb-demo.gif`
