@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.15.2]
 
 - **`scripts/release.sh` cuts a release.** Bump level in, version bump and CHANGELOG heading out,
   then a commit and a tag; `--push` to ship it, `--test` to run the suite first, neither by
