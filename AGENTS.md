@@ -400,7 +400,19 @@ which interpreter is running.
 
 **Releases** — every version bump gets a `vX.Y.Z` tag (§2, invariant 9); `release.yml` builds a
 wheel and sdist on that tag push and attaches them, `SHA256SUMS` and `install.sh` to the GitHub
-release. `cobirb --upgrade [tag]` then routes on the install shape:
+release.
+
+**Cut one with `scripts/release.sh patch|minor|major` — do not improvise the sequence.** Write the
+notes under `## [Unreleased]` in `CHANGELOG.md` first; the script renames that heading to the new
+version, bumps `pyproject.toml`, commits and tags. It pushes only with `--push`, and runs the
+suite only with `--test`. **The steps it omits are as deliberate as the ones it performs**: a
+release adds a version string and a CHANGELOG heading to a tree that was already tested when it
+was committed and again by `tests.yml` on push, so re-running the suite, polling the workflow, or
+installing the published artifact afterwards proves nothing that was in doubt. That ritual grew up
+around five hand-run releases and cost minutes each time. If a release ever does need verifying,
+that is its own deliberate command, not a tail on this one.
+
+`cobirb --upgrade [tag]` then routes on the install shape:
 
 - **Managed** — runs the `install.sh` that shipped *inside the running version's own wheel*,
   forwarding `--version`/`--force`. **The script is the only implementation of "move to version
