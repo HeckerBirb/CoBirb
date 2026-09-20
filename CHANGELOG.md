@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.17.0]
 
 - **New: `max_num_ctx`, a ceiling on the context window CoBirb asks for.** CoBirb states `num_ctx`
   on every request rather than letting Ollama serve its own 4096, and when a model's Modelfile
