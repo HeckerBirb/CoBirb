@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.20.1]
 
 Both of these are defects in 0.20.0, found by testing the paths its own tests did not cover.
 
