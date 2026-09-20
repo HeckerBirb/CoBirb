@@ -146,7 +146,10 @@ def install_charter_tool(
         return existing
     tool = ProposeCharterTool(cwd, on_proposed=on_proposed)
     orchestrator.tools[PROPOSE_CHARTER] = tool
-    orchestrator.policy.allow(PROPOSE_CHARTER, "")
+    # No second argument: that one scopes a grant to a *command*, and reaches
+    # "allow the tool outright" only by falling through an empty-word check.
+    # This tool takes no command, so it says what it means.
+    orchestrator.policy.allow(PROPOSE_CHARTER)
     return tool
 
 

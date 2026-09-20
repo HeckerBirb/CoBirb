@@ -3517,3 +3517,57 @@ async def test_an_ordinary_turn_does_not_feed_the_flock_tab():
         app.note_brainy_waiting(True)
 
         assert not _brainy_panel(app).display
+
+
+async def test_approving_a_charter_asks_exactly_once(monkeypatch):
+    """`/charter` used to ask, then hand the charter to run_flock_session,
+    which asks the identical question again at its own stage 3 — the same
+    wording, twice, for one decision."""
+    from cobirb.flock.charter import Charter, WorkerBrief
+
+    asked = []
+    monkeypatch.setattr(
+        CoBirbApp, "_run_flock",
+        lambda self, objective, charter=None: asked.append(("flock", objective)),
+    )
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        original_push = CoBirbApp.push_screen_wait
+
+        async def _count(self, screen):
+            asked.append(("dialog", getattr(screen, "question", "")))
+            return True
+
+        monkeypatch.setattr(CoBirbApp, "push_screen_wait", _count)
+        app._pending_charter = Charter(
+            objective="x", workers=[WorkerBrief(id="a", brief="b", writes=["a.py"])]
+        )
+
+        app.offer_pending_charter()
+        await pilot.pause()
+
+        dialogs = [entry for entry in asked if entry[0] == "dialog"]
+        assert len(dialogs) == 0, f"the TUI asked as well as the flock: {dialogs}"
+        assert ("flock", "x") in asked
+
+
+async def test_a_charter_that_already_ran_is_not_offered_again():
+    """Otherwise /charter after a finished flock silently offers to run the
+    whole thing a second time."""
+    from cobirb.flock.run import install_charter_tool
+    from cobirb.flock.charter import Charter, WorkerBrief
+    from cobirb.tui.slash_commands import _last_proposed_charter
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.orchestrator = _StubOrchestrator()
+        tool = install_charter_tool(app.orchestrator, "/tmp")
+        tool.charter = Charter(
+            objective="x", workers=[WorkerBrief(id="a", brief="b", writes=["a.py"])]
+        )
+
+        app.forget_used_charter()
+
+        assert _last_proposed_charter(app) is None

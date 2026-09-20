@@ -363,6 +363,12 @@ appeared. `_plan` also retries once with the rejection quoted back (`charter_ret
 because a model told its charter is invalid will otherwise often end the turn by declaring
 success.
 
+**Stage 3 is the only place a charter is approved**, including for one that arrived outside a
+planning turn. `_start_flock_with` deliberately does not ask before handing a charter to
+`run_flock_session`: it did once, with the identical sentence, so one decision took two dialogs.
+The app clears a charter once its flock has run (`forget_used_charter`), since the tool otherwise
+keeps it and `/charter` would offer to run the round again.
+
 **A charter accepted outside a flock run reaches the user through `on_proposed`.** The TUI holds
 it (`note_proposed_charter`) rather than acting at once — the call arrives from inside a tool, with
 the turn that made it still waiting on the result — and offers it when the turn ends

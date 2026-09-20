@@ -51,6 +51,7 @@ from ..plugins.core import persona_shapes_voice, render
 from ..policy import PermissionError
 from ..typing import spi as cobirb_typing
 from .io_bridge import TuiIO
+from ..flock.brainy import PROPOSE_CHARTER
 from ..flock.supervisor import Canceller
 from .flock_bridge import TuiAsker, WorkerPaneIO
 from .panes import FlockPane, PluginsPane, SessionsPane
@@ -597,30 +598,27 @@ class CoBirbApp(App[None]):
         if charter is None or self._flock_stop is not None or self._turn_in_progress:
             return
         self._pending_charter = None
-        self._approve_charter(charter)
+        self._start_flock_with(charter)
 
-    @work
-    async def _approve_charter(self, charter: Any) -> None:
-        """The approval dialog for a charter proposed outside a flock run.
+    def _start_flock_with(self, charter: Any) -> None:
+        """Run a flock from a charter that already exists, skipping planning.
 
-        The same question `run_flock_session` asks at its own stage 3, asked
-        here because this charter did not come from one — and it is the whole
-        of the user's decision either way: approving it is what lets Worker
-        Birbs run unattended inside the scopes it names.
+        **Deliberately does not ask.** `run_flock_session` puts the identical
+        question — the same sentence, the same charter — at its own stage 3,
+        and that stage is the design's single decision point: it is what
+        authorises every Worker Birb to run unattended inside scopes the user
+        has seen. Asking here as well made one decision take two dialogs, and
+        a second dialog repeating the first teaches people to dismiss both
+        without reading either.
+
+        So this commits only to *offering* the flock. The user still approves
+        or refuses it a moment later, from the one prompt that has always
+        been the place to do that.
         """
-        approved = await self.push_screen_wait(
-            ConfirmModal(
-                f"Approve this charter? {len(charter.workers)} Worker Birb(s) will run "
-                "unattended inside exactly these scopes, with no further prompts.",
-                charter.describe(),
-            )
-        )
-        if not approved:
-            self.write_transcript(render.build_notice("Charter not approved; nothing ran."))
-            return
         if self._turn_in_progress or self._flock_stop is not None:
             self.write_transcript(
-                render.build_notice("Something else started in the meantime; nothing ran.")
+                render.build_notice("Something else is running; the charter is still available "
+                                    "— /charter when it finishes.")
             )
             return
         self.query_one(TabbedContent).active = "flock"
@@ -630,6 +628,7 @@ class CoBirbApp(App[None]):
         self._flock_canceller = Canceller()
         # No planning phase on this path — the charter already exists — so the
         # progress counter has nothing to count.
+        self._planning_calls = 0
         self.charter_in_hand = True
         self.set_activity("Fanning out…")
         self._run_flock(charter.objective, charter=charter)
@@ -960,6 +959,21 @@ class CoBirbApp(App[None]):
         if summary:
             self.set_activity("Flock running", summary)
 
+    def forget_used_charter(self) -> None:
+        """Drop the charter once a flock has actually run it.
+
+        `propose_charter` keeps the last charter it accepted until the next
+        planning turn resets it, which is what makes a dismissed approval
+        dialog recoverable with `/charter`. But a charter whose flock has
+        *finished* is not pending anything — and left in place it means
+        `/charter` silently offers to run the whole round a second time,
+        which is a lot of work to start by accident.
+        """
+        self._pending_charter = None
+        tool = (getattr(self.orchestrator, "tools", None) or {}).get(PROPOSE_CHARTER)
+        if tool is not None:
+            tool.reset()
+
     def note_brainy_planning(self, line: str) -> None:
         """One line of Brainy Birb's working-out, for the Flock tab.
 
@@ -1038,6 +1052,8 @@ class CoBirbApp(App[None]):
         self._planning_calls = 0
         self.charter_in_hand = False
         self.query_one(FlockPane).end_planning()
+        if run is not None and run.ran:
+            self.forget_used_charter()
         self._flock_canceller = None
         self.set_activity("")
         self._turn_in_progress = False

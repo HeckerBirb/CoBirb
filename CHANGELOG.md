@@ -4,6 +4,18 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Fixed: approving a charter asked twice.** `/charter`, and a charter proposed mid-conversation,
+  put up an approval dialog and then handed the charter to the flock — which asks the identical
+  question, word for word, at its own stage 3. One decision, two dialogs, the second repeating the
+  first. Only the flock's own prompt asks now: it is the design's single decision point, and a
+  second dialog saying the same thing teaches people to dismiss both without reading either.
+- **Fixed: `/charter` offered to re-run a flock that had already finished.** `propose_charter`
+  keeps the last charter it accepted so a dismissed dialog stays recoverable, but nothing cleared
+  it once a round had actually run — so `/charter` afterwards silently offered to do the whole
+  thing again.
+
 ## [0.16.0]
 
 - **The Flock tab shows Brainy Birb's working-out while it plans.** `/flock` moves you to that
