@@ -48,6 +48,33 @@ orient can't work.
 
 The charter lives in the session. It is never written into your repository.
 
+### Seams belong to nobody
+
+A `[[seams]]` entry marked `kind = "formal"` is a declared artifact — an interface, an abstract
+base class, a trait — that Brainy Birb wrote into the skeleton and everyone builds against. No
+worker may list one in its `writes`, and a charter that does is refused when it's read, naming
+the file and the worker.
+
+That's the commonest way a partition falls apart. One worker claims the shared types file, every
+other worker reads it, and you get one overlap reported per reader — four of them for five
+workers, none really about the readers. The fix was always one line: that worker didn't have to
+write the file at all.
+
+A `kind = "loose"` seam is exempt, and so is one naming a symbol (`module.py::load`). A loose
+seam is an agreement about behaviour with only a test behind it, and that behaviour is usually
+somebody's to implement.
+
+### When the partition overlaps
+
+It's reported, not refused — merging two workers, hoisting the shared file into a seam, or
+letting git reconcile them are all reasonable, and which one is right depends on things CoBirb
+can't see. You're asked whether to run anyway, one worker at a time.
+
+Overlaps are reported **once per file**, listing every worker involved, rather than once per
+pair. And Brainy Birb is invited to correct an overlapping partition at most twice: the charter
+is held either way, so a third attempt only delays the dialog you were always going to get.
+If it re-proposes the same overlap, it's told so and told to stop.
+
 ### When one worker has to go first
 
 Usually none of them do — that's what the skeleton is for. Brainy Birb builds the seam the

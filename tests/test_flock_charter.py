@@ -603,3 +603,88 @@ def test_independent_workers_keep_the_concurrency_they_asked_for():
 
 def test_a_dependency_is_shown_to_whoever_approves_the_charter():
     assert "after  seam" in parse_charter(_WITH_NEEDS).describe()
+
+
+# --------------------------------------------------------------------------- #
+# A seam is writable by nobody — the structural cause of a partition in ruins
+# --------------------------------------------------------------------------- #
+def test_a_worker_cannot_be_given_a_formal_seam_to_write():
+    """One worker claiming the shared interface file is what produced one
+    read/write overlap per reader. Named here, it is one line of the charter."""
+    with pytest.raises(CharterError, match="formal seam") as raised:
+        _charter("""
+            objective = "x"
+            [[seams]]
+            at   = "pkg/types.py"
+            kind = "formal"
+            what = "the shared vocabulary"
+            [[workers]]
+            id     = "a"
+            writes = ["pkg/types.py", "pkg/a.py"]
+            brief  = "go"
+        """)
+
+    assert "pkg/types.py" in str(raised.value)
+    assert "'a'" in str(raised.value)
+
+
+def test_a_loose_seam_may_live_in_a_file_a_worker_writes():
+    """A loose seam is an agreement about behaviour, and the behaviour is
+    somebody's to implement — the charter template's own shape."""
+    charter = _charter("""
+        objective = "x"
+        [[seams]]
+        at   = "pkg/reader.py"
+        kind = "loose"
+        what = "returns None for a missing key"
+        [[workers]]
+        id     = "a"
+        writes = ["pkg/reader.py"]
+        brief  = "go"
+    """)
+
+    assert charter.worker("a").writes == ("pkg/reader.py",)
+
+
+def test_a_seam_naming_a_symbol_does_not_freeze_the_whole_file():
+    charter = _charter("""
+        objective = "x"
+        [[seams]]
+        at   = "pkg/reader.py::load"
+        kind = "formal"
+        what = "the signature everyone calls"
+        [[workers]]
+        id     = "a"
+        writes = ["pkg/reader.py"]
+        brief  = "go"
+    """)
+
+    assert charter.worker("a").writes == ("pkg/reader.py",)
+
+
+def test_several_readers_of_one_written_file_are_one_overlap():
+    """Four readers of one file is one mistake about one line, and reporting
+    it four times describes a partition in ruins instead."""
+    body = """
+        objective = "x"
+        [[workers]]
+        id     = "a"
+        writes = ["pkg/types.py", "pkg/a.py"]
+        brief  = "go"
+    """
+    for worker_id in ("b", "c", "d", "e"):
+        body += f"""
+        [[workers]]
+        id     = "{worker_id}"
+        writes = ["pkg/{worker_id}.py"]
+        reads  = ["pkg/types.py"]
+        brief  = "go"
+        """
+
+    conflicts = find_conflicts(_charter(body))
+
+    assert [c.kind for c in conflicts] == [CONFLICT_READ_WRITE]
+    assert conflicts[0].workers == ("b", "c", "d", "e")
+    assert conflicts[0].writer == "a"
+    assert "1 overlap" in describe_conflicts(conflicts)
+    assert "b, c, d and e read what a writes" in conflicts[0].describe()

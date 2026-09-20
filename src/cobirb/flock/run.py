@@ -329,6 +329,17 @@ def _drive(
         # is a correct answer, and the narration is where it says so.
         return run
     charter = plan.charter
+    if plan.exhausted_turns:
+        # A charter *and* an exhausted budget: planning was cut off rather than
+        # finished, so the skeleton behind this charter may be half-written.
+        # Worth a sentence, because the approval prompt below looks identical
+        # either way and the user is about to authorise workers to build
+        # against whatever is actually on disk.
+        ask.show(
+            f"Brainy Birb used all {plan_turns} planning turns. The charter below is the "
+            "one it proposed, but it stopped rather than finished — check the skeleton is "
+            "complete before approving."
+        )
     run.charter = charter
     if on_charter is not None:
         # Before the partition check and before approval, so a front-end can

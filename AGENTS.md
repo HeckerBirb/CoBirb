@@ -370,6 +370,33 @@ proposes nothing — because the instruction to call the tool never said what *n
 string is indistinguishable from a considered answer, and a skeleton costs one turn per file
 written, so a large partition reaches the budget before it proposes anything.
 
+**An overlapping partition is a second loop, and it needed its own brake**
+(`MAX_OVERLAP_ATTEMPTS = 2`, `ProposeCharterTool._overlap_notice`). `exhausted` tests
+`charter is None`, so the rejection brake below came off permanently the moment any charter
+parsed — and an overlapping charter is one that parsed. That left the `ok=True` branch with no
+cap, and its text opened with "Charter accepted" and closed with "propose a corrected charter":
+two states at once, plus an instruction to act on the second. Same overlaps, same string, every
+time; an unchanged result after an unchanged action is the strongest signal a model has to repeat
+itself. A run reported this as "used all 30 planning turns without proposing a charter" having
+been handed five. Now the charter is **held** rather than "accepted", the invitation to correct it
+is issued twice, and a resubmission whose conflicts are identical is told so — that being the one
+fact distinguishing this attempt from the last.
+
+**A formal seam is writable by no worker, and that is refused at parse time**
+(`charter._check_seams_are_frozen`). It is the structural cause of the overlap loop above: one
+worker claims the shared types file it did not need to write, every other worker reads it, and
+`find_conflicts` reports one read/write overlap per reader — four for five workers, none of them
+about the readers. Brainy Birb was being handed that as a partition problem when the fix was one
+path in one `writes` list. **Loose seams and `::`-qualified ones are exempt**: a loose seam is an
+agreement with only a test behind it and may well describe behaviour inside a file a worker
+implements (the charter template's own shape does), and refusing those would throw out charters
+that were right. **Conflicts are also reported once per file** rather than once per pair, since
+the count is the first thing anyone reads and "4 overlaps" describes a partition in ruins.
+
+**A charter plus an exhausted planning budget is reported** (`run._drive`). The approval prompt
+looks identical whether planning finished or was cut off mid-skeleton, and the user is about to
+authorise workers to build against whatever is actually on disk.
+
 **A charter that keeps failing must stop being asked for.** `MAX_CHARTER_ATTEMPTS = 5`. The
 template goes out with the *first* rejection only — repeating twenty-five identical lines after
 every failure is the strongest signal available to a model that the right next move is to resend

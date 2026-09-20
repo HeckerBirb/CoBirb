@@ -23,7 +23,7 @@ import logging
 from typing import Any
 
 from ..typing.spi import Tool, ToolResult
-from .charter import Charter, CharterError, parse_charter
+from .charter import Charter, CharterError, find_conflicts, parse_charter
 from .supervisor import FlockOutcome, check_partition
 
 logger = logging.getLogger("cobirb")
@@ -36,6 +36,14 @@ PROPOSE_CHARTER = "propose_charter"
 # `_plan` retries, spend another thirty. Five is enough attempts for a real
 # correction and few enough that the user is not watching a loop.
 MAX_CHARTER_ATTEMPTS = 5
+
+# How many *valid* charters with an overlapping partition before the tool stops
+# inviting a corrected one. Lower than `MAX_CHARTER_ATTEMPTS` because the model
+# has already cleared the hard part — this charter parses, it is held, and the
+# user can approve it as it stands — so the only thing more attempts buy is a
+# better partition, and a model that did not improve it on the first correction
+# does not improve it on the fourth.
+MAX_OVERLAP_ATTEMPTS = 2
 
 # What Brainy Birb is told before it plans anything. Long, because every
 # paragraph here is either an invariant of the design or a mistake this would
@@ -228,6 +236,15 @@ class ProposeCharterTool(Tool):
         # `run._plan`.
         self.attempts: int = 0
         self.last_error: str = ""
+        # Valid charters whose partition overlapped, and the overlaps the last
+        # one had. Counted separately from `attempts`, which only ever braked
+        # charters that would not parse: `exhausted` tests `charter is None`,
+        # so the moment one parsed the brake came off for the rest of the
+        # session — and an overlapping charter is a charter that parsed. That
+        # left the `ok=True` branch below with no brake at all and nothing but
+        # the planning turn budget to stop it.
+        self.overlaps: int = 0
+        self._last_overlaps: tuple[tuple[str, str], ...] = ()
 
     def name(self) -> str:
         return self.NAME
@@ -243,6 +260,8 @@ class ProposeCharterTool(Tool):
         self.raw = ""
         self.attempts = 0
         self.last_error = ""
+        self.overlaps = 0
+        self._last_overlaps = ()
 
     def description(self) -> str:
         return (
@@ -301,6 +320,56 @@ class ProposeCharterTool(Tool):
             "thing the error names."
         )
 
+    def _overlap_notice(self, charter: Charter, partition: str) -> str:
+        """What a valid charter with an overlapping partition is told.
+
+        This message used to open with "Charter accepted" and close with "If it
+        was a mistake, propose a corrected charter", which is two states at
+        once and an instruction to act on the second. Nothing counted the
+        attempts, the text was byte-identical every time — same partition, same
+        string — and an unchanged tool result after an unchanged action is the
+        strongest signal a model has that the thing to do next is the same
+        again. The run then spent its whole planning budget re-proposing, and
+        reported at the end that no charter had been proposed at all.
+
+        So: one state, said once. The charter is **held** and the run can go on
+        without another call; a better partition is invited exactly
+        ``MAX_OVERLAP_ATTEMPTS`` times; and a resubmission that overlaps in the
+        same places is told so, because "you changed something and it did not
+        help" is the one fact that distinguishes this attempt from the last.
+        """
+        self.overlaps += 1
+        signature = tuple((conflict.kind, conflict.path) for conflict in find_conflicts(charter))
+        unchanged = signature == self._last_overlaps
+        self._last_overlaps = signature
+
+        held = (
+            f"Charter held: {len(charter.workers)} worker(s). It is NOT disjoint, so it "
+            f"cannot run at full concurrency as it stands:\n{partition}\n\n"
+        )
+        if self.overlaps >= MAX_OVERLAP_ATTEMPTS or unchanged:
+            return held + (
+                "STOP calling propose_charter. "
+                + (
+                    "That is the same overlap you proposed last time, so another attempt "
+                    "will not clear it. "
+                    if unchanged
+                    else f"You have proposed {self.overlaps} charters with overlapping "
+                    "partitions. "
+                )
+                + "This charter is kept and the user will be asked whether to run it one "
+                "worker at a time. Say plainly in your reply, for the person deciding: "
+                "whether the overlap is deliberate, and if not, which file you could not "
+                "find an owner for and why."
+            )
+        return held + (
+            "If a worker claimed a file it does not actually have to change — a shared "
+            "types or interface file you already wrote into the skeleton is the usual one "
+            "— drop that path from its `writes` and call propose_charter ONCE more. If the "
+            "overlap is deliberate, do not call this again: say so in your reply and stop, "
+            "and the user will be asked whether to run one worker at a time."
+        )
+
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
         """Validate and keep the charter, or say exactly what is wrong with it.
 
@@ -328,12 +397,7 @@ class ProposeCharterTool(Tool):
         disjoint, partition = check_partition(charter)
         if not disjoint:
             return ToolResult(
-                ok=True,
-                content=(
-                    f"Charter accepted, with {len(charter.workers)} worker(s), but the "
-                    f"partition overlaps:\n{partition}\n\nThe user will be asked how to "
-                    "resolve this. If it was a mistake, propose a corrected charter."
-                ),
+                ok=True, content=self._overlap_notice(charter, partition),
                 meta={"disjoint": False},
             )
         return ToolResult(

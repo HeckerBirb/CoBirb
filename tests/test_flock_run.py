@@ -437,6 +437,59 @@ def test_the_charter_tool_stops_asking_after_enough_rejections(tmp_path):
     assert "STOP calling propose_charter" in result.content
 
 
+_READS_A_WRITTEN_FILE = """
+objective = "x"
+[[workers]]
+id     = "a"
+writes = ["pkg/types.py", "pkg/a.py"]
+brief  = "go"
+[[workers]]
+id     = "b"
+writes = ["pkg/b.py"]
+reads  = ["pkg/types.py"]
+brief  = "go"
+"""
+
+
+def test_an_overlapping_charter_is_held_rather_than_called_accepted(tmp_path):
+    """"Charter accepted, but propose a corrected charter" is two states at
+    once, and the model acts on the second one forever."""
+    from cobirb.flock.brainy import ProposeCharterTool
+
+    tool = ProposeCharterTool(str(tmp_path))
+    result = tool.execute({"toml": _READS_A_WRITTEN_FILE})
+
+    assert result.ok and tool.charter is not None  # kept: the user may still approve it
+    assert "accepted" not in result.content.lower()
+    assert "held" in result.content.lower()
+
+
+def test_an_overlapping_charter_stops_being_asked_for(tmp_path):
+    """The rejection brake only ever tested `charter is None`, so an
+    overlapping charter — one that parsed — had no brake at all, and nothing
+    but the planning turn budget to stop it re-proposing."""
+    from cobirb.flock.brainy import MAX_OVERLAP_ATTEMPTS, ProposeCharterTool
+
+    tool = ProposeCharterTool(str(tmp_path))
+    for _ in range(MAX_OVERLAP_ATTEMPTS):
+        result = tool.execute({"toml": _READS_A_WRITTEN_FILE})
+
+    assert "STOP calling propose_charter" in result.content
+
+
+def test_a_resubmitted_overlap_is_told_that_nothing_changed(tmp_path):
+    """An unchanged tool result after an unchanged action is the strongest
+    signal a model has that the thing to do next is the same again."""
+    from cobirb.flock.brainy import ProposeCharterTool
+
+    tool = ProposeCharterTool(str(tmp_path))
+    first = tool.execute({"toml": _READS_A_WRITTEN_FILE})
+    second = tool.execute({"toml": _READS_A_WRITTEN_FILE})
+
+    assert "same overlap" not in first.content
+    assert "same overlap" in second.content
+
+
 def test_the_charter_template_is_sent_once_not_after_every_failure(tmp_path):
     """Twenty-five identical lines after every rejection is the strongest
     possible hint to a model that the thing to send next is the same again."""

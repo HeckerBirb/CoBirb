@@ -4,6 +4,28 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **A charter whose partition overlaps no longer loops.** The tool answered a valid but
+  overlapping charter with "Charter accepted… propose a corrected charter" — two states at once,
+  and an instruction to act on the second. Nothing counted the attempts (the existing brake only
+  ever caught charters that would not *parse*), and the text was identical every time, which for a
+  model is the strongest possible signal to send the same thing again. A run then spent its whole
+  planning budget re-proposing and reported at the end that no charter had been proposed at all.
+  The charter is now **held**, a better partition is invited twice, and a resubmission that
+  overlaps in the same places is told so and told to stop.
+- **A worker can no longer be given a formal seam to write.** That was the cause of the loop above:
+  one worker claims the shared interface file it never had to write, every other worker reads it,
+  and you get one overlap reported per reader. It is refused when the charter is read, naming the
+  file and the worker. Loose seams and seams naming a symbol (`module.py::load`) are unaffected —
+  those are agreements about behaviour somebody has to implement.
+- **Overlaps are reported once per file, not once per pair.** Five workers around one shared types
+  file reported four identical overlaps; the count is the first thing you read, and "4 overlaps in
+  the partition" describes a partition in ruins rather than one path in one `writes` list.
+- **A charter proposed after planning ran out of turns says so.** The approval prompt looked the
+  same whether Brainy Birb finished or was cut off mid-skeleton, and you are about to authorise
+  workers to build against whatever is on disk.
+
 ## [0.19.0]
 
 - **A charter can say that one worker waits for another.** `needs = ["exporter"]` on a

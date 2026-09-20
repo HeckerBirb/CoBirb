@@ -435,12 +435,61 @@ def parse_charter(text: str) -> Charter:
     if not isinstance(raw_seams, list):
         raise CharterError("seams must be a list of [[seams]] tables")
 
+    seams = tuple(_seam(entry, index) for index, entry in enumerate(raw_seams))
+    _check_seams_are_frozen(seams, workers)
+
     return Charter(
         objective=_text(data.get("objective"), "objective"),
         workers=workers,
-        seams=tuple(_seam(entry, index) for index, entry in enumerate(raw_seams)),
+        seams=seams,
         concurrency=_concurrency(data.get("concurrency")),
     )
+
+
+def _check_seams_are_frozen(
+    seams: tuple[Seam, ...], workers: tuple[WorkerBrief, ...]
+) -> None:
+    """Refuse a charter that hands a formal seam to a worker to write.
+
+    A formal seam is a declared artifact that Brainy Birb wrote into the
+    skeleton and that the type system holds up. Giving one to a worker
+    contradicts the charter's own words twice over: the file is already there,
+    and everybody else is building against it while that worker changes it.
+
+    Refused rather than reported, because it is the structural cause of the
+    commonest way a partition falls apart. One worker claims the shared types
+    file, every other worker reads it, and the run produces one read/write
+    overlap per reader — four of them for five workers — none of which is
+    really about the readers. The overlaps were being reported to Brainy Birb
+    as a partition problem, and the fix it needed was to stop claiming a file
+    it did not have to write. Named here, it is one sentence about one line.
+
+    **Loose seams are left alone, and whole-file ones only are checked.** A
+    loose seam is an agreement with nothing but a test behind it, and it is
+    perfectly reasonable for it to describe behaviour *inside* a file some
+    worker implements ("returns None for a missing key"). A seam whose ``at``
+    carries a ``::`` qualifier names a symbol rather than a file for the same
+    reason. Both of those the read/write check already covers, and refusing
+    them here would throw out charters that were right.
+    """
+    frozen = {
+        os.path.normpath(seam.at): seam
+        for seam in seams
+        if seam.enforced_by_types and "::" not in seam.at
+    }
+    for worker in workers:
+        for path in worker.writes:
+            seam = frozen.get(path)
+            if seam is None:
+                continue
+            raise CharterError(
+                f"worker {worker.id!r} writes {path}, which this charter declares as a "
+                f"formal seam ({seam.what}). Seam files belong to you and are writable "
+                "by no worker — you already wrote it into the skeleton, and everyone "
+                f"else is building against it. Remove {path} from worker "
+                f"{worker.id!r} writes; it may still read it. If that worker really has "
+                "to change it, then it is not a seam: drop the [[seams]] entry instead."
+            )
 
 
 def _check_dependencies(workers: tuple[WorkerBrief, ...]) -> None:
@@ -516,27 +565,48 @@ CONFLICT_WRITE_WRITE = "write_write"
 CONFLICT_READ_WRITE = "read_write"
 
 
+def _join(names: tuple[str, ...]) -> str:
+    """``"a"``, ``"a and b"``, ``"a, b and c"`` — for prose a person reads."""
+    if len(names) < 2:
+        return names[0] if names else ""
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
 @dataclass(frozen=True)
 class Conflict:
-    """Two workers whose scopes overlap in a way that breaks an invariant."""
+    """Workers whose scopes overlap in a way that breaks an invariant.
+
+    **One per path, not one per pair.** A file that several workers read and
+    one writes is a single mistake about a single line of the charter, and
+    reporting it once per reader turns it into four. That mattered more than it
+    sounds: the count is the first thing anyone reads, and "4 overlaps in the
+    partition" describes a partition in ruins rather than one shared types file
+    that ended up in somebody's ``writes``.
+
+    So ``workers`` holds every worker on the reported side of the overlap — all
+    the owners of a write/write, all the readers of a read/write — and
+    ``writer`` names the single owner that a read/write is about.
+    """
 
     kind: str
     path: str
     workers: tuple[str, ...]
+    writer: str = ""
 
     def describe(self) -> str:
-        who = " and ".join(self.workers)
+        who = _join(self.workers)
+        several = len(self.workers) > 1
         if self.kind == CONFLICT_WRITE_WRITE:
             return (
-                f"{self.path}: {who} both write it. Exclusive ownership is what makes "
-                "concurrent workers safe without locking, and what makes 'which worker "
-                "broke this' answerable."
+                f"{self.path}: {who} {'all' if len(self.workers) > 2 else 'both'} write it. "
+                "Exclusive ownership is what makes concurrent workers safe without locking, "
+                "and what makes 'which worker broke this' answerable."
             )
-        reader, writer = self.workers
         return (
-            f"{self.path}: {reader} reads what {writer} writes. The reader would be working "
-            "against a moving target — a seam both depend on belongs to Brainy Birb, writable "
-            "by neither."
+            f"{self.path}: {who} {'read' if several else 'reads'} what {self.writer} writes. "
+            f"{'They' if several else 'The reader'} would be working against a moving target "
+            "— a seam workers depend on belongs to Brainy Birb, writable by none of them. "
+            f"Usually {self.writer} did not need to write it at all."
         )
 
 
@@ -581,13 +651,21 @@ def find_conflicts(charter: Charter) -> list[Conflict]:
                 Conflict(CONFLICT_WRITE_WRITE, path, tuple(sorted(owners)))
             )
 
+    # Gathered per (path, writer) and reported once, not once per reader. Five
+    # workers around one shared types file produced four identical overlaps,
+    # and four of anything reads as a partition that needs re-cutting when the
+    # truth was one file in one worker's `writes`.
+    readers: dict[tuple[str, str], list[str]] = {}
     for worker in charter.workers:
         for path in worker.reads:
             for other in writers.get(path, []):
                 if other != worker.id and other not in worker.needs:
-                    conflicts.append(
-                        Conflict(CONFLICT_READ_WRITE, path, (worker.id, other))
-                    )
+                    readers.setdefault((path, other), []).append(worker.id)
+
+    for (path, writer), who in sorted(readers.items()):
+        conflicts.append(
+            Conflict(CONFLICT_READ_WRITE, path, tuple(sorted(who)), writer=writer)
+        )
 
     return conflicts
 
