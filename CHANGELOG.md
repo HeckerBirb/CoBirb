@@ -6,13 +6,6 @@ and its §12 decisions record for the ones that were designed and then deliberat
 
 ## [0.18.0]
 
-- **`max_num_ctx` can be written the way people say it.** `"64k"` (or `"64K"`) means 65536 — a `k`
-  is 1024, because what anyone means by "64k" here is the window, and windows are powers of two.
-  The plain number still works. A value that isn't a size costs the cap rather than the run, and
-  `cobirb doctor` reports it instead of leaving you uncapped in silence.
-
-## [Unreleased]
-
 - **A Worker Birb can ask for something its charter scope did not give it.** A worker that needed
   to run a command or reach a tool nobody granted it was silently refused, and then spent its
   remaining turns retrying or writing up why it could not finish — the permission question
@@ -32,6 +25,10 @@ and its §12 decisions record for the ones that were designed and then deliberat
   about — a Worker Birb's policy is built per ticket and thrown away with it, so "always" in a
   flock was re-asked on the next ticket and the next round. A session grant reaches every agent in
   the session, including workers that have not started. In memory only; never written to config.
+- **`max_num_ctx` can be written the way people say it.** `"64k"` (or `"64K"`) means 65536 — a `k`
+  is 1024, because what anyone means by "64k" here is the window, and windows are powers of two.
+  The plain number still works. A value that isn't a size costs the cap rather than the run, and
+  `cobirb doctor` reports it instead of leaving you uncapped in silence.
 
 ## [0.17.0]
 
