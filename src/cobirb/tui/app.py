@@ -62,6 +62,7 @@ from .screens import (
     ModelPickerModal,
     PersonaPickerModal,
     TextPromptModal,
+    WorkerApprovalModal,
 )
 from .widgets import ActivityBar, PromptInput, StatusBar, StreamPreview, TranscriptLog
 
@@ -207,6 +208,11 @@ class CoBirbApp(App[None]):
         # above only keeps new workers from starting; this drops the model
         # connections of the ones already running.
         self._flock_canceller: "Canceller | None" = None
+        # The charter of the round in progress, set once its panes are laid
+        # out. Held because a Worker Birb asking for something needs it
+        # answered against the whole partition — a write into a file another
+        # worker owns is refused without a dialog (`charter.writes_owner`).
+        self.flock_charter: Any = None
         # Worker id -> state, for the activity line's roll-up. Reset per
         # engagement so a previous flock's workers do not linger in it.
         # Resolved once, for the status bar — the orchestrator that would
@@ -371,6 +377,31 @@ class CoBirbApp(App[None]):
         this must not be called from anywhere else.
         """
         return await self.push_screen_wait(ApprovalModal(tool_name, arguments, scope, preview))
+
+    async def request_worker_approval(
+        self,
+        worker_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        scope: str | None = None,
+        preview: str = "",
+    ) -> tuple:
+        """The same, for a Worker Birb, returning ``(decision, instruction)``.
+
+        Its own method rather than a flag on ``request_approval`` because the
+        two return different shapes — see ``WorkerApprovalModal`` for why the
+        question itself is different. Awaited on the event loop on behalf of
+        the worker's thread, exactly as ``request_approval`` is.
+
+        Two workers asking at once stack two modals and are answered top
+        down. Deliberately not serialised behind a queue: the stack already
+        answers them one at a time, and each dialog names the worker it
+        belongs to, so the thing a queue would add is ordering nobody asked
+        for.
+        """
+        return await self.push_screen_wait(
+            WorkerApprovalModal(worker_id, tool_name, arguments, scope, preview)
+        )
 
     # ------------------------------------------------------------------ #
     # Input handling
@@ -916,7 +947,7 @@ class CoBirbApp(App[None]):
                 ask=TuiAsker(self),
                 stop=self._flock_stop,
                 on_event=self._on_flock_event,
-                io_for=lambda worker: WorkerPaneIO(self, worker.id),
+                io_for=lambda worker, slots: WorkerPaneIO(self, worker.id, slots),
                 on_charter=lambda charter: self.call_from_thread(
                     self.prepare_flock_panes, charter
                 ),
@@ -1032,6 +1063,19 @@ class CoBirbApp(App[None]):
         if worker is not None:
             worker.write(renderable)
 
+    def flock_worker_state(self, worker_id: str, state: str) -> None:
+        """Move one worker's pane to a new state. Main thread only.
+
+        Separate from the ``started``/``finished`` events the supervisor
+        announces, because those describe the schedule and this describes what
+        the worker is doing inside its run — the difference between "has not
+        started" and "started, and now waiting on you".
+        """
+        worker = self.query_one(FlockPane).pane(worker_id)
+        if worker is not None:
+            worker.set_state(state)
+        self.set_activity(self.query_one(FlockPane).activity_summary())
+
     async def request_confirmation(self, question: str, detail: str = "") -> bool:
         """Show a yes/no modal and resolve to the answer.
 
@@ -1044,6 +1088,10 @@ class CoBirbApp(App[None]):
         """Lay out a pane per Worker Birb once the charter is approved."""
         # Planning is over; the panes take over from the tail.
         self.charter_in_hand = True
+        # Kept for the duration of the round, because it is what answers "who
+        # owns this file?" when a worker asks for something — see
+        # `charter.writes_owner` and `WorkerPaneIO.confirm_request`.
+        self.flock_charter = charter
         self.query_one(FlockPane).end_planning()
         await self.query_one(FlockPane).begin(charter)
 

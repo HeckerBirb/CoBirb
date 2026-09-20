@@ -130,6 +130,39 @@ ApprovalModal {
     margin: 0 1;
 }
 
+/* A Worker Birb asking for something outside its charter scope. Wider than
+   ApprovalModal because it carries a worker id, what a session grant would
+   reach, and a field to answer in. */
+WorkerApprovalModal {
+    align: center middle;
+}
+
+#worker-approval-dialog {
+    width: 78;
+    max-width: 92%;
+    height: auto;
+    max-height: 80%;
+    padding: 1 2;
+    border: round $warning;
+    background: $surface;
+}
+
+#worker-approval-instruction {
+    margin-top: 1;
+    border: round $primary-darken-2;
+    background: $surface;
+}
+
+#worker-approval-buttons {
+    height: auto;
+    padding-top: 1;
+    align-horizontal: center;
+}
+
+#worker-approval-buttons Button {
+    margin: 0 1;
+}
+
 HelpModal {
     align: center middle;
 }

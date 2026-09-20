@@ -446,6 +446,39 @@ def find_conflicts(charter: Charter) -> list[Conflict]:
     return conflicts
 
 
+def writes_owner(charter: Charter, path: str, *, besides: str = "") -> str:
+    """Which Worker Birb owns ``path``, if one does and it is not ``besides``.
+
+    The check behind the one thing a worker may never be *asked* about. A
+    worker that needs a capability it was not given — to run a command, to
+    reach a tool nobody granted it — can put that question to the user, and
+    most of the time the answer is a reasonable yes. Writing into a file
+    another worker owns is the exception, and it is refused outright rather
+    than offered as a dialog.
+
+    Two reasons it is not a question. Exclusive ownership of files is not a
+    convention here, it is the property that makes concurrent workers safe by
+    construction: grant it away mid-round and two agents are editing one file
+    with no lock between them, and "which worker broke this" stops having an
+    answer. And the person answering cannot reasonably be expected to hold the
+    whole partition in their head at the moment a dialog appears — CoBirb has
+    the charter right there and can simply check.
+
+    ``path`` is matched as the charter states it. Both sides come from the same
+    normalisation (``_paths``), so this compares like with like rather than
+    trying to resolve a path the charter deliberately kept relative.
+    """
+    target = os.path.normpath(path.strip()) if path.strip() else ""
+    if not target:
+        return ""
+    for worker in charter.workers:
+        if worker.id == besides:
+            continue
+        if target in worker.writes:
+            return worker.id
+    return ""
+
+
 def describe_conflicts(conflicts: list[Conflict]) -> str:
     """The text shown when a partition does not hold together."""
     if not conflicts:

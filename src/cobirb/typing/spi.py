@@ -95,7 +95,17 @@ def check_spi_version(plugin: Any) -> None:
 DECISION_ONCE = "once"
 DECISION_ALWAYS = "always"
 DECISION_DENY = "deny"
-DECISIONS = frozenset({DECISION_ONCE, DECISION_ALWAYS, DECISION_DENY})
+# Allow this call and every matching one for the rest of the CoBirb session,
+# across every agent in it — the main conversation and every Worker Birb,
+# including ones that have not started yet (see `policy.SessionGrants`).
+# Distinct from ALWAYS, which only ever widens the one policy it was asked
+# about: a Worker Birb's policy is built per worker and dies with it, so
+# "always" answered in a flock would re-ask on the next ticket and the next
+# round. A session grant lives in memory for the life of the process and is
+# never written to config — a permission that survives a restart is a
+# different decision from one made live in a dialog.
+DECISION_SESSION = "session"
+DECISIONS = frozenset({DECISION_ONCE, DECISION_ALWAYS, DECISION_SESSION, DECISION_DENY})
 
 
 @dataclass
@@ -117,6 +127,33 @@ class ApprovalRequest:
     # it: a unified diff for an edit, the patch for apply_patch. Empty for
     # tools whose arguments already say everything (read_file, shell).
     preview: str = ""
+    # Which agent is asking, where that is not "the one you are talking to" —
+    # a Worker Birb's id. Empty for the main conversation. An adapter that
+    # shows this can say *who* wants the capability, which in a flock is half
+    # the question: several agents are working at once and they are not
+    # interchangeable.
+    asked_by: str = ""
+
+
+@dataclass
+class ApprovalOutcome:
+    """An answer to an ``ApprovalRequest``, for adapters that can say more
+    than one of the three decision strings.
+
+    Exists because "no" is the least useful thing a person can tell an agent
+    that has just asked for something. A refusal carrying *what to do
+    instead* turns a dead end into a redirection: the text reaches the model
+    as part of the tool result, so the next turn acts on it rather than
+    retrying the same call or giving up.
+
+    Returned by the optional ``confirm_request`` hook. Adapters implementing
+    only ``confirm``/``confirm_scoped`` keep returning a plain string and lose
+    nothing but the instruction.
+    """
+
+    decision: str
+    # Only meaningful alongside DECISION_DENY. Empty means a plain refusal.
+    instruction: str = ""
 @dataclass
 class ToolCall:
     """A structured tool invocation emitted by the model.
@@ -272,10 +309,22 @@ class I_OAdapter(abc.ABC):
         - ``"once"``: allow this one call, don't change the policy.
         - ``"always"``: allow this call and update the policy so matching
           calls skip the prompt for the rest of this run.
+        - ``"session"``: allow this call for every agent in the CoBirb
+          session, now and for any that start later. Wider than ``"always"``,
+          which only widens the single policy it was asked about.
         - ``"deny"``: refuse the call.
 
         Adapters with no way to ask (e.g. a future non-interactive one)
         should return ``"deny"`` — permission is fail-closed, not fail-open.
+
+        Two **optional** hooks extend this without changing the signature, and
+        are probed with ``getattr`` rather than declared here, which is what
+        keeps the SPI freeze honest. Implement either, both, or neither:
+
+        - ``confirm_scoped(ApprovalRequest) -> str`` — the same question, with
+          what ``"always"`` would grant and a preview of the change.
+        - ``confirm_request(ApprovalRequest) -> ApprovalOutcome`` — that, plus
+          the ability to refuse *with an instruction* for the model.
         """
 
 

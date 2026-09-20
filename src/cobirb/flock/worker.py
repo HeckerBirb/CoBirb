@@ -53,11 +53,18 @@ weakening what they assert. You may and should ADD tests for anything you \
 find while implementing — edge cases, error paths, whatever the skeleton did \
 not anticipate.
 3. You may READ any file in this project to understand it — list directories, \
-grep, read whatever helps. You may only CHANGE the files listed below. A write \
-anywhere else is refused, so do not attempt it; if you believe you need to \
-change another file, that is a shortcoming to report (see 4), not something to \
-work around. You cannot run shell commands.
-4. If you cannot finish something, do not improvise around it. Say plainly: \
+grep, read whatever helps. You may only CHANGE the files listed below.
+4. If you need something you have not been given — to run a command, to use a \
+tool nobody granted you — ASK for it by using it. The user is shown the \
+request and answers it. You pause while they decide; your colleagues keep \
+working, so asking costs you time and costs the round nothing. A refusal may \
+come back with an instruction telling you what to do instead: that instruction \
+is from the user, and it is what to do next.
+5. The ONE thing you may never have is a write into a file another Worker \
+Birb owns. That is refused outright and is not worth asking for — exclusive \
+ownership of files is what lets all of you work at the same time. If your \
+ticket seems to need it, that is a finding about the plan: report it (see 6).
+6. If you cannot finish something, do not improvise around it. Say plainly: \
 what you could not do, why, where it breaks, and either a proposed change to \
 the design or a question for Brainy Birb. Being stuck is a normal outcome and \
 an honest report is worth more than a guess.
@@ -139,7 +146,7 @@ def compose_brief(worker: WorkerBrief) -> str:
     if worker.accept:
         parts.append(
             f"Your work is done when this passes: {worker.accept}\n"
-            "(It is run for you after your turn; you cannot run commands yourself.)"
+            "(It is run for you after your turn.)"
         )
     return "\n".join(parts)
 
@@ -152,6 +159,7 @@ def run_worker(
     max_turns: int = DEFAULT_MAX_TURNS,
     io=None,
     canceller=None,
+    grants=None,
 ) -> WorkerReport:
     """Run one brief to completion and report on it.
 
@@ -169,7 +177,17 @@ def run_worker(
     """
     config = config or Config()
     policy = policy_for(worker, cwd, audit_log_enabled=bool(config.get("audit_log")))
-    orchestrator = build_subagent(cwd, policy, accept=worker.accept, config=config, io=io)
+    orchestrator = build_subagent(
+        cwd, policy, accept=worker.accept, config=config, io=io,
+        # Joins this worker to the session's approvals, so one granted before
+        # it started applies to it without asking again — and so one it asks
+        # for itself reaches the workers after it.
+        grants=grants,
+        # Named on its own approval requests: with several workers running,
+        # "may I run this?" is only answerable if you know which of them is
+        # asking.
+        agent_id=worker.id,
+    )
     # Registered so a force-stop can reach this worker while it is blocked on
     # the model; a plain graceful stop never gets a chance to, because the
     # thread is not checking anything.

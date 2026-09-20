@@ -14,7 +14,7 @@ from ..config import Config
 from ..mcp import connect_servers
 from ..orchestrator import Orchestrator, build_default_policy
 from ..plugins.core import LocalModelProvider, TerminalIO, ToolRegistry
-from ..policy import Policy
+from ..policy import Policy, SessionGrants
 from ..session import SessionManager
 from ..typing import spi as cobirb_typing
 from ..plugins.core.repomap import DEFAULT_BUDGET_CHARS, render_map
@@ -149,6 +149,7 @@ def build_orchestrator(
     password: str | None = None,
     model_name: str | None = None,
     io_factory: Callable[[], cobirb_typing.I_OAdapter] = TerminalIO,
+    grants: "SessionGrants | None" = None,
 ) -> Orchestrator:
     """Wire the core: registry -> provider -> policy -> orchestrator.
 
@@ -245,6 +246,12 @@ def build_orchestrator(
         # The user's own commands at the lifecycle points.
         hooks=HookRunner.from_config(config, cwd),
         mcp_clients=mcp_clients,
+        # Approvals that reach every agent in the session rather than only
+        # this policy. Created here when nobody supplied one, so a run that
+        # never fans out still has somewhere for a "for the session" answer
+        # to live — and the Flock reaches it through `orchestrator.grants`
+        # rather than being handed it separately.
+        grants=grants,
     )
 
 
@@ -255,6 +262,8 @@ def build_subagent(
     accept: str = "",
     config: Config | None = None,
     io: cobirb_typing.I_OAdapter | None = None,
+    grants: "SessionGrants | None" = None,
+    agent_id: str = "",
 ) -> Orchestrator:
     """Wire an agent that takes its instructions from another agent.
 
@@ -267,6 +276,10 @@ def build_subagent(
     - **Its policy is handed in, not read from config.** The charter's scopes
       *are* the isolation; config's ``allow_tools`` would widen them behind the
       user's back, and the user approved the charter rather than the config.
+      ``grants`` is the deliberate exception and does not weaken that line: a
+      session grant is a decision a person made live, at a dialog, knowing
+      which agent was asking — not a setting sitting in a file that a worker
+      silently inherits.
     - **It gets no project context at all.** No ``AGENTS.md``, no repo map.
       Need-to-know is the whole design: a worker that can read the codebase
       outline knows the shape of everyone else's work. Conventions reach it
@@ -293,12 +306,13 @@ def build_subagent(
     """
     config = config or Config()
     registry = ToolRegistry(cwd)
-    return Orchestrator(
+    subagent = Orchestrator(
         model=build_for_role(ROLE_WORKER, config),
         tools=registry.tools,
         policy=policy,
         io=io or HeadlessIO(),
         session=None,
+        grants=grants,
         context_tokens=config.get("context_tokens"),
         # No project context, and — separately — no memory catalogues either:
         # those are composed into `system` per turn by the TUI itself
@@ -324,6 +338,8 @@ def build_subagent(
         checkpoints=None if config.get("checkpoints") is False else Checkpoints(cwd),
         hooks=HookRunner.from_config(config, cwd),
     )
+    subagent.agent_id = agent_id
+    return subagent
 
 
 def resolve_model_name(model_name: str | None, cwd: str) -> str:

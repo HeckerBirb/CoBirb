@@ -20,7 +20,8 @@ cobirb flock -p "add CSV export to the reporting tool"
 1. **Brainy Birb plans.** Reads the project, decides the seams, writes interfaces, typed stubs
    and failing tests.
 2. **You approve the charter.** One dialog listing each worker and exactly what it may write.
-   This is the only decision point — nothing runs until you say yes.
+   Nothing runs until you say yes, and it is the only place capability is granted up front — a
+   worker can still ask for something later (see below), which pauses only itself.
 3. **Workers run**, concurrently, unattended, each inside its own scope.
 4. **Review**, one worker at a time: read the diff, restore the stub and check the test
    actually fails, probe each stated behaviour.
@@ -89,6 +90,42 @@ making decisions that aren't its own.
 
 Checkpoints, secret redaction and your hooks still apply — those belong to every agent working
 in your tree.
+
+## When a worker needs something it wasn't given
+
+A charter grants files. Sooner or later a worker needs something else — to run the project's
+formatter, to reach a tool nobody mentioned — and being silently refused used to cost the ticket:
+it would spend its remaining turns retrying or writing up why it couldn't finish.
+
+So it asks, and you get three answers:
+
+```
+[exporter] wants to use shell
+pytest tests/test_csv_export.py -q
+
+  Once (y)     Session (s)     Deny (n)
+  [ Disallow; do this instead…                    ]
+```
+
+- **Once** — this call only.
+- **Session** — every agent for the rest of this CoBirb session: this conversation and every
+  Worker Birb, including ones that haven't started and later rounds. It lives in memory and is
+  never written to your config.
+- **Deny** — optionally with a line saying what to do instead, which reaches the worker as part
+  of the refusal. That's usually the answer worth giving: "no" alone leaves it with nothing but
+  a retry.
+
+**Asking costs the asker, not the round.** The worker pauses and gives up its concurrency slot,
+so the rest of the flock keeps going at full speed and the next one starts immediately. Its
+column shows `held — waiting for you`.
+
+**One thing is never asked.** A write into a file another worker owns is refused outright, and
+the worker is told why. Exclusive ownership of files is what makes workers safe to run at the
+same time; granting it away mid-round would leave two agents editing one file, and "which worker
+broke this" would stop having an answer.
+
+Without a screen — `cobirb flock -p "…"` — there's nobody to ask, so everything outside the
+charter is refused, exactly as before.
 
 ## Two models
 

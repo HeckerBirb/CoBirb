@@ -213,7 +213,7 @@ def run_flock_session(
     plan_turns: int = DEFAULT_PLAN_TURNS,
     probe: bool = True,
     password: str | None = None,
-    io_for: Callable[[Any], Any] | None = None,
+    io_for: Callable[[Any, Any], Any] | None = None,
     on_charter: Callable[[Charter], None] | None = None,
     canceller: Canceller | None = None,
     charter: Charter | None = None,
@@ -255,7 +255,7 @@ def _drive(
     on_event: Callable[[str, Any], None] | None,
     plan_turns: int,
     probe: bool,
-    io_for: Callable[[Any], Any] | None = None,
+    io_for: Callable[[Any, Any], Any] | None = None,
     on_charter: Callable[[Charter], None] | None = None,
     canceller: Canceller | None = None,
     charter: Charter | None = None,
@@ -394,6 +394,11 @@ def _drive(
     outcome = run_flock(
         charter, cwd, config=config, concurrency=concurrency, stop=stop,
         on_event=on_event, io_for=io_for, canceller=canceller,
+        # Read off the orchestrator rather than passed in: Brainy Birb's
+        # agent already holds the session's approvals, and threading a second
+        # copy through every caller would be the same object in two places,
+        # free to be the wrong one.
+        grants=getattr(orchestrator, "grants", None),
     )
     run.outcome = outcome
     ask.show(outcome.describe())

@@ -172,11 +172,16 @@ class WorkerPane(Vertical):
         colours = {
             "waiting": "dim",
             "running": "bold yellow",
+            # Distinct from "waiting", which means "has not started". This one
+            # has started, has asked the user for something, and is the only
+            # state a person can clear — so it is the loudest colour here.
+            "held": "bold magenta",
             "done": "bold green",
             "failed": "bold red",
             "flagged": "bold yellow",
         }
-        return Text(f"[{self._worker_id}] {state}", style=colours.get(state, "bold"))
+        label = "held — waiting for you" if state == "held" else state
+        return Text(f"[{self._worker_id}] {label}", style=colours.get(state, "bold"))
 
     def set_state(self, state: str) -> None:
         self.state = state
@@ -299,7 +304,10 @@ class FlockPane(Vertical):
         once. Read off the panes themselves, so it can only ever describe
         workers that are actually on screen.
         """
-        order = {"running": 0, "waiting": 1, "flagged": 2, "failed": 3, "done": 4}
+        # "held" first: it is the only state in this list that needs a person
+        # to do something, and a roll-up that buries it under four running
+        # workers is a roll-up nobody acts on.
+        order = {"held": 0, "running": 1, "waiting": 2, "flagged": 3, "failed": 4, "done": 5}
         panes = sorted(
             self.query(WorkerPane), key=lambda p: (order.get(p.state, 9), p._worker_id)
         )

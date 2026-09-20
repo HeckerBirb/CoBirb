@@ -11,6 +11,28 @@ and its §12 decisions record for the ones that were designed and then deliberat
   The plain number still works. A value that isn't a size costs the cap rather than the run, and
   `cobirb doctor` reports it instead of leaving you uncapped in silence.
 
+## [Unreleased]
+
+- **A Worker Birb can ask for something its charter scope did not give it.** A worker that needed
+  to run a command or reach a tool nobody granted it was silently refused, and then spent its
+  remaining turns retrying or writing up why it could not finish — the permission question
+  answered correctly and the ticket lost anyway. It now asks, and you answer: once, for the whole
+  CoBirb session, or no — optionally with a line saying what to do instead, which reaches the
+  worker as part of the refusal rather than leaving it with nothing but a retry.
+- **Asking costs the asker, not the round.** A worker waiting on you gives up its concurrency slot,
+  so the rest of the flock keeps running at full speed and the next worker starts immediately. Its
+  column shows `held — waiting for you`. Previously the limit was the thread pool's size, which
+  conflated how many workers exist with how many may be working — so two open dialogs at
+  `concurrency = 2` would have stalled everything.
+- **A write into a file another worker owns is refused outright, never asked about.** Exclusive
+  file ownership is what makes workers safe to run at the same time, so it is not something to
+  grant away at a dialog — and the person answering should not have to hold the whole partition in
+  their head to spot it. CoBirb has the charter and checks it.
+- **New: "allow for the session".** Wider than "always", which only widens the policy it was asked
+  about — a Worker Birb's policy is built per ticket and thrown away with it, so "always" in a
+  flock was re-asked on the next ticket and the next round. A session grant reaches every agent in
+  the session, including workers that have not started. In memory only; never written to config.
+
 ## [0.17.0]
 
 - **New: `max_num_ctx`, a ceiling on the context window CoBirb asks for.** CoBirb states `num_ctx`

@@ -247,6 +247,132 @@ class TextPromptModal(ModalScreen[Optional[str]]):
         self.dismiss(None)
 
 
+class WorkerApprovalModal(ModalScreen[tuple]):
+    """A Worker Birb asking for something its charter scope did not give it.
+
+    Separate from ``ApprovalModal`` rather than a flag on it, because three
+    things about the question are genuinely different and each one changes
+    what the person needs to see:
+
+    - **Somebody specific is asking.** Several workers are running at once and
+      they are not interchangeable, so the worker's id leads the dialog. "May
+      I run pytest?" is a different question depending on which ticket wants
+      it.
+    - **"Always" is the wrong middle option.** A worker's policy is built per
+      ticket and thrown away with it, so an "always" answered here would be
+      re-asked on the next ticket and the next round. The useful grant is the
+      session (see ``policy.SessionGrants``), and the dialog says out loud
+      that it reaches workers that have not started.
+    - **A refusal can carry instructions.** "No" on its own leaves a worker
+      with nothing to do but retry or give up; "no, do it this way" is the
+      answer people actually have. The text field is that answer, and it is a
+      placeholder rather than a value so it can never be submitted by
+      accident as though it were something the user typed.
+
+    Dismisses with ``(decision, instruction)``. Fails closed: escape denies,
+    with whatever instruction had been typed, if any.
+    """
+
+    BINDINGS = [
+        Binding("y", "decide('once')", "Once", show=True),
+        Binding("s", "decide('session')", "Session", show=True),
+        Binding("n", "deny", "Deny", show=True),
+        Binding("escape", "deny", "Deny", show=False),
+    ]
+
+    INSTRUCTION_PLACEHOLDER = "Disallow; do this instead…"
+
+    def __init__(
+        self,
+        worker_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        scope: str | None = None,
+        preview: str = "",
+    ) -> None:
+        super().__init__()
+        self._worker_id = worker_id
+        self._tool_name = tool_name
+        self._arguments = arguments
+        self._scope = scope
+        self._preview = preview
+
+    def compose(self) -> ComposeResult:
+        args = self._arguments
+        detail = args.get("command") or args.get("path") or args.get("pattern") or ""
+        body = Text()
+        body.append(f"[{self._worker_id}]", style="bold cyan")
+        body.append(" wants to use ", style="bold")
+        body.append(self._tool_name, style="bold yellow")
+        if detail:
+            body.append(f"\n{detail}", style="dim")
+        body.append(
+            "\n\nIts charter scope does not cover this. It is paused until you "
+            "answer; the other Worker Birbs are still running.",
+            style="dim",
+        )
+        if self._scope:
+            body.append("\n\nFor the session will ", style="dim")
+            body.append(self._scope, style="bold")
+            body.append(
+                " for every agent in this CoBirb session — this conversation and "
+                "every Worker Birb, including ones that have not started yet.",
+                style="dim",
+            )
+        with VerticalScroll(id="worker-approval-dialog"):
+            yield Static(body, id="worker-approval-body")
+            if self._preview:
+                yield Static(
+                    render.build_preview_panel(self._tool_name, self._preview),
+                    id="worker-approval-preview",
+                )
+            yield Input(
+                placeholder=self.INSTRUCTION_PLACEHOLDER, id="worker-approval-instruction"
+            )
+            with Horizontal(id="worker-approval-buttons"):
+                yield Button("Once (y)", variant="primary", id="worker-once")
+                yield Button("Session (s)", variant="warning", id="worker-session")
+                yield Button("Deny (n)", variant="error", id="worker-deny")
+
+    def _instruction(self) -> str:
+        """What the user typed, if anything.
+
+        Reads ``value`` and never ``placeholder``: an untouched field is empty,
+        so the prompt text can never reach the model as though it were an
+        instruction somebody meant.
+        """
+        try:
+            return self.query_one("#worker-approval-instruction", Input).value.strip()
+        except Exception:  # noqa: BLE001 - a dialog mid-teardown still has to answer
+            return ""
+
+    def action_decide(self, decision: str) -> None:
+        # An instruction belongs to a refusal. Typing one and then approving
+        # anyway is a change of mind, and the approval is the answer.
+        self.dismiss((decision, ""))
+
+    def action_deny(self) -> None:
+        self.dismiss(("deny", self._instruction()))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Enter in the field means "deny, and here is what to do instead".
+
+        The field only ever carries a refusal, so submitting it is the same
+        decision as pressing Deny — and having typed the alternative, pressing
+        a second button to send it would be a step with nothing in it.
+        """
+        event.stop()
+        self.dismiss(("deny", self._instruction()))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        decision = {
+            "worker-once": "once",
+            "worker-session": "session",
+        }.get(event.button.id or "", "deny")
+        self.dismiss((decision, self._instruction() if decision == "deny" else ""))
+
+
 class ConfirmModal(ModalScreen[bool]):
     """A yes/no question, for decisions that are not tool approvals.
 

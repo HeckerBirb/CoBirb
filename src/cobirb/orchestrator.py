@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterable
 
 from .checkpoints import Checkpoints
 from .context import DEFAULT_CONTEXT_TOKENS, CompactionReport, compact, history_budget
-from .policy import AuditLog, Policy
+from .policy import AuditLog, Policy, SessionGrants
 from .redaction import redact
 from .runtime.hooks import (
     EVENT_AFTER_TOOL,
@@ -133,6 +133,26 @@ def render_through(
     return False
 
 
+def _denial_message(tool_name: str, instruction: str = "") -> str:
+    """What a refused tool call tells the model.
+
+    The bare refusal is a dead end: the model learns it may not do the thing
+    and nothing about what it should do instead, so it either retries the
+    identical call or abandons the work and reports being stuck. Where the
+    user took the trouble to say what to do instead, that is the useful half
+    of the answer and it goes in the result the model reads.
+
+    Marked as coming from the user rather than from CoBirb, because the two
+    carry different authority: one is a policy outcome, the other is an
+    instruction from the person the agent is working for.
+    """
+    denial = f"Permission denied: tool '{tool_name}' is not permitted."
+    instruction = instruction.strip()
+    if not instruction:
+        return denial
+    return f"{denial}\nThe user says to do this instead: {instruction}"
+
+
 def _tool_failure_message(tool_name: str, tool: Any, exc: Exception) -> str:
     """Turn a tool's exception into something the model can act on.
 
@@ -194,11 +214,24 @@ class Orchestrator:
         checkpoints: "Checkpoints | None" = None,
         hooks: "HookRunner | None" = None,
         mcp_clients: list[Any] | None = None,
+        grants: "SessionGrants | None" = None,
     ) -> None:
         self.model = model
         self.tools = tools
         self.policy = policy
         self.io = io
+        # Approvals that outlive this agent's own policy, shared with every
+        # other agent in the session (see policy.SessionGrants). Always an
+        # object so no call site needs a "are grants wired?" branch, and this
+        # policy joins it immediately — a session grant made by a Worker Birb
+        # has to reach the agent the user is talking to as well.
+        self.grants = grants if grants is not None else SessionGrants()
+        self.grants.register(policy)
+        # Who this agent is, when it is not the one the user is talking to:
+        # a Worker Birb's id, set by `wiring.build_subagent`. Travels on an
+        # approval request so a prompt can say which of several concurrent
+        # agents wants the capability — in a flock that is half the question.
+        self.agent_id = ""
         self.crypto = crypto
         self.session = session
         # The project's own check, run after a turn that changed files. None
@@ -775,39 +808,63 @@ class Orchestrator:
         for call in tool_calls:
             self._execute_tool(call, phase)
 
-    def _request_approval(self, tool_name: str, arguments: dict[str, Any]) -> str:
+    def _request_approval(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> tuple[str, str]:
         """Ask ``io`` whether to allow a not-yet-permitted tool call.
 
-        An adapter may implement the optional ``confirm_scoped`` hook to
-        receive a plain-language description of what "always" would actually
-        grant (``Policy.describe_grant``) — approving a read widens access to
-        a whole directory tree, and a prompt that can't say so is asking the
-        user to agree to something it hasn't told them. Adapters that only
-        implement the documented ``confirm`` still work, they just ask the
-        narrower question.
+        Returns the decision and, when the answer was a refusal carrying one,
+        what the user said to do instead.
+
+        Three adapter shapes, richest first, each probed with ``getattr``
+        rather than declared on the ABC — which is what keeps the SPI freeze
+        honest (see ``I_OAdapter.confirm``):
+
+        - ``confirm_request`` answers with an ``ApprovalOutcome``, so a
+          refusal can carry an instruction for the model.
+        - ``confirm_scoped`` receives a plain-language description of what
+          "always" would actually grant (``Policy.describe_grant``) —
+          approving a read widens access to a whole directory tree, and a
+          prompt that can't say so is asking the user to agree to something
+          it hasn't told them.
+        - ``confirm`` is the documented minimum and asks the narrowest
+          question.
 
         Fails closed (denies) when there's no interactive adapter attached,
         it doesn't implement ``confirm`` (duck-typed test doubles), or it
         raises — there's no one to ask, so the safe answer is no.
         """
+        deny = (cobirb_typing.DECISION_DENY, "")
         if self.io is None or not hasattr(self.io, "confirm"):
-            return cobirb_typing.DECISION_DENY
+            return deny
+        instruction = ""
         try:
+            request = cobirb_typing.ApprovalRequest(
+                tool_name=tool_name,
+                arguments=arguments,
+                scope=self.policy.describe_grant(tool_name, arguments),
+                preview=self._preview(tool_name, arguments),
+                asked_by=self.agent_id,
+            )
+            confirm_request = getattr(self.io, "confirm_request", None)
             confirm_scoped = getattr(self.io, "confirm_scoped", None)
-            if callable(confirm_scoped):
-                decision = confirm_scoped(
-                    cobirb_typing.ApprovalRequest(
-                        tool_name=tool_name,
-                        arguments=arguments,
-                        scope=self.policy.describe_grant(tool_name, arguments),
-                        preview=self._preview(tool_name, arguments),
-                    )
-                )
+            if callable(confirm_request):
+                outcome = confirm_request(request)
+                decision = getattr(outcome, "decision", "")
+                instruction = str(getattr(outcome, "instruction", "") or "")
+            elif callable(confirm_scoped):
+                decision = confirm_scoped(request)
             else:
                 decision = self.io.confirm(tool_name, arguments)
         except Exception:  # noqa: BLE001 - a broken adapter must not open access
-            return cobirb_typing.DECISION_DENY
-        return decision if decision in cobirb_typing.DECISIONS else cobirb_typing.DECISION_DENY
+            return deny
+        if decision not in cobirb_typing.DECISIONS:
+            return deny
+        # An instruction only means anything attached to a refusal. Carried
+        # alongside an approval it would be text the model never sees, which
+        # is worse than not offering it: the user would have typed something
+        # and watched it vanish.
+        return decision, instruction if decision == cobirb_typing.DECISION_DENY else ""
 
     def _execute_tool(self, call: cobirb_typing.ToolCall, phase: str | None = None) -> None:
         tool_name = call.name
@@ -851,11 +908,11 @@ class Orchestrator:
         # out it could have worked." Fails closed (denies) with no adapter,
         # or one that can't ask (see I_OAdapter.confirm's contract).
         if not self.policy.is_allowed(tool_name, arguments):
-            decision = self._request_approval(tool_name, arguments)
+            decision, instruction = self._request_approval(tool_name, arguments)
             if decision == cobirb_typing.DECISION_DENY:
                 self._record_call(tool_name, ok=False, denied=True)
                 result = cobirb_typing.ToolResult(
-                    ok=False, content=f"Permission denied: tool '{tool_name}' is not permitted."
+                    ok=False, content=_denial_message(tool_name, instruction)
                 )
                 session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
                 self._render_tool_call(tool_name, arguments, result)
@@ -865,6 +922,11 @@ class Orchestrator:
                 # orchestrator's — a read grants a directory, a shell call
                 # grants its invocation, everything else grants the tool.
                 self.policy.grant(tool_name, arguments)
+            elif decision == cobirb_typing.DECISION_SESSION:
+                # The same widening, applied to every agent in the session
+                # instead of only this one. Registering this policy at
+                # construction is what makes that include the caller.
+                self.grants.grant(tool_name, arguments)
 
         self._snapshot_before(tool, arguments)
         self.policy.log(tool_name, arguments, cwd=self.session.working_dir)

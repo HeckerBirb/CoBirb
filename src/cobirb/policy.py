@@ -31,7 +31,9 @@ import json
 import os
 import shlex
 import sys
+import threading
 import time
+import weakref
 from typing import Any
 
 from . import paths
@@ -497,6 +499,80 @@ class Policy:
             if directory is not None:
                 return f"change files in {directory} and its subdirectories"
         return f"use '{tool_name}'"
+
+
+class SessionGrants:
+    """Approvals that outlive the policy they were granted on.
+
+    ``Policy.grant`` widens exactly one policy, which is the right unit for
+    the agent you are talking to — it lives as long as the session does. It is
+    the wrong unit everywhere else in the Flock: a Worker Birb's policy is
+    built per worker (``flock.charter.policy_for``) and thrown away when its
+    ticket ends, so "always" answered for one worker re-asks on the next
+    ticket, and again on the next round, for the identical call.
+
+    This is the wider answer. A grant recorded here reaches **every agent in
+    the session** — the main conversation and every Worker Birb, including
+    ones that have not been built yet. A session grant is a session grant: it
+    carries no record of which agent asked, because a permission that means
+    different things depending on who asked for it is a permission nobody can
+    reason about.
+
+    Two properties worth stating, since both are the sort of thing that is
+    assumed rather than checked:
+
+    - **Memory only.** Nothing here is written to ``config.json``. A
+      permission that survives a restart is a different decision from one
+      made live in a dialog, and only the user editing their own config gets
+      to make it.
+    - **Policies are held weakly.** A finished Worker Birb's policy is
+      garbage; a strong reference to one per ticket per round would be a leak
+      with the lifetime of the session.
+    """
+
+    def __init__(self) -> None:
+        # (tool_name, arguments) as granted, replayed onto policies that
+        # register later. Kept as the original call rather than as a resolved
+        # rule so each policy re-derives the scope itself — `grant` resolves
+        # paths against the policy's own cwd, and pre-resolving here would
+        # bake one agent's working directory into everyone's rules.
+        self._granted: list[tuple[str, dict[str, Any]]] = []
+        self._policies: "weakref.WeakSet[Policy]" = weakref.WeakSet()
+        self._lock = threading.Lock()
+
+    def register(self, policy: "Policy") -> None:
+        """Put ``policy`` under this session's grants, backlog included.
+
+        Called for every policy built in the session, so a Worker Birb that
+        starts after an approval is already widened by it before its first
+        turn — which is the whole point, and the case a per-policy grant
+        cannot express.
+        """
+        with self._lock:
+            self._policies.add(policy)
+            backlog = list(self._granted)
+        for tool_name, arguments in backlog:
+            policy.grant(tool_name, arguments)
+
+    def grant(self, tool_name: str, arguments: dict[str, Any] | None = None) -> None:
+        """Record an approval and push it to every policy already registered.
+
+        Both halves matter and for different agents: the push is what widens
+        the workers running right now, and the record is what widens the ones
+        that start next.
+        """
+        arguments = dict(arguments or {})
+        with self._lock:
+            self._granted.append((tool_name, arguments))
+            policies = list(self._policies)
+        for policy in policies:
+            policy.grant(tool_name, arguments)
+
+    @property
+    def granted(self) -> tuple[tuple[str, dict[str, Any]], ...]:
+        """What has been granted this session, for a caller that wants to say."""
+        with self._lock:
+            return tuple(self._granted)
 
 
 def _within(path: str, directory: str) -> bool:

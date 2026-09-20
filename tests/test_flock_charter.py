@@ -20,6 +20,7 @@ from cobirb.flock.charter import (
     find_conflicts,
     parse_charter,
     policy_for,
+    writes_owner,
 )
 
 _MINIMAL = """
@@ -414,3 +415,57 @@ def test_a_path_escape_does_not_leave_the_granted_file(tmp_path):
 
     assert not policy.is_allowed("write_file", {"path": "../mine.py"})
     assert not policy.is_allowed("write_file", {"path": "sub/../../mine.py"})
+
+
+# --------------------------------------------------------------------------- #
+# Who owns a file — the one thing a worker may never be asked about.
+# --------------------------------------------------------------------------- #
+_TWO_OWNERS = """
+objective = "two tickets"
+
+[[workers]]
+id     = "a"
+writes = ["src/a.py"]
+brief  = "Do a."
+
+[[workers]]
+id     = "b"
+writes = ["src/b.py"]
+brief  = "Do b."
+"""
+
+
+def test_a_file_another_worker_owns_names_that_worker():
+    """What makes the refusal answerable without asking anyone: the charter
+    already says who owns what."""
+    charter = parse_charter(_TWO_OWNERS)
+
+    assert writes_owner(charter, "src/b.py", besides="a") == "b"
+
+
+def test_a_workers_own_file_is_not_somebody_elses():
+    charter = parse_charter(_TWO_OWNERS)
+
+    assert writes_owner(charter, "src/a.py", besides="a") == ""
+
+
+def test_a_file_nobody_owns_is_nobody_elses():
+    """Only cross-silo writes are refused outright. Everything else a worker
+    wants is a question the user gets to answer."""
+    charter = parse_charter(_TWO_OWNERS)
+
+    assert writes_owner(charter, "src/new_helper.py", besides="a") == ""
+
+
+def test_ownership_is_matched_the_way_the_charter_states_it():
+    """Both sides come from the same normalisation, so a path written the
+    long way round still finds its owner."""
+    charter = parse_charter(_TWO_OWNERS)
+
+    assert writes_owner(charter, "src/./b.py", besides="a") == "b"
+
+
+def test_an_empty_path_owns_nothing():
+    charter = parse_charter(_TWO_OWNERS)
+
+    assert writes_owner(charter, "   ", besides="a") == ""

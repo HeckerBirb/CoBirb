@@ -11,7 +11,9 @@ import threading
 import time
 
 from cobirb.flock.charter import parse_charter
-from cobirb.flock.supervisor import Canceller, check_partition, run_flock
+import pytest
+
+from cobirb.flock.supervisor import Canceller, Slots, check_partition, run_flock
 from cobirb.flock.worker import WorkerReport
 
 
@@ -390,7 +392,7 @@ def test_force_is_reflected_in_a_worker_started_and_reported_from_run_flock(monk
 
     seen_cancellers = []
 
-    def fake_run_worker(worker, cwd, *, config=None, io=None, canceller=None):
+    def fake_run_worker(worker, cwd, *, canceller=None, **_):
         seen_cancellers.append(canceller)
         if canceller is not None:
             canceller.register(_FakeOrchestrator())
@@ -404,3 +406,70 @@ def test_force_is_reflected_in_a_worker_started_and_reported_from_run_flock(monk
     )
 
     assert all(c is canceller for c in seen_cancellers)
+
+
+# --------------------------------------------------------------------------- #
+# Asking the user costs the asker, not the round.
+# --------------------------------------------------------------------------- #
+def test_a_worker_waiting_on_the_user_lets_another_one_run(monkeypatch, tmp_path):
+    """The whole feature, at the one concurrency where it is unambiguous. With
+    a single slot, a worker parked on a question must let its colleague past —
+    otherwise a flock with everyone waiting on dialogs runs nothing at all."""
+    order = []
+    parked = threading.Event()
+
+    def run(worker, cwd, *, io=None, **kwargs):
+        if worker.id == "a":
+            order.append("a-asks")
+            with io.released():        # parked on a question
+                parked.set()
+                time.sleep(0.2)
+            order.append("a-resumes")
+        else:
+            parked.wait(timeout=2)
+            order.append("b-runs-anyway")
+        return WorkerReport(worker_id=worker.id, ok=True, accepted=True)
+
+    _fake_workers(monkeypatch, run)
+
+    run_flock(
+        _charter(_two_ticket_project(tmp_path)), str(tmp_path), concurrency=1,
+        io_for=lambda worker, slots: slots,
+    )
+
+    assert order.index("b-runs-anyway") < order.index("a-resumes")
+
+
+def test_a_parked_worker_gives_the_slot_back_even_if_it_blows_up(monkeypatch, tmp_path):
+    """A leaked slot would not fail loudly — it would quietly lower the
+    flock's concurrency for the rest of the round."""
+    slots = Slots(1)
+
+    with pytest.raises(RuntimeError):
+        with slots.released():
+            raise RuntimeError("cancelled while parked")
+
+    # The count is intact: something can still take the only slot.
+    with slots:
+        pass
+
+
+def test_the_concurrency_limit_still_holds_when_nobody_asks(monkeypatch, tmp_path):
+    """The pool is sized to the workers now, so the limit lives in the slots
+    rather than in the pool — and it has to still be a limit."""
+    live, peak, lock = [], [], threading.Lock()
+
+    def run(worker, cwd, **kwargs):
+        with lock:
+            live.append(worker.id)
+            peak.append(len(live))
+        time.sleep(0.1)
+        with lock:
+            live.remove(worker.id)
+        return WorkerReport(worker_id=worker.id, ok=True, accepted=True)
+
+    _fake_workers(monkeypatch, run)
+
+    run_flock(_charter(_two_ticket_project(tmp_path)), str(tmp_path), concurrency=1)
+
+    assert max(peak) == 1

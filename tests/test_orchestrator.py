@@ -1143,6 +1143,110 @@ def test_a_broken_preview_does_not_cost_the_user_the_prompt(tmp_path):
     assert asked and asked[0].preview == ""
 
 
+def test_a_refusal_can_carry_an_instruction_the_model_reads(tmp_path):
+    """"No" on its own leaves an agent with nothing to do but retry or give
+    up. What the user wants instead is the useful half of the answer, so it
+    goes into the result the model actually reads."""
+    from cobirb.typing.spi import ApprovalOutcome
+
+    class _InstructingIO(_RecordingIO):
+        def confirm_request(self, request):
+            return ApprovalOutcome(decision="deny", instruction="use the Makefile target")
+
+    session = Orchestrator(
+        model=_ToolCallModel("shell", {"command": "pytest -q"}),
+        tools=ToolRegistry(str(tmp_path)).tools,
+        policy=Policy(),
+        io=_InstructingIO(),
+    ).run("run the tests", "sys", cwd=str(tmp_path))
+
+    content = _tool_turn(session).content
+    assert "Permission denied" in content
+    assert "use the Makefile target" in content
+
+
+def test_an_instruction_attached_to_an_approval_is_not_carried(tmp_path):
+    """It would be text the user typed and the model never sees, which is
+    worse than not offering the field at all."""
+    from cobirb.typing.spi import ApprovalOutcome
+
+    class _OddIO(_RecordingIO):
+        def confirm_request(self, request):
+            return ApprovalOutcome(decision="once", instruction="ignored")
+
+    session = Orchestrator(
+        model=_ToolCallModel("read_file", {"path": "a.txt"}),
+        tools=ToolRegistry(str(tmp_path)).tools,
+        policy=Policy(),
+        io=_OddIO(),
+    ).run("read it", "sys", cwd=str(tmp_path))
+
+    assert "ignored" not in _tool_turn(session).content
+
+
+def test_approving_for_the_session_widens_every_agent_not_just_this_one(tmp_path):
+    """The distinction from "always", which widens the one policy it was
+    asked about and dies with it."""
+    from cobirb.policy import SessionGrants
+    from cobirb.typing.spi import ApprovalOutcome
+
+    class _SessionIO(_RecordingIO):
+        def confirm_request(self, request):
+            return ApprovalOutcome(decision="session")
+
+    grants = SessionGrants()
+    later = Policy()
+    Orchestrator(
+        model=_ToolCallModel("shell", {"command": "pytest -q"}),
+        tools=ToolRegistry(str(tmp_path)).tools,
+        policy=Policy(),
+        io=_SessionIO(),
+        grants=grants,
+    ).run("run the tests", "sys", cwd=str(tmp_path))
+
+    grants.register(later)
+    assert later.is_allowed("shell", {"command": "pytest -q"})
+
+
+def test_an_adapter_answering_with_nonsense_is_a_refusal(tmp_path):
+    """Fail closed reaches the new hook too: a plugin returning something
+    unrecognised must not open access."""
+    class _NonsenseIO(_RecordingIO):
+        def confirm_request(self, request):
+            return "yes please"
+
+    session = Orchestrator(
+        model=_ToolCallModel("shell", {"command": "rm -rf /"}),
+        tools=ToolRegistry(str(tmp_path)).tools,
+        policy=Policy(),
+        io=_NonsenseIO(),
+    ).run("go", "sys", cwd=str(tmp_path))
+
+    assert "Permission denied" in _tool_turn(session).content
+
+
+def test_an_approval_request_says_which_agent_is_asking(tmp_path):
+    """With several Worker Birbs running at once, "may I run this?" is only
+    answerable if you know which of them is asking."""
+    seen: list = []
+
+    class _ScopedIO(_RecordingIO):
+        def confirm_scoped(self, request):
+            seen.append(request)
+            return "deny"
+
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("shell", {"command": "ls"}),
+        tools=ToolRegistry(str(tmp_path)).tools,
+        policy=Policy(),
+        io=_ScopedIO(),
+    )
+    orchestrator.agent_id = "exporter"
+    orchestrator.run("go", "sys", cwd=str(tmp_path))
+
+    assert seen and seen[0].asked_by == "exporter"
+
+
 def test_an_approved_edit_is_snapshotted_and_can_be_undone(tmp_path):
     """End to end: the orchestrator saves the file before the tool changes
     it, so undo has something to put back."""

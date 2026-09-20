@@ -25,6 +25,7 @@ Asking to stop means no further workers start and the run reports what it has.
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import logging
 import threading
 import time
@@ -155,6 +156,61 @@ class Canceller:
             logger.debug("force-cancelling a worker raised", exc_info=True)
 
 
+class Slots:
+    """The flock's real concurrency limit, as something a worker can put down.
+
+    Concurrency used to be the thread pool's size, which conflated two
+    different things: how many workers *exist* and how many are allowed to be
+    working at once. They came apart the moment a Worker Birb could stop to
+    ask the user something. A worker waiting on a person is not using the
+    model endpoint, not holding the GPU and not making progress — but under a
+    sized pool it was still occupying the slot, so a flock with
+    ``concurrency = 2`` and two workers waiting on dialogs ran nothing at all.
+
+    So the pool is sized to the number of workers and *this* is the limit. A
+    worker holds a slot while it works and gives it back while it is parked:
+
+        with slots:                 # working
+            ...
+            with slots.released():  # parked on a question
+                answer = ask()
+
+    Deliberately a plain semaphore and not a priority queue. A worker whose
+    question was just answered rejoins the queue rather than jumping it, which
+    means it can wait behind a worker that has not started yet. That was a
+    considered trade: the ordering is only visible when more workers are ready
+    than there are slots, and the machinery to fix it is a custom waiter queue
+    — worth building if the wait ever proves noticeable, not before.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._semaphore = threading.Semaphore(max(1, limit))
+
+    def __enter__(self) -> "Slots":
+        self._semaphore.acquire()
+        return self
+
+    def __exit__(self, *exc_info) -> bool:
+        self._semaphore.release()
+        return False
+
+    @contextlib.contextmanager
+    def released(self):
+        """Give the slot up for the duration, then wait for one again.
+
+        The re-acquire is in a ``finally`` so a worker that is force-stopped
+        while parked still restores the count. A slot leaked here would not
+        fail loudly — it would quietly lower the flock's concurrency for the
+        rest of the round, which is the kind of bug that gets diagnosed as
+        "the endpoint felt slow today".
+        """
+        self._semaphore.release()
+        try:
+            yield
+        finally:
+            self._semaphore.acquire()
+
+
 class FlockStopped(Exception):
     """Raised by nothing; reserved so callers can tell a stop from a failure."""
 
@@ -169,6 +225,7 @@ def run_flock(
     on_event=None,
     io_for=None,
     canceller: "Canceller | None" = None,
+    grants=None,
 ) -> FlockOutcome:
     """Run one round of a charter and report on it.
 
@@ -181,10 +238,17 @@ def run_flock(
     front-end can show progress without this module knowing what a pane is.
     Kinds: ``"started"``, ``"finished"``, ``"reviewed"``.
 
-    ``io_for(worker)`` optionally supplies each Worker Birb with its own I/O
-    adapter — how the TUI gives each one a pane to draw into. Coarse events say
-    *that* a worker started; this is what makes its work visible while it
-    happens.
+    ``io_for(worker, slots)`` optionally supplies each Worker Birb with its own
+    I/O adapter — how the TUI gives each one a pane to draw into. Coarse events
+    say *that* a worker started; this is what makes its work visible while it
+    happens. It receives ``slots`` as well as the worker because an adapter
+    that can stop to ask the user something has to be able to put its
+    concurrency slot down first (see ``Slots``); one that only draws can
+    ignore it.
+
+    ``grants`` is the session's approval store, passed to each worker so an
+    answer of "allow for the session" reaches the workers that have not
+    started yet as well as the one that asked.
     """
     config = config or Config()
     stop = stop or threading.Event()
@@ -205,19 +269,34 @@ def run_flock(
     baseline = Baseline.capture(charter, cwd)
     outcome = FlockOutcome(charter=charter)
 
+    slots = Slots(limit)
+
     def run_one(worker: WorkerBrief) -> WorkerReport:
+        # Checked before taking a slot, not after: a stopped flock should not
+        # queue up behind the workers still finishing just to decline to run.
         if stop.is_set():
             return WorkerReport(worker_id=worker.id, ok=False, error="stopped before it started")
-        announce("started", worker)
-        report = run_worker(
-            worker, cwd, config=config, io=io_for(worker) if io_for else None,
-            canceller=canceller,
-        )
+        with slots:
+            if stop.is_set():
+                return WorkerReport(
+                    worker_id=worker.id, ok=False, error="stopped before it started"
+                )
+            announce("started", worker)
+            report = run_worker(
+                worker, cwd, config=config,
+                io=io_for(worker, slots) if io_for else None,
+                canceller=canceller, grants=grants,
+            )
         announce("finished", report)
         return report
 
     logger.info("flock: %d worker(s), %d at a time", len(workers), limit)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=limit) as pool:
+    # Sized to the workers, with `slots` holding the real limit — a worker
+    # parked on a question needs its thread kept alive while costing nothing
+    # against the concurrency budget. `pool.map` still does the dispatching,
+    # so `reports` stays in charter order, which `complete`, `outstanding`
+    # and the review loop all rely on.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(workers))) as pool:
         outcome.reports = list(pool.map(run_one, workers))
 
     outcome.stopped = stop.is_set()

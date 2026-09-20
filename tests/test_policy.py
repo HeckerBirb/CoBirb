@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 
 from cobirb.plugins.core.tools import WriteFileTool
-from cobirb.policy import AuditLog, Policy, _segments
+from cobirb.policy import AuditLog, Policy, SessionGrants, _segments
 
 
 def test_default_deny_unknown_tool():
@@ -384,3 +384,64 @@ def test_policy_and_tool_resolve_a_tilde_path_to_the_same_file(tmp_path, monkeyp
     WriteFileTool(cwd=str(work)).execute({"path": "~/x.txt", "content": "landed"})
 
     assert (home / "x.txt").read_text() == "landed"
+
+
+# --------------------------------------------------------------------------- #
+# Session grants — approvals that outlive the policy they were made on.
+# --------------------------------------------------------------------------- #
+def test_a_session_grant_reaches_a_policy_that_did_not_exist_yet():
+    """The case a per-policy grant cannot express, and the reason this exists:
+    a Worker Birb built after the approval must not be asked again."""
+    grants = SessionGrants()
+    grants.grant("shell", {"command": "pytest -q"})
+    later = Policy()
+    grants.register(later)
+
+    assert later.is_allowed("shell", {"command": "pytest -q"})
+
+
+def test_a_session_grant_reaches_a_policy_already_running():
+    """The other half: workers in flight are widened too, not only the ones
+    that start next."""
+    grants = SessionGrants()
+    live = Policy()
+    grants.register(live)
+    grants.grant("shell", {"command": "pytest -q"})
+
+    assert live.is_allowed("shell", {"command": "pytest -q"})
+
+
+def test_a_session_grant_widens_only_what_was_granted():
+    """It is the same widening `Policy.grant` does, applied to more policies —
+    not a blanket approval, which the design does not have."""
+    grants = SessionGrants()
+    policy = Policy()
+    grants.register(policy)
+    grants.grant("shell", {"command": "pytest -q"})
+
+    assert not policy.is_allowed("shell", {"command": "rm -rf /"})
+    assert not policy.is_allowed("write_file", {"path": "/etc/passwd"})
+
+
+def test_session_grants_start_empty():
+    """Default-deny survives the new machinery: a fresh store grants nothing."""
+    policy = Policy()
+    SessionGrants().register(policy)
+
+    assert not policy.is_allowed("shell", {"command": "ls"})
+
+
+def test_a_finished_worker_does_not_keep_its_policy_alive():
+    """Held weakly on purpose. A strong reference per ticket per round would
+    be a leak with the lifetime of the session."""
+    import gc
+
+    grants = SessionGrants()
+    policy = Policy()
+    grants.register(policy)
+    del policy
+    gc.collect()
+
+    # Nothing to push to, and granting must not raise on the way to finding
+    # that out.
+    grants.grant("shell", {"command": "ls"})

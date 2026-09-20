@@ -128,6 +128,16 @@ prompt → model call → tool calls (policy-gated) → results into history →
 - `grant()` decides what "always" widens to: a read → its directory, a write → its directory, a
   shell call → that invocation, anything else (plugin/MCP tools) → the tool name.
   `describe_grant()` produces the sentence the prompt shows before the user agrees.
+- `SessionGrants` is the same widening applied to **every agent in the session** rather than to the
+  one policy that was asked about — the `"session"` decision. It exists because a Worker Birb's
+  policy is built per ticket and dies with it, so `"always"` answered in a flock is re-asked on the
+  next ticket and the next round. Every policy built in the session registers and receives the
+  backlog, so a worker that starts *after* an approval is already widened by it. **A session grant
+  is a session grant:** it records nothing about who asked, because a permission that means
+  different things depending on its origin is one nobody can reason about — so a grant made in the
+  main conversation reaches workers, and one made by a worker reaches the main conversation.
+  Memory only, never written to config (a permission surviving a restart is the user's decision to
+  make in their own file), and policies are held weakly so finished workers do not accumulate.
 - `AuditLog` is **off** unless `"audit_log": true`. It stores arguments verbatim (file contents,
   diffs, commands), so it is written 0600, credential-redacted, and never created until enabled.
 
@@ -296,8 +306,10 @@ persistent was not done: see §17's note on `ShellTool`'s per-call process state
   non-integer declaration is an error, not a shrug. Incompatible → `IncompatiblePlugin`, refused at
   the loader boundary, non-fatally.
 - Interfaces: `Tool`, `ModelProvider`, `I_OAdapter`, `SessionCrypto`; data: `ToolCall`,
-  `ToolResult`, `ApprovalRequest`, `Persona`, `SteeringInterrupted`, and the
-  `once`/`always`/`deny` decision constants.
+  `ToolResult`, `ApprovalRequest`, `ApprovalOutcome`, `Persona`, `SteeringInterrupted`, and the
+  `once`/`always`/`session`/`deny` decision constants. `confirm_scoped` and `confirm_request` are
+  **optional duck-typed hooks**, probed with `getattr` and never on the ABC; `_request_approval`
+  tries them richest first and normalises anything unrecognised to deny.
 - Entry-point group `cobirb.plugins`. **Tools are additive** (every discovered one registers);
   **model/io/crypto are singleton slots** that only replace the core default when named in
   `plugins.<slot>` config. Local plugins live in `~/.cobirb/plugins/<name>/` and must be installed
@@ -405,6 +417,20 @@ scopes, are reviewed, and Brainy Birb reports.
   **no project context at all** (need-to-know), `HeadlessIO`, and verification scoped to the
   worker's own `accept`. Checkpoints, redaction and hooks still apply — those belong to every agent
   in someone's tree.
+- **A worker can ask for what its scope did not give it** (`WorkerPaneIO.confirm_request`). The
+  charter stays the only place capability is granted *up front*; this is the escalation out of it,
+  and it exists because silently refusing cost the ticket — a worker denied `shell` spent its
+  remaining turns retrying or reporting failure, with the capability question answered correctly
+  and the work lost anyway. **Asking costs the asker, not the round:** the worker releases its
+  concurrency slot (`supervisor.Slots`) so the rest of the flock runs at full speed, and its pane
+  shows `held`. Answers are once / session (`policy.SessionGrants`) / deny-with-an-instruction,
+  the last of which reaches the model through `orchestrator._denial_message`.
+- **A write into a file another worker owns is refused without asking** (`charter.writes_owner`).
+  Exclusive ownership is what makes concurrency safe by construction, not a convention — granted
+  away mid-round, two agents edit one file with no lock and "which worker broke this" stops having
+  an answer. It is also not a fair question to put to a person, who would have to hold the whole
+  partition in their head at the moment a dialog appears; CoBirb has the charter and can check.
+  Headless has nobody to ask and still refuses everything outside the charter.
 - Workers run concurrently, then join, **then** review one at a time (review reverts a stub
   temporarily, which would break a colleague's check). A failed worker never stops the others.
   Stopping is checked between workers; a model call in flight cannot be interrupted.
@@ -454,7 +480,10 @@ never wrap a row onto a second line and push another off the bottom. Keys: `f1` 
 `f2` next tab, `ctrl+q` quit, `ctrl+c` copy selection else cancel the turn, `up`/`down` recall the
 last 100 prompts (memory only). The prompt box stays enabled during a turn — submitting again
 steers rather than queueing. Tool approval is a modal (`y` once / `a` always / `n`/escape deny) and
-states what "always" would grant.
+states what "always" would grant. A Worker Birb's request uses `WorkerApprovalModal` instead
+(`y` once / `s` session / `n` deny), which names the worker, says a session grant reaches agents
+that have not started, and carries a placeholder-only field for "do this instead" — a placeholder
+so the prompt text can never be submitted as though the user had typed it.
 
 **Config keys** — `default_model`, `models.*`, `persona`, `system_prompt`, `plugins.{model,io,crypto}`,
 `allow_tools`, `allow_read_dirs`, `allow_write_dirs`, `verify_command`, `verify_timeout`,

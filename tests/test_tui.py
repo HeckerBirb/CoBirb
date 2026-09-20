@@ -16,6 +16,7 @@ a bare pause will pass locally and flake in CI.
 from __future__ import annotations
 
 import os
+import textwrap
 import threading
 from types import SimpleNamespace
 
@@ -49,6 +50,7 @@ from cobirb.tui.screens import (
     PersonaPickerModal,
     RememberModal,
     TextPromptModal,
+    WorkerApprovalModal,
     _ordered_catalogue_options,
 )
 from cobirb.tui.widgets import (
@@ -3571,3 +3573,180 @@ async def test_a_charter_that_already_ran_is_not_offered_again():
         app.forget_used_charter()
 
         assert _last_proposed_charter(app) is None
+
+
+# --------------------------------------------------------------------------- #
+# A Worker Birb asking for something outside its charter scope.
+# --------------------------------------------------------------------------- #
+async def _worker_dialog(pilot, app, **overrides):
+    """Put one worker's approval dialog on screen and collect its answer."""
+    answers: list = []
+    kwargs = dict(
+        worker_id="exporter", tool_name="shell", arguments={"command": "pytest -q"},
+        scope="run 'pytest' commands", preview="",
+    )
+    kwargs.update(overrides)
+    app.push_screen(WorkerApprovalModal(**kwargs), callback=answers.append)
+    # Waiting for the screen alone is not enough: it is the current screen
+    # before `compose` has mounted anything into it, so a query for the body
+    # or the field races the mount and finds nothing.
+    await _until(pilot, lambda: bool(app.screen.query("#worker-approval-instruction")))
+    return answers
+
+
+async def test_the_worker_dialog_says_who_is_asking():
+    """Several workers run at once and they are not interchangeable — "may I
+    run this?" is only answerable if you know which one wants it."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _worker_dialog(pilot, app)
+
+        body = _static_text(app, "#worker-approval-body")
+        assert "exporter" in body
+        assert "shell" in body
+
+
+async def test_the_worker_dialog_says_a_session_grant_reaches_other_agents():
+    """It widens more than the worker in front of you, so it has to say so —
+    agreeing to that from a dialog that named one worker would be blind."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _worker_dialog(pilot, app)
+
+        assert "not started" in _static_text(app, "#worker-approval-body")
+
+
+@pytest.mark.parametrize(
+    "key,expected", [("y", "once"), ("s", "session"), ("n", "deny")]
+)
+async def test_the_worker_dialog_keys_resolve_to_a_decision(key, expected):
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        answers = await _worker_dialog(pilot, app)
+
+        await pilot.press(key)
+        await _until(pilot, lambda: bool(answers))
+
+        assert answers[0][0] == expected
+
+
+async def test_escape_denies_the_worker():
+    """Fails closed like every other approval path in the codebase."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        answers = await _worker_dialog(pilot, app)
+
+        await pilot.press("escape")
+        await _until(pilot, lambda: bool(answers))
+
+        assert answers[0][0] == "deny"
+
+
+async def test_a_refusal_carries_what_to_do_instead():
+    """The useful half of "no" — it reaches the model as part of the tool
+    result, so the worker acts on it rather than retrying."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        answers = await _worker_dialog(pilot, app)
+
+        app.screen.query_one("#worker-approval-instruction", Input).value = (
+            "use the Makefile target"
+        )
+        await pilot.press("n")
+        await _until(pilot, lambda: bool(answers))
+
+        assert answers[0] == ("deny", "use the Makefile target")
+
+
+async def test_an_untouched_field_sends_nothing():
+    """The prompt text is a placeholder, not a value: it can never reach the
+    model as though somebody had meant it."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        answers = await _worker_dialog(pilot, app)
+
+        await pilot.press("n")
+        await _until(pilot, lambda: bool(answers))
+
+        assert answers[0] == ("deny", "")
+
+
+async def test_approving_after_typing_does_not_carry_the_instruction():
+    """Typing an alternative and then allowing it anyway is a change of mind,
+    and the approval is the answer."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        answers = await _worker_dialog(pilot, app)
+
+        app.screen.query_one("#worker-approval-instruction", Input).value = "never mind"
+        await pilot.press("y")
+        await _until(pilot, lambda: bool(answers))
+
+        assert answers[0] == ("once", "")
+
+
+async def test_a_write_into_another_workers_files_is_refused_without_asking():
+    """The one thing that is never a question. Exclusive file ownership is
+    what makes concurrent workers safe, so it cannot be granted away at a
+    dialog — and CoBirb has the charter to check it against."""
+    from cobirb.flock.charter import parse_charter
+    from cobirb.tui.flock_bridge import WorkerPaneIO
+    from cobirb.typing.spi import ApprovalRequest
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.flock_charter = parse_charter(textwrap.dedent("""
+            objective = "two tickets"
+
+            [[workers]]
+            id     = "a"
+            writes = ["a.py"]
+            brief  = "Do a."
+
+            [[workers]]
+            id     = "b"
+            writes = ["b.py"]
+            brief  = "Do b."
+        """))
+
+        outcome = WorkerPaneIO(app, "a").confirm_request(
+            ApprovalRequest(tool_name="write_file", arguments={"path": "b.py"})
+        )
+
+        assert outcome.decision == "deny"
+        assert "'b'" in outcome.instruction
+        # No dialog was raised: nobody was asked anything.
+        assert not isinstance(app.screen, WorkerApprovalModal)
+
+
+async def test_a_worker_may_still_ask_for_a_file_nobody_owns():
+    """Only cross-silo writes are refused outright — everything else is a
+    question the user gets to answer."""
+    from cobirb.flock.charter import parse_charter
+    from cobirb.tui.flock_bridge import WorkerPaneIO
+    from cobirb.typing.spi import ApprovalRequest
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.flock_charter = parse_charter(textwrap.dedent("""
+            objective = "one ticket"
+
+            [[workers]]
+            id     = "a"
+            writes = ["a.py"]
+            brief  = "Do a."
+        """))
+
+        adapter = WorkerPaneIO(app, "a")
+        assert adapter._blocked_owner(
+            ApprovalRequest(tool_name="write_file", arguments={"path": "new_helper.py"})
+        ) == ""
