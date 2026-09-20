@@ -21,6 +21,37 @@ version.
 Every role inherits from `default`, field by field. Name only `default` and everything uses it.
 Check with `cobirb models`.
 
+## Capping the context window
+
+```json
+{
+  "max_num_ctx": "64k"
+}
+```
+
+Three numbers can call themselves "the context window," and `max_num_ctx` is the outermost of
+them:
+
+1. **Ollama's own default is 4096** — what a model gets served if nothing says otherwise. CoBirb
+   never relies on it: every `/api/chat` request states `options.num_ctx` explicitly, because a
+   client that lets the server guess gets a conversation silently truncated from the front.
+2. **What CoBirb asks for** is the Modelfile's own `num_ctx` if whoever built the model set one,
+   and otherwise the architecture's advertised maximum — `qwen2.context_length`, `llama.context_length`,
+   read straight off `/api/show`. For a Qwen2-family model with no `num_ctx` in its Modelfile,
+   that maximum is 262144, sized as KV cache on top of the weights.
+3. **`max_num_ctx` is a ceiling on step 2**, not a replacement for it. A model asking for less than
+   the ceiling is untouched; one asking for more — that 262144 — is clamped down to it. It never
+   raises a window that came out lower, and it changes nothing about the model or its Modelfile,
+   only what CoBirb puts in the request.
+
+Set it to whatever a single conversation's KV cache should top out at on your card — `"64k"` and
+`65536` mean the same thing, a `k` being 1024. Leave it unset and CoBirb asks for whatever the
+model advertises, uncapped, which is fine on hardware with room for it and is why nothing needs it
+by default.
+
+`context_tokens` is a different knob and does not do this job: it overrides how much conversation
+*history* CoBirb budgets against, never the `num_ctx` sent to the server.
+
 ## Every key
 
 | Key | Default | Does |
