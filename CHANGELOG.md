@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.18.0]
 
 - **`max_num_ctx` can be written the way people say it.** `"64k"` (or `"64K"`) means 65536 — a `k`
   is 1024, because what anyone means by "64k" here is the window, and windows are powers of two.
