@@ -64,6 +64,38 @@ A `kind = "loose"` seam is exempt, and so is one naming a symbol (`module.py::lo
 seam is an agreement about behaviour with only a test behind it, and that behaviour is usually
 somebody's to implement.
 
+### How Brainy Birb builds it
+
+A piece at a time, with each piece checked as it lands:
+
+```
+declare_seam   export/types.py, formal, "ExportSpec and Column"
+add_worker     writer  writes export/csv.py, tests/test_csv.py   reads export/types.py
+add_worker     cli     writes cli.py, tests/test_cli.py          reads export/types.py
+seal_charter   "Add CSV export"
+```
+
+Every `add_worker` is checked against the plan so far, and answers immediately:
+
+```
+export/csv.py is already written by ticket 'writer', and two owners of one file is what
+makes concurrent workers unsafe. Give this ticket a different file, or — if 'writer'
+should not have claimed it — call drop_worker('writer') and add it back without that path.
+```
+
+So **a charter built this way cannot come out with an overlapping partition.** The refusal arrives
+while Brainy Birb is still writing the ticket that caused it, naming one path and what to do about
+it, and nothing is partially applied. `drop_worker` backs a ticket out when the file it claimed
+turns out to belong to another one.
+
+Tickets can be added in any order — both directions of every check run on every call, so nothing
+depends on writers coming before readers. A `needs` may name a ticket that doesn't exist yet; those
+and any circular waits are settled at `seal_charter`.
+
+`propose_charter` still takes a whole charter as TOML in one call, which is less work for a small
+plan. It's checked after the fact, so it *can* come back overlapping — which is what the next
+section is about.
+
 ### When the partition overlaps
 
 It's reported, not refused — merging two workers, hoisting the shared file into a seam, or
@@ -149,6 +181,25 @@ making decisions that aren't its own.
 Checkpoints, secret redaction and your hooks still apply — those belong to every agent working
 in your tree.
 
+## A worker runs its own acceptance check
+
+The `accept` command from its ticket is the one thing a worker may run. It implements, runs the
+check, reads the failure, fixes, runs it again — converging on green rather than writing blind.
+
+That command is the only one it gets. The grant is a prefix rule over the exact invocation you
+approved in the charter, applied to every segment of anything it tries to run, so
+`pytest tests/test_csv.py -q` doesn't become `rm`, and a chained command with something else in it
+is refused whole. Anything else it turns out to need still comes to you as a dialog. A ticket with
+no `accept` gets no shell at all.
+
+It used to be run *for* the worker, once, after its turn — which made the ticket's definition of
+done the one thing it couldn't see. A worker wrote an implementation blind, learned once whether
+the check passed, got a single fix attempt, and was finished, with its report saying "acceptance
+check FAILED" about work it never had a chance to iterate on.
+
+The check still runs once more after the turn ends, so leaving it failing isn't something a worker
+can talk its way past.
+
 ## When a worker needs something it wasn't given
 
 A charter grants files. Sooner or later a worker needs something else — to run the project's
@@ -159,11 +210,13 @@ So it asks, and you get three answers:
 
 ```
 [exporter] wants to use shell
-pytest tests/test_csv_export.py -q
+ruff format export/csv.py
 
   Once (y)     Session (s)     Deny (n)
   [ Disallow; do this instead…                    ]
 ```
+
+Its own `accept` command isn't one of these — see below.
 
 - **Once** — this call only.
 - **Session** — every agent for the rest of this CoBirb session: this conversation and every

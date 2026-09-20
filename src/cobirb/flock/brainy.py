@@ -7,9 +7,18 @@ reads the reports and reviews and says where the round got to.
 
 Almost all of that is judgement, so almost all of this module is a prompt. The
 code here is the two things a prompt cannot do: hand the model a way to return
-a charter that does not involve writing a file into the user's repository
-(``ProposeCharterTool``), and compose the material a round's verdict is written
-from (``round_summary``).
+a charter that does not involve writing a file into the user's repository, and
+compose the material a round's verdict is written from (``round_summary``).
+
+**There are two routes to a charter and one place it lands.** ``CharterDesk``
+holds the plan, the accepted charter and every counter; the five tools over it
+are moves. ``DeclareSeamTool``, ``AddWorkerTool``, ``DropWorkerTool`` and
+``SealCharterTool`` build a plan up a piece at a time over ``plan.PlanDraft``,
+each call checked against what is already there — so an overlapping partition
+cannot be constructed. ``ProposeCharterTool`` still takes a whole charter as
+TOML, which is less work for a small plan and is validated after the fact.
+Both end at ``CharterDesk.accept``, so whichever produced a charter, the
+front-end finds it in the same place.
 
 **The S.O.L.I.D. guidance below is deliberately hardcoded rather than left to
 the model's instincts.** Dependency Inversion in particular is not a style
@@ -23,12 +32,38 @@ import logging
 from typing import Any
 
 from ..typing.spi import Tool, ToolResult
-from .charter import Charter, CharterError, find_conflicts, parse_charter
+from .charter import (
+    DEFAULT_CONCURRENCY,
+    MAX_CONCURRENCY,
+    SEAM_KINDS,
+    Charter,
+    CharterError,
+    find_conflicts,
+    parse_charter,
+)
+from .plan import PlanDraft
 from .supervisor import FlockOutcome, check_partition
 
 logger = logging.getLogger("cobirb")
 
 PROPOSE_CHARTER = "propose_charter"
+DECLARE_SEAM = "declare_seam"
+ADD_WORKER = "add_worker"
+DROP_WORKER = "drop_worker"
+SEAL_CHARTER = "seal_charter"
+
+# Every tool Brainy Birb uses to build a charter. Named in one place because
+# `run.install_charter_tool` registers and permits all of them together — a
+# planning surface with one tool missing is one the transcript still tells the
+# model to use.
+PLANNING_TOOLS = (PROPOSE_CHARTER, DECLARE_SEAM, ADD_WORKER, DROP_WORKER, SEAL_CHARTER)
+
+# How many times the same refusal, word for word, before the answer stops being
+# a correction and becomes an instruction to stop. The incremental moves fail
+# locally and cheaply, which is the point of them — but "cheap" is not "free",
+# and a model that has been told three times that a path is taken is not going
+# to discover on the fourth attempt that it is not.
+MAX_REPEATED_REFUSALS = 3
 
 # How many rejected charters before the tool stops asking for another one.
 # The planning turn is bounded at 30 turns, so a model that cannot produce
@@ -145,17 +180,38 @@ have written a sequence of steps, not a division of labour, and it should \
 either be one worker's ticket or a smaller skeleton with a real seam in it.
 
 WHEN YOU ARE READY
-Build the skeleton with your file tools first, then call `propose_charter` \
-once with the whole charter as TOML. Do not write the charter to a file in \
-the project; it belongs to the session. The user will read it and approve, \
-edit or reject it before any worker runs.
+Build the skeleton with your file tools first. Then build the charter up a \
+piece at a time:
+
+  - `declare_seam` once per seam, with its kind.
+  - `add_worker` once per ticket: its id, its brief, and every file it may \
+write. Each call is CHECKED AGAINST THE PLAN SO FAR and answers immediately — \
+a file another ticket already writes, or a file that is a formal seam, is \
+refused right there and named. So you find out while you are still writing \
+that one ticket, with one path to change.
+  - `drop_worker` if a ticket claimed something that turns out to belong to \
+another one. Drop it, add it back corrected.
+  - `seal_charter` once, with the objective, when every ticket is in.
+
+Add the tickets in whatever order you thought of them; both directions of \
+every check run on every call, so nothing depends on writers coming before \
+readers. A charter built this way CANNOT come out with an overlapping \
+partition, which is the commonest way a round fails before it starts.
+
+`propose_charter` still takes a whole charter as TOML in one call, and for a \
+small plan — two tickets and a seam — that is less work. But it is checked \
+after the fact: it can come back overlapping, and then there is no single move \
+to blame. Prefer the pieces for anything larger.
+
+Do not write the charter to a file in the project; it belongs to the session. \
+The user will read it and approve, edit or reject it before any worker runs.
 
 A CHARTER IN YOUR REPLY IS NOT A CHARTER. Writing the TOML out in your \
 answer — in a code block, or as prose, however complete and however \
-well-formed — proposes nothing and starts nothing. `propose_charter` is the \
-only thing that creates one. If you write it into your reply and stop, the \
-run ends with no Flock, and the person waiting on it sees a charter on screen \
-and nothing happening. Call the tool.
+well-formed — proposes nothing and starts nothing. `seal_charter` and \
+`propose_charter` are the only things that create one. If you write it into \
+your reply and stop, the run ends with no Flock, and the person waiting on it \
+sees a charter on screen and nothing happening. Call the tool.
 
 BUDGET YOUR TURNS. Every file you write costs one, and you have a limited \
 number for the whole planning phase — skeleton and charter together. A \
@@ -204,29 +260,32 @@ Another ticket.
 '''
 
 
-class ProposeCharterTool(Tool):
-    """How Brainy Birb hands a charter back without touching the repository.
+class CharterDesk:
+    """Where a charter is assembled and kept, however it arrives.
 
-    A tool rather than a fenced block in the final answer, for two reasons. The
-    charter is validated the moment it arrives, so a malformed one is a
-    correctable tool failure on the next turn rather than a parse error after
-    the turn is over. And it never becomes a file in the working tree: a
-    charter lives in the session, and a charter file sitting in a repository is
-    one a clone could plant.
+    Two routes reach the same place. Brainy Birb can build the plan up move by
+    move (``declare_seam``, ``add_worker``, ``drop_worker``, ``seal_charter``,
+    over ``plan.PlanDraft``), or it can send one whole TOML document
+    (``propose_charter``). Both end at ``accept``, so there is one place that
+    decides what an accepted charter means, one set of counters, and one
+    notification to the front-end — rather than two surfaces that drift until
+    only the one nobody tests still works.
+
+    It holds the state because the state outlives any one call: a charter has
+    to survive the turn that proposed it (the user approves it later, possibly
+    after a dialog was dismissed), and the counters have to survive the model's
+    next attempt, which is the entire mechanism by which a loop is noticed.
     """
 
-    NAME = PROPOSE_CHARTER
-
-    def __init__(
-        self, cwd: str | None = None, on_proposed: "Any | None" = None
-    ) -> None:
-        self._cwd = cwd
+    def __init__(self, cwd: str | None = None, on_proposed: "Any | None" = None) -> None:
+        self.cwd = cwd
         # Called with a charter the moment one is accepted. This is what lets a
         # charter proposed outside a flock run reach the user: the front-end
         # decides whether to act on it (it does nothing while a flock is
-        # already running and about to ask for approval itself), so the tool
+        # already running and about to ask for approval itself), so the desk
         # does not need to know which of the two situations it is in.
         self.on_proposed = on_proposed
+        self.draft = PlanDraft()
         self.charter: Charter | None = None
         self.raw: str = ""
         # What was attempted and what was wrong with it. Without these, a
@@ -241,87 +300,95 @@ class ProposeCharterTool(Tool):
         # charters that would not parse: `exhausted` tests `charter is None`,
         # so the moment one parsed the brake came off for the rest of the
         # session — and an overlapping charter is a charter that parsed. That
-        # left the `ok=True` branch below with no brake at all and nothing but
-        # the planning turn budget to stop it.
+        # left the accepted-but-overlapping path with no brake at all and
+        # nothing but the planning turn budget to stop it.
         self.overlaps: int = 0
         self._last_overlaps: tuple[tuple[str, str], ...] = ()
-
-    def name(self) -> str:
-        return self.NAME
+        # The last refusal, and how many times running it has been identical.
+        # A move-level refusal is cheap and specific, which is the point of
+        # building a plan incrementally — but a model can still send the same
+        # rejected move forever, and nothing else here would notice.
+        self._last_refusal: str = ""
+        self._repeats: int = 0
 
     def reset(self) -> None:
-        """Forget any charter and any failures, before a fresh planning turn.
+        """Forget everything, before a fresh planning turn.
 
-        The tool now lives as long as the session does, so a second flock
-        would otherwise start holding the first one's charter and be handed it
-        as though it had just been proposed.
+        The desk now lives as long as the session does, so a second flock would
+        otherwise start holding the first one's charter — and half of its
+        draft, which is worse: a plan that is partly somebody else's is one no
+        refusal makes sense against.
         """
+        self.draft = PlanDraft()
         self.charter = None
         self.raw = ""
         self.attempts = 0
         self.last_error = ""
         self.overlaps = 0
         self._last_overlaps = ()
-
-    def description(self) -> str:
-        return (
-            "Propose the charter for this Flock: the objective, the seams, and one "
-            "ticket per Worker Birb, as TOML. Call this once, after the skeleton is "
-            "written. The user reads and approves it before any worker runs."
-        )
-
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "toml": {
-                    "type": "string",
-                    "description": f"The whole charter as TOML. Shape:\n{CHARTER_TEMPLATE}",
-                }
-            },
-            "required": ["toml"],
-        }
+        self._last_refusal = ""
+        self._repeats = 0
 
     @property
     def exhausted(self) -> bool:
-        """Whether this has been tried enough times to stop asking."""
+        """Whether a charter has been tried enough times to stop asking."""
         return self.charter is None and self.attempts >= MAX_CHARTER_ATTEMPTS
 
-    def _rejection(self, exc: CharterError) -> str:
-        """What a rejected charter is told, which changes as attempts pile up.
+    # ------------------------------------------------------------------ #
+    # Accepting one
+    # ------------------------------------------------------------------ #
+    def accept(self, charter: Charter, raw: str = "") -> "tuple[str, bool]":
+        """Keep a charter and say what happens to it next, and whether it is disjoint.
 
-        **The template is sent once.** It is twenty-five lines, it is already
-        in this tool's own parameter schema, and repeating it after every
-        failure fills the context with identical text — which, for a model
-        deciding what to send next, is the strongest possible signal that the
-        thing to send next is the same again.
-
-        At the cap the answer stops being a correction and becomes an
-        instruction to stop. A tool that only ever says "no, try again" to a
-        model that cannot get it right is a loop with a turn limit for a brake,
-        and the user watching it has no idea whether anything is happening.
+        The single tail both routes run through. ``on_proposed`` is fired here
+        rather than by the callers, guarded, because a front-end that cannot
+        display a charter must not turn an accepted one into a failed call.
         """
-        if self.attempts >= MAX_CHARTER_ATTEMPTS:
-            return (
-                f"That charter could not be read: {exc}\n\n"
-                f"This is attempt {self.attempts}, and every one has been rejected. "
-                "STOP calling propose_charter. Say plainly, in your reply, what you were "
-                "trying to express and what you cannot get past — a person will read it. "
-                "Repeating the same charter will not produce a different answer."
-            )
-        if self.attempts == 1:
-            return (
-                f"That charter could not be read: {exc}\n\nThe shape is:\n{CHARTER_TEMPLATE}"
-            )
+        self.last_error = ""
+        self.charter, self.raw = charter, raw
+        if self.on_proposed is not None:
+            try:
+                self.on_proposed(charter)
+            except Exception:  # noqa: BLE001 - a front-end that cannot display it
+                # must not turn an accepted charter into a failed tool call.
+                logger.debug("a charter handler raised", exc_info=True)
+        disjoint, partition = check_partition(charter)
+        if not disjoint:
+            return self._overlap_notice(charter, partition), False
         return (
-            f"That charter could not be read: {exc}\n\n"
-            f"Attempt {self.attempts} of {MAX_CHARTER_ATTEMPTS}. The shape is in this tool's "
-            "`toml` parameter description — do not resend what you just sent; change the "
-            "thing the error names."
+            f"Charter accepted: {len(charter.workers)} worker(s), "
+            f"{len(charter.seams)} seam(s), partition is disjoint. "
+            "It now goes to the user for approval."
+        ), True
+
+    def refuse(self, message: str) -> str:
+        """A move-level refusal, with a stop attached once it starts repeating.
+
+        The refusals from ``PlanDraft`` are already specific — one path, one
+        owner, what to do about it — so this adds nothing to a first or second
+        one. What it adds on the third is the only thing the model has not
+        already been told: that repeating this is not working.
+        """
+        if message == self._last_refusal:
+            self._repeats += 1
+        else:
+            self._last_refusal, self._repeats = message, 1
+        if self._repeats < MAX_REPEATED_REFUSALS:
+            return message
+        return (
+            f"{message}\n\nThat is the {self._repeats}th time you have sent this same move "
+            "and been refused it, so sending it again will not work either. Do something "
+            "different: change the path, drop the ticket that holds it, or stop calling "
+            "planning tools and say in your reply what you cannot resolve."
         )
 
     def _overlap_notice(self, charter: Charter, partition: str) -> str:
         """What a valid charter with an overlapping partition is told.
+
+        Only ``propose_charter`` can reach this — a sealed plan is disjoint by
+        construction — and that asymmetry is deliberate rather than an
+        oversight. A whole document is checked after the fact and can therefore
+        be wrong in a way there is no move to blame.
 
         This message used to open with "Charter accepted" and close with "If it
         was a mistake, propose a corrected charter", which is two states at
@@ -365,10 +432,351 @@ class ProposeCharterTool(Tool):
         return held + (
             "If a worker claimed a file it does not actually have to change — a shared "
             "types or interface file you already wrote into the skeleton is the usual one "
-            "— drop that path from its `writes` and call propose_charter ONCE more. If the "
-            "overlap is deliberate, do not call this again: say so in your reply and stop, "
-            "and the user will be asked whether to run one worker at a time."
+            "— drop that path from its `writes` and call propose_charter ONCE more. Or "
+            "build the plan with add_worker instead, which refuses an overlap at the move "
+            "that causes it. If the overlap is deliberate, do not call this again: say so "
+            "in your reply and stop, and the user will be asked whether to run one worker "
+            "at a time."
         )
+
+    def rejection(self, exc: CharterError) -> str:
+        """What a rejected whole-document charter is told.
+
+        Changes as attempts pile up. **The template is sent once.** It is
+        twenty-five lines, it is already in ``propose_charter``'s own parameter
+        schema, and repeating it after every failure fills the context with
+        identical text — which, for a model deciding what to send next, is the
+        strongest possible signal that the thing to send next is the same again.
+
+        At the cap the answer stops being a correction and becomes an
+        instruction to stop. A tool that only ever says "no, try again" to a
+        model that cannot get it right is a loop with a turn limit for a brake,
+        and the user watching it has no idea whether anything is happening.
+        """
+        if self.attempts >= MAX_CHARTER_ATTEMPTS:
+            return (
+                f"That charter could not be read: {exc}\n\n"
+                f"This is attempt {self.attempts}, and every one has been rejected. "
+                "STOP calling propose_charter. Say plainly, in your reply, what you were "
+                "trying to express and what you cannot get past — a person will read it. "
+                "Repeating the same charter will not produce a different answer."
+            )
+        if self.attempts == 1:
+            return (
+                f"That charter could not be read: {exc}\n\nThe shape is:\n{CHARTER_TEMPLATE}"
+                "\n\nOr build it a piece at a time with declare_seam and add_worker, which "
+                "check each move as you make it and never refuse a whole plan at once."
+            )
+        return (
+            f"That charter could not be read: {exc}\n\n"
+            f"Attempt {self.attempts} of {MAX_CHARTER_ATTEMPTS}. The shape is in this tool's "
+            "`toml` parameter description — do not resend what you just sent; change the "
+            "thing the error names. If the TOML keeps failing, use declare_seam and "
+            "add_worker instead: no TOML, and one check per move."
+        )
+
+
+class _DeskTool(Tool):
+    """A planning tool over a shared ``CharterDesk``.
+
+    The desk is passed in rather than owned, because all five tools are moves
+    on one plan — one holding its own draft would build a charter the others
+    could not see.
+    """
+
+    NAME = ""
+
+    def __init__(self, desk: CharterDesk) -> None:
+        self.desk = desk
+
+    def name(self) -> str:
+        return self.NAME
+
+    def _refuse(self, exc: CharterError) -> ToolResult:
+        return ToolResult(ok=False, content=self.desk.refuse(str(exc)), error="bad_move")
+
+
+class DeclareSeamTool(_DeskTool):
+    """Record one agreement the workers meet at."""
+
+    NAME = DECLARE_SEAM
+
+    def description(self) -> str:
+        return (
+            "Declare one seam: a file, or file::symbol, that several Worker Birbs meet at. "
+            "Call it once per seam, before or after adding tickets. A 'formal' seam is a "
+            "declared artifact the type system holds up, and no ticket may write it."
+        )
+
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "at": {
+                    "type": "string",
+                    "description": "The file the seam lives at, e.g. 'export/types.py' — "
+                    "or 'export/reader.py::load' for an agreement about one symbol.",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": list(SEAM_KINDS),
+                    "description": "'formal' if the type system holds it up, 'loose' if "
+                    "only a test does.",
+                },
+                "what": {
+                    "type": "string",
+                    "description": "One sentence: what the agreement is and who meets at it.",
+                },
+            },
+            "required": ["at", "kind", "what"],
+        }
+
+    def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        try:
+            verdict = self.desk.draft.declare_seam(
+                str(arguments.get("at") or ""),
+                str(arguments.get("kind") or ""),
+                str(arguments.get("what") or ""),
+            )
+        except CharterError as exc:
+            return self._refuse(exc)
+        return ToolResult(ok=True, content=verdict)
+
+
+class AddWorkerTool(_DeskTool):
+    """Add one ticket to the plan, checked against every ticket already in it."""
+
+    NAME = ADD_WORKER
+
+    def description(self) -> str:
+        return (
+            "Add one Worker Birb's ticket to the plan. Checked against the plan so far as "
+            "soon as you call it: a file another ticket already writes, or that is a formal "
+            "seam, is refused here and named — so the partition cannot come out overlapping. "
+            "Call it once per worker, then seal_charter."
+        )
+
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Short id for this ticket, e.g. 'writer'. Unique.",
+                },
+                "brief": {
+                    "type": "string",
+                    "description": "This worker's whole ticket: what to implement and what "
+                    "done looks like. Only its own part — never the feature, the other "
+                    "workers, or the shape of the whole.",
+                },
+                "writes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Every file this worker may create or modify. Nothing "
+                    "else will be permitted, so a file you leave out costs it the ticket.",
+                },
+                "reads": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "The interfaces this work has to fit. It may read the "
+                    "whole project regardless; these are the ones to point it at.",
+                },
+                "accept": {
+                    "type": "string",
+                    "description": "The command that proves this ticket is done, e.g. "
+                    "'pytest tests/test_csv.py -q'. The worker may run this itself.",
+                },
+                "tests": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Which of `writes` hold the acceptance tests.",
+                },
+                "needs": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Ticket ids that must finish first. Omit unless this "
+                    "worker genuinely cannot start until another has finished.",
+                },
+            },
+            "required": ["id", "brief", "writes"],
+        }
+
+    def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        try:
+            verdict = self.desk.draft.add_worker(
+                str(arguments.get("id") or ""),
+                brief=str(arguments.get("brief") or ""),
+                writes=arguments.get("writes"),
+                reads=arguments.get("reads"),
+                accept=str(arguments.get("accept") or ""),
+                tests=arguments.get("tests"),
+                needs=arguments.get("needs"),
+            )
+        except CharterError as exc:
+            return self._refuse(exc)
+        return ToolResult(ok=True, content=verdict)
+
+
+class DropWorkerTool(_DeskTool):
+    """Remove a ticket, so a plan can be backed out of rather than restarted."""
+
+    NAME = DROP_WORKER
+
+    def description(self) -> str:
+        return (
+            "Remove a ticket from the plan. Use it when a ticket claimed a file that "
+            "belongs to another one, or to a seam — drop it and add it back corrected."
+        )
+
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {"id": {"type": "string", "description": "The ticket id to drop."}},
+            "required": ["id"],
+        }
+
+    def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        try:
+            verdict = self.desk.draft.drop_worker(str(arguments.get("id") or ""))
+        except CharterError as exc:
+            return self._refuse(exc)
+        return ToolResult(ok=True, content=verdict)
+
+
+class SealCharterTool(_DeskTool):
+    """Turn the accumulated plan into the charter the user approves."""
+
+    NAME = SEAL_CHARTER
+
+    def description(self) -> str:
+        return (
+            "Seal the plan you have built into a charter and send it to the user for "
+            "approval. Call it once, after every seam is declared and every ticket added."
+        )
+
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "objective": {
+                    "type": "string",
+                    "description": "One paragraph: what this round of work is for. The "
+                    "first thing the person approving it reads.",
+                },
+                "concurrency": {
+                    "type": "integer",
+                    "description": f"How many workers may run at once. Default "
+                    f"{DEFAULT_CONCURRENCY}, max {MAX_CONCURRENCY}.",
+                },
+            },
+            "required": ["objective"],
+        }
+
+    def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        self.desk.attempts += 1
+        concurrency = arguments.get("concurrency")
+        try:
+            charter = self.desk.draft.seal(
+                str(arguments.get("objective") or ""),
+                None if concurrency in (None, "") else int(concurrency),
+            )
+        except (CharterError, TypeError, ValueError) as exc:
+            self.desk.last_error = str(exc)
+            return ToolResult(ok=False, content=self.desk.refuse(str(exc)), error="bad_charter")
+        content, disjoint = self.desk.accept(charter)
+        return ToolResult(ok=True, content=content, meta={"disjoint": disjoint})
+
+
+class ProposeCharterTool(_DeskTool):
+    """A whole charter in one call, as TOML.
+
+    The original route and still the right one for a plan small enough to hold
+    in a single document — two tickets and a seam is less work said once than
+    said in four calls. For anything larger, ``add_worker`` is what the rules
+    steer to, because this validates after the fact: it can come back
+    overlapping, and there is no single move to blame for it.
+
+    A tool rather than a fenced block in the final answer, for two reasons. The
+    charter is validated the moment it arrives, so a malformed one is a
+    correctable tool failure on the next turn rather than a parse error after
+    the turn is over. And it never becomes a file in the working tree: a
+    charter lives in the session, and a charter file sitting in a repository is
+    one a clone could plant.
+
+    The state lives on the desk, and the properties below delegate to it so
+    that the front-end — which reaches a charter through
+    ``tools[PROPOSE_CHARTER]`` — keeps working whichever route produced one.
+    """
+
+    NAME = PROPOSE_CHARTER
+
+    def __init__(
+        self,
+        cwd: str | None = None,
+        on_proposed: "Any | None" = None,
+        desk: "CharterDesk | None" = None,
+    ) -> None:
+        super().__init__(desk or CharterDesk(cwd, on_proposed=on_proposed))
+
+    # -- the desk's state, reachable through the tool the front-end holds -- #
+    @property
+    def charter(self) -> Charter | None:
+        return self.desk.charter
+
+    @charter.setter
+    def charter(self, value: "Charter | None") -> None:
+        self.desk.charter = value
+
+    @property
+    def raw(self) -> str:
+        return self.desk.raw
+
+    @property
+    def attempts(self) -> int:
+        return self.desk.attempts
+
+    @property
+    def last_error(self) -> str:
+        return self.desk.last_error
+
+    @property
+    def overlaps(self) -> int:
+        return self.desk.overlaps
+
+    @property
+    def exhausted(self) -> bool:
+        return self.desk.exhausted
+
+    @property
+    def on_proposed(self) -> "Any | None":
+        return self.desk.on_proposed
+
+    @on_proposed.setter
+    def on_proposed(self, value: "Any | None") -> None:
+        self.desk.on_proposed = value
+
+    def reset(self) -> None:
+        self.desk.reset()
+
+    def description(self) -> str:
+        return (
+            "Propose the whole charter for this Flock in one call, as TOML: the objective, "
+            "the seams, and one ticket per Worker Birb. Good for a small plan. For a larger "
+            "one prefer declare_seam and add_worker, which check each piece as you add it."
+        )
+
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "toml": {
+                    "type": "string",
+                    "description": f"The whole charter as TOML. Shape:\n{CHARTER_TEMPLATE}",
+                }
+            },
+            "required": ["toml"],
+        }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
         """Validate and keep the charter, or say exactly what is wrong with it.
@@ -379,36 +787,17 @@ class ProposeCharterTool(Tool):
         attention later.
         """
         text = str(arguments.get("toml") or "")
-        self.attempts += 1
+        self.desk.attempts += 1
         try:
             charter = parse_charter(text)
         except CharterError as exc:
-            self.last_error = str(exc)
-            return ToolResult(ok=False, content=self._rejection(exc), error="bad_charter")
-
-        self.last_error = ""
-        self.charter, self.raw = charter, text
-        if self.on_proposed is not None:
-            try:
-                self.on_proposed(charter)
-            except Exception:  # noqa: BLE001 - a front-end that cannot display it
-                # must not turn an accepted charter into a failed tool call.
-                logger.debug("a charter handler raised", exc_info=True)
-        disjoint, partition = check_partition(charter)
-        if not disjoint:
+            self.desk.last_error = str(exc)
             return ToolResult(
-                ok=True, content=self._overlap_notice(charter, partition),
-                meta={"disjoint": False},
+                ok=False, content=self.desk.rejection(exc), error="bad_charter"
             )
-        return ToolResult(
-            ok=True,
-            content=(
-                f"Charter accepted: {len(charter.workers)} worker(s), "
-                f"{len(charter.seams)} seam(s), partition is disjoint. "
-                "It now goes to the user for approval."
-            ),
-            meta={"disjoint": True},
-        )
+
+        content, disjoint = self.desk.accept(charter, text)
+        return ToolResult(ok=True, content=content, meta={"disjoint": disjoint})
 
 
 def plan_prompt(objective: str) -> str:
@@ -428,13 +817,16 @@ def charter_retry_prompt(last_error: str) -> str:
     """
     return (
         "Your charter was NOT accepted, and no Flock has been created. Nothing you have "
-        "said since changes that — the only thing that proposes a charter is a call to "
-        "`propose_charter`, and the last one was rejected:\n\n"
+        "said since changes that — the only things that propose a charter are "
+        "`seal_charter` and `propose_charter`, and the last attempt was rejected:\n\n"
         f"    {last_error}\n\n"
-        "Fix exactly that and call `propose_charter` again now. Do not describe the "
-        "charter in prose and do not report success: neither creates one. If you have "
-        "concluded that this work should not be divided between workers at all, say so "
-        "plainly instead — that is a legitimate answer, and a different one from this."
+        "Fix exactly that and propose it again now. If the whole-document TOML route keeps "
+        "failing, build the charter up instead: `declare_seam` and `add_worker` per piece, "
+        "then `seal_charter` — each call is checked on its own, so nothing is refused all "
+        "at once. Do not describe the charter in prose and do not report success: neither "
+        "creates one. If you have concluded that this work should not be divided between "
+        "workers at all, say so plainly instead — that is a legitimate answer, and a "
+        "different one from this."
     )
 
 
@@ -478,7 +870,8 @@ def round_summary(outcome: FlockOutcome) -> str:
         "design, or just the affected workers re-briefed if the remaining work is "
         "isolated. Say plainly if no second round is needed.",
         "",
-        "DESCRIBE THAT SECOND ROUND IN PROSE. DO NOT CALL `propose_charter` here. "
+        "DESCRIBE THAT SECOND ROUND IN PROSE. DO NOT CALL `propose_charter`, "
+        "`seal_charter`, `add_worker` or `declare_seam` here. "
         "This round is finished and nothing you propose now would start another one; "
         "that is the user's decision, made from the account you are writing. If they "
         "want the round you describe, they will ask for it and you can propose it "

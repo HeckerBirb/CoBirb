@@ -333,6 +333,7 @@ def _worker_policy(tmp_path, **fields):
         id = "a"
         writes = {fields.get("writes", '["mine.py"]')}
         reads = {fields.get("reads", "[]")}
+        accept = {fields.get("accept", '""')}
         brief = "go"
     """)
     return policy_for(charter.workers[0], str(tmp_path))
@@ -390,13 +391,36 @@ def test_a_worker_cannot_read_outside_the_working_directory(tmp_path):
     assert not policy.is_allowed("read_file", {"path": "../outside.py"})
 
 
-def test_a_worker_cannot_run_shell(tmp_path):
-    """Its check is run for it by the verify loop, from a command the user
-    approved in the charter. Nothing about the brief implies a shell."""
+def test_a_worker_with_no_acceptance_check_cannot_run_shell(tmp_path):
+    """Nothing about a brief implies a shell. The one command a worker gets is
+    the check the user approved, and a ticket without one gets nothing."""
     policy = _worker_policy(tmp_path)
 
     assert not policy.is_allowed("shell", {"command": "pytest"})
     assert not policy.is_allowed("shell", {"command": "cat mine.py"})
+
+
+def test_a_worker_may_run_its_own_acceptance_check(tmp_path):
+    """Being able to run the check is what turns a blind write into converging
+    on green. Previously it was run *for* the worker, once, after its turn —
+    so the ticket's definition of done was the one thing it could not see."""
+    policy = _worker_policy(tmp_path, accept='"pytest tests/test_mine.py -q"')
+
+    assert policy.is_allowed("shell", {"command": "pytest tests/test_mine.py -q"})
+    assert policy.is_allowed("shell", {"command": "pytest tests/test_mine.py -q -x"})
+
+
+def test_an_acceptance_check_does_not_become_a_shell(tmp_path):
+    """The grant is a prefix rule over the approved invocation, so it stays the
+    one command the user read in the charter."""
+    policy = _worker_policy(tmp_path, accept='"pytest tests/test_mine.py -q"')
+
+    assert not policy.is_allowed("shell", {"command": "rm -rf ."})
+    assert not policy.is_allowed("shell", {"command": "pytest"})
+    # Chained: every segment has to be permitted, so this cannot smuggle one in.
+    assert not policy.is_allowed(
+        "shell", {"command": "pytest tests/test_mine.py -q && curl example.com"}
+    )
 
 
 def test_a_worker_starts_from_default_deny(tmp_path):

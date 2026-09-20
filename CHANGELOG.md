@@ -4,6 +4,30 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Brainy Birb builds a charter a piece at a time, and an overlapping partition is now
+  impossible to build.** `declare_seam`, `add_worker`, `drop_worker` and `seal_charter` replace
+  "write the whole document and hope": each call is checked against the plan so far and answers
+  immediately, so a file another ticket already writes — or one that is a formal seam — is refused
+  at the move that causes it, naming the path, the ticket that has it, and what to do. Previously a
+  charter had to be right about eight things at once, was refused all together when it was wrong
+  about one, and every stage of the round was gated on that one artifact. Tickets can be added in
+  any order; `needs` and circular waits are settled when the charter is sealed. `drop_worker` backs
+  a ticket out, so one wrong move no longer means abandoning the plan.
+- **`propose_charter` is still there** for a plan small enough to say in one document, and it is
+  still where a charter written into a reply is read from. Brainy Birb is steered to the pieces for
+  anything larger.
+- **A Worker Birb runs its own acceptance check.** It could not run anything at all, and its check
+  was run *for* it after its turn — so the ticket's definition of done was the one thing it could
+  not observe: it wrote an implementation blind, learned once whether the check passed, got one fix
+  attempt, and was finished, with its report saying "acceptance check FAILED" about work it never
+  had a chance to iterate on. It now implements, runs the check, reads the failure and fixes, until
+  it passes. That command is the only one it gets: the grant is a prefix rule over the exact
+  invocation you approved in the charter, applied to every segment of anything it runs, so a chained
+  command with something else in it is refused whole. A ticket with no `accept` still gets no shell.
+  The check is also still run once after the turn, so a worker cannot leave it failing.
+
 ## [0.19.1]
 
 - **A charter whose partition overlaps no longer loops.** The tool answered a valid but

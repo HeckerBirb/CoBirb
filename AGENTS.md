@@ -72,7 +72,7 @@ not let it quietly pick a default, narrow a feature or rule an approach out. Rai
 | `plugins/core/` | Built-ins: `tools`, `model`, `io`, `crypto`, `persona`, `render`, `repomap`, `ignores`. |
 | `runtime/` | Composition layer both front-ends share: `wiring`, `plugins`, `models`, `personas`, `commands`, `command_index` (what the `/` picker lists and how it ranks), `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues` (which catalogues a session has open — see §6b), `mentions` (`@path` ranking + expansion), `doctor` (the readiness checks). |
 | `mcp/` | stdio MCP client (`client`) and its tool adapter (`tools`). |
-| `flock/` | Multi-agent runs: `charter`, `brainy`, `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. |
+| `flock/` | Multi-agent runs: `charter`, `plan` (the incremental builder), `brainy`, `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. |
 | `tui/` | Textual app: `app` (the application itself — mount, input, the turn, workers, actions), `slash_commands` (what each `/command` does, as `(app, argument)` functions + the `COMMANDS` table), `transcript` (everything written to the transcript, and the flush-before-write ordering rule), `attachments` (images queued by `/image` for the next message), `mention_picker` (the five-row `@path` list), `command_picker` (the five-row `/command` list), `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. |
 | `help_text.py` | The prose `cobirb help [topic]` prints. |
 | `install.sh` | The installer, shipped inside the package. Also the upgrader and downgrader — see §14. |
@@ -339,6 +339,54 @@ persistent was not done: see §17's note on `ShellTool`'s per-call process state
 
 ## 13. The Flock (`flock/`)
 
+**A charter is built a validated move at a time, not proposed as one document**
+(`plan.PlanDraft`, and the four tools over it in `brainy`). The document shape asked a model to
+be right about eight things at once — TOML, disjoint writes, no undeclared read/write, no cycles,
+tests ⊆ writes, every needed file listed, N coherent briefs — and refused all of it when it was
+wrong about one, with everything downstream gated on that single artifact. The whole §13 history
+above is patches on that wall. So: `declare_seam`, `add_worker`, `drop_worker`, `seal_charter`,
+each checked against the plan so far the moment it is made.
+
+Three properties are the reason, and they are worth keeping:
+
+- **An overlapping partition is unbuildable rather than reported.** `add_worker` refuses a path
+  another ticket owns, so `find_conflicts` stops being a validator over a finished document and
+  becomes an invariant of construction. `seal` still runs it as a belt-and-braces check: if it
+  ever fires, a move-level check has a hole, and that is a thing to find with the charter in hand.
+- **A refusal names one path and costs one move**, while the model is still writing the ticket
+  that caused it. "4 overlap(s) in the partition" after every ticket was written cost all of them.
+- **Order does not matter.** Both directions of every check run on every move — a ticket claiming
+  a file an existing ticket reads is refused, and so is one reading a file an existing ticket
+  claims — so nothing imposes writers-before-readers. `needs` is the one thing deferred to `seal`,
+  since a plan built in the order the work occurred to somebody names a dependency before adding
+  it.
+
+`drop_worker` exists because the checks are strict and a strict check with no way back turns one
+wrong move into a plan that has to be abandoned; it refuses to drop a ticket others declare `needs`
+on. **`propose_charter` stays** for a plan small enough to say in one document, and because
+`recover_charter` needs TOML to read out of a reply — but `BRAINY_RULES` steers to the moves for
+anything larger, since a document can come back overlapping with no single move to blame.
+
+**Both routes end at `CharterDesk.accept`.** The desk owns the draft, the charter, and every
+counter, and all five tools are moves on it — one tool holding its own draft would build a charter
+the others could not see, and two surfaces with separate state drift until only the one nobody
+tests still works. `install_charter_tool` registers and permits all five together: the rules in
+context name all of them, so a missing one is an `Unknown tool` the model cannot argue past. The
+front-end still reaches a charter through `tools[PROPOSE_CHARTER]`, whose `charter`/`attempts`/
+`reset` delegate to the desk.
+
+**A Worker Birb runs its own acceptance check** (`charter.policy_for` grants `shell` for
+`worker.accept` and nothing else). It was granted for nothing at all, and the check was run *for*
+the worker after its turn — so the ticket's definition of done was the one thing it could not
+observe: write blind, learn once, one fix attempt (`DEFAULT_MAX_FIX_ATTEMPTS = 1`), finished, with
+the report saying "acceptance check FAILED" about work it never had a chance to iterate on. Still
+least privilege: the command is one string out of the charter the user read, granted as a `Policy`
+prefix rule, so every segment of anything run has to match that invocation and a chained command
+with something else in it is refused whole. A single-word `accept` (`make`, `pytest`) is the loose
+case — a one-word prefix trusts that binary with any arguments — and narrowing it further is not
+something `Policy` can express. The post-turn verification still runs, so a worker cannot leave the
+check failing and talk its way past it.
+
 **`propose_charter` is registered for the whole session, not just the planning turn**
 (`run.install_charter_tool`), and permitted outright. It was previously added before planning and
 popped in a `finally` afterwards; but the planning transcript — `BRAINY_RULES` included, which
@@ -454,9 +502,10 @@ scopes, are reviewed, and Brainy Birb reports.
   event, or a released dependent reads an absent result as a failure. A dependent is skipped when
   its dependency did not run (`ok`), not when its acceptance check merely failed — one flaky check
   should not kill a subtree.
-- `policy_for()`: **writes are file-strict, reads are open across `cwd`.** Read isolation was tried
-  and removed — workers could not orient (denied on every `list_dir`/`glob`) and the knowledge
-  isolation never depended on it, since the plan is never on disk and the brief omits it.
+- `policy_for()`: **writes are file-strict, reads are open across `cwd`, `shell` is the worker's own
+  `accept` command and nothing else.** Read isolation was tried and removed — workers could not
+  orient (denied on every `list_dir`/`glob`) and the knowledge isolation never depended on it,
+  since the plan is never on disk and the brief omits it.
 - `build_subagent()` differs from a normal run in exactly four ways: policy handed in (not config),
   **no project context at all** (need-to-know), `HeadlessIO`, and verification scoped to the
   worker's own `accept`. Checkpoints, redaction and hooks still apply — those belong to every agent

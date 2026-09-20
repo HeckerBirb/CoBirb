@@ -27,7 +27,18 @@ the charter, the partition check, the fan-out, and the verification passes.
 from __future__ import annotations
 
 from . import branch
-from .brainy import BRAINY_RULES, ProposeCharterTool, plan_prompt, round_summary
+from .brainy import (
+    BRAINY_RULES,
+    PLANNING_TOOLS,
+    AddWorkerTool,
+    CharterDesk,
+    DeclareSeamTool,
+    DropWorkerTool,
+    ProposeCharterTool,
+    SealCharterTool,
+    plan_prompt,
+    round_summary,
+)
 from .charter import (
     Charter,
     CharterError,
@@ -39,6 +50,7 @@ from .charter import (
     parse_charter,
     policy_for,
 )
+from .plan import PlanDraft
 from .probe import ProbeResult, probe_concurrency
 from .review import Baseline, Mutant, Review, review_worker
 from .supervisor import FlockOutcome, check_partition, run_flock
@@ -46,16 +58,23 @@ from .worker import WorkerReport, run_worker
 
 __all__ = [
     "BRAINY_RULES",
+    "PLANNING_TOOLS",
     "branch",
+    "AddWorkerTool",
     "Baseline",
+    "CharterDesk",
     "Charter",
     "CharterError",
     "Conflict",
+    "DeclareSeamTool",
+    "DropWorkerTool",
     "FlockOutcome",
     "Mutant",
+    "PlanDraft",
     "ProbeResult",
     "ProposeCharterTool",
     "Review",
+    "SealCharterTool",
     "Seam",
     "WorkerBrief",
     "WorkerReport",

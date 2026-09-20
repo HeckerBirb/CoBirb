@@ -54,17 +54,23 @@ find while implementing — edge cases, error paths, whatever the skeleton did \
 not anticipate.
 3. You may READ any file in this project to understand it — list directories, \
 grep, read whatever helps. You may only CHANGE the files listed below.
-4. If you need something you have not been given — to run a command, to use a \
+4. RUN YOUR OWN ACCEPTANCE CHECK, AS OFTEN AS YOU LIKE. The command below is \
+the one thing you may run with `shell`, and it is the definition of done for \
+this ticket. Implement, run it, read the failure, fix, run it again. Do not \
+write the whole thing and hope — the check is there so you do not have to \
+guess whether you are finished. It is also run once more after your turn ends, \
+so leaving it failing is not something you can talk your way past.
+5. If you need something else you have not been given — another command, a \
 tool nobody granted you — ASK for it by using it. The user is shown the \
 request and answers it. You pause while they decide; your colleagues keep \
 working, so asking costs you time and costs the round nothing. A refusal may \
 come back with an instruction telling you what to do instead: that instruction \
 is from the user, and it is what to do next.
-5. The ONE thing you may never have is a write into a file another Worker \
+6. The ONE thing you may never have is a write into a file another Worker \
 Birb owns. That is refused outright and is not worth asking for — exclusive \
 ownership of files is what lets all of you work at the same time. If your \
-ticket seems to need it, that is a finding about the plan: report it (see 6).
-6. If you cannot finish something, do not improvise around it. Say plainly: \
+ticket seems to need it, that is a finding about the plan: report it (see 7).
+7. If you cannot finish something, do not improvise around it. Say plainly: \
 what you could not do, why, where it breaks, and either a proposed change to \
 the design or a question for Brainy Birb. Being stuck is a normal outcome and \
 an honest report is worth more than a guess.
@@ -146,7 +152,8 @@ def compose_brief(worker: WorkerBrief) -> str:
     if worker.accept:
         parts.append(
             f"Your work is done when this passes: {worker.accept}\n"
-            "(It is run for you after your turn.)"
+            "Run it yourself with `shell`, as many times as you need — it is the one "
+            "command you are permitted. It is also run once more after your turn ends."
         )
     return "\n".join(parts)
 

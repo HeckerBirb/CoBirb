@@ -31,7 +31,11 @@ from ..orchestrator import Orchestrator
 from . import branch
 from .brainy import (
     PROPOSE_CHARTER,
+    AddWorkerTool,
+    DeclareSeamTool,
+    DropWorkerTool,
     ProposeCharterTool,
+    SealCharterTool,
     charter_retry_prompt,
     plan_prompt,
     round_summary,
@@ -136,6 +140,15 @@ def install_charter_tool(
     an approval prompt for it would be asking the user to authorise CoBirb to
     talk to itself.
 
+    **All five planning tools go on together, over one shared ``CharterDesk``.**
+    Brainy Birb can build a charter up a move at a time (``declare_seam``,
+    ``add_worker``, ``drop_worker``, ``seal_charter``) or send one whole TOML
+    document (``propose_charter``), and both routes write to the same desk — so
+    whichever one produced a charter, the front-end finds it in the same place.
+    Registering a subset would be worse than registering none: the rules in
+    context name all of them, and a model calling the one that is missing gets
+    an ``Unknown tool`` it cannot argue its way past.
+
     Idempotent, and returns whichever tool is now installed, so the flock and
     the front-end can both call it without racing to own the instance.
     """
@@ -145,11 +158,21 @@ def install_charter_tool(
             existing.on_proposed = on_proposed
         return existing
     tool = ProposeCharterTool(cwd, on_proposed=on_proposed)
-    orchestrator.tools[PROPOSE_CHARTER] = tool
-    # No second argument: that one scopes a grant to a *command*, and reaches
-    # "allow the tool outright" only by falling through an empty-word check.
-    # This tool takes no command, so it says what it means.
-    orchestrator.policy.allow(PROPOSE_CHARTER)
+    for planner in (
+        tool,
+        DeclareSeamTool(tool.desk),
+        AddWorkerTool(tool.desk),
+        DropWorkerTool(tool.desk),
+        SealCharterTool(tool.desk),
+    ):
+        orchestrator.tools[planner.name()] = planner
+        # No second argument: that one scopes a grant to a *command*, and
+        # reaches "allow the tool outright" only by falling through an
+        # empty-word check. These tools take no command, so it says what it
+        # means. Permitting them is the same considered exception to
+        # default-deny as `propose_charter` was: they reach no filesystem, no
+        # network and no subprocess — they build a plan in memory.
+        orchestrator.policy.allow(planner.name())
     return tool
 
 

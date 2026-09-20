@@ -349,7 +349,10 @@ HOW A RUN GOES
   1. Brainy Birb plans, designs the seams, and writes the skeleton into your
      project: interfaces, typed stubs, docstrings that state semantics, and
      unit tests that fail.
-  2. CoBirb checks the partition is disjoint — no two workers writing one file.
+  2. It builds the charter a ticket at a time, and each one is checked as it
+     lands — a file another ticket already writes, or a file that is a seam, is
+     refused there and then. So the partition comes out disjoint: no two
+     workers writing one file, nobody reading a file that is still moving.
   3. YOU APPROVE THE CHARTER. The only decision you make. You see the plan,
      every seam, and every worker's exact read and write scope before anything
      runs. Approving it is what lets the workers run unattended, which is why
@@ -360,11 +363,17 @@ HOW A RUN GOES
 
 WHAT A WORKER CAN TOUCH
 
-Its scope is a Policy, not a request. A Worker Birb cannot open, list or even
-discover a file outside its ticket — list_dir, glob and grep all resolve to a
-directory it was not granted, so it cannot enumerate its surroundings. It gets
-no AGENTS.md and no repo map either: conventions reach it through the skeleton
-it is filling in, which was already written in your project's style.
+Its scope is a Policy, not a request. A Worker Birb may CHANGE only the files
+its ticket names — nothing else, and a write into a file another worker owns is
+refused outright rather than asked about. It may READ anything in the project,
+because one that cannot orient cannot work; what isolates it is that it gets no
+AGENTS.md, no repo map and no plan, so it sees code rather than the shape of the
+whole. Conventions reach it through the skeleton it is filling in, which was
+already written in your project's style.
+
+It may run ONE command: its own acceptance check, exactly as you approved it in
+the charter. That is how it converges on green instead of writing blind. Every
+other command, and every other tool, comes to you as a dialog.
 
 It CAN edit its own tests, and should add more for whatever it finds. That is
 not a gap — see below.

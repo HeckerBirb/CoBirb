@@ -38,6 +38,11 @@ charter is meant to be edited by the person approving it.
 session, and a file found in a working directory is not one CoBirb wrote.
 ``parse_charter`` takes text; a caller may hand it the contents of a file the
 user explicitly named, exactly as ``--session`` names a session.
+
+``parse_charter`` reads a whole document and validates it in one go. The other
+way to build one is ``plan.PlanDraft``, which accumulates the same structures a
+validated move at a time; the checks they share live here, as
+``check_dependencies``, ``check_seams_are_frozen`` and ``frozen_seam_paths``.
 """
 from __future__ import annotations
 
@@ -429,14 +434,14 @@ def parse_charter(text: str) -> Charter:
     if duplicates:
         raise CharterError(f"two workers share the id {', '.join(sorted(duplicates))}")
 
-    _check_dependencies(workers)
+    check_dependencies(workers)
 
     raw_seams = data.get("seams") or []
     if not isinstance(raw_seams, list):
         raise CharterError("seams must be a list of [[seams]] tables")
 
     seams = tuple(_seam(entry, index) for index, entry in enumerate(raw_seams))
-    _check_seams_are_frozen(seams, workers)
+    check_seams_are_frozen(seams, workers)
 
     return Charter(
         objective=_text(data.get("objective"), "objective"),
@@ -446,8 +451,23 @@ def parse_charter(text: str) -> Charter:
     )
 
 
-def _check_seams_are_frozen(
-    seams: tuple[Seam, ...], workers: tuple[WorkerBrief, ...]
+def frozen_seam_paths(seams: "tuple[Seam, ...] | list[Seam]") -> dict[str, Seam]:
+    """The seam files no worker may write, keyed by normalised path.
+
+    Formal whole-file seams only — see ``check_seams_are_frozen`` for why the
+    loose and ``::``-qualified ones are exempt. Public because the incremental
+    builder (``plan.PlanDraft``) has to answer the same question one move at a
+    time, and two implementations of "is this path frozen?" would drift.
+    """
+    return {
+        os.path.normpath(seam.at): seam
+        for seam in seams
+        if seam.enforced_by_types and "::" not in seam.at
+    }
+
+
+def check_seams_are_frozen(
+    seams: "tuple[Seam, ...] | list[Seam]", workers: "tuple[WorkerBrief, ...] | list[WorkerBrief]"
 ) -> None:
     """Refuse a charter that hands a formal seam to a worker to write.
 
@@ -472,11 +492,7 @@ def _check_seams_are_frozen(
     reason. Both of those the read/write check already covers, and refusing
     them here would throw out charters that were right.
     """
-    frozen = {
-        os.path.normpath(seam.at): seam
-        for seam in seams
-        if seam.enforced_by_types and "::" not in seam.at
-    }
+    frozen = frozen_seam_paths(seams)
     for worker in workers:
         for path in worker.writes:
             seam = frozen.get(path)
@@ -492,7 +508,7 @@ def _check_seams_are_frozen(
             )
 
 
-def _check_dependencies(workers: tuple[WorkerBrief, ...]) -> None:
+def check_dependencies(workers: tuple[WorkerBrief, ...]) -> None:
     """Refuse a dependency graph that cannot be run, at parse time.
 
     Both failures here are ones a model produces regularly and neither is
@@ -746,9 +762,28 @@ def policy_for(
     by prefix and ``_within`` matches a path that *is* the granted one or sits
     beneath it, so granting a file matches that file and nothing else. That
     granularity is also what keeps this working in languages CoBirb cannot
-    parse — it owns files, not symbols. ``shell`` is granted to no worker;
-    running commands unattended is the one capability the charter approval does
-    not extend, and the acceptance check is run *for* the worker instead.
+    parse — it owns files, not symbols.
+
+    **``shell`` is granted for the worker's own ``accept`` command and nothing
+    else.** It used to be granted for nothing at all, and the acceptance check
+    was run *for* the worker after its turn. That made the ticket's definition
+    of done the one thing it could not observe: it wrote an implementation
+    blind, learned once whether the check passed, got a single fix attempt, and
+    was finished — with its report saying "acceptance check FAILED" about work
+    it never had a chance to iterate on. Being able to run the check is what
+    turns a blind write into converging on green, and it is the difference
+    between a ticket that lands and one that reports a shortcoming.
+
+    It is still least privilege. The command is one string out of the charter
+    the user read and approved, granted as a ``Policy`` prefix rule, so every
+    segment of anything the worker runs has to match that invocation —
+    ``pytest tests/test_csv.py -q`` does not become ``rm``, and a chained
+    command with something else in it is refused whole. A single-word ``accept``
+    (``make``, ``pytest``) is the one loose case, since a one-word prefix
+    trusts that binary with any arguments; that is the user's own stated check,
+    named by them, and narrowing it further is not something ``Policy`` can
+    express. Everything else a worker turns out to need still goes through the
+    escalation path, where a person answers.
     """
     policy = build_default_policy(audit_log_enabled=audit_log_enabled, cwd=cwd)
     for path in worker.writes:
@@ -758,4 +793,6 @@ def policy_for(
     # and kept only for the conflict check and the brief; the grant that makes
     # a worker able to orient itself is the working directory.
     policy.allow_read_dir(cwd)
+    if worker.accept.strip():
+        policy.allow("shell", worker.accept)
     return policy

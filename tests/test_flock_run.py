@@ -628,3 +628,148 @@ def test_running_out_of_planning_turns_is_its_own_outcome(monkeypatch, tmp_path)
     assert run.stopped_at == "turns"
     assert "planning turns" in run.report
     assert "Stopped after" not in run.report  # not the synthetic string verbatim
+
+
+# --------------------------------------------------------------------------- #
+# Building a charter a move at a time
+# --------------------------------------------------------------------------- #
+class _BuilderBrainy:
+    """A Brainy Birb that builds its charter with the incremental tools."""
+
+    def __init__(self, calls):
+        self._calls = list(calls)
+
+    def name(self):
+        return "builder-brainy"
+
+    def chat(self, system, context, tools=None, *, stream=False):
+        return "Working on the plan." if self._calls else "All done."
+
+    def parse_tool_calls(self, reply):
+        if not self._calls:
+            return []
+        name, arguments = self._calls.pop(0)
+        return [ToolCall(name=name, arguments=arguments)]
+
+    def supports_tool_calling(self):
+        return True
+
+    def supports_streaming(self):
+        return False
+
+
+def _builder_calls(tmp_path):
+    from cobirb.flock.brainy import ADD_WORKER, DECLARE_SEAM, SEAL_CHARTER
+
+    return [
+        (DECLARE_SEAM, {"at": "types.py", "kind": "formal", "what": "the shared vocabulary"}),
+        (ADD_WORKER, {
+            "id": "a", "brief": "Implement a.", "writes": ["a.py", "test_a.py"],
+            "tests": ["test_a.py"], "reads": ["types.py"],
+            "accept": f'"{sys.executable}" -m pytest test_a.py -q',
+        }),
+        (ADD_WORKER, {
+            "id": "b", "brief": "Implement b.", "writes": ["b.py", "test_b.py"],
+            "tests": ["test_b.py"], "reads": ["types.py"],
+            "accept": f'"{sys.executable}" -m pytest test_b.py -q',
+        }),
+        (SEAL_CHARTER, {"objective": "two things", "concurrency": 2}),
+    ]
+
+
+def test_every_planning_tool_is_installed_and_permitted(monkeypatch, tmp_path):
+    """The rules in context name all of them, so a missing one is an `Unknown
+    tool` the model cannot argue its way past."""
+    from cobirb.flock.brainy import PLANNING_TOOLS
+    from cobirb.flock.run import install_charter_tool
+
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy("", propose=False))
+    install_charter_tool(orchestrator, str(tmp_path))
+
+    for name in PLANNING_TOOLS:
+        assert name in orchestrator.tools
+        assert orchestrator.policy.is_allowed(name, {})
+
+
+def test_a_charter_built_a_move_at_a_time_reaches_approval(monkeypatch, tmp_path):
+    """The whole point of the incremental route: the plan accumulates, and the
+    sealed charter is the one the user approves."""
+    _skeleton(tmp_path)
+    _honest_workers(monkeypatch, tmp_path)
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(_builder_calls(tmp_path)))
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert run.charter is not None
+    assert [w.id for w in run.charter.workers] == ["a", "b"]
+    assert run.charter.seams[0].at == "types.py"
+    assert run.ran
+
+
+def test_a_sealed_charter_cannot_overlap(monkeypatch, tmp_path):
+    """`add_worker` refuses a claimed path at the move that causes it, so there
+    is no later stage at which two owners of one file can be discovered."""
+    from cobirb.flock.brainy import ADD_WORKER, SEAL_CHARTER
+    from cobirb.flock.charter import find_conflicts
+
+    _skeleton(tmp_path)
+    _honest_workers(monkeypatch, tmp_path)
+    calls = [
+        (ADD_WORKER, {"id": "a", "brief": "go", "writes": ["a.py"]}),
+        (ADD_WORKER, {"id": "b", "brief": "go", "writes": ["a.py"]}),  # refused
+        (ADD_WORKER, {"id": "b", "brief": "go", "writes": ["b.py"]}),
+        (SEAL_CHARTER, {"objective": "two things"}),
+    ]
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(calls))
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert find_conflicts(run.charter) == []
+    assert {w.id for w in run.charter.workers} == {"a", "b"}
+
+
+def test_both_routes_write_to_the_same_charter(tmp_path):
+    """Two surfaces that did not share state would drift until only the one
+    nobody tests still worked."""
+    from cobirb.flock.brainy import AddWorkerTool, ProposeCharterTool, SealCharterTool
+
+    propose = ProposeCharterTool(str(tmp_path))
+    AddWorkerTool(propose.desk).execute({"id": "a", "brief": "go", "writes": ["a.py"]})
+    SealCharterTool(propose.desk).execute({"objective": "x"})
+
+    assert propose.charter is not None
+    assert propose.charter.worker("a") is not None
+
+
+def test_the_same_refused_move_stops_being_answered_with_a_correction(tmp_path):
+    """A move-level refusal is cheap and specific, but a model can still send
+    the same rejected move forever and nothing else would notice."""
+    from cobirb.flock.brainy import MAX_REPEATED_REFUSALS, AddWorkerTool, ProposeCharterTool
+
+    desk = ProposeCharterTool(str(tmp_path)).desk
+    add = AddWorkerTool(desk)
+    add.execute({"id": "a", "brief": "go", "writes": ["a.py"]})
+    for _ in range(MAX_REPEATED_REFUSALS):
+        result = add.execute({"id": "b", "brief": "go", "writes": ["a.py"]})
+
+    assert not result.ok
+    assert "Do something different" in result.content
+
+
+def test_a_second_flock_does_not_inherit_the_first_draft(tmp_path):
+    """Half of somebody else's plan is worse than none of it: a refusal about a
+    path no longer in this round makes no sense against."""
+    from cobirb.flock.brainy import AddWorkerTool, ProposeCharterTool
+
+    propose = ProposeCharterTool(str(tmp_path))
+    AddWorkerTool(propose.desk).execute({"id": "a", "brief": "go", "writes": ["a.py"]})
+
+    propose.reset()
+
+    assert propose.desk.draft.empty
