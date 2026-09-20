@@ -127,7 +127,20 @@ WHEN YOU ARE READY
 Build the skeleton with your file tools first, then call `propose_charter` \
 once with the whole charter as TOML. Do not write the charter to a file in \
 the project; it belongs to the session. The user will read it and approve, \
-edit or reject it before any worker runs."""
+edit or reject it before any worker runs.
+
+A CHARTER IN YOUR REPLY IS NOT A CHARTER. Writing the TOML out in your \
+answer — in a code block, or as prose, however complete and however \
+well-formed — proposes nothing and starts nothing. `propose_charter` is the \
+only thing that creates one. If you write it into your reply and stop, the \
+run ends with no Flock, and the person waiting on it sees a charter on screen \
+and nothing happening. Call the tool.
+
+BUDGET YOUR TURNS. Every file you write costs one, and you have a limited \
+number for the whole planning phase — skeleton and charter together. A \
+skeleton so large that it uses them all means the run ends before you propose \
+anything, which is worse than a smaller skeleton that got proposed. If the \
+work needs more files than you have turns, cut the partition down and say so."""
 
 # The shape the model has to produce, shown rather than described. A schema in
 # prose gets approximated; an example gets copied.

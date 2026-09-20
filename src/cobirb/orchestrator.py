@@ -234,6 +234,14 @@ class Orchestrator:
         self.last_verification = None
         # What the last _build_context had to throw away, for /context.
         self.last_compaction: CompactionReport | None = None
+        # Whether the last _loop ran out of turns rather than reaching a final
+        # answer. The synthetic "Stopped after N turns" string it returns is
+        # indistinguishable from a real reply to a caller reading the summary,
+        # and the flock needs to tell them apart: a planning turn that spent
+        # its whole budget writing a skeleton has not decided anything, and
+        # reporting it as though the model had reached a conclusion is how a
+        # run that simply needed more room reads as one that refused.
+        self.turns_exhausted = False
         # Whether the most recent run()'s final answer was already streamed
         # live to `io` (see run()'s docstring) — false until a run happens.
         self.last_turn_streamed = False
@@ -515,6 +523,7 @@ class Orchestrator:
         back around to pick up the message that interrupted it, rather than
         parsing tool calls out of a reply that never finished.
         """
+        self.turns_exhausted = False
         for _ in range(max_turns):
             # One place builds the context, once per model call, from
             # whatever the session holds right now — so every path that adds
@@ -568,6 +577,7 @@ class Orchestrator:
             session.add(Turn(role="assistant", content=content, phase=phase))
             return content, streamed and bool(content)
 
+        self.turns_exhausted = True
         return f"Stopped after {max_turns} turns without a final answer.", False
 
     def _spun(self, label: str, fn: Callable[[], Any]) -> Any:

@@ -493,3 +493,85 @@ def test_a_toml_error_names_a_likely_cause(tmp_path):
             assert expected in str(exc), f"{toml!r} -> {exc}"
         else:
             raise AssertionError(f"{toml!r} should not have parsed")
+
+
+class _ProseCharterBrainy:
+    """Writes the charter into its reply instead of calling the tool.
+
+    The commonest way a flock dies: Ollama's native tool_calls field is empty,
+    so the orchestrator reads the reply as a final answer, and the charter sits
+    in the transcript while the run reports that nothing happened.
+    """
+
+    def __init__(self, toml, fenced=True):
+        self._reply = (
+            f"Here is the charter:\n\n```toml\n{toml}```\n\nReady for the workers."
+            if fenced else f"Here is the charter:\n\n{toml}"
+        )
+
+    def name(self):
+        return "prose-brainy"
+
+    def chat(self, system, context, tools=None, *, stream=False):
+        return self._reply
+
+    def parse_tool_calls(self, reply):
+        return []
+
+    def supports_tool_calling(self):
+        return True
+
+    def supports_streaming(self):
+        return False
+
+
+def test_a_charter_written_into_the_reply_is_read_from_there(monkeypatch, tmp_path):
+    """Refusing to read it means telling the user their flock produced nothing
+    while the charter sits on screen in front of them."""
+    _skeleton(tmp_path)
+    _honest_workers(monkeypatch, tmp_path)
+    orchestrator = _orchestrator(
+        monkeypatch, tmp_path, _ProseCharterBrainy(_charter_toml(tmp_path))
+    )
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert run.charter is not None
+    assert run.ran
+
+
+def test_a_reply_with_no_charter_in_it_recovers_nothing(monkeypatch, tmp_path):
+    """Recovery must not invent one. Most replies are just prose."""
+    from cobirb.flock.charter import recover_charter
+
+    assert recover_charter("The workers are ready to commence work.") is None
+    assert recover_charter("") is None
+
+
+def test_running_out_of_planning_turns_is_its_own_outcome(monkeypatch, tmp_path):
+    """The synthetic "Stopped after N turns" string reads like an answer. A
+    user told that has no way to know the run needed more room, not less work.
+    """
+    _skeleton(tmp_path)
+
+    class _NeverFinishes:
+        def name(self): return "busy"
+        def chat(self, system, context, tools=None, *, stream=False): return "working"
+        def parse_tool_calls(self, reply):
+            return [ToolCall(name="read_file", arguments={"path": "a.py"})]
+        def supports_tool_calling(self): return True
+        def supports_streaming(self): return False
+
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _NeverFinishes())
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False, plan_turns=3,
+    )
+
+    assert run.stopped_at == "turns"
+    assert "planning turns" in run.report
+    assert "Stopped after" not in run.report  # not the synthetic string verbatim

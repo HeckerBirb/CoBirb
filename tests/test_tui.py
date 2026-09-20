@@ -52,6 +52,7 @@ from cobirb.tui.screens import (
     _ordered_catalogue_options,
 )
 from cobirb.tui.widgets import (
+    ActivityBar,
     PromptHistory,
     PromptInput,
     StatusBar,
@@ -3384,3 +3385,45 @@ async def test_a_dismissed_charter_is_still_reachable_from_the_tool():
         app._pending_charter = None
 
         assert _last_proposed_charter(app) is not None
+
+
+async def test_planning_progress_keeps_the_flock_tab_moving():
+    """`/flock` switches to the Flock tab, whose panes are only built once a
+    charter exists — the *end* of the longest phase. Until then a run that is
+    working hard and one that has hung look identical from there."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._flock_stop = threading.Event()
+        app.charter_in_hand = False
+
+        app.note_flock_planning_progress("write_file")
+        app.note_flock_planning_progress("write_file")
+
+        assert app._planning_calls == 2
+        assert "2 tool call(s)" in str(app.query_one(ActivityBar).render())
+
+
+async def test_planning_progress_stops_once_the_charter_arrives():
+    """The panes take over from the counter."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._flock_stop = threading.Event()
+        app.charter_in_hand = True
+
+        app.note_flock_planning_progress("write_file")
+
+        assert app._planning_calls == 0
+
+
+async def test_planning_progress_is_silent_outside_a_flock():
+    """An ordinary turn's tool calls are not a flock planning phase."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._flock_stop = None
+
+        app.note_flock_planning_progress("write_file")
+
+        assert app._planning_calls == 0

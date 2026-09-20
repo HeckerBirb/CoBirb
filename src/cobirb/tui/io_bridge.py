@@ -186,6 +186,9 @@ class TuiIO(I_OAdapter):
 
     def render_tool_call(self, tool_name: str, arguments: dict[str, Any], result: Any) -> None:
         self._write(render.build_tool_call_panel(tool_name, arguments, result))
+        # Through `_call` like everything else here: this runs on the
+        # orchestrator's thread and touches widgets.
+        self._call(self._app.note_flock_planning_progress, tool_name)
 
     def write_error(self, persona_name: str, text: str) -> None:
         """A blocked tool call or a provider that fell over.

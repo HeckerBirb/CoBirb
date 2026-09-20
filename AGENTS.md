@@ -322,6 +322,20 @@ permission is a considered exception to §2's default-deny rather than an oversi
 gates *capability* (filesystem, network, subprocess) and this tool reaches none of it — it parses
 text and keeps the result in memory.
 
+**A charter written into a reply is read from there** (`charter.recover_charter`, used by
+`_plan` only when the tool was not called). Tool calls are extracted from Ollama's native
+`tool_calls` field alone — there is deliberately no text fallback for tools in general — so a model
+that writes the TOML into its *answer* produces no call, and `_loop` reads the reply as a final
+answer. That ends planning with the charter sitting in the transcript and nothing having happened,
+which was the single commonest way a flock died. `PlanResult.recovered` says it happened and the
+run tells the user. **`BRAINY_RULES` also states the mechanism** — that a charter in a reply
+proposes nothing — because the instruction to call the tool never said what *not* calling it costs.
+
+**Running out of planning turns is a distinct outcome** (`Orchestrator.turns_exhausted` →
+`PlanResult.exhausted_turns` → `stopped_at="turns"`). `_loop`'s synthetic "Stopped after N turns"
+string is indistinguishable from a considered answer, and a skeleton costs one turn per file
+written, so a large partition reaches the budget before it proposes anything.
+
 **A charter that keeps failing must stop being asked for.** `MAX_CHARTER_ATTEMPTS = 5`. The
 template goes out with the *first* rejection only — repeating twenty-five identical lines after
 every failure is the strongest signal available to a model that the right next move is to resend

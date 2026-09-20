@@ -189,6 +189,10 @@ class CoBirbApp(App[None]):
         self.attachments = PendingAttachments()
         # How anything reaches the transcript, and in what order.
         self.transcript = TranscriptView(self)
+        # How many tool calls this flock's planning phase has made, for the
+        # progress line, and whether planning has finished.
+        self._planning_calls = 0
+        self.charter_in_hand = False
         # A charter `propose_charter` accepted outside a flock run, waiting
         # for the turn that proposed it to finish so it can be put to the user.
         # See note_proposed_charter.
@@ -624,6 +628,9 @@ class CoBirbApp(App[None]):
         self.query_one("#prompt-input", PromptInput).disabled = True
         self._flock_stop = threading.Event()
         self._flock_canceller = Canceller()
+        # No planning phase on this path — the charter already exists — so the
+        # progress counter has nothing to count.
+        self.charter_in_hand = True
         self.set_activity("Fanning out…")
         self._run_flock(charter.objective, charter=charter)
 
@@ -953,6 +960,24 @@ class CoBirbApp(App[None]):
         if summary:
             self.set_activity("Flock running", summary)
 
+    def note_flock_planning_progress(self, tool_name: str) -> None:
+        """Keep the Flock tab moving while Brainy Birb builds the skeleton.
+
+        `/flock` switches to the Flock tab immediately, but its panes are only
+        built once a charter exists — which is the *end* of the longest phase
+        of the run. Until then every tool call renders into Current, the tab
+        the user was just moved away from, leaving them watching one static
+        line through a skeleton that can take twenty turns to write. A run that
+        is working hard and a run that has hung look identical from there.
+        """
+        if self._flock_stop is None or self.charter_in_hand:
+            return
+        self._planning_calls += 1
+        self.set_activity(
+            f"Brainy Birb is planning — {self._planning_calls} tool call(s), "
+            f"last: {tool_name}"
+        )
+
     def flock_progress(self, text: str) -> None:
         """Progress from the flock itself. Main thread only."""
         headline = text.splitlines()[0][:120]
@@ -986,10 +1011,14 @@ class CoBirbApp(App[None]):
 
     async def prepare_flock_panes(self, charter) -> None:
         """Lay out a pane per Worker Birb once the charter is approved."""
+        # Planning is over; the panes take over from the progress counter.
+        self.charter_in_hand = True
         await self.query_one(FlockPane).begin(charter)
 
     def _on_flock_finished(self, run) -> None:
         self._flock_stop = None
+        self._planning_calls = 0
+        self.charter_in_hand = False
         self._flock_canceller = None
         self.set_activity("")
         self._turn_in_progress = False

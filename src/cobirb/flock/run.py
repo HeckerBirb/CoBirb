@@ -36,7 +36,7 @@ from .brainy import (
     plan_prompt,
     round_summary,
 )
-from .charter import Charter
+from .charter import Charter, recover_charter
 from .preflight import missing_models
 from .probe import ProbeResult, probe_concurrency
 from .supervisor import Canceller, FlockOutcome, check_partition, run_flock
@@ -93,6 +93,11 @@ class PlanResult:
     narration: str
     attempts: int = 0
     last_error: str = ""
+    # True when the charter was read out of Brainy Birb's reply rather than
+    # proposed through the tool — see `charter.recover_charter`.
+    recovered: bool = False
+    # True when planning ran out of turns instead of reaching a conclusion.
+    exhausted_turns: bool = False
 
     @property
     def failed(self) -> bool:
@@ -171,11 +176,25 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> P
             system="", cwd=cwd, persona="Brainy Birb", max_turns=turns,
         )
 
+    narration = session.summary or ""
+    charter, recovered = tool.charter, False
+    if charter is None:
+        # Last resort: the model wrote the charter into its reply instead of
+        # calling the tool. A reply does not propose anything — but one that
+        # contains a complete, valid charter has done all the work and missed
+        # only the mechanism, and refusing to read it means telling the user
+        # their flock produced nothing while the charter sits on screen in
+        # front of them.
+        charter = recover_charter(narration)
+        recovered = charter is not None
+
     return PlanResult(
-        charter=tool.charter,
-        narration=session.summary or "",
+        charter=charter,
+        narration=narration,
         attempts=tool.attempts,
         last_error=tool.last_error,
+        recovered=recovered,
+        exhausted_turns=bool(getattr(orchestrator, "turns_exhausted", False)),
     )
 
 
@@ -262,6 +281,14 @@ def _drive(
     else:
         ask.show("Brainy Birb is planning and building the skeleton…")
         plan = _plan(orchestrator, objective, cwd, plan_turns)
+    if plan.charter is not None and plan.recovered:
+        # Say so. A charter that arrived this way is one the model got right
+        # apart from how it delivered it, and the user approving it should
+        # know it was read out of a reply rather than proposed.
+        ask.show(
+            "Brainy Birb wrote the charter into its reply instead of proposing it. "
+            "Reading it from there — it is the same charter, and you still approve it below."
+        )
     if plan.failed:
         # A charter was attempted and every attempt was rejected. Reported as
         # its own outcome rather than through `narration`, which at this point
@@ -274,6 +301,21 @@ def _drive(
             f"last was rejected:\n\n    {plan.last_error}\n\n"
             "Nothing was started and nothing was changed beyond whatever skeleton it wrote. "
             "Run /flock again, or say what to correct."
+        )
+        return run
+    if plan.charter is None and plan.exhausted_turns:
+        # Ran out of turns rather than reaching a conclusion — almost always a
+        # skeleton bigger than the budget, since every file written costs a
+        # turn. Reported as its own thing because the synthetic "Stopped after
+        # N turns" string reads like an answer, and a user told that has no way
+        # to know the run needed more room rather than less work.
+        run.stopped_at = "turns"
+        run.report = (
+            f"No flock ran. Brainy Birb used all {plan_turns} planning turns without "
+            "proposing a charter — usually a skeleton with more files in it than the "
+            "budget allows, since every file written costs a turn.\n\n"
+            "Whatever it wrote is still there. Run /flock again with a smaller slice of "
+            "the work, or ask it to propose a charter for the skeleton it has already built."
         )
         return run
     if plan.charter is None:

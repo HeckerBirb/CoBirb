@@ -276,6 +276,34 @@ _CURLY_QUOTES = "\u201c\u201d\u2018\u2019"
 _UNQUOTED_VALUE = re.compile(r"^\s*[A-Za-z_][\w-]*\s*=\s*(?![\"'\[{\d]|true\b|false\b)\S")
 
 
+# A fenced block, with or without a language tag. Models hedge by writing the
+# charter into their reply in one of these rather than calling the tool.
+_FENCED = re.compile(r"```(?:[A-Za-z0-9_+-]*)\s*\n(.*?)```", re.S)
+
+
+def recover_charter(text: str) -> "Charter | None":
+    """A charter the model wrote into its reply instead of proposing it.
+
+    Nothing about a reply makes a charter — the only thing that proposes one is
+    a ``propose_charter`` call. But a model that writes a perfectly good charter
+    into a fenced block and then stops has done all the work and missed only the
+    mechanism, and the alternative to reading it is telling the user their flock
+    produced nothing while the charter sits in the transcript in front of them.
+
+    Fenced blocks are tried first and the whole text last, so a reply that is
+    *only* TOML still works. Returns ``None`` for anything that does not parse,
+    which is the common case and not an error: most replies are just prose.
+    """
+    if not text or not text.strip():
+        return None
+    for candidate in [match.group(1) for match in _FENCED.finditer(text)] + [text]:
+        try:
+            return parse_charter(candidate)
+        except CharterError:
+            continue
+    return None
+
+
 def _toml_hint(text: str, exc: Exception) -> str:
     """A specific cause for a TOML error, when one can be identified.
 

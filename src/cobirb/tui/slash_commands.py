@@ -307,6 +307,8 @@ def cmd_flock(app: "CoBirbApp", argument: str) -> None:
     app.query_one("#prompt-input", PromptInput).disabled = True
     app._flock_stop = threading.Event()
     app._flock_canceller = Canceller()
+    app._planning_calls = 0
+    app.charter_in_hand = False
     app.set_activity("Brainy Birb is planning…")
     app._run_flock(argument.strip())
 

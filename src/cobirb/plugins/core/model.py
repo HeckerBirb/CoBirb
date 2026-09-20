@@ -578,7 +578,10 @@ class LocalModelProvider(ModelProvider):
                 if content:
                     yield content
                 if message.get("tool_calls"):
-                    tool_calls = _extract_tool_calls(message)
+                    # Extended, not replaced: a model that splits its calls
+                    # across chunks would otherwise have every one but the
+                    # last silently dropped.
+                    tool_calls.extend(_extract_tool_calls(message))
                 if chunk.get("done"):
                     break
         except Exception as exc:  # noqa: BLE001 - see _as_control_exception

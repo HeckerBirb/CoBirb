@@ -4,6 +4,29 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Fixed: a charter Brainy Birb wrote into its reply left the run dead.** CoBirb reads tool calls
+  only from Ollama's native `tool_calls` field, so a model that writes the charter into its
+  *answer* instead — fenced, or as plain TOML — produces no tool call at all, and the orchestrator
+  reads the reply as a final answer. The flock then reported that no charter was proposed while
+  the charter sat in the transcript in front of you. It is now read from there when the tool was
+  not called, and the run says that is what happened. This is the "I see the proposed charter and
+  nothing happens" case, and why nudging sometimes worked: native tool-calling is not reliable
+  per-call on local models, and gets less so as the context fills with a skeleton.
+- **Brainy Birb is told the mechanism, not just the instruction.** `BRAINY_RULES` said to call
+  `propose_charter`; it never said that writing the charter into a reply *does nothing*. It does
+  now, and it is told that every file it writes costs a planning turn.
+- **Running out of planning turns is its own outcome.** A skeleton with more files in it than the
+  budget allows used to end with `Stopped after 30 turns without a final answer.` reported
+  verbatim — a synthetic string that reads exactly like a considered answer. It now says the turns
+  ran out, that the skeleton is still there, and what to do next.
+- **The Flock tab shows progress while Brainy Birb is planning.** `/flock` moves you to that tab,
+  whose panes are only built once a charter exists — the end of the longest phase — so until then
+  you watched one unchanging line while all the work rendered into the tab you had just left.
+- **Fixed: streamed tool calls split across chunks lost all but the last.** Dormant with Ollama,
+  which sends them together, but wrong.
+
 ## [0.15.4]
 
 - **Fixed: a charter Brainy Birb could not get right became a loop.** Every rejection came back
