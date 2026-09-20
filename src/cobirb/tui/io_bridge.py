@@ -197,7 +197,14 @@ class TuiIO(I_OAdapter):
         # Through `_call` like everything else here: this runs on the
         # orchestrator's thread and touches widgets.
         self._call(self._app.note_flock_planning_progress, tool_name)
-        subject = arguments.get("path") or arguments.get("pattern") or arguments.get("command") or ""
+        # `id` and `at` are the planning tools' subjects: without them the Flock
+        # tab's strip shows four bare `add_worker` lines while Brainy Birb is
+        # building a charter, which is exactly the stretch it exists to make
+        # legible.
+        subject = (
+            arguments.get("path") or arguments.get("pattern") or arguments.get("command")
+            or arguments.get("id") or arguments.get("at") or ""
+        )
         self._call(self._app.note_brainy_planning, f"{tool_name} {subject}".strip())
 
     def write_error(self, persona_name: str, text: str) -> None:

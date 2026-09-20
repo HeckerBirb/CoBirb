@@ -775,15 +775,26 @@ def policy_for(
     between a ticket that lands and one that reports a shortcoming.
 
     It is still least privilege. The command is one string out of the charter
-    the user read and approved, granted as a ``Policy`` prefix rule, so every
-    segment of anything the worker runs has to match that invocation —
+    the user read and approved, granted as ``Policy`` prefix rules, so every
+    segment of anything the worker runs has to match part of that invocation —
     ``pytest tests/test_csv.py -q`` does not become ``rm``, and a chained
-    command with something else in it is refused whole. A single-word ``accept``
+    command that adds something else is refused whole. A single-word ``accept``
     (``make``, ``pytest``) is the one loose case, since a one-word prefix
     trusts that binary with any arguments; that is the user's own stated check,
     named by them, and narrowing it further is not something ``Policy`` can
     express. Everything else a worker turns out to need still goes through the
     escalation path, where a person answers.
+
+    **``allow_command`` rather than ``allow``**, because an ``accept`` is
+    frequently more than one segment — ``pytest -q && ruff check src`` is an
+    ordinary definition of done — and ``allow`` grants the first segment only.
+    That produced a grant which denied the very command it was made from: the
+    worker was refused its own acceptance check, escalated to the user for a
+    command the user had already approved in the charter, and did it again on
+    every attempt. A command the scan cannot read through grants nothing and
+    the worker simply has no shell, which is the same as before this existed;
+    the post-turn verification runs the check either way, so the ticket is
+    never lost to this.
     """
     policy = build_default_policy(audit_log_enabled=audit_log_enabled, cwd=cwd)
     for path in worker.writes:
@@ -794,5 +805,5 @@ def policy_for(
     # a worker able to orient itself is the working directory.
     policy.allow_read_dir(cwd)
     if worker.accept.strip():
-        policy.allow("shell", worker.accept)
+        policy.allow_command(worker.accept)
     return policy

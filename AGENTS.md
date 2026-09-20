@@ -375,8 +375,24 @@ context name all of them, so a missing one is an `Unknown tool` the model cannot
 front-end still reaches a charter through `tools[PROPOSE_CHARTER]`, whose `charter`/`attempts`/
 `reset` delegate to the desk.
 
+**A plan built and never sealed is its own outcome** (`PlanResult.unsealed` → `stopped_at="unsealed"`,
+and `brainy.seal_reminder_prompt` for the one nudge that precedes it). It is the incremental
+route's version of the bug `e91c565` fixed for the document route, and it arrives by the same
+door: `attempts` counts attempts to *seal*, so a model that called `add_worker` five times and
+stopped has `attempts == 0` and `charter is None` — indistinguishable from "this work does not
+divide", which is what the user was told while a finished plan sat in the session unrun. The
+nudge quotes the draft back, because a model told only "call `seal_charter`" starts re-adding
+tickets and collides with itself. An empty draft is still the legitimate decision it always was.
+
 **A Worker Birb runs its own acceptance check** (`charter.policy_for` grants `shell` for
-`worker.accept` and nothing else). It was granted for nothing at all, and the check was run *for*
+`worker.accept` and nothing else, via `Policy.allow_command`). **`allow_command` and not
+`allow`:** `allow(tool, command)` grants the *first* segment, which is right for the approval
+prompt it was written for — the user is shown one invocation and says yes to it — and wrong for a
+command granted up front, because `is_allowed` requires *every* segment. So `accept = "pytest -q
+&& ruff check src"`, an ordinary definition of done, produced a grant that denied the command it
+was made from: the worker was refused its own check, escalated to the user for something they had
+already approved in the charter, and did it again every attempt. A command the scan cannot read
+through (substitution, subshell, `find -exec`) grants nothing and the worker simply has no shell. It was granted for nothing at all, and the check was run *for*
 the worker after its turn — so the ticket's definition of done was the one thing it could not
 observe: write blind, learn once, one fix attempt (`DEFAULT_MAX_FIX_ATTEMPTS = 1`), finished, with
 the report saying "acceptance check FAILED" about work it never had a chance to iterate on. Still

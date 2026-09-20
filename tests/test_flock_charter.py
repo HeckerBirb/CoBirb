@@ -712,3 +712,23 @@ def test_several_readers_of_one_written_file_are_one_overlap():
     assert conflicts[0].writer == "a"
     assert "1 overlap" in describe_conflicts(conflicts)
     assert "b, c, d and e read what a writes" in conflicts[0].describe()
+
+
+def test_a_multi_segment_acceptance_check_is_granted_whole(tmp_path):
+    """`allow("shell", cmd)` grants the first segment only, but `is_allowed`
+    requires every segment — so granting `pytest -q && ruff check .` used to
+    produce a grant that denied the command it was made from."""
+    policy = _worker_policy(tmp_path, accept='"pytest -q && ruff check src"')
+
+    assert policy.is_allowed("shell", {"command": "pytest -q && ruff check src"})
+    assert policy.is_allowed("shell", {"command": "pytest -q"})
+    assert not policy.is_allowed("shell", {"command": "ruff check /etc"})
+
+
+def test_an_unreadable_acceptance_check_grants_no_shell(tmp_path):
+    """A grant over a command substitution is a grant over whatever it happens
+    to contain. The post-turn verification still runs the check."""
+    policy = _worker_policy(tmp_path, accept='"pytest $(ls tests) -q"')
+
+    assert not policy.is_allowed("shell", {"command": "pytest $(ls tests) -q"})
+    assert not policy.is_allowed("shell", {"command": "pytest -q"})

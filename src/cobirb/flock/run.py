@@ -39,6 +39,7 @@ from .brainy import (
     charter_retry_prompt,
     plan_prompt,
     round_summary,
+    seal_reminder_prompt,
 )
 from .charter import Charter, recover_charter
 from .preflight import missing_models
@@ -102,6 +103,13 @@ class PlanResult:
     recovered: bool = False
     # True when planning ran out of turns instead of reaching a conclusion.
     exhausted_turns: bool = False
+    # Tickets sitting in an unsealed draft. The incremental route's own version
+    # of "tried and produced nothing": a model that called `add_worker` five
+    # times and never called `seal_charter` has done all the work and missed
+    # the last step, which is a different outcome from deciding the work does
+    # not divide — and indistinguishable from it without this, because
+    # `attempts` only counts attempts to *seal*.
+    unsealed: int = 0
 
     @property
     def failed(self) -> bool:
@@ -201,6 +209,15 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> P
             charter_retry_prompt(tool.last_error),
             system="", cwd=cwd, persona="Brainy Birb", max_turns=turns,
         )
+    elif tool.charter is None and not tool.desk.draft.empty:
+        # A plan was built and never sealed. The likeliest new failure mode of
+        # the incremental route, because it has four steps where the document
+        # had one and the last of them is the easy one to drop — so it gets the
+        # same treatment a rejection gets: one nudge naming what is missing.
+        session = orchestrator.run(
+            seal_reminder_prompt(tool.desk.draft),
+            system="", cwd=cwd, persona="Brainy Birb", max_turns=turns,
+        )
 
     narration = session.summary or ""
     charter, recovered = tool.charter, False
@@ -221,6 +238,7 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> P
         last_error=tool.last_error,
         recovered=recovered,
         exhausted_turns=bool(getattr(orchestrator, "turns_exhausted", False)),
+        unsealed=0 if charter is not None else len(tool.desk.draft.workers),
     )
 
 
@@ -327,6 +345,20 @@ def _drive(
             f"last was rejected:\n\n    {plan.last_error}\n\n"
             "Nothing was started and nothing was changed beyond whatever skeleton it wrote. "
             "Run /flock again, or say what to correct."
+        )
+        return run
+    if plan.charter is None and plan.unsealed:
+        # Distinct from both branches below. A draft with tickets in it is not
+        # "this work does not divide" — it is the opposite, said by a model
+        # that did the dividing and did not seal it. Reported as the other
+        # thing, the user is told their objective was declined while a finished
+        # plan sits in the session unrun.
+        run.stopped_at = "unsealed"
+        run.report = (
+            f"No flock ran. Brainy Birb built a plan of {plan.unsealed} ticket(s) but never "
+            "called `seal_charter`, so no charter was proposed and nothing was approved.\n\n"
+            "Whatever skeleton it wrote is still there. Run /flock again, or ask it to seal "
+            "the plan it has already built."
         )
         return run
     if plan.charter is None and plan.exhausted_turns:

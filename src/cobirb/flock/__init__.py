@@ -38,6 +38,7 @@ from .brainy import (
     SealCharterTool,
     plan_prompt,
     round_summary,
+    seal_reminder_prompt,
 )
 from .charter import (
     Charter,
@@ -89,4 +90,5 @@ __all__ = [
     "round_summary",
     "run_flock",
     "run_worker",
+    "seal_reminder_prompt",
 ]

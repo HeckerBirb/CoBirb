@@ -4,6 +4,26 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+Both of these are defects in 0.20.0, found by testing the paths its own tests did not cover.
+
+- **Fixed: a multi-segment `accept` command denied the worker its own check.** `accept = "pytest -q
+  && ruff check src"` is an ordinary definition of done, and the grant covered only the first
+  segment while the check requires every one — so the worker was refused the command the charter
+  had approved, escalated to you for it, and did so again on every attempt. Every segment is now
+  granted. A command using substitution or a subshell still grants nothing, since a grant over
+  something unreadable is a grant over whatever it contains; the post-turn verification runs the
+  check either way, so no ticket is lost to this.
+- **Fixed: a plan built but never sealed was reported as "this work does not divide".** A model
+  that added every ticket and stopped without calling `seal_charter` produced no charter and no
+  recorded attempt, which read as Brainy Birb declining to fan the work out — while a finished plan
+  sat in the session, unrun. It now gets one nudge with the plan quoted back, and if it still does
+  not seal, you are told plainly that N tickets were built and never sealed. Deciding not to divide
+  the work is still reported as the legitimate answer it is.
+- The Flock tab's planning strip names which ticket or seam each planning call was about, instead of
+  four identical `add_worker` lines.
+
 ## [0.20.0]
 
 - **Brainy Birb builds a charter a piece at a time, and an overlapping partition is now

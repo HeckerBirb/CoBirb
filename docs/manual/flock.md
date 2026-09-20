@@ -158,6 +158,11 @@ whatever skeleton got written.
 That is a different outcome from Brainy Birb deciding the work shouldn't be divided at all,
 which is a legitimate answer and is reported as one.
 
+A third case: a plan that was built and never sealed. Brainy Birb added every ticket and stopped
+without calling `seal_charter`, so there's no charter to approve even though the plan is finished.
+It gets one nudge with the plan quoted back; if it still doesn't seal, you're told how many tickets
+were built rather than being told the work doesn't divide.
+
 ### Asking for it again
 
 Brainy Birb can propose a charter at any point, not only while planning — so "redo the plan, the
@@ -186,11 +191,13 @@ in your tree.
 The `accept` command from its ticket is the one thing a worker may run. It implements, runs the
 check, reads the failure, fixes, runs it again — converging on green rather than writing blind.
 
-That command is the only one it gets. The grant is a prefix rule over the exact invocation you
-approved in the charter, applied to every segment of anything it tries to run, so
-`pytest tests/test_csv.py -q` doesn't become `rm`, and a chained command with something else in it
-is refused whole. Anything else it turns out to need still comes to you as a dialog. A ticket with
-no `accept` gets no shell at all.
+That command is the only one it gets. The grant covers every segment of the exact invocation you
+approved in the charter — so `pytest -q && ruff check src` works, `pytest tests/test_csv.py -q`
+doesn't become `rm`, and a chained command that adds something else is refused whole. Anything else
+it turns out to need still comes to you as a dialog. A ticket with no `accept` gets no shell at all,
+and neither does one whose `accept` uses a construct CoBirb can't read through — `$(…)`, a
+subshell, `find -exec` — since a grant over something unreadable is a grant over whatever it
+contains.
 
 It used to be run *for* the worker, once, after its turn — which made the ticket's definition of
 done the one thing it couldn't see. A worker wrote an implementation blind, learned once whether

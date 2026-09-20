@@ -421,6 +421,33 @@ class Policy:
                 return
         self._allowed.add(tool_name)
 
+    def allow_command(self, command: str) -> bool:
+        """Allow one whole shell command, every segment of it, or nothing.
+
+        ``allow("shell", command)`` grants the *first* segment only, which is
+        correct for the approval prompt it was written for — the user is shown
+        one invocation and says yes to that. It is wrong for a command granted
+        up front out of a configuration or a charter: ``is_allowed`` requires
+        **every** segment to be permitted, so granting the first of
+        ``pytest -q && ruff check .`` produces a grant that denies the very
+        command it was made from.
+
+        So this grants each segment the way ``allow`` grants one. Returns
+        whether it could: a command using a construct the scan cannot see
+        through — command substitution, a subshell, ``find -exec`` — grants
+        nothing and says so, because a grant over something unreadable is a
+        grant over whatever it happens to contain.
+        """
+        segments = _segments(command or "")
+        if not segments:
+            return False
+        for words in segments:
+            if len(words) > 1:
+                self._allowed_prefixes.add(tuple(words))
+            elif words:
+                self._allowed.add(words[0])
+        return True
+
     def deny(self, tool_name: str) -> None:
         self._denied.add(tool_name)
 

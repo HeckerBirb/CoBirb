@@ -634,7 +634,11 @@ def test_running_out_of_planning_turns_is_its_own_outcome(monkeypatch, tmp_path)
 # Building a charter a move at a time
 # --------------------------------------------------------------------------- #
 class _BuilderBrainy:
-    """A Brainy Birb that builds its charter with the incremental tools."""
+    """A Brainy Birb that builds its charter with the incremental tools.
+
+    A ``None`` in ``calls`` ends the turn there — the model stops calling tools
+    — which is how a plan that was built and never sealed is scripted.
+    """
 
     def __init__(self, calls):
         self._calls = list(calls)
@@ -648,7 +652,10 @@ class _BuilderBrainy:
     def parse_tool_calls(self, reply):
         if not self._calls:
             return []
-        name, arguments = self._calls.pop(0)
+        call = self._calls.pop(0)
+        if call is None:
+            return []
+        name, arguments = call
         return [ToolCall(name=name, arguments=arguments)]
 
     def supports_tool_calling(self):
@@ -773,3 +780,71 @@ def test_a_second_flock_does_not_inherit_the_first_draft(tmp_path):
     propose.reset()
 
     assert propose.desk.draft.empty
+
+
+def test_a_plan_built_but_never_sealed_is_its_own_outcome(monkeypatch, tmp_path):
+    """Three tickets in the draft is the opposite of "this work does not
+    divide", and reporting it as that tells the user their objective was
+    declined while a finished plan sits in the session unrun."""
+    from cobirb.flock.brainy import ADD_WORKER
+
+    _skeleton(tmp_path)
+    # Adds three tickets, then stops without sealing — and stops again when
+    # nudged, so the outcome is the unsealed plan rather than the nudge working.
+    calls = [(ADD_WORKER, {"id": w, "brief": "go", "writes": [f"{w}.py"]}) for w in "abc"]
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(calls + [None, None]))
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert run.stopped_at == "unsealed"
+    assert "3 ticket(s)" in run.report
+    assert "seal_charter" in run.report
+
+
+def test_an_unsealed_plan_gets_one_nudge_to_seal_it(monkeypatch, tmp_path):
+    """The work is all done at that point — the tickets are in the draft — and
+    the only thing between it and a running flock is one more call."""
+    from cobirb.flock.brainy import ADD_WORKER, SEAL_CHARTER
+
+    _skeleton(tmp_path)
+    _honest_workers(monkeypatch, tmp_path)
+    # Stops after adding the tickets; the nudge turn then seals.
+    calls = [
+        (ADD_WORKER, {"id": "a", "brief": "go", "writes": ["a.py"]}),
+        (ADD_WORKER, {"id": "b", "brief": "go", "writes": ["b.py"]}),
+        None,  # the turn ends here, with a plan and no charter
+        (SEAL_CHARTER, {"objective": "two things"}),
+    ]
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(calls))
+    prompts = []
+    original = orchestrator.run
+    monkeypatch.setattr(
+        orchestrator, "run",
+        lambda prompt, *a, **k: (prompts.append(prompt), original(prompt, *a, **k))[1],
+    )
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert any("not a charter until it is sealed" in p for p in prompts)
+    assert run.charter is not None
+    assert "Do not add the tickets again" in next(
+        p for p in prompts if "sealed" in p
+    )
+
+
+def test_an_empty_draft_is_still_a_legitimate_decision_not_to_divide(monkeypatch, tmp_path):
+    """Nothing attempted at all stays the answer it always was."""
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy("", propose=False))
+
+    run = run_flock_session(
+        orchestrator, "rename one variable", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert run.stopped_at == "planning"

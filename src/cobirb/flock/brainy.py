@@ -830,6 +830,35 @@ def charter_retry_prompt(last_error: str) -> str:
     )
 
 
+def seal_reminder_prompt(draft: PlanDraft) -> str:
+    """One nudge for a plan that was built and never sealed.
+
+    The incremental route's counterpart to ``charter_retry_prompt``, and needed
+    for the same reason: a planning turn ends when the model stops calling
+    tools, and a model that has added every ticket can stop by describing the
+    plan it just built rather than sealing it. The work is all done at that
+    point — the tickets are in the draft — and the only thing between it and a
+    running flock is one more call, so asking for that call is cheap and
+    recovers the whole round.
+
+    The plan is quoted back because it is the evidence that nothing needs
+    rebuilding. Told only "call seal_charter", a model that has lost track of
+    what landed starts adding the tickets again and collides with itself.
+    """
+    return (
+        "You have NOT proposed a charter, and no Flock has been created. The plan you built "
+        f"is still here — {draft.describe()} — but a plan is not a charter until it is "
+        "sealed, and `seal_charter` is the only thing that seals it.\n\n"
+        "Call `seal_charter` now with the objective. Do not add the tickets again: they are "
+        "already in the plan, and adding them a second time will be refused as duplicates. "
+        "Do not describe the charter in prose and do not report success — neither creates "
+        "one.\n\n"
+        "If you have concluded that this work should not be divided between workers after "
+        "all, say so plainly instead and do not seal anything. That is a legitimate answer, "
+        "and a different one from this."
+    )
+
+
 def round_summary(outcome: FlockOutcome) -> str:
     """What Brainy Birb is given to write the round's verdict from.
 
