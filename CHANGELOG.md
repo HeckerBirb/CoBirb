@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.19.1]
 
 - **A charter whose partition overlaps no longer loops.** The tool answered a valid but
   overlapping charter with "Charter accepted… propose a corrected charter" — two states at once,
