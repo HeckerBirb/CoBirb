@@ -409,7 +409,24 @@ single decision point in the run. **Worker Birbs** then run unattended inside ch
 scopes, are reviewed, and Brainy Birb reports.
 
 - Charter: `objective`, `concurrency` (default 2, max 16), `[[seams]]` (`kind` ∈ `formal|loose`),
-  `[[workers]]` with `writes`/`reads`/`accept`/`brief`. Held in the session, never written to the repo.
+  `[[workers]]` with `writes`/`reads`/`accept`/`brief`/`needs`. Held in the session, never written
+  to the repo.
+- **`needs` is the exception to independence, and stays the last resort.** The default partition is
+  tickets that do not wait on each other, which is the entire reason for fanning out; `BRAINY_RULES`
+  says so explicitly, because a model given the field will otherwise serialise a fan-out into a
+  queue. It exists for a seam that must be *built* before it can be built against and could not be
+  hoisted into the skeleton. Unknown ids, self-reference and cycles are refused in `parse_charter`
+  (`_check_dependencies`/`_find_cycle`, which names the cycle) — caught in the scheduler they would
+  be a flock that hangs with no explanation. `find_conflicts` stops reporting a read/write overlap
+  when the reader declares `needs` on the writer: the file has stopped changing, which is the
+  condition the conflict existed to catch. Write/write is a conflict whatever the ordering.
+  `Charter.effective_concurrency` is the width of the widest graph level, capped by `concurrency`,
+  and `describe()` says so — approving "4 at a time" and getting 1 is the charter lying about the
+  round. Workers wait on a `threading.Event` **before** taking a slot, never while holding one
+  (that deadlocks any chain longer than the limit); `record()` stores the report *then* sets the
+  event, or a released dependent reads an absent result as a failure. A dependent is skipped when
+  its dependency did not run (`ok`), not when its acceptance check merely failed — one flaky check
+  should not kill a subtree.
 - `policy_for()`: **writes are file-strict, reads are open across `cwd`.** Read isolation was tried
   and removed — workers could not orient (denied on every `list_dir`/`glob`) and the knowledge
   isolation never depended on it, since the plan is never on disk and the brief omits it.

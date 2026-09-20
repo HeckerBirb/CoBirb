@@ -469,3 +469,137 @@ def test_an_empty_path_owns_nothing():
     charter = parse_charter(_TWO_OWNERS)
 
     assert writes_owner(charter, "   ", besides="a") == ""
+
+
+# --------------------------------------------------------------------------- #
+# Dependencies — the one thing independence cannot express.
+# --------------------------------------------------------------------------- #
+_WITH_NEEDS = """
+objective = "a seam, then work against it"
+concurrency = 4
+
+[[workers]]
+id     = "seam"
+writes = ["src/types.py"]
+brief  = "Build the shared types."
+
+[[workers]]
+id     = "user"
+writes = ["src/uses_types.py"]
+reads  = ["src/types.py"]
+needs  = ["seam"]
+brief  = "Use them."
+"""
+
+
+def test_a_worker_can_declare_what_it_waits_for():
+    charter = parse_charter(_WITH_NEEDS)
+
+    assert charter.worker("user").needs == ("seam",)
+    assert charter.worker("seam").needs == ()
+
+
+def test_reading_what_a_declared_dependency_writes_is_not_a_conflict():
+    """The conflict exists to catch a worker reading a file that changes
+    underneath it. A declared dependency means it has stopped changing."""
+    assert find_conflicts(parse_charter(_WITH_NEEDS)) == []
+
+
+def test_reading_what_an_undeclared_writer_writes_is_still_a_conflict():
+    """Nobody decided the ordering, so the reader really is racing."""
+    charter = parse_charter(_WITH_NEEDS.replace('needs  = ["seam"]', ""))
+
+    assert [c.kind for c in find_conflicts(charter)] == [CONFLICT_READ_WRITE]
+
+
+def test_two_workers_writing_one_file_is_a_conflict_whatever_the_ordering():
+    """Ordering does not rescue shared ownership: "which worker broke this"
+    still has no answer."""
+    charter = parse_charter("""
+        objective = "two owners"
+
+        [[workers]]
+        id     = "a"
+        writes = ["src/shared.py"]
+        brief  = "Do a."
+
+        [[workers]]
+        id     = "b"
+        writes = ["src/shared.py"]
+        needs  = ["a"]
+        brief  = "Do b."
+    """)
+
+    assert [c.kind for c in find_conflicts(charter)] == [CONFLICT_WRITE_WRITE]
+
+
+def test_needing_a_worker_that_does_not_exist_is_refused():
+    with pytest.raises(CharterError) as exc:
+        parse_charter(_WITH_NEEDS.replace('needs  = ["seam"]', 'needs  = ["ghost"]'))
+
+    assert "ghost" in str(exc.value)
+
+
+def test_needing_itself_is_refused():
+    with pytest.raises(CharterError) as exc:
+        parse_charter(_WITH_NEEDS.replace('needs  = ["seam"]', 'needs  = ["user"]'))
+
+    assert "itself" in str(exc.value)
+
+
+def test_a_cycle_is_refused_and_named():
+    """"There is a cycle" sends whoever is fixing it to read the whole
+    charter; the model that wrote it needs to know which edge to drop."""
+    with pytest.raises(CharterError) as exc:
+        parse_charter("""
+            objective = "a circle"
+
+            [[workers]]
+            id     = "a"
+            writes = ["a.py"]
+            needs  = ["b"]
+            brief  = "Do a."
+
+            [[workers]]
+            id     = "b"
+            writes = ["b.py"]
+            needs  = ["a"]
+            brief  = "Do b."
+        """)
+
+    message = str(exc.value)
+    assert "a" in message and "b" in message and "->" in message
+
+
+def test_a_chain_reports_the_concurrency_it_can_really_reach():
+    """Approving "4 at a time" and getting 1 is the charter telling you
+    something untrue about your own round."""
+    charter = parse_charter(_WITH_NEEDS)
+
+    assert charter.concurrency == 4
+    assert charter.effective_concurrency == 1
+    assert "1 in practice" in charter.describe()
+
+
+def test_independent_workers_keep_the_concurrency_they_asked_for():
+    charter = parse_charter("""
+        objective = "two independent things"
+        concurrency = 2
+
+        [[workers]]
+        id     = "a"
+        writes = ["a.py"]
+        brief  = "Do a."
+
+        [[workers]]
+        id     = "b"
+        writes = ["b.py"]
+        brief  = "Do b."
+    """)
+
+    assert charter.effective_concurrency == 2
+    assert "in practice" not in charter.describe()
+
+
+def test_a_dependency_is_shown_to_whoever_approves_the_charter():
+    assert "after  seam" in parse_charter(_WITH_NEEDS).describe()

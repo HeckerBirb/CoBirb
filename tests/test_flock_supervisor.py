@@ -473,3 +473,123 @@ def test_the_concurrency_limit_still_holds_when_nobody_asks(monkeypatch, tmp_pat
     run_flock(_charter(_two_ticket_project(tmp_path)), str(tmp_path), concurrency=1)
 
     assert max(peak) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Dependencies between workers.
+# --------------------------------------------------------------------------- #
+def _dependent_project(tmp_path):
+    """A seam one worker builds and another builds against."""
+    for name in ("a", "b"):
+        (tmp_path / f"{name}.py").write_text(_STUB.format(name=name))
+    return textwrap.dedent("""
+        objective = "a seam, then work against it"
+        concurrency = 4
+
+        [[workers]]
+        id     = "a"
+        writes = ["a.py"]
+        brief  = "Build the seam."
+
+        [[workers]]
+        id     = "b"
+        writes = ["b.py"]
+        needs  = ["a"]
+        brief  = "Build against it."
+    """)
+
+
+def test_a_dependent_worker_does_not_start_until_its_dependency_finishes(
+    monkeypatch, tmp_path
+):
+    """The one thing independence cannot express: b's whole job is to build on
+    something a has to exist first."""
+    order = []
+
+    def run(worker, cwd, **kwargs):
+        order.append(f"start:{worker.id}")
+        time.sleep(0.1)
+        order.append(f"end:{worker.id}")
+        return WorkerReport(worker_id=worker.id, ok=True, accepted=True)
+
+    _fake_workers(monkeypatch, run)
+
+    run_flock(_charter(_dependent_project(tmp_path)), str(tmp_path))
+
+    assert order == ["start:a", "end:a", "start:b", "end:b"]
+
+
+def test_a_worker_whose_dependency_failed_is_skipped_and_says_why(monkeypatch, tmp_path):
+    """Building against a seam nobody built produces work that cannot be
+    reviewed and a report nobody can act on."""
+    def run(worker, cwd, **kwargs):
+        if worker.id == "a":
+            return WorkerReport(worker_id="a", ok=False, error="it fell over")
+        return WorkerReport(worker_id="b", ok=True, accepted=True)
+
+    _fake_workers(monkeypatch, run)
+
+    outcome = run_flock(_charter(_dependent_project(tmp_path)), str(tmp_path))
+
+    skipped = next(r for r in outcome.reports if r.worker_id == "b")
+    assert not skipped.ok
+    assert "'a'" in skipped.error
+    assert {r.worker_id for r in outcome.outstanding} == {"a", "b"}
+
+
+def test_a_dependency_whose_acceptance_check_failed_still_lets_the_next_one_run(
+    monkeypatch, tmp_path
+):
+    """Gated on whether it ran, not on whether its check passed: a failing
+    check is common and often has nothing to do with what the dependent
+    needs, and one flaky test should not kill a whole subtree."""
+    def run(worker, cwd, **kwargs):
+        if worker.id == "a":
+            return WorkerReport(worker_id="a", ok=True, accepted=False)
+        return WorkerReport(worker_id="b", ok=True, accepted=True)
+
+    _fake_workers(monkeypatch, run)
+
+    outcome = run_flock(_charter(_dependent_project(tmp_path)), str(tmp_path))
+
+    ran = next(r for r in outcome.reports if r.worker_id == "b")
+    assert ran.ok and ran.accepted
+
+
+def test_waiting_for_a_dependency_does_not_hold_a_concurrency_slot(monkeypatch, tmp_path):
+    """A worker sitting on a slot while waiting for a colleague that needs
+    that slot to finish is a deadlock — and at concurrency 1 it would be every
+    chain. The proof is simply that this run terminates."""
+    _fake_workers(monkeypatch, _honest_worker())
+
+    outcome = run_flock(
+        _charter(_dependent_project(tmp_path)), str(tmp_path), concurrency=1
+    )
+
+    assert len(outcome.reports) == 2
+    assert all(r.ok for r in outcome.reports)
+
+
+def test_stopping_releases_workers_waiting_on_a_dependency(monkeypatch, tmp_path):
+    """Otherwise ctrl+c on a chain leaves the dependents parked forever."""
+    stop = threading.Event()
+
+    def run(worker, cwd, **kwargs):
+        stop.set()      # a finishes, and the flock is stopped while b waits
+        return WorkerReport(worker_id=worker.id, ok=True, accepted=True)
+
+    _fake_workers(monkeypatch, run)
+
+    outcome = run_flock(_charter(_dependent_project(tmp_path)), str(tmp_path), stop=stop)
+
+    assert outcome.stopped
+    assert len(outcome.reports) == 2
+
+
+def test_reports_stay_in_charter_order_however_they_were_scheduled(monkeypatch, tmp_path):
+    """`complete`, `outstanding` and the review loop all read this order."""
+    _fake_workers(monkeypatch, _honest_worker())
+
+    outcome = run_flock(_charter(_dependent_project(tmp_path)), str(tmp_path))
+
+    assert [r.worker_id for r in outcome.reports] == ["a", "b"]

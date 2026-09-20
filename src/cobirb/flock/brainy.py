@@ -116,12 +116,25 @@ weakened assertions and vacuous tests are caught — you do not need to defend \
 against them in the brief.
 
 A worker can READ the whole project but may only CHANGE the files in its \
-`writes` list, and it cannot run shell commands. So two things are on you: \
-put EVERY file a worker must create or modify in its `writes` — a file it \
-needs to change but you did not list will be refused, and it will have to \
-stop and report instead of doing its job; and make sure its acceptance check \
-(`accept`) is something that can be judged by running it, since the worker \
-cannot run anything itself.
+`writes` list. Put EVERY file a worker must create or modify in its `writes`: \
+a file it needs but you did not list will be refused, and it will have to \
+stop and report instead of doing its job. A worker can ask the user for \
+anything else it turns out to need — a command to run, a tool nobody gave it \
+— but asking costs it time and the user's attention, so it is not a substitute \
+for a `writes` list you got right.
+
+5. DO NOT MAKE WORKERS WAIT FOR EACH OTHER UNLESS THEY MUST.
+`needs` exists and it is the last thing to reach for. Workers with no `needs` \
+all start at once, which is the entire reason for fanning out; every `needs` \
+you add removes one of them from that. The partition you want is tickets that \
+are genuinely independent because YOU already built the seam they meet at \
+in step 3 — that is what the skeleton is for.
+
+Use `needs` only where a worker's job is to BUILD something another worker \
+must then build ON, and you could not hoist it into the skeleton yourself. If \
+you find yourself giving most workers a `needs`, the partition is wrong: you \
+have written a sequence of steps, not a division of labour, and it should \
+either be one worker's ticket or a smaller skeleton with a real seam in it.
 
 WHEN YOU ARE READY
 Build the skeleton with your file tools first, then call `propose_charter` \
@@ -168,6 +181,17 @@ reads  = ["path/to/shared_types.py"]
 accept = "the command that proves this ticket is done"
 brief  = """
 This worker's ticket. Only its own part.
+"""
+
+[[workers]]
+id     = "b"
+writes = ["path/to/other.py"]
+needs  = ["a"]                   # OPTIONAL. Omit it unless b truly cannot
+                                 # start until a has finished. Independent
+                                 # tickets run at the same time; every `needs`
+                                 # you add takes one away.
+brief  = """
+Another ticket.
 """
 '''
 

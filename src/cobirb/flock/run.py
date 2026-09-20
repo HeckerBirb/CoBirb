@@ -355,7 +355,11 @@ def _drive(
         # choice to continue by removing the thing that makes it unsafe.
         concurrency = 1
     else:
-        concurrency = charter.concurrency
+        # The charter's number, capped by what its dependency graph actually
+        # permits — a chain of four runs one at a time whatever `concurrency`
+        # says, and the probe below would otherwise go looking for parallelism
+        # this round was never going to use.
+        concurrency = charter.effective_concurrency
 
     # ---- 3. The one human decision -------------------------------------- #
     # The charter travels *with* the question rather than being shown before

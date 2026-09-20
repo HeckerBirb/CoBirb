@@ -16,7 +16,16 @@ do with its own work. So: fan out, join, *then* review.
 
 **A worker that fails does not stop the others.** Brainy Birb needs the whole
 picture to plan the next round, and losing four finished tickets because the
-fifth blew up would be a poor trade.
+fifth blew up would be a poor trade. The exception is a worker that declared
+it ``needs`` the failed one: it is skipped and says so, because building
+against a seam nobody built produces work that cannot be reviewed and a report
+nobody can act on.
+
+**Most workers depend on nothing, and the scheduler is built for that.** A
+charter's default shape is independent tickets, so ``needs`` is usually empty
+and every worker is admissible at once. Where it is declared, a worker waits
+for its dependencies *before* taking a concurrency slot — waiting while
+holding one would deadlock any chain longer than the limit.
 
 **Stopping is checked between workers, not inside one.** A model call in
 flight cannot be interrupted, which is already true of a single-agent turn.
@@ -270,12 +279,50 @@ def run_flock(
     outcome = FlockOutcome(charter=charter)
 
     slots = Slots(limit)
+    # One per worker, set when it stops running however it ended. Dependents
+    # wait on these rather than polling, and the `finally` that sets them is
+    # what keeps a failed or skipped worker from hanging everything behind it.
+    finished = {worker.id: threading.Event() for worker in workers}
+    reports: dict[str, WorkerReport] = {}
+    reports_lock = threading.Lock()
+
+    def wait_for_dependencies(worker: WorkerBrief) -> str:
+        """Block until this worker may start; return why it may not, if so.
+
+        Waited out **before** taking a slot, never while holding one — a
+        worker sitting on a slot waiting for a colleague that needs that slot
+        to finish is a deadlock, and at ``concurrency = 1`` it would be every
+        chain. The pool is sized to the worker count, so a waiting worker
+        costs a parked thread and nothing else.
+        """
+        for need in worker.needs:
+            event = finished.get(need)
+            if event is None:  # pragma: no cover - parse_charter refuses these
+                continue
+            while not event.wait(timeout=0.2):
+                if stop.is_set():
+                    return "stopped while waiting for " + need
+            with reports_lock:
+                upstream = reports.get(need)
+            # Gated on whether it *ran*, not on whether its acceptance check
+            # passed. A failing check is common and often unrelated to what
+            # the dependent needs; a worker that never ran leaves nothing to
+            # build against at all.
+            if upstream is None or not upstream.ok:
+                return f"did not run — its dependency '{need}' failed"
+        return ""
 
     def run_one(worker: WorkerBrief) -> WorkerReport:
-        # Checked before taking a slot, not after: a stopped flock should not
-        # queue up behind the workers still finishing just to decline to run.
+        # Checked before waiting and before taking a slot: a stopped flock
+        # should not queue up behind the workers still finishing just to
+        # decline to run.
         if stop.is_set():
-            return WorkerReport(worker_id=worker.id, ok=False, error="stopped before it started")
+            return WorkerReport(
+                worker_id=worker.id, ok=False, error="stopped before it started"
+            )
+        blocked = wait_for_dependencies(worker)
+        if blocked:
+            return WorkerReport(worker_id=worker.id, ok=False, error=blocked)
         with slots:
             if stop.is_set():
                 return WorkerReport(
@@ -290,6 +337,28 @@ def run_flock(
         announce("finished", report)
         return report
 
+    def record(worker: WorkerBrief) -> WorkerReport:
+        """``run_one``, published to this worker's dependents when it ends.
+
+        **The order of the two statements in the ``finally`` is the whole
+        point.** The report is stored and only then is the event set, because
+        a dependent released first would look up a result that is not there
+        yet and read a perfectly good worker as a failed one. The placeholder
+        covers the path where ``run_one`` raises — it never does today, since
+        ``run_worker`` reports rather than throws, but a dependent left
+        waiting forever is not the way to find out that changed.
+        """
+        report = WorkerReport(
+            worker_id=worker.id, ok=False, error="did not finish and said nothing"
+        )
+        try:
+            report = run_one(worker)
+            return report
+        finally:
+            with reports_lock:
+                reports[worker.id] = report
+            finished[worker.id].set()
+
     logger.info("flock: %d worker(s), %d at a time", len(workers), limit)
     # Sized to the workers, with `slots` holding the real limit — a worker
     # parked on a question needs its thread kept alive while costing nothing
@@ -297,7 +366,7 @@ def run_flock(
     # so `reports` stays in charter order, which `complete`, `outstanding`
     # and the review loop all rely on.
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(workers))) as pool:
-        outcome.reports = list(pool.map(run_one, workers))
+        outcome.reports = list(pool.map(record, workers))
 
     outcome.stopped = stop.is_set()
 

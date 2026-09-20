@@ -131,6 +131,16 @@ class WorkerBrief:
     # a naming heuristic that works for `test_*.py` and fails for `*_test.go`
     # would quietly turn the strongest check in the design into a no-op.
     tests: tuple[str, ...] = ()
+    # Workers that must finish before this one starts. Empty for the common
+    # case, which is the point: the design's first answer to "who goes first?"
+    # is "nobody, they are independent", and a charter that declares
+    # dependencies everywhere has serialised a fan-out into a queue.
+    #
+    # It exists for the one shape independence cannot express: a seam that has
+    # to be *built* before anything can be built against it. Without this that
+    # work needs two rounds and a second trip through the user, which is a lot
+    # of ceremony for "b reads what a writes".
+    needs: tuple[str, ...] = ()
 
     @property
     def implementation(self) -> tuple[str, ...]:
@@ -158,6 +168,33 @@ class Charter:
                 return entry
         return None
 
+    @property
+    def effective_concurrency(self) -> int:
+        """How many workers can really be in flight at once.
+
+        A dependency graph is a ceiling on parallelism that ``concurrency``
+        knows nothing about: a chain of four runs one at a time however large
+        the number says. Computed as the widest level of the graph — the
+        workers that become admissible together — so the approval prompt can
+        say what will actually happen rather than what was asked for.
+
+        Someone approving "4 at a time" and getting 1 has been told something
+        untrue by their own charter, and the cost of finding out is a round
+        that takes four times as long as they planned for.
+        """
+        remaining = {worker.id: set(worker.needs) for worker in self.workers}
+        widest = 0
+        while remaining:
+            ready = [wid for wid, needs in remaining.items() if not needs]
+            if not ready:  # a cycle; parse_charter refuses these first
+                break
+            widest = max(widest, len(ready))
+            for wid in ready:
+                del remaining[wid]
+            for needs in remaining.values():
+                needs.difference_update(ready)
+        return max(1, min(self.concurrency, widest or len(self.workers)))
+
     def describe(self) -> str:
         """A plain-text summary, for the approval prompt and the log."""
         lines = [f"Objective: {self.objective.strip()}", ""]
@@ -165,11 +202,19 @@ class Charter:
             lines.append("Seams:")
             lines += [f"  {seam.describe()}" for seam in self.seams]
             lines.append("")
-        lines.append(f"{len(self.workers)} Worker Birb(s), {self.concurrency} at a time:")
+        headline = f"{len(self.workers)} Worker Birb(s), {self.concurrency} at a time"
+        if self.effective_concurrency < self.concurrency:
+            headline += (
+                f" — but {self.effective_concurrency} in practice, because some wait "
+                "for others"
+            )
+        lines.append(headline + ":")
         for worker in self.workers:
             lines.append(f"  [{worker.id}] writes {', '.join(worker.writes)}")
             if worker.reads:
                 lines.append(f"      reads  {', '.join(worker.reads)}")
+            if worker.needs:
+                lines.append(f"      after  {', '.join(worker.needs)}")
             if worker.accept:
                 lines.append(f"      accept {worker.accept}")
         return "\n".join(lines)
@@ -263,7 +308,30 @@ def _worker(entry: Any, index: int) -> WorkerBrief:
         reads=_paths(entry.get("reads"), f"worker {worker_id!r} reads"),
         accept=_text(entry.get("accept"), f"worker {worker_id!r} accept", required=False),
         tests=tests,
+        needs=_needs(entry.get("needs"), worker_id),
     )
+
+
+def _needs(value: Any, worker_id: str) -> tuple[str, ...]:
+    """The ids this worker waits for, as written.
+
+    Whether they *exist* is checked in ``parse_charter``, which is the only
+    place that can see the other workers. Here is just the shape.
+    """
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list) or any(not isinstance(entry, str) for entry in value):
+        raise CharterError(f"worker {worker_id!r} needs must be a list of worker ids")
+    cleaned = tuple(entry.strip() for entry in value if entry.strip())
+    if worker_id in cleaned:
+        raise CharterError(
+            f"worker {worker_id!r} needs itself, which can never be satisfied"
+        )
+    if len(set(cleaned)) != len(cleaned):
+        raise CharterError(f"worker {worker_id!r} names the same dependency twice")
+    return cleaned
 
 
 # Typographic quotes. A model writing prose and TOML in the same breath emits
@@ -361,6 +429,8 @@ def parse_charter(text: str) -> Charter:
     if duplicates:
         raise CharterError(f"two workers share the id {', '.join(sorted(duplicates))}")
 
+    _check_dependencies(workers)
+
     raw_seams = data.get("seams") or []
     if not isinstance(raw_seams, list):
         raise CharterError("seams must be a list of [[seams]] tables")
@@ -371,6 +441,72 @@ def parse_charter(text: str) -> Charter:
         seams=tuple(_seam(entry, index) for index, entry in enumerate(raw_seams)),
         concurrency=_concurrency(data.get("concurrency")),
     )
+
+
+def _check_dependencies(workers: tuple[WorkerBrief, ...]) -> None:
+    """Refuse a dependency graph that cannot be run, at parse time.
+
+    Both failures here are ones a model produces regularly and neither is
+    survivable later: an id that does not exist would leave a worker waiting
+    for something that never finishes, and a cycle would leave every worker in
+    it waiting for the others forever. Caught here, they are a tool failure
+    Brainy Birb can correct on the next turn; caught in the scheduler, they are
+    a flock that hangs with no idea why.
+    """
+    known = {worker.id for worker in workers}
+    for worker in workers:
+        unknown = [need for need in worker.needs if need not in known]
+        if unknown:
+            raise CharterError(
+                f"worker {worker.id!r} needs {', '.join(sorted(unknown))}, which "
+                f"{'is' if len(unknown) == 1 else 'are'} not in this charter — "
+                f"the workers are {', '.join(sorted(known))}"
+            )
+
+    cycle = _find_cycle(workers)
+    if cycle:
+        raise CharterError(
+            "these workers wait on each other in a circle and none could ever "
+            f"start: {' -> '.join(cycle)}"
+        )
+
+
+def _find_cycle(workers: tuple[WorkerBrief, ...]) -> list[str]:
+    """One cycle in the dependency graph, named in order, or an empty list.
+
+    Named rather than merely detected: "there is a cycle" sends whoever is
+    fixing it to read the whole charter, and the charter was written by a model
+    that will need to be told which edge to drop.
+    """
+    needs = {worker.id: worker.needs for worker in workers}
+    visiting: set[str] = set()
+    done: set[str] = set()
+    path: list[str] = []
+
+    def walk(worker_id: str) -> list[str]:
+        if worker_id in done:
+            return []
+        if worker_id in visiting:
+            # Back to something on the current path: the cycle is the tail of
+            # the path from that point, closed by repeating it.
+            start = path.index(worker_id)
+            return path[start:] + [worker_id]
+        visiting.add(worker_id)
+        path.append(worker_id)
+        for need in needs.get(worker_id, ()):
+            found = walk(need)
+            if found:
+                return found
+        path.pop()
+        visiting.discard(worker_id)
+        done.add(worker_id)
+        return []
+
+    for worker in workers:
+        found = walk(worker.id)
+        if found:
+            return found
+    return []
 
 
 # --------------------------------------------------------------------------- #
@@ -417,10 +553,20 @@ def find_conflicts(charter: Charter) -> list[Conflict]:
     Two kinds, both violating an invariant:
 
     - **write/write** breaks exclusive ownership, which is the property that
-      makes concurrency safe by construction rather than by locking.
+      makes concurrency safe by construction rather than by locking. Always a
+      conflict, whatever the ordering: two owners of one file means "which
+      worker broke this" stops having an answer.
     - **read/write** breaks the frozen-seam rule. If A reads a file B writes,
       A is reading something that changes underneath it; the shared vocabulary
       two workers meet at has to be owned by neither of them.
+
+    **A declared dependency answers the read/write case rather than excusing
+    it.** If A says it ``needs`` B, then B has finished before A starts, so the
+    file is not changing underneath A — the condition the conflict exists to
+    catch is absent, and reporting it anyway would force the user to wave
+    through the very thing the charter said explicitly. An *undeclared*
+    overlap is still reported, because that is a worker reading a moving file
+    without anyone having decided it should.
     """
     conflicts: list[Conflict] = []
 
@@ -438,7 +584,7 @@ def find_conflicts(charter: Charter) -> list[Conflict]:
     for worker in charter.workers:
         for path in worker.reads:
             for other in writers.get(path, []):
-                if other != worker.id:
+                if other != worker.id and other not in worker.needs:
                     conflicts.append(
                         Conflict(CONFLICT_READ_WRITE, path, (worker.id, other))
                     )

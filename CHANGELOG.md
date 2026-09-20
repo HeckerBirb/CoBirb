@@ -4,6 +4,28 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **A charter can say that one worker waits for another.** `needs = ["exporter"]` on a
+  `[[workers]]` entry holds it back until that worker has finished. It is deliberately the last
+  resort and Brainy Birb is told so: independent tickets all start at once, which is the entire
+  reason for fanning out, and every `needs` takes one away. It exists for the one shape
+  independence cannot express — a seam that must be *built* before anything can be built against
+  it, where hoisting it into the skeleton was not possible. Previously that needed two rounds and
+  a second trip through you.
+- **Reading a file a worker you depend on writes is no longer reported as an overlap.** It stopped
+  changing when that worker finished, which is the condition the check existed to catch. Reading
+  one you do *not* depend on still is. Two workers writing the same file is still a conflict
+  whatever the ordering — "which worker broke this" has to keep having an answer.
+- **The charter says what concurrency you will really get.** A chain runs one at a time however
+  large `concurrency` is, so the approval now reads `4 at a time — but 1 in practice, because some
+  wait for others` rather than letting you approve a number the round was never going to reach.
+- **A worker whose dependency never ran is skipped and says which one.** A dependency whose
+  acceptance check merely failed still lets the next one run: that is common and usually unrelated
+  to what the dependent needs, and one flaky check should not kill a whole subtree. Unknown ids,
+  a worker needing itself, and circular waits are refused when the charter is read, with the cycle
+  named.
+
 ## [0.18.0]
 
 - **A Worker Birb can ask for something its charter scope did not give it.** A worker that needed

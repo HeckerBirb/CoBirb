@@ -48,6 +48,37 @@ orient can't work.
 
 The charter lives in the session. It is never written into your repository.
 
+### When one worker has to go first
+
+Usually none of them do — that's what the skeleton is for. Brainy Birb builds the seam the
+workers meet at, so their tickets are independent and all start at once.
+
+For the case it can't hoist into the skeleton, a worker can name what it waits for:
+
+```toml
+[[workers]]
+id     = "consumer"
+writes = ["src/report.py"]
+reads  = ["src/export/csv.py"]
+needs  = ["exporter"]     # runs only once `exporter` has finished
+```
+
+`needs` also settles the partition check: reading a file a worker you depend on writes isn't an
+overlap, because it has stopped changing by the time you start. Reading one you *don't* depend
+on still is.
+
+Two things it costs, both shown before you approve:
+
+- **Parallelism.** A chain runs one at a time whatever `concurrency` says, so the charter tells
+  you what you'll actually get: `3 Worker Birb(s), 4 at a time — but 1 in practice, because some
+  wait for others`.
+- **The dependents, if it fails.** A worker whose dependency never ran is skipped and says so,
+  rather than building against a seam that isn't there. A dependency whose *acceptance check*
+  failed still lets the next one run — that's common and usually unrelated.
+
+An unknown id, a worker needing itself, or a circle are refused when the charter is read, with
+the cycle named.
+
 ### While it plans
 
 `/flock` moves you to the Flock tab, and the worker panes only exist once there is a charter — so
