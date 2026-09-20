@@ -421,7 +421,7 @@ class Policy:
                 return
         self._allowed.add(tool_name)
 
-    def allow_command(self, command: str) -> bool:
+    def allow_command(self, command: str, *, any_arguments: bool = False) -> bool:
         """Allow one whole shell command, every segment of it, or nothing.
 
         ``allow("shell", command)`` grants the *first* segment only, which is
@@ -437,15 +437,26 @@ class Policy:
         through — command substitution, a subshell, ``find -exec`` — grants
         nothing and says so, because a grant over something unreadable is a
         grant over whatever it happens to contain.
+
+        ``any_arguments`` grants the **programs** the command runs rather than
+        the invocation, so every segment's first word joins ``_allowed`` and
+        runs with whatever arguments it likes. Wider on purpose, and the
+        difference matters: an exact invocation is the right grant for a command
+        somebody just read and approved, while a command named up front as "the
+        way to check this work" has to survive the variations of actually doing
+        the work. See ``flock.charter.policy_for``, which is the caller that
+        needs it.
         """
         segments = _segments(command or "")
         if not segments:
             return False
         for words in segments:
-            if len(words) > 1:
-                self._allowed_prefixes.add(tuple(words))
-            elif words:
+            if not words:
+                continue
+            if any_arguments or len(words) == 1:
                 self._allowed.add(words[0])
+            else:
+                self._allowed_prefixes.add(tuple(words))
         return True
 
     def deny(self, tool_name: str) -> None:

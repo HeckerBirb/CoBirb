@@ -764,37 +764,39 @@ def policy_for(
     granularity is also what keeps this working in languages CoBirb cannot
     parse — it owns files, not symbols.
 
-    **``shell`` is granted for the worker's own ``accept`` command and nothing
-    else.** It used to be granted for nothing at all, and the acceptance check
-    was run *for* the worker after its turn. That made the ticket's definition
-    of done the one thing it could not observe: it wrote an implementation
-    blind, learned once whether the check passed, got a single fix attempt, and
-    was finished — with its report saying "acceptance check FAILED" about work
-    it never had a chance to iterate on. Being able to run the check is what
-    turns a blind write into converging on green, and it is the difference
-    between a ticket that lands and one that reports a shortcoming.
+    **``shell`` is granted for the programs the worker's own ``accept`` command
+    runs, and nothing else.** It used to be granted for nothing at all, and the
+    acceptance check was run *for* the worker after its turn. That made the
+    ticket's definition of done the one thing it could not observe: it wrote an
+    implementation blind, learned once whether the check passed, got a single
+    fix attempt, and was finished — with its report saying "acceptance check
+    FAILED" about work it never had a chance to iterate on. Being able to run
+    the check is what turns a blind write into converging on green.
 
-    It is still least privilege. The command is one string out of the charter
-    the user read and approved, granted as ``Policy`` prefix rules, so every
-    segment of anything the worker runs has to match part of that invocation —
-    ``pytest tests/test_csv.py -q`` does not become ``rm``, and a chained
-    command that adds something else is refused whole. A single-word ``accept``
-    (``make``, ``pytest``) is the one loose case, since a one-word prefix
-    trusts that binary with any arguments; that is the user's own stated check,
-    named by them, and narrowing it further is not something ``Policy`` can
-    express. Everything else a worker turns out to need still goes through the
-    escalation path, where a person answers.
+    **The grant is the programs, not the invocation** (``allow_command(...,
+    any_arguments=True)``), and that is the second correction to this. Granting
+    the exact invocation as a prefix was technically least privilege and
+    practically a keyhole: a worker iterating on its ticket runs one test file
+    at a time, adds ``-x``, adds ``-k`` — and every variation missed the prefix
+    and became an approval dialog for a command the user had already approved
+    in the charter. "Run your own acceptance check" was advertised and not
+    actually granted. So ``pytest`` from ``pytest tests/test_csv.py -q`` is
+    granted with any arguments, and ``ruff`` too if the accept command chains to
+    it.
 
-    **``allow_command`` rather than ``allow``**, because an ``accept`` is
-    frequently more than one segment — ``pytest -q && ruff check src`` is an
-    ordinary definition of done — and ``allow`` grants the first segment only.
-    That produced a grant which denied the very command it was made from: the
-    worker was refused its own acceptance check, escalated to the user for a
-    command the user had already approved in the charter, and did it again on
-    every attempt. A command the scan cannot read through grants nothing and
-    the worker simply has no shell, which is the same as before this existed;
-    the post-turn verification runs the check either way, so the ticket is
-    never lost to this.
+    What that still does *not* grant is anything the accept command never
+    names. A pipe is a second program — ``pytest -q | head -50`` needs ``head``,
+    which no charter granted, so it is refused and asked about. That is the
+    remaining source of dialogs and it is deliberate: shell grants carry no path
+    scoping at all, so admitting general-purpose commands like ``cat`` or
+    ``head`` would reach outside the worker's read scope entirely, which its
+    file tools cannot. Everything else a worker turns out to need goes through
+    the escalation path, where a person answers.
+
+    A command the scan cannot read through — substitution, a subshell,
+    ``find -exec`` — grants nothing at all, and the worker simply has no shell.
+    The post-turn verification runs the check either way, so no ticket is lost
+    to that.
     """
     policy = build_default_policy(audit_log_enabled=audit_log_enabled, cwd=cwd)
     for path in worker.writes:
@@ -805,5 +807,5 @@ def policy_for(
     # a worker able to orient itself is the working directory.
     policy.allow_read_dir(cwd)
     if worker.accept.strip():
-        policy.allow_command(worker.accept)
+        policy.allow_command(worker.accept, any_arguments=True)
     return policy

@@ -6,6 +6,25 @@ and its §12 decisions record for the ones that were designed and then deliberat
 
 ## [Unreleased]
 
+- **A Worker Birb's request is now asked in that worker's own pane.** It used to be a full-screen
+  dialog, and several workers asking at once stacked them in the same position — so dismissing one
+  dropped the next under a cursor already committed to clicking, and you could approve a command you
+  never read. Columns have distinct positions, so the race has nowhere to happen. Nothing is focused
+  by default either, or the same problem reappears on the keyboard: click the button in the pane you
+  mean. With no panes on screen a request is denied rather than falling back to a dialog.
+- **Worker panes are twice as wide** (90 columns, was 44). At 44 a worker's tool calls, shortcoming
+  report and review all wrapped to shreds, and a pane now also holds requests that need reading
+  rather than skimming.
+- **A worker may run its acceptance check the way it actually needs to.** The grant was the exact
+  invocation from the charter, which meant a worker iterating — one test file at a time, `-x`, `-k` —
+  missed it on every variation and asked you about a command you had already approved. It now grants
+  the *programs* the check names, with any arguments, plus every program a chained check runs. A pipe
+  is still a second program, so `pytest -q | head -50` still asks: shell grants carry no path scoping
+  at all, so admitting `head` or `cat` would let a worker read outside its scope entirely.
+- **Documented, because it surprises people:** your `allow_tools`, `allow_read_dirs` and
+  `allow_write_dirs` do **not** apply to Worker Birbs and never have. The charter you approve is the
+  only thing that grants one anything up front, which is the single reason a worker asks about
+  `find`, `pwd` or `ls` — there is no isolation rule about `find` in particular.
 - **The flock review's third pass — mutation testing — has been removed.** It mutated each behaviour
   a docstring claimed and required the tests to catch every one, which made it a review of the
   *contract* as much as of the work. It was also wired to nothing: the code existed, the reviewer

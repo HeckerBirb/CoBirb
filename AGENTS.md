@@ -410,24 +410,38 @@ divide", which is what the user was told while a finished plan sat in the sessio
 nudge quotes the draft back, because a model told only "call `seal_charter`" starts re-adding
 tickets and collides with itself. An empty draft is still the legitimate decision it always was.
 
-**A Worker Birb runs its own acceptance check** (`charter.policy_for` grants `shell` for
-`worker.accept` and nothing else, via `Policy.allow_command`). **`allow_command` and not
-`allow`:** `allow(tool, command)` grants the *first* segment, which is right for the approval
-prompt it was written for — the user is shown one invocation and says yes to it — and wrong for a
-command granted up front, because `is_allowed` requires *every* segment. So `accept = "pytest -q
-&& ruff check src"`, an ordinary definition of done, produced a grant that denied the command it
-was made from: the worker was refused its own check, escalated to the user for something they had
-already approved in the charter, and did it again every attempt. A command the scan cannot read
-through (substitution, subshell, `find -exec`) grants nothing and the worker simply has no shell. It was granted for nothing at all, and the check was run *for*
-the worker after its turn — so the ticket's definition of done was the one thing it could not
-observe: write blind, learn once, one fix attempt (`DEFAULT_MAX_FIX_ATTEMPTS = 1`), finished, with
-the report saying "acceptance check FAILED" about work it never had a chance to iterate on. Still
-least privilege: the command is one string out of the charter the user read, granted as a `Policy`
-prefix rule, so every segment of anything run has to match that invocation and a chained command
-with something else in it is refused whole. A single-word `accept` (`make`, `pytest`) is the loose
-case — a one-word prefix trusts that binary with any arguments — and narrowing it further is not
-something `Policy` can express. The post-turn verification still runs, so a worker cannot leave the
-check failing and talk its way past it.
+**A Worker Birb runs its own acceptance check**, and `shell` is granted for the *programs* that
+check names — `charter.policy_for` calls `Policy.allow_command(worker.accept, any_arguments=True)`.
+This has been corrected twice and both corrections are worth keeping:
+
+- **It was granted for nothing at all**, and the check was run *for* the worker after its turn. So
+  the ticket's definition of done was the one thing it could not observe: write blind, learn once,
+  one fix attempt (`DEFAULT_MAX_FIX_ATTEMPTS = 1`), finished — with the report saying "acceptance
+  check FAILED" about work it never had a chance to iterate on.
+- **Then it was granted as a prefix over the exact invocation**, which was technically least
+  privilege and practically a keyhole. `allow(tool, command)` also grants only the *first* segment,
+  so `accept = "pytest -q && ruff check src"` produced a grant that denied the command it was made
+  from (hence `allow_command`, which covers every segment). And a worker iterating on its ticket
+  runs one file at a time, adds `-x`, adds `-k` — every variation missed the prefix and became an
+  approval dialog for a command the user had already approved in the charter. "Run your own
+  acceptance check" was advertised and not actually granted.
+
+So the grant is `pytest` with any arguments, plus every other program the accept command chains to.
+**What it still does not grant is anything the check never names**, and that is deliberate rather
+than an oversight: a pipe is a second program, so `pytest -q | head -50` needs `head` and is asked
+about. Shell grants carry **no path scoping at all**, so admitting general-purpose commands like
+`cat` or `head` would reach outside the worker's read scope entirely — which its file tools cannot.
+A command the scan cannot read through (substitution, subshell, `find -exec`) grants nothing and the
+worker simply has no shell. The post-turn verification runs either way, so no ticket is lost to that
+and a worker cannot leave its check failing and talk its way past it.
+
+**Config does not reach a Worker Birb at all** (`wiring.build_subagent`). `allow_tools`,
+`allow_read_dirs` and `allow_write_dirs` are all ignored: the charter's scopes *are* the isolation,
+and the user approved the charter rather than the config. Worth stating because it surprises people
+— `"shell(pytest)"` in `~/.cobirb/config.json` grants a worker nothing, and `find`/`pwd`/`ls` prompt
+for the same single reason rather than for any isolation rule of their own. There is no need-to-know
+rule about `find`; the only find-specific code is `_EXEC_FLAGS`, which makes a command unverifiable
+so it is refused rather than granted.
 
 **`propose_charter` is registered for the whole session, not just the planning turn**
 (`run.install_charter_tool`), and permitted outright. It was previously added before planning and
@@ -544,8 +558,8 @@ scopes, are reviewed, and Brainy Birb reports.
   event, or a released dependent reads an absent result as a failure. A dependent is skipped when
   its dependency did not run (`ok`), not when its acceptance check merely failed — one flaky check
   should not kill a subtree.
-- `policy_for()`: **writes are file-strict, reads are open across `cwd`, `shell` is the worker's own
-  `accept` command and nothing else.** Read isolation was tried and removed — workers could not
+- `policy_for()`: **writes are file-strict, reads are open across `cwd`, `shell` is the programs the
+  worker's own `accept` command names and nothing else.** Read isolation was tried and removed — workers could not
   orient (denied on every `list_dir`/`glob`) and the knowledge isolation never depended on it,
   since the plan is never on disk and the brief omits it.
 - `build_subagent()` differs from a normal run in exactly four ways: policy handed in (not config),
@@ -560,6 +574,19 @@ scopes, are reviewed, and Brainy Birb reports.
   concurrency slot (`supervisor.Slots`) so the rest of the flock runs at full speed, and its pane
   shows `held`. Answers are once / session (`policy.SessionGrants`) / deny-with-an-instruction,
   the last of which reaches the model through `orchestrator._denial_message`.
+- **The question is asked in the asking worker's own pane, never in a modal** (`panes.WorkerRequest`,
+  `WorkerPane.ask`, `app.request_worker_approval`). It was a stacked `WorkerApprovalModal` per
+  request, answered top down, on the reasoning that the stack already serialises them and each
+  dialog names its worker. That ignored *where* the modals appear — all in one place, so dismissing
+  one drops the next under a cursor already committed to clicking, and a click meant for one
+  worker's `pytest` answers a different worker's request for something else. In a permission dialog
+  that is approving a command nobody read. **Distinct screen positions are the fix, not a queue**:
+  panes are columns, so no two workers' buttons ever share coordinates. **Nothing is focused or
+  armed by default**, or the same race reappears on the keyboard. It **fails closed with no pane**
+  — there is no fallback modal, because inventing a screen that cannot aim at a worker is how the
+  bug got written. The preview goes to the pane's log rather than into the request block, which
+  would otherwise grow to the height of a diff and push its own buttons off the bottom. Panes are
+  90 columns wide (was 44) because a request has to be read rather than skimmed.
 - **A write into a file another worker owns is refused without asking** (`charter.writes_owner`).
   Exclusive ownership is what makes concurrency safe by construction, not a convention — granted
   away mid-round, two agents edit one file with no lock and "which worker broke this" stops having

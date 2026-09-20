@@ -216,13 +216,30 @@ passes run as usual.
 The `accept` command from its ticket is the one thing a worker may run. It implements, runs the
 check, reads the failure, fixes, runs it again — converging on green rather than writing blind.
 
-That command is the only one it gets. The grant covers every segment of the exact invocation you
-approved in the charter — so `pytest -q && ruff check src` works, `pytest tests/test_csv.py -q`
-doesn't become `rm`, and a chained command that adds something else is refused whole. Anything else
-it turns out to need still comes to you as a dialog. A ticket with no `accept` gets no shell at all,
-and neither does one whose `accept` uses a construct CoBirb can't read through — `$(…)`, a
-subshell, `find -exec` — since a grant over something unreadable is a grant over whatever it
-contains.
+What it gets is the **programs** your `accept` command names, with any arguments — so an `accept` of
+`pytest tests/test_csv.py -q` lets it run `pytest` on one file at a time, add `-x`, add `-k`, and
+converge. `pytest -q && ruff check src` grants both `pytest` and `ruff`.
+
+What it does **not** get is anything the check never named, and that's deliberate:
+
+- **A pipe is a second program.** `pytest -q | head -50` needs `head`, so it comes to you as a
+  request. Shell grants carry no path scoping at all, so admitting `head` or `cat` would let a
+  worker read outside its scope entirely — something its file tools cannot do.
+- **A ticket with no `accept` gets no shell.** So does one whose `accept` uses a construct CoBirb
+  can't read through — `$(…)`, a subshell, `find -exec` — since a grant over something unreadable is
+  a grant over whatever it contains.
+
+### Your config does not apply to workers
+
+This surprises people, so: `allow_tools`, `allow_read_dirs` and `allow_write_dirs` in
+`~/.cobirb/config.json` are **ignored for Worker Birbs**. `"shell(pytest)"` there grants a worker
+nothing. The charter is what you approved, and the charter is the only thing that grants a worker
+anything up front.
+
+That's also the whole reason a worker asks about `find`, `pwd` or `ls` — one rule, not a special case
+per command. There's no isolation rule about `find` in particular: reads are already open across the
+working directory, so it would show a worker nothing `glob` doesn't. A worker reaching for `find`
+when it has `glob`, `grep` and `list_dir` is just not using the tools it already has.
 
 It used to be run *for* the worker, once, after its turn — which made the ticket's definition of
 done the one thing it couldn't see. A worker wrote an implementation blind, learned once whether
@@ -238,15 +255,30 @@ A charter grants files. Sooner or later a worker needs something else — to run
 formatter, to reach a tool nobody mentioned — and being silently refused used to cost the ticket:
 it would spend its remaining turns retrying or writing up why it couldn't finish.
 
-So it asks, and you get three answers:
+So it asks — **inside its own pane**, not in a dialog over the whole screen:
 
 ```
-[exporter] wants to use shell
-ruff format export/csv.py
-
-  Once (y)     Session (s)     Deny (n)
-  [ Disallow; do this instead…                    ]
+╭─ [exporter] held — waiting for you ─────────╮   ╭─ [cli] running ──────────────╮
+│ writes export/csv.py                        │   │ writes cli.py                │
+│ ╭─────────────────────────────────────────╮ │   │                              │
+│ │ wants to use shell                      │ │   │  edit_file cli.py            │
+│ │ ruff format export/csv.py               │ │   │  …                           │
+│ │                                         │ │   │                              │
+│ │ Not in its charter scope. Paused until  │ │   │                              │
+│ │ you answer.                             │ │   │                              │
+│ │ [ Deny; do this instead…              ] │ │   │                              │
+│ │     Once    Session    Deny             │ │   │                              │
+│ ╰─────────────────────────────────────────╯ │   │                              │
+╰─────────────────────────────────────────────╯   ╰──────────────────────────────╯
 ```
+
+**Each request lives in the column of the worker that asked**, which is the point. When these were
+full-screen dialogs they stacked in one position, so dismissing one dropped the next under a cursor
+already committed to clicking — and you'd approve a command you never read. Columns have distinct
+positions, so that can't happen.
+
+Nothing is focused by default, deliberately: a default target would put the same race on the
+keyboard. Click the button in the pane you mean, or tab to it.
 
 Its own `accept` command isn't one of these — see below.
 

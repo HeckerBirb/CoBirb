@@ -400,26 +400,40 @@ def test_a_worker_with_no_acceptance_check_cannot_run_shell(tmp_path):
     assert not policy.is_allowed("shell", {"command": "cat mine.py"})
 
 
-def test_a_worker_may_run_its_own_acceptance_check(tmp_path):
-    """Being able to run the check is what turns a blind write into converging
-    on green. Previously it was run *for* the worker, once, after its turn —
-    so the ticket's definition of done was the one thing it could not see."""
+def test_a_worker_may_run_its_acceptance_check_however_it_needs_to(tmp_path):
+    """The grant is the *programs* the check runs, not the literal invocation.
+    Granting the exact string was a keyhole: a worker iterating runs one file at
+    a time and adds -x and -k, and every variation became an approval dialog for
+    a command the charter had already approved."""
     policy = _worker_policy(tmp_path, accept='"pytest tests/test_mine.py -q"')
 
     assert policy.is_allowed("shell", {"command": "pytest tests/test_mine.py -q"})
     assert policy.is_allowed("shell", {"command": "pytest tests/test_mine.py -q -x"})
+    assert policy.is_allowed("shell", {"command": "pytest tests/test_other.py -k thing"})
+
+
+def test_every_program_a_chained_check_names_is_granted(tmp_path):
+    policy = _worker_policy(tmp_path, accept='"pytest -q && ruff check src"')
+
+    assert policy.is_allowed("shell", {"command": "pytest -q && ruff check src"})
+    assert policy.is_allowed("shell", {"command": "ruff check other"})
 
 
 def test_an_acceptance_check_does_not_become_a_shell(tmp_path):
-    """The grant is a prefix rule over the approved invocation, so it stays the
-    one command the user read in the charter."""
+    """Wider on the test runner, nothing else. A program the check never names
+    is still refused — which is what keeps a pipe a question, since shell grants
+    carry no path scoping and `head` or `cat` would reach past the worker's
+    read scope entirely."""
     policy = _worker_policy(tmp_path, accept='"pytest tests/test_mine.py -q"')
 
     assert not policy.is_allowed("shell", {"command": "rm -rf ."})
-    assert not policy.is_allowed("shell", {"command": "pytest"})
-    # Chained: every segment has to be permitted, so this cannot smuggle one in.
+    assert not policy.is_allowed("shell", {"command": "cat /etc/passwd"})
+    # Chained and piped: every segment has to be permitted on its own.
     assert not policy.is_allowed(
         "shell", {"command": "pytest tests/test_mine.py -q && curl example.com"}
+    )
+    assert not policy.is_allowed(
+        "shell", {"command": "pytest tests/test_mine.py -q | head -50"}
     )
 
 
@@ -712,17 +726,6 @@ def test_several_readers_of_one_written_file_are_one_overlap():
     assert conflicts[0].writer == "a"
     assert "1 overlap" in describe_conflicts(conflicts)
     assert "b, c, d and e read what a writes" in conflicts[0].describe()
-
-
-def test_a_multi_segment_acceptance_check_is_granted_whole(tmp_path):
-    """`allow("shell", cmd)` grants the first segment only, but `is_allowed`
-    requires every segment — so granting `pytest -q && ruff check .` used to
-    produce a grant that denied the command it was made from."""
-    policy = _worker_policy(tmp_path, accept='"pytest -q && ruff check src"')
-
-    assert policy.is_allowed("shell", {"command": "pytest -q && ruff check src"})
-    assert policy.is_allowed("shell", {"command": "pytest -q"})
-    assert not policy.is_allowed("shell", {"command": "ruff check /etc"})
 
 
 def test_an_unreadable_acceptance_check_grants_no_shell(tmp_path):

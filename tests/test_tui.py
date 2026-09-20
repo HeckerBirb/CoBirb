@@ -15,6 +15,7 @@ a bare pause will pass locally and flake in CI.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import textwrap
 import threading
@@ -24,7 +25,7 @@ import pytest
 from rich.text import Text
 from textual.geometry import Offset
 from textual.selection import Selection
-from textual.widgets import Footer, Input, OptionList, RichLog, TabbedContent
+from textual.widgets import Button, Footer, Input, OptionList, RichLog, Static, TabbedContent
 from textual.widgets.option_list import Option
 
 from conftest import StubSession, StubSessionManager
@@ -50,7 +51,6 @@ from cobirb.tui.screens import (
     PersonaPickerModal,
     RememberModal,
     TextPromptModal,
-    WorkerApprovalModal,
     _ordered_catalogue_options,
 )
 from cobirb.tui.widgets import (
@@ -3578,72 +3578,152 @@ async def test_a_charter_that_already_ran_is_not_offered_again():
 # --------------------------------------------------------------------------- #
 # A Worker Birb asking for something outside its charter scope.
 # --------------------------------------------------------------------------- #
-async def _worker_dialog(pilot, app, **overrides):
-    """Put one worker's approval dialog on screen and collect its answer."""
-    answers: list = []
+_TWO_TICKETS = """
+objective = "two tickets"
+
+[[workers]]
+id     = "exporter"
+writes = ["a.py"]
+brief  = "Do a."
+
+[[workers]]
+id     = "cli"
+writes = ["b.py"]
+brief  = "Do b."
+"""
+
+
+async def _worker_request(pilot, app, worker_id="exporter", **overrides):
+    """Put one worker's request in its own pane and return (task, pane).
+
+    Drives the real path — ``WorkerPane.ask`` — because the thing under test is
+    that the question lands in the asking worker's column and nowhere else.
+    """
+    from cobirb.flock.charter import parse_charter
+    from cobirb.tui.panes import FlockPane
+
+    flock = app.query_one(FlockPane)
+    if flock.pane(worker_id) is None:
+        await flock.begin(parse_charter(textwrap.dedent(_TWO_TICKETS)))
+    pane = flock.pane(worker_id)
     kwargs = dict(
-        worker_id="exporter", tool_name="shell", arguments={"command": "pytest -q"},
-        scope="run 'pytest' commands", preview="",
+        tool_name="shell", detail="pytest -q", scope="run 'pytest' commands", preview=""
     )
     kwargs.update(overrides)
-    app.push_screen(WorkerApprovalModal(**kwargs), callback=answers.append)
-    # Waiting for the screen alone is not enough: it is the current screen
-    # before `compose` has mounted anything into it, so a query for the body
-    # or the field races the mount and finds nothing.
-    await _until(pilot, lambda: bool(app.screen.query("#worker-approval-instruction")))
-    return answers
+    task = asyncio.create_task(pane.ask(**kwargs))
+    # Waiting for the task alone is not enough: `ask` has to mount the widget
+    # before a query for its field finds anything.
+    await _until(pilot, lambda: bool(pane.query(".worker-request-instruction")))
+    return task, pane
 
 
-async def test_the_worker_dialog_says_who_is_asking():
-    """Several workers run at once and they are not interchangeable — "may I
-    run this?" is only answerable if you know which one wants it."""
+def _press(pane, css_class):
+    pane.query_one(f".{css_class}", Button).press()
+
+
+async def test_a_worker_request_lands_in_that_workers_own_pane():
+    """The whole point of moving it out of a modal: two workers asking at once
+    used to stack dialogs in one position, so a click committed to one answered
+    the other."""
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        await _worker_dialog(pilot, app)
+        task, pane = await _worker_request(pilot, app)
 
-        body = _static_text(app, "#worker-approval-body")
-        assert "exporter" in body
+        from cobirb.tui.panes import FlockPane
+
+        assert pane.query(".worker-request")
+        # The other worker's column is untouched: no second question anywhere.
+        other = app.query_one(FlockPane).pane("cli")
+        assert not other.query(".worker-request")
+
+        _press(pane, "worker-request-deny")
+        assert (await task)[0] == "deny"
+
+
+async def test_two_workers_asking_at_once_get_separate_places_to_answer():
+    """Distinct positions are what removes the race, not a queue."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        first_task, first = await _worker_request(pilot, app, worker_id="exporter")
+        second_task, second = await _worker_request(
+            pilot, app, worker_id="cli", detail="ruff check ."
+        )
+
+        assert first.query(".worker-request") and second.query(".worker-request")
+
+        # Answering one leaves the other exactly as it was, still waiting.
+        _press(first, "worker-request-once")
+        assert (await first_task)[0] == "once"
+        assert not second_task.done()
+        assert second.query(".worker-request")
+
+        _press(second, "worker-request-deny")
+        assert (await second_task)[0] == "deny"
+
+
+async def test_the_request_says_what_is_wanted():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        task, pane = await _worker_request(pilot, app)
+
+        body = str(pane.query_one(".worker-request-body", Static).content)
         assert "shell" in body
+        assert "pytest -q" in body
+
+        _press(pane, "worker-request-deny")
+        await task
 
 
-async def test_the_worker_dialog_says_a_session_grant_reaches_other_agents():
-    """It widens more than the worker in front of you, so it has to say so —
-    agreeing to that from a dialog that named one worker would be blind."""
+async def test_the_request_says_a_session_grant_reaches_other_agents():
+    """It widens more than the worker in front of you, so it has to say so."""
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        await _worker_dialog(pilot, app)
+        task, pane = await _worker_request(pilot, app)
 
-        assert "not started" in _static_text(app, "#worker-approval-body")
+        assert "not yet started" in str(
+            pane.query_one(".worker-request-body", Static).content
+        )
+
+        _press(pane, "worker-request-deny")
+        await task
 
 
 @pytest.mark.parametrize(
-    "key,expected", [("y", "once"), ("s", "session"), ("n", "deny")]
+    "css_class,expected",
+    [
+        ("worker-request-once", "once"),
+        ("worker-request-session", "session"),
+        ("worker-request-deny", "deny"),
+    ],
 )
-async def test_the_worker_dialog_keys_resolve_to_a_decision(key, expected):
+async def test_each_button_resolves_to_its_decision(css_class, expected):
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        answers = await _worker_dialog(pilot, app)
+        task, pane = await _worker_request(pilot, app)
 
-        await pilot.press(key)
-        await _until(pilot, lambda: bool(answers))
+        _press(pane, css_class)
 
-        assert answers[0][0] == expected
+        assert (await task)[0] == expected
 
 
-async def test_escape_denies_the_worker():
-    """Fails closed like every other approval path in the codebase."""
+async def test_nothing_is_focused_by_default():
+    """A default target would put the race back on the keyboard: whichever
+    request grabbed focus last would catch an Enter meant for another."""
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        answers = await _worker_dialog(pilot, app)
+        task, pane = await _worker_request(pilot, app)
 
-        await pilot.press("escape")
-        await _until(pilot, lambda: bool(answers))
+        focused = app.focused
+        assert focused is None or focused not in pane.query("*").nodes
 
-        assert answers[0][0] == "deny"
+        _press(pane, "worker-request-deny")
+        await task
 
 
 async def test_a_refusal_carries_what_to_do_instead():
@@ -3652,15 +3732,12 @@ async def test_a_refusal_carries_what_to_do_instead():
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        answers = await _worker_dialog(pilot, app)
+        task, pane = await _worker_request(pilot, app)
 
-        app.screen.query_one("#worker-approval-instruction", Input).value = (
-            "use the Makefile target"
-        )
-        await pilot.press("n")
-        await _until(pilot, lambda: bool(answers))
+        pane.query_one(".worker-request-instruction", Input).value = "use the Makefile target"
+        _press(pane, "worker-request-deny")
 
-        assert answers[0] == ("deny", "use the Makefile target")
+        assert (await task) == ("deny", "use the Makefile target")
 
 
 async def test_an_untouched_field_sends_nothing():
@@ -3669,12 +3746,11 @@ async def test_an_untouched_field_sends_nothing():
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        answers = await _worker_dialog(pilot, app)
+        task, pane = await _worker_request(pilot, app)
 
-        await pilot.press("n")
-        await _until(pilot, lambda: bool(answers))
+        _press(pane, "worker-request-deny")
 
-        assert answers[0] == ("deny", "")
+        assert (await task) == ("deny", "")
 
 
 async def test_approving_after_typing_does_not_carry_the_instruction():
@@ -3683,13 +3759,42 @@ async def test_approving_after_typing_does_not_carry_the_instruction():
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        answers = await _worker_dialog(pilot, app)
+        task, pane = await _worker_request(pilot, app)
 
-        app.screen.query_one("#worker-approval-instruction", Input).value = "never mind"
-        await pilot.press("y")
-        await _until(pilot, lambda: bool(answers))
+        pane.query_one(".worker-request-instruction", Input).value = "never mind"
+        _press(pane, "worker-request-once")
 
-        assert answers[0] == ("once", "")
+        assert (await task) == ("once", "")
+
+
+async def test_the_request_is_removed_once_it_is_answered():
+    """A question nobody is waiting on would sit in the pane looking live."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        task, pane = await _worker_request(pilot, app)
+
+        _press(pane, "worker-request-once")
+        await task
+        await pilot.pause()
+
+        assert not pane.query(".worker-request")
+
+
+async def test_a_request_with_no_pane_to_ask_in_is_denied():
+    """Fails closed. With no panes up there is nothing that could aim the
+    question at the right worker, and inventing a dialog is how the race got
+    written in the first place."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        decision, instruction = await app.request_worker_approval(
+            "nobody", "shell", {"command": "pytest -q"}
+        )
+
+        assert decision == "deny"
+        assert instruction == ""
 
 
 async def test_a_write_into_another_workers_files_is_refused_without_asking():
@@ -3723,8 +3828,8 @@ async def test_a_write_into_another_workers_files_is_refused_without_asking():
 
         assert outcome.decision == "deny"
         assert "'b'" in outcome.instruction
-        # No dialog was raised: nobody was asked anything.
-        assert not isinstance(app.screen, WorkerApprovalModal)
+        # No request was raised anywhere: nobody was asked anything.
+        assert not app.query(".worker-request")
 
 
 async def test_a_worker_may_still_ask_for_a_file_nobody_owns():

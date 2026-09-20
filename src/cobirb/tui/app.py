@@ -62,9 +62,9 @@ from .screens import (
     ModelPickerModal,
     PersonaPickerModal,
     TextPromptModal,
-    WorkerApprovalModal,
 )
 from .widgets import ActivityBar, PromptInput, StatusBar, StreamPreview, TranscriptLog
+from ..typing.spi import DECISION_DENY
 
 logger = logging.getLogger("cobirb")
 
@@ -388,20 +388,27 @@ class CoBirbApp(App[None]):
     ) -> tuple:
         """The same, for a Worker Birb, returning ``(decision, instruction)``.
 
-        Its own method rather than a flag on ``request_approval`` because the
-        two return different shapes — see ``WorkerApprovalModal`` for why the
-        question itself is different. Awaited on the event loop on behalf of
-        the worker's thread, exactly as ``request_approval`` is.
+        **Asked inside the asking worker's own pane, not in a modal**, and that
+        is a fix rather than a preference. It used to stack a
+        ``WorkerApprovalModal`` per request and answer them top down, on the
+        reasoning that the stack already serialises them and each dialog names
+        its worker. What that missed is where the modals appear: all in the same
+        place. Dismiss one and the next lands under a cursor already committed
+        to clicking, so a click meant for one worker's request answers a
+        different worker's — which in a permission dialog means approving a
+        command nobody read. Panes have distinct positions, so the race has
+        nowhere to happen. See ``panes.WorkerRequest``.
 
-        Two workers asking at once stack two modals and are answered top
-        down. Deliberately not serialised behind a queue: the stack already
-        answers them one at a time, and each dialog names the worker it
-        belongs to, so the thing a queue would add is ordering nobody asked
-        for.
+        **Fails closed when the pane is gone.** There is no fallback modal: if
+        the flock's panes are not up, there is nothing on screen that could
+        aim a question at the right worker, and inventing one is how the bug
+        above got written. Nobody to ask means no.
         """
-        return await self.push_screen_wait(
-            WorkerApprovalModal(worker_id, tool_name, arguments, scope, preview)
-        )
+        pane = self.query_one(FlockPane).pane(worker_id)
+        if pane is None:
+            return (DECISION_DENY, "")
+        detail = arguments.get("command") or arguments.get("path") or arguments.get("pattern") or ""
+        return await pane.ask(tool_name, str(detail), scope, preview)
 
     # ------------------------------------------------------------------ #
     # Input handling

@@ -130,39 +130,6 @@ ApprovalModal {
     margin: 0 1;
 }
 
-/* A Worker Birb asking for something outside its charter scope. Wider than
-   ApprovalModal because it carries a worker id, what a session grant would
-   reach, and a field to answer in. */
-WorkerApprovalModal {
-    align: center middle;
-}
-
-#worker-approval-dialog {
-    width: 78;
-    max-width: 92%;
-    height: auto;
-    max-height: 80%;
-    padding: 1 2;
-    border: round $warning;
-    background: $surface;
-}
-
-#worker-approval-instruction {
-    margin-top: 1;
-    border: round $primary-darken-2;
-    background: $surface;
-}
-
-#worker-approval-buttons {
-    height: auto;
-    padding-top: 1;
-    align-horizontal: center;
-}
-
-#worker-approval-buttons Button {
-    margin: 0 1;
-}
-
 HelpModal {
     align: center middle;
 }
@@ -351,13 +318,49 @@ FlockPane {
 
 /* A fixed readable width rather than an equal share of whatever is left:
    three agents at 1fr each squeeze the text past reading, and a pane too
-   narrow to read is the same as no pane. The row scrolls sideways instead. */
+   narrow to read is the same as no pane. The row scrolls sideways instead.
+   Widened from 44 to 90: at 44 a worker's tool calls, shortcoming report and
+   review all wrapped to shreds, and a pane now also holds that worker's
+   approval requests, which have to be read carefully rather than skimmed. */
 .worker-pane {
-    width: 44;
+    width: 90;
     height: 1fr;
     margin: 0 1 0 0;
     border: round $primary-darken-2;
     padding: 0 1;
+}
+
+/* A request this worker is waiting on, above its log so it cannot scroll out
+   of sight. Bordered in $warning and given the pane's full width: it is the
+   only thing on this screen where a misread costs something, so it has to be
+   unmissable and unambiguous about which column it belongs to. */
+.worker-request {
+    height: auto;
+    margin-bottom: 1;
+    padding: 0 1;
+    border: round $warning;
+    background: $surface;
+}
+
+.worker-request-body {
+    height: auto;
+}
+
+.worker-request-instruction {
+    margin-top: 1;
+    border: round $primary-darken-2;
+    background: $surface;
+}
+
+.worker-request-buttons {
+    height: auto;
+    padding-top: 1;
+    align-horizontal: center;
+}
+
+.worker-request-buttons Button {
+    margin: 0 1;
+    min-width: 12;
 }
 
 .worker-title {

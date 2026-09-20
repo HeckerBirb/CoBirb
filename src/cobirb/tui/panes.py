@@ -9,13 +9,14 @@ instead of a modal.
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, cast
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, HorizontalScroll, Vertical
 from rich.text import Text
-from textual.widgets import Button, OptionList, RichLog, Static
+from textual.widgets import Button, Input, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
 
 from .. import session
@@ -137,6 +138,105 @@ class SessionsPane(Vertical):
             app.refresh_sessions_pane()
 
 
+class WorkerRequest(Vertical):
+    """A Worker Birb's request for something, asked inside that worker's pane.
+
+    **This used to be a full-screen modal and that was a safety bug.** Several
+    workers ask at once, the modals stacked in the same place, and dismissing
+    one put the next under a cursor already committed to clicking — so a click
+    meant for one worker's ``pytest`` landed on another worker's request for
+    something else entirely. In a permission dialog, "you approved a command you
+    never read" is not an inconvenience.
+
+    What fixes it is not a queue but **distinct screen positions**: each pane
+    occupies its own column, so no two workers' buttons ever share coordinates
+    and a committed click cannot be inherited by a different question.
+
+    **Nothing here is focused or armed by default.** A default target would
+    reintroduce the same race on the keyboard — whichever request grabbed focus
+    last would catch an Enter meant for another. Answering is therefore always a
+    deliberate, aimed action: click this pane's button, or tab to it.
+
+    Resolves a ``(decision, instruction)`` pair through an ``asyncio.Future``,
+    which is what lets the worker's thread block on an answer while the rest of
+    the flock carries on (see ``WorkerPane.ask``).
+    """
+
+    INSTRUCTION_PLACEHOLDER = "Deny; do this instead…"
+
+    def __init__(self, worker_id: str, tool_name: str, detail: str, scope: str | None) -> None:
+        super().__init__(classes="worker-request")
+        self._worker_id = worker_id
+        self._tool_name = tool_name
+        self._detail = detail
+        self._scope = scope
+        self.answered: "asyncio.Future[tuple[str, str]]" = (
+            asyncio.get_event_loop().create_future()
+        )
+
+    def compose(self) -> ComposeResult:
+        body = Text()
+        body.append("wants to use ", style="bold")
+        body.append(self._tool_name, style="bold yellow")
+        if self._detail:
+            body.append(f"\n{self._detail}", style="default")
+        body.append("\n\nNot in its charter scope. Paused until you answer.", style="dim")
+        if self._scope:
+            body.append("\nSession = ", style="dim")
+            body.append(self._scope, style="bold")
+            body.append(" for every agent, including workers not yet started.", style="dim")
+        yield Static(body, classes="worker-request-body")
+        yield Input(placeholder=self.INSTRUCTION_PLACEHOLDER, classes="worker-request-instruction")
+        with Horizontal(classes="worker-request-buttons"):
+            yield Button("Once", variant="primary", classes="worker-request-once")
+            yield Button("Session", variant="warning", classes="worker-request-session")
+            yield Button("Deny", variant="error", classes="worker-request-deny")
+
+    def _instruction(self) -> str:
+        """What the user typed, if anything.
+
+        Reads ``value`` and never ``placeholder``: an untouched field is empty,
+        so the prompt text can never reach the model as though it were an
+        instruction somebody meant.
+        """
+        try:
+            return self.query_one(Input).value.strip()
+        except Exception:  # noqa: BLE001 - a pane mid-teardown still has to answer
+            return ""
+
+    def resolve(self, decision: str, instruction: str = "") -> None:
+        """Answer once. Later calls are ignored rather than raising.
+
+        A widget being removed while a click is in flight is ordinary, and a
+        second resolution of the same request would be an ``InvalidStateError``
+        surfacing as a crashed UI over a question already answered.
+        """
+        if not self.answered.done():
+            self.answered.set_result((decision, instruction))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        classes = event.button.classes
+        if "worker-request-once" in classes:
+            # An instruction belongs to a refusal. Typing one and then approving
+            # anyway is a change of mind, and the approval is the answer.
+            self.resolve("once")
+        elif "worker-request-session" in classes:
+            self.resolve("session")
+        else:
+            self.resolve("deny", self._instruction())
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Enter in the field means "deny, and here is what to do instead".
+
+        The field only ever carries a refusal, so submitting it is the same
+        decision as pressing Deny — and having typed the alternative, pressing a
+        second button to send it would be a step with nothing in it.
+        """
+        event.stop()
+        self.resolve("deny", self._instruction())
+
+
 class WorkerPane(Vertical):
     """One Worker Birb's own column: who it is, what it owns, what it is doing.
 
@@ -144,6 +244,9 @@ class WorkerPane(Vertical):
     into a single log produce a stream where neither is followable — and
     following one worker is the only way to tell whether it is stuck, which
     is the thing a person watching actually wants to know.
+
+    It is also where that worker's requests are answered — see
+    ``WorkerRequest`` for why that is a pane and not a dialog.
     """
 
     def __init__(self, worker_id: str, scope: str) -> None:
@@ -189,6 +292,34 @@ class WorkerPane(Vertical):
 
     def write(self, renderable) -> None:
         self.query_one(TranscriptLog).write(renderable)
+
+    async def ask(
+        self, tool_name: str, detail: str, scope: str | None, preview: str = ""
+    ) -> tuple[str, str]:
+        """Put a request in this pane and wait, here, for the answer.
+
+        Awaited on the event loop on behalf of the worker's own thread, which is
+        blocked in ``WorkerPaneIO.confirm_request`` until this returns — the same
+        shape the modal had, without the shared screen position that made two
+        simultaneous requests dangerous.
+
+        **The preview goes to the log, not into the request block.** A diff or a
+        file body is tall, and this is a 90-column pane inside a row that scrolls
+        sideways; a request that grows to the height of its content pushes its own
+        buttons off the bottom. The log is already where this worker's output
+        goes, it scrolls, and it can be selected and copied out of.
+
+        Removed in a ``finally`` so a request cannot outlive its answer and sit
+        in the pane as a question nobody is waiting on.
+        """
+        if preview:
+            self.write(render.build_preview_panel(tool_name, preview))
+        request = WorkerRequest(self._worker_id, tool_name, detail, scope)
+        await self.mount(request, before=self.query_one(TranscriptLog))
+        try:
+            return await request.answered
+        finally:
+            await request.remove()
 
 
 class FlockPane(Vertical):

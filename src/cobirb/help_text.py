@@ -123,7 +123,10 @@ INTERACTIVE KEYS
   the mouse, and otherwise cancels a running turn (a stuck or slow shell
   command, most usefully — quitting mid-turn tries this first too, so it
   never sits waiting on one either). In a tool-approval dialog: y allow
-  once · a allow for the rest of the session · n (or escape) deny.
+  once · a allow for the rest of the session · n (or escape) deny. A Worker
+  Birb's request is not a dialog — it appears in that worker's own pane on the
+  Flock tab, with its own buttons, so two workers asking at once can never be
+  answered by the same click. See 'help flock'.
 
 EXTENDING IT
   Roles          One model per job: orchestrator, worker. 'cobirb models'
@@ -373,9 +376,17 @@ AGENTS.md, no repo map and no plan, so it sees code rather than the shape of the
 whole. Conventions reach it through the skeleton it is filling in, which was
 already written in your project's style.
 
-It may run ONE command: its own acceptance check, exactly as you approved it in
-the charter. That is how it converges on green instead of writing blind. Every
-other command, and every other tool, comes to you as a dialog.
+It may run the programs its own acceptance check names, with any arguments — so
+it can run one test file at a time and converge on green instead of writing
+blind. Nothing else: a pipe is a second program, so 'pytest -q | head' still
+asks you, because shell grants carry no path scoping and 'head' would reach
+outside the worker's read scope. Requests appear in that worker's own pane.
+
+Your config does NOT apply to Worker Birbs. allow_tools, allow_read_dirs and
+allow_write_dirs are ignored for them: the charter you approved is the only
+thing that grants a worker anything up front. So "shell(pytest)" in your config
+grants a worker nothing, and that one rule — not a special case per command —
+is why it asks about find, pwd or ls.
 
 It CAN edit its own tests, and should add more for whatever it finds. That is
 not a gap — see below.
