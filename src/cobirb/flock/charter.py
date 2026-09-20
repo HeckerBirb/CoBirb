@@ -42,6 +42,7 @@ user explicitly named, exactly as ``--session`` names a session.
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass
 from typing import Any
@@ -265,6 +266,49 @@ def _worker(entry: Any, index: int) -> WorkerBrief:
     )
 
 
+# Typographic quotes. A model writing prose and TOML in the same breath emits
+# these regularly, and TOML has no idea what they are.
+_CURLY_QUOTES = "\u201c\u201d\u2018\u2019"
+
+# A key whose value starts with none of the things a TOML value can start with:
+# a quote, a bracket, a brace, a digit, or true/false. Almost always a bare
+# string somebody forgot to quote.
+_UNQUOTED_VALUE = re.compile(r"^\s*[A-Za-z_][\w-]*\s*=\s*(?![\"'\[{\d]|true\b|false\b)\S")
+
+
+def _toml_hint(text: str, exc: Exception) -> str:
+    """A specific cause for a TOML error, when one can be identified.
+
+    ``tomllib`` reports *where* it gave up, not what the author did wrong, and
+    "Invalid value (at line 1, column 13)" is the identical message for a curly
+    quote and for an unquoted string. That is enough for a person with the file
+    in front of them and nowhere near enough for a model trying to correct its
+    own output — which will otherwise send the same thing again, and again,
+    because nothing it was told distinguishes one attempt from the next.
+
+    The whole text is scanned rather than the line the error names:
+    ``TOMLDecodeError`` only grew ``lineno`` in Python 3.13, and a hint that
+    silently stops working on the interpreter most people are running is worse
+    than one that occasionally names a second suspect line.
+    """
+    hints = []
+    if any(ch in text for ch in _CURLY_QUOTES):
+        hints.append(
+            "the text contains typographic quotes (" + " ".join(_CURLY_QUOTES) + ") — "
+            "TOML only understands straight ones (\" and ')"
+        )
+    for number, line in enumerate(text.splitlines(), start=1):
+        if _UNQUOTED_VALUE.match(line):
+            hints.append(
+                f"line {number} looks like a string value with no quotes around it "
+                f"({line.strip()[:60]!r}) — every string in TOML needs them"
+            )
+            break
+    if not hints:
+        return ""
+    return "\n\nLikely cause: " + "; ".join(hints) + "."
+
+
 def parse_charter(text: str) -> Charter:
     """Read a charter from TOML, or say clearly why it cannot be read.
 
@@ -275,7 +319,7 @@ def parse_charter(text: str) -> Charter:
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
-        raise CharterError(f"not valid TOML — {exc}") from exc
+        raise CharterError(f"not valid TOML — {exc}{_toml_hint(text, exc)}") from exc
     except (TypeError, AttributeError) as exc:  # not a string at all
         raise CharterError(f"a charter must be text — {exc}") from exc
 

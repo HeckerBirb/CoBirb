@@ -161,7 +161,11 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> P
         plan_prompt(objective), system="", cwd=cwd, persona="Brainy Birb", max_turns=turns
     )
 
-    if tool.charter is None and tool.attempts:
+    # Not when the attempts are already spent. The retry is for a planning turn
+    # that ended early — a model that declared success over a rejected charter
+    # — and asking again after it has failed the tool's own limit buys another
+    # turn budget's worth of the identical failure.
+    if tool.charter is None and tool.attempts and not tool.exhausted:
         session = orchestrator.run(
             charter_retry_prompt(tool.last_error),
             system="", cwd=cwd, persona="Brainy Birb", max_turns=turns,

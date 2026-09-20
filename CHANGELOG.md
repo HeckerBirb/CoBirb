@@ -4,6 +4,20 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Fixed: a charter Brainy Birb could not get right became a loop.** Every rejection came back
+  with the same twenty-five-line template, which is the strongest available hint to a model that
+  the thing to send next is what it just sent. The template is now shown once; after that the
+  rejection names the error and says not to resend. After five attempts the tool stops asking
+  altogether and tells Brainy Birb to explain what it is stuck on instead, and planning no longer
+  spends a second turn budget retrying a model that has already exhausted them. **0.15.3's retry
+  made this worse before it made it better** — it doubled the turns available for failing.
+- **A TOML error now names a likely cause.** `Invalid value (at line 1, column 13)` is the
+  identical message for a curly quote and for an unquoted string, which tells a model correcting
+  its own output nothing it can act on. Both are now identified by name, with the offending line
+  quoted.
+
 ## [0.15.3]
 
 - **Fixed: a rejected charter ended a flock as though nothing had been wrong.** When validation

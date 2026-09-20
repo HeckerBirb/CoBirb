@@ -421,3 +421,75 @@ def test_a_rejected_charter_gets_one_more_try_with_the_reason_quoted(monkeypatch
     )
 
     assert any("was NOT accepted" in p for p in prompts)
+
+
+def test_the_charter_tool_stops_asking_after_enough_rejections(tmp_path):
+    """A tool that only ever says "no, try again" is a loop with the turn
+    limit for a brake — and the user watching it cannot tell whether anything
+    is happening."""
+    from cobirb.flock.brainy import MAX_CHARTER_ATTEMPTS, ProposeCharterTool
+
+    tool = ProposeCharterTool(str(tmp_path))
+    for _ in range(MAX_CHARTER_ATTEMPTS):
+        result = tool.execute({"toml": "objective = not quoted"})
+
+    assert tool.exhausted
+    assert "STOP calling propose_charter" in result.content
+
+
+def test_the_charter_template_is_sent_once_not_after_every_failure(tmp_path):
+    """Twenty-five identical lines after every rejection is the strongest
+    possible hint to a model that the thing to send next is the same again."""
+    from cobirb.flock.brainy import ProposeCharterTool
+
+    tool = ProposeCharterTool(str(tmp_path))
+    first = tool.execute({"toml": "objective = not quoted"})
+    second = tool.execute({"toml": "objective = not quoted"})
+
+    assert "path/to/module.py" in first.content
+    assert "path/to/module.py" not in second.content
+
+
+def test_planning_does_not_retry_once_the_attempts_are_spent(monkeypatch, tmp_path):
+    """The retry is for a turn that ended early, not for a model that has
+    already failed the tool's own limit — that just buys a second turn budget
+    of the identical failure."""
+    from cobirb.flock.brainy import MAX_CHARTER_ATTEMPTS
+
+    _skeleton(tmp_path)
+    prompts = []
+    orchestrator = _orchestrator(
+        monkeypatch, tmp_path, _BadCharterBrainy(attempts_before_giving_up=MAX_CHARTER_ATTEMPTS)
+    )
+    original = orchestrator.run
+    monkeypatch.setattr(
+        orchestrator, "run",
+        lambda prompt, *a, **k: (prompts.append(prompt), original(prompt, *a, **k))[1],
+    )
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": False), probe=False,
+    )
+
+    assert not any("was NOT accepted" in p for p in prompts)
+    assert run.stopped_at == "charter"
+
+
+def test_a_toml_error_names_a_likely_cause(tmp_path):
+    """tomllib says where it gave up, not what was done wrong — and "Invalid
+    value (at line 1, column 13)" is the same message for a curly quote as for
+    an unquoted string. A model correcting its own output cannot tell those
+    apart, so it sends the same thing again."""
+    from cobirb.flock.charter import CharterError, parse_charter
+
+    for toml, expected in [
+        ("objective = “x”", "typographic quotes"),
+        ("objective = add CSV export", "no quotes around it"),
+    ]:
+        try:
+            parse_charter(toml)
+        except CharterError as exc:
+            assert expected in str(exc), f"{toml!r} -> {exc}"
+        else:
+            raise AssertionError(f"{toml!r} should not have parsed")

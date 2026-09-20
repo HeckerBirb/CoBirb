@@ -322,6 +322,15 @@ permission is a considered exception to §2's default-deny rather than an oversi
 gates *capability* (filesystem, network, subprocess) and this tool reaches none of it — it parses
 text and keeps the result in memory.
 
+**A charter that keeps failing must stop being asked for.** `MAX_CHARTER_ATTEMPTS = 5`. The
+template goes out with the *first* rejection only — repeating twenty-five identical lines after
+every failure is the strongest signal available to a model that the right next move is to resend
+what it just sent — and at the cap the tool stops correcting and tells Brainy Birb to explain what
+it is stuck on. `_plan` skips its retry when `tool.exhausted`, since otherwise a model that has
+failed the tool's own limit gets a second turn budget to fail in. `charter._toml_hint` names the
+cause where it can: `tomllib` reports where it gave up, and "Invalid value (at line 1, column 13)"
+is the same message for a curly quote as for an unquoted string.
+
 **A rejected charter is not the same outcome as no charter.** `ProposeCharterTool` counts
 `attempts` and keeps `last_error`; `PlanResult.failed` is what distinguishes "tried and every
 attempt was invalid" (`stopped_at="charter"`, reported with the reason) from "decided the work

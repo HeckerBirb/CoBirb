@@ -30,6 +30,13 @@ logger = logging.getLogger("cobirb")
 
 PROPOSE_CHARTER = "propose_charter"
 
+# How many rejected charters before the tool stops asking for another one.
+# The planning turn is bounded at 30 turns, so a model that cannot produce
+# valid TOML would otherwise spend all of them failing at it — and then, since
+# `_plan` retries, spend another thirty. Five is enough attempts for a real
+# correction and few enough that the user is not watching a loop.
+MAX_CHARTER_ATTEMPTS = 5
+
 # What Brainy Birb is told before it plans anything. Long, because every
 # paragraph here is either an invariant of the design or a mistake this would
 # otherwise make — and short compared to the cost of a partition whose workers
@@ -219,6 +226,44 @@ class ProposeCharterTool(Tool):
             "required": ["toml"],
         }
 
+    @property
+    def exhausted(self) -> bool:
+        """Whether this has been tried enough times to stop asking."""
+        return self.charter is None and self.attempts >= MAX_CHARTER_ATTEMPTS
+
+    def _rejection(self, exc: CharterError) -> str:
+        """What a rejected charter is told, which changes as attempts pile up.
+
+        **The template is sent once.** It is twenty-five lines, it is already
+        in this tool's own parameter schema, and repeating it after every
+        failure fills the context with identical text — which, for a model
+        deciding what to send next, is the strongest possible signal that the
+        thing to send next is the same again.
+
+        At the cap the answer stops being a correction and becomes an
+        instruction to stop. A tool that only ever says "no, try again" to a
+        model that cannot get it right is a loop with a turn limit for a brake,
+        and the user watching it has no idea whether anything is happening.
+        """
+        if self.attempts >= MAX_CHARTER_ATTEMPTS:
+            return (
+                f"That charter could not be read: {exc}\n\n"
+                f"This is attempt {self.attempts}, and every one has been rejected. "
+                "STOP calling propose_charter. Say plainly, in your reply, what you were "
+                "trying to express and what you cannot get past — a person will read it. "
+                "Repeating the same charter will not produce a different answer."
+            )
+        if self.attempts == 1:
+            return (
+                f"That charter could not be read: {exc}\n\nThe shape is:\n{CHARTER_TEMPLATE}"
+            )
+        return (
+            f"That charter could not be read: {exc}\n\n"
+            f"Attempt {self.attempts} of {MAX_CHARTER_ATTEMPTS}. The shape is in this tool's "
+            "`toml` parameter description — do not resend what you just sent; change the "
+            "thing the error names."
+        )
+
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
         """Validate and keep the charter, or say exactly what is wrong with it.
 
@@ -233,11 +278,7 @@ class ProposeCharterTool(Tool):
             charter = parse_charter(text)
         except CharterError as exc:
             self.last_error = str(exc)
-            return ToolResult(
-                ok=False,
-                content=f"That charter could not be read: {exc}\n\nThe shape is:\n{CHARTER_TEMPLATE}",
-                error="bad_charter",
-            )
+            return ToolResult(ok=False, content=self._rejection(exc), error="bad_charter")
 
         self.last_error = ""
         self.charter, self.raw = charter, text
