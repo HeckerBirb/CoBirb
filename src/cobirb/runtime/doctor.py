@@ -57,7 +57,11 @@ _EXPECTED_TYPES: dict[str, tuple[type, ...]] = {
     "checkpoints": (bool,), "redact_secrets": (bool,), "audit_log": (bool,),
     "instructions": (bool,), "repo_map": (bool,), "plan_mode": (bool,),
     "instructions_max_chars": (int,), "repo_map_max_chars": (int,),
-    "context_tokens": (int,), "max_num_ctx": (int,),
+    "context_tokens": (int,),
+    # Also a string, for the "64k" spelling — see models.parse_context_size.
+    # Whether that string *says* anything is checked below, since a type is
+    # all this table can ask about.
+    "max_num_ctx": (int, str),
     "verify_timeout": (int,), "verify_fix_attempts": (int,),
     "persona": (str,), "system_prompt": (str,), "verify_command": (str,),
 }
@@ -160,6 +164,16 @@ def _check_referenced_things(report: Report, raw: dict[str, Any]) -> None:
         for directory in raw.get(key) or []:
             if not os.path.isdir(os.path.expanduser(str(directory))):
                 problems.append(f"{key} names '{directory}', which is not a directory")
+
+    # A string here is allowed so that "64k" can be written, which means a
+    # string that isn't a size is the one way this key can be well-typed and
+    # still say nothing. Uncapped-in-silence is exactly the outcome someone
+    # setting it was trying to avoid.
+    if "max_num_ctx" in raw and model_roles.parse_context_size(raw["max_num_ctx"]) is None:
+        problems.append(
+            f"max_num_ctx is '{raw['max_num_ctx']}', which is not a size — "
+            "write 65536 or 64k. No cap is being applied"
+        )
 
     if problems:
         report.add("config references", WARN, "; ".join(problems))

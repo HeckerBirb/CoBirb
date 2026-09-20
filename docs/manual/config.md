@@ -40,7 +40,7 @@ Check with `cobirb models`.
 | `repo_map` | `true` | Send a codebase outline |
 | `repo_map_max_chars` | `16000` | Cap on that |
 | `context_tokens` | *asked for* | Override the history budget (not the `num_ctx` sent to the server) |
-| `max_num_ctx` | — | Ceiling on the `num_ctx` CoBirb asks the server for |
+| `max_num_ctx` | — | Ceiling on the `num_ctx` CoBirb asks the server for — `65536` or `"64k"` |
 | `verify_command` | — | Run after a turn that changed files, e.g. `"pytest -q"` |
 | `verify_timeout` | `120` | Seconds |
 | `verify_fix_attempts` | `1` | Bounded retries when it fails |

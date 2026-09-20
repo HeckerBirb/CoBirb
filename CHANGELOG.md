@@ -4,6 +4,13 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **`max_num_ctx` can be written the way people say it.** `"64k"` (or `"64K"`) means 65536 — a `k`
+  is 1024, because what anyone means by "64k" here is the window, and windows are powers of two.
+  The plain number still works. A value that isn't a size costs the cap rather than the run, and
+  `cobirb doctor` reports it instead of leaving you uncapped in silence.
+
 ## [0.17.0]
 
 - **New: `max_num_ctx`, a ceiling on the context window CoBirb asks for.** CoBirb states `num_ctx`

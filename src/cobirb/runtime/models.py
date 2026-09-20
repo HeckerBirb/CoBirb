@@ -35,6 +35,7 @@ can read, instead of one you infer from three layers of fallback.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from ..config import Config
 from ..plugins.core import LocalModelProvider
@@ -49,6 +50,34 @@ ROLE_ORCHESTRATOR = "orchestrator"
 ROLE_WORKER = "worker"
 
 ROLES = (ROLE_DEFAULT, ROLE_ORCHESTRATOR, ROLE_WORKER)
+
+
+def parse_context_size(value: Any) -> int | None:
+    """A context size written the way people say them: ``64k`` is 65536.
+
+    Context windows are powers of two that everyone names in thousands — "a
+    128k model", "cap it at 32k" — and then writes into config as a six-digit
+    number with a chance of a typo in it. Both spellings are accepted, and a
+    ``k`` suffix (either case) multiplies by 1024 rather than 1000, because
+    what people mean by "64k" here is the window, and windows are 65536.
+
+    Returns ``None`` for anything unparseable rather than raising: this reads
+    a config file at startup, and a stray character in it should cost the
+    setting, never the run. ``cobirb doctor`` is what says so out loud.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    multiplier = 1
+    if text.endswith("k"):
+        text, multiplier = text[:-1].strip(), 1024
+    try:
+        size = int(float(text) * multiplier)
+    except ValueError:
+        return None
+    return size if size > 0 else None
 
 
 @dataclass(frozen=True)
@@ -150,11 +179,10 @@ def build_for_role(
     """
     config = config or Config()
     spec = resolve_role(role, config, override)
-    max_num_ctx = config.get("max_num_ctx")
     return LocalModelProvider(
         model=spec.name,
         base_url=spec.base_url,
-        max_num_ctx=int(max_num_ctx) if max_num_ctx else None,
+        max_num_ctx=parse_context_size(config.get("max_num_ctx")),
     )
 
 

@@ -17,6 +17,7 @@ from cobirb.runtime.models import (
     ROLE_WORKER,
     build_for_role,
     describe_roles,
+    parse_context_size,
     resolve_role,
 )
 from cobirb.runtime.wiring import build_model
@@ -160,6 +161,34 @@ def test_without_max_num_ctx_the_model_still_gets_what_it_advertises(tmp_path, m
     config = _config(tmp_path, {"model": "m"})
 
     assert build_for_role(ROLE_DEFAULT, config).context_window() == 262144
+
+
+def test_a_context_size_can_be_written_the_way_people_say_it():
+    """Windows are powers of two that everyone names in thousands, so a k is
+    1024 — "64k" has to come out as exactly the window people mean by it."""
+    assert parse_context_size("64k") == 65536
+    assert parse_context_size("64K") == 65536
+    assert parse_context_size(" 32k ") == 32768
+    assert parse_context_size("128k") == 131072
+
+
+def test_a_plain_number_is_still_a_context_size():
+    assert parse_context_size(65536) == 65536
+    assert parse_context_size("65536") == 65536
+
+
+def test_a_size_that_says_nothing_is_no_cap_rather_than_a_crash():
+    """This reads a config file at startup: a stray character in it should
+    cost the setting, not the run. `cobirb doctor` is what says so."""
+    for junk in (None, "", "   ", "sixty-four k", "64kb", 0, -1, True):
+        assert parse_context_size(junk) is None
+
+
+def test_max_num_ctx_caps_from_the_human_spelling_too(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _advertising(262144))
+    config = _config(tmp_path, {"model": "m", "max_num_ctx": "64k"})
+
+    assert build_for_role(ROLE_DEFAULT, config).context_window() == 65536
 
 
 def test_the_listing_says_where_each_answer_came_from(tmp_path):

@@ -827,6 +827,8 @@ See config.json.example for a starting point. Keys:
                                  The model still dictates the window whenever
                                  it asks for less than this; only a request
                                  above the ceiling gets clamped down to it.
+                                 Written either way round: 65536, or "64k"
+                                 (a k is 1024, so "64k" is exactly 65536).
                                  Unset (default) asks for whatever the model
                                  advertises, uncapped.
   "allow_read_dirs"              Directories CoBirb may read without asking,

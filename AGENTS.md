@@ -220,7 +220,9 @@ reserves 20 % clamped to 2048–16384 tokens. Estimation is `len(text) // 4`.
 `LocalModelProvider.context_window()` (`plugins/core/model.py`) resolves what to ask for — the
 Modelfile's own `num_ctx` if set, otherwise the architecture's advertised max — and then clamps it
 against `max_num_ctx` (config key, wired through `runtime/models.build_for_role` to every role) if
-one is set. That ceiling only ever lowers the request: a model asking for less than the ceiling is
+one is set. `models.parse_context_size` reads it as either a number or the way people say them —
+`"64k"` is 65536, a `k` being 1024 — and returns `None` for anything unparseable, so a typo costs
+the cap rather than the run; `cobirb doctor` reports that case rather than leaving it silent. That ceiling only ever lowers the request: a model asking for less than the ceiling is
 untouched, and an endpoint with no `max_num_ctx` configured behaves exactly as before.
 `Orchestrator._context_budget` reads the same hook, so capping the window also caps what history is
 packed against it rather than leaving CoBirb filling a window the server was never asked for. It exists

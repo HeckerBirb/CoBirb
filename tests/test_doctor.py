@@ -98,6 +98,24 @@ def test_a_directory_that_is_there_passes(tmp_path):
     assert _check(report, "config references").status == doctor.OK
 
 
+def test_a_max_num_ctx_that_is_not_a_size_is_a_warning(tmp_path):
+    """A string is allowed there so "64k" can be written, which makes a
+    string that says nothing the one way the key can be well-typed and still
+    do nothing — uncapped in silence, which is what setting it was avoiding."""
+    report = _run(tmp_path, {"max_num_ctx": "64kb"})
+
+    check = _check(report, "config references")
+    assert check.status == doctor.WARN
+    assert "64kb" in check.detail
+
+
+def test_both_spellings_of_max_num_ctx_pass(tmp_path):
+    for value in ("64k", 65536):
+        report = _run(tmp_path, {"max_num_ctx": value})
+        assert _check(report, "config value types").status == doctor.OK
+        assert _check(report, "config references").status == doctor.OK
+
+
 def test_no_config_file_at_all_is_fine(tmp_path):
     """Defaults apply, and that is a legitimate way to run."""
     report = _run(tmp_path)
