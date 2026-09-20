@@ -32,6 +32,30 @@ from ...typing.spi import ModelProvider, SteeringInterrupted, Tool, ToolCall
 
 DEFAULT_BASE_URL = "http://localhost:11434"
 
+# How long to wait for the endpoint to *accept a connection*. Short on purpose:
+# either something is listening on that port or it is not, and on the local
+# socket this normally serves that answer comes back instantly. This is the
+# timeout behind "Is Ollama running?" — the question it is actually able to
+# answer.
+DEFAULT_CONNECT_TIMEOUT = 10
+
+# How long to wait for the endpoint to *say something* once connected. Long on
+# purpose, and the reason this is a separate number.
+#
+# It used to be one 120s socket timeout doing both jobs, and that number was
+# wrong for both. A socket timeout measures **silence, not work**: a request
+# Ollama has queued behind another generation sends no bytes at all until it
+# starts producing tokens, so the clock was measuring queue wait. A flock is
+# exactly the shape that produces queue wait — several Worker Birbs against one
+# endpoint — and workers died at 120s having never sent a prompt, reported as
+# "Is Ollama running?" about a server that was busy answering their colleague.
+#
+# Ten minutes because that is the order of magnitude of a real wait: a cold
+# model load plus a queued 128k-context first token on the hardware this
+# targets. A person watching sees the pane say `running` throughout; nothing is
+# hidden by waiting.
+DEFAULT_REQUEST_TIMEOUT = 600
+
 
 def _tool_schema(tool: Tool) -> dict[str, Any]:
     """Convert a CoBirb Tool into the function-calling schema Ollama expects."""
@@ -267,10 +291,16 @@ class LocalModelProvider(ModelProvider):
         base_url: str | None = None,
         cwd: str | None = None,
         max_num_ctx: int | None = None,
+        connect_timeout: int | None = None,
+        request_timeout: int | None = None,
     ) -> None:
         self._model = model or os.environ.get("COBIRB_MODEL_NAME", "")
         self._base_url = (base_url or os.environ.get("COBIRB_OLLAMA_URL") or DEFAULT_BASE_URL).rstrip("/")
         self.cwd = cwd or os.getcwd()
+        # Two numbers, not one, because they answer different questions — see
+        # the constants for the failure that came of conflating them.
+        self._connect_timeout = int(connect_timeout or DEFAULT_CONNECT_TIMEOUT)
+        self._request_timeout = int(request_timeout or DEFAULT_REQUEST_TIMEOUT)
         # A ceiling on what context_window() will ever ask the server for —
         # see context_window() for why this exists and what it does and does
         # not affect.
@@ -323,12 +353,36 @@ class LocalModelProvider(ModelProvider):
             http.client.HTTPSConnection if split.scheme == "https"
             else http.client.HTTPConnection
         )
-        conn = connection_class(split.hostname, split.port, timeout=120)
+        # Built with the *connect* timeout; ``_stream_chat`` swaps the socket
+        # onto the request timeout once it is connected (see ``_open``). Opening
+        # it here instead would put the connect failure outside the caller's
+        # ``except OSError``, which is what turns "nothing is listening" into
+        # ``_unreachable`` with the endpoint named.
+        conn = connection_class(split.hostname, split.port, timeout=self._connect_timeout)
         with self._inflight_lock:
             if self._cancelled:
                 raise RuntimeError("the model request was cancelled")
             self._inflight.add(conn)
         return conn, split.path
+
+    def _open(self, conn: http.client.HTTPConnection) -> None:
+        """Connect on the short clock, then read on the long one.
+
+        This is the only path where the two timeouts can genuinely be split —
+        ``http.client`` hands back the real socket, where ``urllib`` hides it —
+        and it is the path every Worker Birb turn takes, so it is the one that
+        had to be got right. A dead endpoint still fails in seconds; a live one
+        that has this request queued behind another generation gets all the
+        silence it needs.
+
+        Called from inside the caller's ``except OSError``, so a refused
+        connection is reported as an unreachable endpoint rather than escaping
+        as a bare socket error.
+        """
+        conn.connect()
+        sock = getattr(conn, "sock", None)
+        if sock is not None:
+            sock.settimeout(self._request_timeout)
 
     def _release(self, conn: http.client.HTTPConnection) -> None:
         with self._inflight_lock:
@@ -380,7 +434,13 @@ class LocalModelProvider(ModelProvider):
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=120) as response:
+            # The long clock. This path cannot split connect from read — the
+            # socket is inside `urllib` — and of the two jobs, waiting for a
+            # busy endpoint is the one that loses work if it is got wrong. A
+            # dead endpoint is caught on the short clock by `list_models`, which
+            # is what the startup check and `preflight.missing_models` use
+            # before any of this is reached.
+            with urllib.request.urlopen(request, timeout=self._request_timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
             raise _unreachable(self._base_url, exc, self._model) from exc
@@ -400,7 +460,9 @@ class LocalModelProvider(ModelProvider):
             f"{self._base_url}/v1/models", headers={"Accept": "application/json"}
         )
         try:
-            with urllib.request.urlopen(request, timeout=10) as response:
+            # The short clock: this is a liveness-and-metadata call, and the one
+            # place "Is Ollama running?" is a question a timeout can answer.
+            with urllib.request.urlopen(request, timeout=self._connect_timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
             raise _unreachable(self._base_url, exc) from exc
@@ -573,6 +635,7 @@ class LocalModelProvider(ModelProvider):
         tool_calls: list[ToolCall] = []
         try:
             try:
+                self._open(conn)
                 conn.request(
                     "POST",
                     f"{prefix}/api/chat",

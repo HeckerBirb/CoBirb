@@ -148,6 +148,22 @@ proposed and the panes take over.
 Building a skeleton for a large partition takes a while, and this is how you tell a run that is
 working from one that has stopped.
 
+### When the endpoint is busy
+
+Several workers against one endpoint means queueing, and a queued request sends nothing back until it
+starts generating. Two things keep that from costing you tickets:
+
+- **`request_timeout` defaults to 600 seconds** (see `cobirb help config`). It measures silence, not
+  work, so it has to be long enough to cover a cold model load plus a queued first token. At the old
+  120 seconds, workers died having never sent a prompt — reported as "Is Ollama running?" about a
+  server that was busy answering their colleague.
+- **A worker that couldn't start is started again**, up to three times. Only when nothing happened
+  yet: one that had already edited files isn't restarted, because re-sending its brief against a tree
+  that has moved would be worse than the half-finished ticket it reports instead.
+
+If your endpoint serves one request at a time, the real fix is on its side — `OLLAMA_NUM_PARALLEL` for
+Ollama. `/flock` offers to measure it before fanning out, and you can drop `concurrency` to 1.
+
 ### When one doesn't take
 
 If a charter fails validation, Brainy Birb is told exactly what was wrong and asked to correct

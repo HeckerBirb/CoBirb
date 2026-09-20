@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from conftest import write_config
 
 from cobirb.config import Config
@@ -210,3 +212,41 @@ def test_a_role_nobody_recognises_is_still_listed(tmp_path):
     config = _config(tmp_path, {"models": {"default": {"name": "big"}, "reviewr": {"name": "x"}}})
 
     assert any(spec.role == "reviewr" for spec in describe_roles(config))
+
+
+# --------------------------------------------------------------------------- #
+# Connect and read are two different waits
+# --------------------------------------------------------------------------- #
+def test_the_two_timeouts_have_separate_defaults(tmp_path):
+    """One 120s socket timeout did both jobs and was wrong for both: a socket
+    timeout measures silence, not work, so a request queued behind another
+    worker's generation timed out having never sent a prompt."""
+    from cobirb.plugins.core.model import DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT
+
+    provider = build_for_role("worker", _config(tmp_path, {}))
+
+    assert provider._connect_timeout == DEFAULT_CONNECT_TIMEOUT
+    assert provider._request_timeout == DEFAULT_REQUEST_TIMEOUT
+    # Waiting for a busy endpoint is the long one; asking whether anything is
+    # listening is the short one, and that ordering is the whole point.
+    assert provider._request_timeout > provider._connect_timeout
+
+
+def test_both_timeouts_can_be_configured(tmp_path):
+    provider = build_for_role(
+        "worker", _config(tmp_path, {"connect_timeout": 3, "request_timeout": 1200})
+    )
+
+    assert provider._connect_timeout == 3
+    assert provider._request_timeout == 1200
+
+
+@pytest.mark.parametrize("value", ["soon", 0, -5, None])
+def test_an_unusable_timeout_costs_the_setting_not_the_run(tmp_path, value):
+    """It reads a config file at startup. A stray value should cost the
+    setting, the same way `max_num_ctx` does."""
+    from cobirb.plugins.core.model import DEFAULT_REQUEST_TIMEOUT
+
+    provider = build_for_role("worker", _config(tmp_path, {"request_timeout": value}))
+
+    assert provider._request_timeout == DEFAULT_REQUEST_TIMEOUT

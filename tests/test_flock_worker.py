@@ -7,6 +7,7 @@ a test that stubbed the policy would be testing nothing.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 
 from conftest import write_config
 
@@ -46,7 +47,17 @@ class _ScriptedWorker:
         return False
 
 
-def _brief(body):
+_ONE_TICKET = """
+objective = "x"
+
+[[workers]]
+id     = "a"
+writes = ["a.py"]
+brief  = "Implement a."
+"""
+
+
+def _brief(body=_ONE_TICKET):
     return parse_charter(body).workers[0]
 
 
@@ -330,3 +341,138 @@ def test_a_worker_obeys_the_users_own_hooks(monkeypatch, tmp_path):
     run_worker(worker, str(tmp_path))
 
     assert not (tmp_path / "mine.py").exists()
+
+
+# --------------------------------------------------------------------------- #
+# A provider fault must not cost the ticket
+# --------------------------------------------------------------------------- #
+def test_a_worker_that_could_not_start_is_tried_again(monkeypatch, tmp_path):
+    """The reported failure: several workers against one endpoint, the first
+    generating, and the others' opening request timing out while they queued.
+    A whole ticket was lost to a fault that cost nothing to retry."""
+    from cobirb.flock import worker as worker_mod
+
+    monkeypatch.setattr(worker_mod, "START_RETRY_SECONDS", 0)
+    attempts = []
+
+    class _Flaky:
+        last_verification = None
+        last_run_tool_calls: list = []
+
+        def run(self, *args, **kwargs):
+            attempts.append(1)
+            if len(attempts) < 3:
+                raise RuntimeError("Could not reach the model provider: timed out")
+            return SimpleNamespace(summary="did it", turns=[1])
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(worker_mod, "build_subagent", lambda *a, **k: _Flaky())
+
+    report = run_worker(_brief(), str(tmp_path))
+
+    assert len(attempts) == 3
+    assert report.ok
+
+
+def test_a_worker_that_already_changed_files_is_not_restarted(monkeypatch, tmp_path):
+    """Re-sending the brief against a tree that has moved under it is worse
+    than a half-finished ticket reporting a shortcoming."""
+    from cobirb.flock import worker as worker_mod
+
+    monkeypatch.setattr(worker_mod, "START_RETRY_SECONDS", 0)
+    attempts = []
+
+    class _FailsLate:
+        last_verification = None
+        last_run_tool_calls = [{"name": "write_file", "ok": True}]
+
+        def run(self, *args, **kwargs):
+            attempts.append(1)
+            raise RuntimeError("the connection dropped")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(worker_mod, "build_subagent", lambda *a, **k: _FailsLate())
+
+    report = run_worker(_brief(), str(tmp_path))
+
+    assert len(attempts) == 1
+    assert not report.ok
+
+
+def test_every_attempt_failing_reports_how_many_there_were(monkeypatch, tmp_path):
+    from cobirb.flock import worker as worker_mod
+
+    monkeypatch.setattr(worker_mod, "START_RETRY_SECONDS", 0)
+
+    class _Dead:
+        last_verification = None
+        last_run_tool_calls: list = []
+
+        def run(self, *args, **kwargs):
+            raise RuntimeError("timed out")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(worker_mod, "build_subagent", lambda *a, **k: _Dead())
+
+    report = run_worker(_brief(), str(tmp_path))
+
+    assert not report.ok
+    assert "attempts to start" in report.error
+
+
+def test_a_force_stop_is_not_retried(monkeypatch, tmp_path):
+    """Retrying after the user asked to stop is the opposite of stopping."""
+    from cobirb.flock import worker as worker_mod
+    from cobirb.flock.supervisor import Canceller
+
+    monkeypatch.setattr(worker_mod, "START_RETRY_SECONDS", 0)
+    attempts = []
+    canceller = Canceller()
+    canceller.force()
+
+    class _Cancelled:
+        last_verification = None
+        last_run_tool_calls: list = []
+
+        def run(self, *args, **kwargs):
+            attempts.append(1)
+            raise RuntimeError("the model request was cancelled")
+
+        def cancel(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(worker_mod, "build_subagent", lambda *a, **k: _Cancelled())
+
+    run_worker(_brief(), str(tmp_path), canceller=canceller)
+
+    assert len(attempts) == 1
+
+
+# --------------------------------------------------------------------------- #
+# What the brief tells it
+# --------------------------------------------------------------------------- #
+def test_the_brief_states_the_working_directory():
+    """Nothing else does: `Orchestrator.run` only appends the cwd line when
+    there is a system prompt or project context, and a worker has neither — so
+    workers asked for `pwd`, a shell command nobody granted them."""
+    text = compose_brief(_brief(), "/home/someone/project")
+
+    assert "/home/someone/project" in text
+
+
+def test_the_brief_points_at_the_file_tools_rather_than_the_shell():
+    """It has glob, grep and list_dir and was reaching past them for `find`,
+    which costs an approval dialog to be told to use what it already has."""
+    text = compose_brief(_brief(), "/tmp")
+
+    assert "glob" in text and "grep" in text
+    assert "find" in text  # named as something it does not have

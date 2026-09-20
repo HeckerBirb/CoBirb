@@ -803,6 +803,19 @@ See config.json.example for a starting point. Keys:
       "name": "...", "base_url": "..."}}  Model name/endpoint (local Ollama
                                  by default; any OpenAI-compatible server
                                  works).
+  "connect_timeout"              Seconds to wait for the endpoint to accept a
+                                 connection (default 10). Short on purpose:
+                                 either something is listening on that port or
+                                 it is not. This is the timeout behind "Is
+                                 Ollama running?".
+  "request_timeout"              Seconds to wait for it to say something once
+                                 connected (default 600). Long on purpose, and
+                                 separate because it measures SILENCE, not
+                                 work: a request your endpoint queued behind
+                                 another generation sends nothing until it
+                                 starts producing tokens. Raise it if you
+                                 serve very large models or run several Worker
+                                 Birbs at once.
   "verify_command"               A command that decides whether the project
                                  is still healthy, e.g. "pytest -q". Run
                                  after any turn that changed files; if it

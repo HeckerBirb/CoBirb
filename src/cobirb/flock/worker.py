@@ -17,6 +17,7 @@ back as a written shortcoming for the next round.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 from ..config import Config
@@ -30,6 +31,25 @@ logger = logging.getLogger("cobirb")
 # fix, and bounded because a worker that has not converged by now is reporting
 # a shortcoming rather than one turn from finishing.
 DEFAULT_MAX_TURNS = 12
+
+# How many times a worker may be *started*. Not a retry of the work — see
+# `run_worker` for the condition, which is that nothing happened at all.
+#
+# The failure this exists for: several workers against one endpoint, the first
+# one generating, and the others' opening request timing out while it waited its
+# turn. That raised out of the provider, `except Exception` turned it into a
+# report, and the ticket was gone — with the model never having seen the brief.
+# A whole ticket lost to a fault that cost nothing to retry.
+START_ATTEMPTS = 3
+
+# A pause between those attempts. Short: the interesting case is an endpoint
+# that was restarting or briefly wedged, where a couple of seconds is the whole
+# difference, and a request that timed out has already waited
+# `request_timeout` seconds by definition. Deliberately not a backoff ladder —
+# a retry against a busy endpoint queues *behind* the work that made it busy, so
+# more attempts spaced further apart buy depth in a queue rather than patience.
+# Patience is `model.DEFAULT_REQUEST_TIMEOUT`'s job.
+START_RETRY_SECONDS = 2.0
 
 # Prepended to every brief. Deliberately short: everything here is either an
 # invariant of the design or something a worker cannot discover for itself,
@@ -52,8 +72,11 @@ yourself would silently break work you cannot see.
 weakening what they assert. You may and should ADD tests for anything you \
 find while implementing — edge cases, error paths, whatever the skeleton did \
 not anticipate.
-3. You may READ any file in this project to understand it — list directories, \
-grep, read whatever helps. You may only CHANGE the files listed below.
+3. You may READ any file in this project to understand it, and you have tools \
+for it: `list_dir`, `glob`, `grep`, `read_file`, `repo_map`. USE THOSE, not the \
+shell. You have no `find`, no `ls`, no `cat` and will not be given them — \
+asking costs you a turn and the user's attention to be told to use the tool you \
+already have. You may only CHANGE the files listed below.
 4. RUN YOUR OWN ACCEPTANCE CHECK, AS OFTEN AS YOU LIKE. The command below is \
 the one thing you may run with `shell`, and it is the definition of done for \
 this ticket. Implement, run it, read the failure, fix, run it again. Do not \
@@ -130,15 +153,26 @@ class WorkerReport:
         return "\n".join(lines)
 
 
-def compose_brief(worker: WorkerBrief) -> str:
+def compose_brief(worker: WorkerBrief, cwd: str = "") -> str:
     """The whole prompt a Worker Birb is given: the rules, then its ticket.
 
     The file lists are stated here as well as enforced by the policy, and both
     are deliberate. The policy is what *makes* the isolation true; telling the
     worker its boundaries is what stops it wasting turns discovering them by
     being refused.
+
+    **The working directory is stated here because nothing else tells it.**
+    ``Orchestrator.run`` appends a "Working directory:" line to the system
+    prompt only ``if (system or self.project_context)``, and a worker has
+    neither — ``build_subagent`` passes ``project_context=""`` and the flock
+    passes ``system=""``, both on purpose. So the line was dropped and workers
+    asked for ``pwd``, which is a shell command nobody granted them: a whole
+    approval dialog to learn a fact that costs one line to state.
     """
     parts = [WORKER_RULES, "", "--- Your ticket ---", "", worker.brief.strip(), ""]
+    if cwd:
+        parts.append(f"You are working in: {cwd}")
+        parts.append("Every path below is relative to it.")
     parts.append(f"Files you may change: {', '.join(worker.writes)}")
     parts.append(
         "You may read anything else in the project to understand it, but change "
@@ -202,17 +236,44 @@ def run_worker(
         canceller.register(orchestrator)
 
     logger.info("worker %s starting; writes=%s", worker.id, ", ".join(worker.writes))
+    brief = compose_brief(worker, cwd)
     try:
-        session = orchestrator.run(
-            compose_brief(worker),
-            system="",
-            cwd=cwd,
-            persona=f"worker-{worker.id}",
-            max_turns=max_turns,
-        )
-    except Exception as exc:  # noqa: BLE001 - one failed ticket is not a failed run
-        logger.warning("worker %s failed: %s", worker.id, exc)
-        return WorkerReport(worker_id=worker.id, ok=False, error=f"{type(exc).__name__}: {exc}")
+        session = None
+        for attempt in range(1, START_ATTEMPTS + 1):
+            try:
+                session = orchestrator.run(
+                    brief,
+                    system="",
+                    cwd=cwd,
+                    persona=f"worker-{worker.id}",
+                    max_turns=max_turns,
+                )
+                break
+            except Exception as exc:  # noqa: BLE001 - one failed ticket is not a failed run
+                # **Retried only when nothing happened.** A run that made no
+                # tool call did not touch the workspace, so starting it again is
+                # clean. One that had already edited files is not retried: the
+                # brief would be re-sent against a tree that has moved under it,
+                # and a worker half-way through its ticket reporting a
+                # shortcoming is a better outcome than one that starts over
+                # against its own half-finished work.
+                started_work = bool(getattr(orchestrator, "last_run_tool_calls", None))
+                stopping = canceller is not None and canceller.forced
+                if started_work or stopping or attempt == START_ATTEMPTS:
+                    logger.warning("worker %s failed: %s", worker.id, exc)
+                    return WorkerReport(
+                        worker_id=worker.id,
+                        ok=False,
+                        error=(
+                            f"{type(exc).__name__}: {exc}"
+                            + ("" if attempt == 1 else f" (after {attempt} attempts to start)")
+                        ),
+                    )
+                logger.warning(
+                    "worker %s could not start (attempt %d/%d): %s",
+                    worker.id, attempt, START_ATTEMPTS, exc,
+                )
+                time.sleep(START_RETRY_SECONDS)
     finally:
         if canceller is not None:
             canceller.unregister(orchestrator)

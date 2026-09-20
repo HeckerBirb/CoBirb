@@ -34,6 +34,12 @@
   "repo_map_max_chars": 16000,
   "context_tokens": null,
   "max_num_ctx": null,
+
+  "//connect_timeout": "Seconds to wait for the model endpoint to accept a connection (default 10). Short on purpose: either something is listening on that port or it is not. This is the timeout behind 'Is Ollama running?'.",
+  "connect_timeout": 10,
+  "//request_timeout": "Seconds to wait for the endpoint to say something once connected (default 600). Long on purpose, and a separate number because it measures SILENCE, not work: a request your endpoint has queued behind another generation sends nothing at all until it starts producing tokens. A flock is the shape that produces that wait — several Worker Birbs against one endpoint — and too small a value here kills workers that had not sent a prompt yet. Raise it if you serve very large models or run many workers at once.",
+  "request_timeout": 600,
+
   "plan_mode": false,
   "audit_log": false,
 

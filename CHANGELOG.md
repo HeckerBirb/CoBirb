@@ -6,6 +6,28 @@ and its §12 decisions record for the ones that were designed and then deliberat
 
 ## [Unreleased]
 
+- **Two model timeouts instead of one, and both configurable.** `connect_timeout` (10s) is how long
+  to wait for your endpoint to accept a connection — short, because either something is listening or
+  it isn't, and it's the only question a timeout can answer with "Is Ollama running?".
+  `request_timeout` (600s) is how long to wait for it to *say* something once connected. One 120s
+  number used to do both jobs and was wrong for both: a socket timeout measures **silence, not work**,
+  and a request your endpoint has queued behind another generation sends nothing at all until it
+  starts producing tokens. A flock is exactly that shape, so Worker Birbs died at 120 seconds having
+  never sent a prompt — and were told the server might not be running, while it was busy answering
+  their colleague.
+- **A provider fault no longer costs a whole ticket.** Any exception from the model turned into a
+  dead worker; a transient timeout lost work the model had never even started. A worker that couldn't
+  start is now started again, up to three times. Only when nothing happened yet: one that had already
+  edited files isn't restarted, since re-sending its brief against a tree that has moved under it is
+  worse than the half-finished ticket it reports instead. Not retried during a force-stop, and
+  deliberately not a backoff ladder — a retry against a busy endpoint queues *behind* what made it
+  busy, so spacing attempts further apart buys queue depth rather than patience.
+- **A worker is told its working directory**, so it stops spending an approval dialog on `pwd`. The
+  cwd line the orchestrator adds is only attached when there's a system prompt or project context,
+  and a worker has neither by design.
+- **A worker is told to use its file tools rather than the shell.** It has `list_dir`, `glob`, `grep`,
+  `read_file` and `repo_map`, and was reaching past them for `find` — which costs an approval dialog
+  to be told to use what it already had.
 - **A Worker Birb's request is now asked in that worker's own pane.** It used to be a full-screen
   dialog, and several workers asking at once stacked them in the same position — so dismissing one
   dropped the next under a cursor already committed to clicking, and you could approve a command you

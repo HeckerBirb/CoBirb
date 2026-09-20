@@ -331,6 +331,7 @@ persistent was not done: see §17's note on `ShellTool`'s per-call process state
 | Mechanism | Shape | Notes |
 |---|---|---|
 | Hooks (`runtime/hooks.py`) | `before_tool`, `after_tool`, `before_turn`, `after_turn` | Event arrives as JSON on stdin; 30 s timeout. A non-zero `before_tool` exit **blocks** the call and its output becomes the model's reason. Others are observational; failures are surfaced, never fatal. |
+| Timeouts (`plugins/core/model.py`) | `connect_timeout` (10), `request_timeout` (600) | **Two numbers because they answer different questions.** One 120s socket timeout did both and was wrong for both: a socket timeout measures *silence, not work*, and a request an endpoint has queued behind another generation sends nothing until it starts generating — so Worker Birbs died at 120s having never sent a prompt, reported as "Is Ollama running?" about a busy server. Split genuinely in `_stream_chat` (`_connect` builds on the short clock, `_open` swaps the socket to the long one) — the path every worker turn takes. `_post` cannot split (the socket is inside `urllib`) and takes the long one; a dead endpoint is caught on the short clock by `list_models`, which the startup check and `preflight.missing_models` use first. `runtime.models._timeout` drops an unreadable value rather than raising. |
 | Verify (`runtime/verify.py`) | `"verify_command": "pytest -q"` | Off unless set — never guessed. Runs **outside** the permission layer by design (the user's own config, run by CoBirb, unchangeable by the model). 120 s timeout, 1 fix attempt. |
 | Custom commands (`runtime/custom_commands.py`) | `~/.cobirb/commands/*.md`, `<project>/.cobirb/commands/*.md` | `/name` sends the body; `$ARGUMENTS` and `$1`…`$9` substitute, otherwise arguments are appended. Optional `---\ndescription: …\n---` frontmatter. |
 | MCP (`mcp/`) | `mcp_servers` in config, **stdio only** | Tools register as `mcp__<server>__<tool>` and go through the same policy, prompt, audit and redaction path. Environment is **not** inherited (only `PATH`, `HOME`, `LANG`, `LC_ALL`, `TMPDIR`, `SYSTEMROOT` + configured `env`, unless `inherit_env`). Not members of `READ_TOOLS` — "always" grants that one tool, for the session. |
@@ -566,6 +567,22 @@ scopes, are reviewed, and Brainy Birb reports.
   **no project context at all** (need-to-know), `HeadlessIO`, and verification scoped to the
   worker's own `accept`. Checkpoints, redaction and hooks still apply — those belong to every agent
   in someone's tree.
+- **A provider fault no longer costs the ticket** (`worker.START_ATTEMPTS = 3`). `except Exception`
+  turned any exception into `ok=False` and the ticket was gone — which is how a flock lost two
+  workers to their opening request timing out while the first one generated, with the model never
+  having seen the brief. **Retried only when nothing happened**: the condition is an empty
+  `last_run_tool_calls`, so a run that had already edited files is *not* restarted — re-sending the
+  brief against a tree that has moved under it is worse than a half-finished ticket reporting a
+  shortcoming. Not retried during a force-stop either, since retrying after the user asked to stop
+  is the opposite of stopping. `START_RETRY_SECONDS = 2` and deliberately **not** a backoff ladder:
+  a retry against a busy endpoint queues *behind* the work that made it busy, so spacing attempts
+  further apart buys queue depth rather than patience. Patience is `request_timeout`'s job.
+- **The brief states the working directory** (`compose_brief(worker, cwd)`). `Orchestrator.run`
+  appends its "Working directory:" line only `if (system or self.project_context)`, and a worker has
+  neither by design — so the line was dropped and workers spent an approval dialog on `pwd` to learn
+  a fact that costs one line to state. `WORKER_RULES` also names the read tools (`list_dir`, `glob`,
+  `grep`, `read_file`, `repo_map`) and says the shell is not how to explore, because a worker
+  reaching for `find` is one not using what it already has.
 - **A worker can ask for what its scope did not give it** (`WorkerPaneIO.confirm_request`). The
   charter stays the only place capability is granted *up front*; this is the escalation out of it,
   and it exists because silently refusing cost the ticket — a worker denied `shell` spent its

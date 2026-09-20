@@ -52,6 +52,31 @@ by default.
 `context_tokens` is a different knob and does not do this job: it overrides how much conversation
 *history* CoBirb budgets against, never the `num_ctx` sent to the server.
 
+## Two timeouts, because they answer different questions
+
+```json
+  "connect_timeout": 10,
+  "request_timeout": 600
+```
+
+- **`connect_timeout`** — how long to wait for the endpoint to *accept a connection*. Short on
+  purpose: either something is listening on that port or it isn't. This is the timeout behind
+  "Is Ollama running?", which is the only question it can actually answer.
+- **`request_timeout`** — how long to wait for the endpoint to *say something* once connected.
+
+They used to be one 120-second number, and it was wrong for both jobs. A socket timeout measures
+**silence, not work**: a request your endpoint has queued behind another generation sends no bytes at
+all until it starts producing tokens, so the clock was measuring queue wait. A flock is exactly the
+shape that produces queue wait — several Worker Birbs against one endpoint — so workers died at 120
+seconds having never sent a prompt, and were reported as "Is Ollama running?" about a server that was
+busy answering their colleague.
+
+Raise `request_timeout` if you serve very large models, run many workers at once, or see workers
+failing to start. Lower `connect_timeout` if you'd rather find out sooner that nothing is listening.
+
+If your endpoint serves one request at a time, the more direct fix is on its side —
+`OLLAMA_NUM_PARALLEL` for Ollama. `/flock` can measure this for you before it fans out.
+
 ## Every key
 
 | Key | Default | Does |
@@ -72,6 +97,8 @@ by default.
 | `repo_map_max_chars` | `16000` | Cap on that |
 | `context_tokens` | *asked for* | Override the history budget (not the `num_ctx` sent to the server) |
 | `max_num_ctx` | — | Ceiling on the `num_ctx` CoBirb asks the server for — `65536` or `"64k"` |
+| `connect_timeout` | `10` | Seconds to wait for the endpoint to accept a connection |
+| `request_timeout` | `600` | Seconds to wait for it to respond once connected (above) |
 | `verify_command` | — | Run after a turn that changed files, e.g. `"pytest -q"` |
 | `verify_timeout` | `120` | Seconds |
 | `verify_fix_attempts` | `1` | Bounded retries when it fails |

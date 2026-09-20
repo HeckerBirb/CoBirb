@@ -34,11 +34,14 @@ can read, instead of one you infer from three layers of fallback.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from ..config import Config
 from ..plugins.core import LocalModelProvider
+
+logger = logging.getLogger("cobirb")
 
 # The role a plain, single-agent run uses, and the one every other role falls
 # back to.
@@ -183,7 +186,30 @@ def build_for_role(
         model=spec.name,
         base_url=spec.base_url,
         max_num_ctx=parse_context_size(config.get("max_num_ctx")),
+        connect_timeout=_timeout(config, "connect_timeout"),
+        request_timeout=_timeout(config, "request_timeout"),
     )
+
+
+def _timeout(config: Config, key: str) -> int | None:
+    """A timeout from config, or ``None`` to take the provider's own default.
+
+    Anything unreadable is dropped rather than raised on: a mistyped timeout
+    should cost the setting, not the session. The provider's defaults are the
+    documented values, so falling back to them is the same as not setting it.
+    """
+    value = config.get(key)
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        logger.warning("%s is not a whole number of seconds; using the default", key)
+        return None
+    if parsed < 1:
+        logger.warning("%s must be at least 1 second; using the default", key)
+        return None
+    return parsed
 
 
 def describe_roles(config: Config, override: str | None = None) -> list[ModelSpec]:
