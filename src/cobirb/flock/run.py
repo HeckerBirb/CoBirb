@@ -21,6 +21,7 @@ same flow works from the terminal and from the full-screen app.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from dataclasses import dataclass
@@ -184,6 +185,44 @@ def install_charter_tool(
     return tool
 
 
+@contextlib.contextmanager
+def _without_project_verification(orchestrator: Orchestrator):
+    """Take the user's ``verify_command`` off Brainy Birb for the planning turn.
+
+    **Brainy Birb's job is to write failing tests.** ``BRAINY_RULES`` step 3
+    says so in as many words — "failing tests that pin EVERY behaviour the
+    docstring claims" — and they are what the Worker Birbs are briefed to make
+    pass. The planning turn therefore ends with a project whose check fails *by
+    design*.
+
+    That went straight into ``_verify_and_fix``, which saw a turn that had
+    changed files, ran the user's ``verify_command``, watched it fail, and
+    handed Brainy Birb "VERIFICATION FAILED. Fix the cause." with four turns
+    and its file tools still attached. The obedient response is to implement its
+    own stubs or weaken its own tests — destroying the one artifact the entire
+    design rests on, and the one the workers were about to build against. It
+    also spent a second full run of the suite and clobbered
+    ``turns_exhausted``, which is set at the top of every ``_loop``.
+
+    ``build_subagent`` already scopes each worker's verification to its own
+    ``accept`` so a worker "never meets somebody else's failing test to
+    helpfully fix". This is the same rule applied to the agent that *authors*
+    the failing tests, which had simply been missed.
+
+    Restored in a ``finally``, and safe to mutate because a flock holds the
+    session: ``cmd_flock`` refuses to start while a turn is running and
+    ``/flock`` refuses while a flock is. The workers' own scoped checks and the
+    review passes are untouched — they are the verification a flock actually
+    wants.
+    """
+    original = orchestrator.verify
+    orchestrator.verify = None
+    try:
+        yield
+    finally:
+        orchestrator.verify = original
+
+
 def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> PlanResult:
     """Let Brainy Birb plan and scaffold, and take the charter it proposes.
 
@@ -196,28 +235,36 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> P
     """
     tool = install_charter_tool(orchestrator, cwd)
     tool.reset()
-    session = orchestrator.run(
-        plan_prompt(objective), system="", cwd=cwd, persona="Brainy Birb", max_turns=turns
-    )
+    with _without_project_verification(orchestrator):
+        session = orchestrator.run(
+            plan_prompt(objective), system="", cwd=cwd, persona="Brainy Birb", max_turns=turns
+        )
 
-    # Not when the attempts are already spent. The retry is for a planning turn
-    # that ended early — a model that declared success over a rejected charter
-    # — and asking again after it has failed the tool's own limit buys another
-    # turn budget's worth of the identical failure.
-    if tool.charter is None and tool.attempts and not tool.exhausted:
-        session = orchestrator.run(
-            charter_retry_prompt(tool.last_error),
-            system="", cwd=cwd, persona="Brainy Birb", max_turns=turns,
-        )
-    elif tool.charter is None and not tool.desk.draft.empty:
-        # A plan was built and never sealed. The likeliest new failure mode of
-        # the incremental route, because it has four steps where the document
-        # had one and the last of them is the easy one to drop — so it gets the
-        # same treatment a rejection gets: one nudge naming what is missing.
-        session = orchestrator.run(
-            seal_reminder_prompt(tool.desk.draft),
-            system="", cwd=cwd, persona="Brainy Birb", max_turns=turns,
-        )
+        # Not when the attempts are already spent. The retry is for a planning
+        # turn that ended early — a model that declared success over a rejected
+        # charter — and asking again after it has failed the tool's own limit
+        # buys another turn budget's worth of the identical failure.
+        if tool.charter is None and tool.attempts and not tool.exhausted:
+            session = orchestrator.run(
+                charter_retry_prompt(tool.last_error),
+                system="", cwd=cwd, persona="Brainy Birb", max_turns=turns,
+            )
+        elif tool.charter is None and tool.desk.draft.workers:
+            # A plan was built and never sealed. The likeliest new failure mode
+            # of the incremental route, because it has four steps where the
+            # document had one and the last of them is the easy one to drop —
+            # so it gets the same treatment a rejection gets: one nudge naming
+            # what is missing.
+            #
+            # Gated on *tickets*, not on the draft being non-empty. A draft
+            # holding only seams would otherwise be nudged to seal a plan that
+            # `seal` refuses for having no tickets at all: a whole turn budget
+            # spent reaching a refusal, reported afterwards as a rejected
+            # charter by a model that never proposed one.
+            session = orchestrator.run(
+                seal_reminder_prompt(tool.desk.draft),
+                system="", cwd=cwd, persona="Brainy Birb", max_turns=turns,
+            )
 
     narration = session.summary or ""
     charter, recovered = tool.charter, False

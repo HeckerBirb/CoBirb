@@ -4,6 +4,36 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+Four defects found by a static read of flock mode. The first two had been there for many releases
+and are the reason a complex flock did not survive its own planning phase.
+
+- **Fixed: Brainy Birb was told to fix the failing tests it had just deliberately written.** Its job
+  is to write a skeleton of failing tests for the workers to make pass, so the planning turn ends
+  with your project's check failing *by design* — and `verify_command` then ran, failed, and handed
+  Brainy Birb "VERIFICATION FAILED. Fix the cause." with four turns and its file tools. The obedient
+  answer is to implement its own stubs or weaken its own tests, destroying the skeleton the workers
+  were about to build against. Planning now runs with that check off, as each worker's verification
+  has always been scoped to its own ticket. It also stops burning a second full test run per flock,
+  and stops masking the "ran out of planning turns" report.
+- **Fixed: the strongest review check silently passed whenever a ticket declared no `tests`.** It
+  restores the implementation and keeps the worker's tests, then requires the acceptance check to
+  fail — but with `tests` undeclared, every file the worker owns counts as implementation, so the
+  restore put the whole scope back to the skeleton and the check failed for the skeleton's own
+  reasons. It reported "caught" no matter what the worker did. Two cases are now reported as **could
+  not be checked** rather than as a pass: a worker that changed nothing, and one whose whole scope
+  would be restored. A ticket owning a single file whose tests live elsewhere is unaffected. Brainy
+  Birb is also warned at charter time when it sets `accept` and forgets `tests`.
+- **Fixed: Ctrl+C didn't stop the review passes.** A review rewrites the worker's files, runs the
+  acceptance command with its own timeout, and puts them back — so a stopped round went on touching
+  your tree and spawning test runs for minutes after you said stop, and quitting during that window
+  could leave a file mid-revert. Stopping is now checked between reviews as it is between workers. A
+  review already under way still finishes, because putting the files back is part of it.
+- **Fixed: a plan holding only seams was nudged to seal itself.** `seal_charter` refuses a plan with
+  no tickets, so the nudge spent a whole planning turn budget reaching a refusal and then reported a
+  rejected charter for a model that never proposed one.
+
 ## [0.20.1]
 
 Both of these are defects in 0.20.0, found by testing the paths its own tests did not cover.

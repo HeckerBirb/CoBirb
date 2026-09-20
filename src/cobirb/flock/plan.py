@@ -234,6 +234,21 @@ class PlanDraft:
                 " It has no `accept` command, so nothing can confirm it is done and it will"
                 " never be reported complete. Add one unless there is genuinely no check."
             )
+        elif not test_paths and len(write_paths) > 1:
+            # Also said rather than refused, and for a sharper reason than it
+            # looks: `tests` is what review subtracts to find the
+            # implementation to put back. Undeclared, a worker's test files
+            # count as implementation, get restored along with it, and the
+            # strongest check in the round has nothing of the worker's work left
+            # to check against. Review now reports that it could not check
+            # rather than passing it — but a charter that says so up front is
+            # better than a round that finds out afterwards.
+            note += (
+                " It declares no `tests`. If any of those files hold this ticket's "
+                "acceptance tests, name them in `tests` — review restores the "
+                "implementation and keeps the tests, and it cannot tell them apart by "
+                "filename."
+            )
         return f"{note} Plan so far: {self.describe()}."
 
     def drop_worker(self, worker_id: str) -> str:

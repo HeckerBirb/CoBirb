@@ -329,9 +329,11 @@ THE FLOCK — dividing work between agents that cannot see each other
 
 Interactively this opens the Flock tab: one pane per Worker Birb, showing
 what each is allowed to touch and what it is doing, updating as they work.
-Ctrl+C asks before interrupting — no further workers start, and any already
-talking to a model finish that turn, because a model call in flight cannot be
-cut off. Whatever has been written to your files stays written; use git.
+Ctrl+C asks before interrupting — no further workers start, no further reviews
+run, and any worker already talking to a model finishes that turn, because a
+model call in flight cannot be cut off. A review already under way finishes too:
+it puts a file back to its stub for a moment, and stopping mid-way would leave
+it there. Whatever has been written to your files stays written; use git.
 
 One Brainy Birb (the lead) plans the work, designs the interfaces, builds the
 skeleton, and writes one ticket per Worker Birb. The workers then fill those

@@ -186,6 +186,31 @@ making decisions that aren't its own.
 Checkpoints, secret redaction and your hooks still apply — those belong to every agent working
 in your tree.
 
+## Declare each ticket's `tests`
+
+`tests` names which of a ticket's `writes` hold its acceptance tests. It looks optional and isn't,
+in one specific way: review works by restoring the *implementation* and keeping the worker's tests,
+and it can't tell them apart by filename. Undeclared, the test files count as implementation and get
+restored too — so the check runs against the bare skeleton and proves nothing.
+
+That case now reports **could not be checked** rather than passing, and Brainy Birb is warned when
+it sets `accept` without `tests`. But the fix is to name them:
+
+```toml
+writes = ["export/csv.py", "tests/test_csv.py"]
+tests  = ["tests/test_csv.py"]
+```
+
+A ticket that owns one file, whose acceptance tests live in a file the skeleton owns and nobody
+writes, needs no `tests` — nothing of its scope gets restored over.
+
+## `verify_command` and the skeleton
+
+Your `verify_command` is **not** run against Brainy Birb's planning turn. It writes failing tests on
+purpose, so your check fails by design at that point, and running it there told Brainy Birb to go and
+fix the skeleton it had just built. Each worker's check is its own ticket's `accept`, and the review
+passes run as usual.
+
 ## A worker runs its own acceptance check
 
 The `accept` command from its ticket is the one thing a worker may run. It implements, runs the

@@ -848,3 +848,80 @@ def test_an_empty_draft_is_still_a_legitimate_decision_not_to_divide(monkeypatch
     )
 
     assert run.stopped_at == "planning"
+
+
+def test_planning_is_not_subject_to_the_projects_verify_command(monkeypatch, tmp_path):
+    """Brainy Birb's job is to write failing tests. Running the user's check
+    after that turn handed it "VERIFICATION FAILED — fix the cause" with four
+    turns and its file tools, and the obedient answer is to implement its own
+    stubs or weaken its own tests — destroying the skeleton the workers were
+    about to build against."""
+    _skeleton(tmp_path)
+    _honest_workers(monkeypatch, tmp_path)
+    ran = []
+    monkeypatch.setattr(
+        "cobirb.orchestrator.run_verification",
+        lambda command, cwd, timeout: ran.append(command) or (_ for _ in ()).throw(
+            AssertionError("the project verify command must not run during planning")
+        ),
+    )
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_charter_toml(tmp_path)))
+    from cobirb.runtime.verify import VerifySettings
+
+    orchestrator.verify = VerifySettings(command="exit 1", cwd=str(tmp_path))
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert ran == []
+    assert run.charter is not None
+
+
+def test_the_projects_verify_command_is_put_back_after_planning(monkeypatch, tmp_path):
+    """Suppressed for the planning turn only — it is the user's setting for the
+    rest of the session."""
+    from cobirb.runtime.verify import VerifySettings
+
+    _skeleton(tmp_path)
+    _honest_workers(monkeypatch, tmp_path)
+    settings = VerifySettings(command="true", cwd=str(tmp_path))
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_charter_toml(tmp_path)))
+    orchestrator.verify = settings
+
+    run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert orchestrator.verify is settings
+
+
+def test_a_draft_of_only_seams_is_not_nudged_to_seal(monkeypatch, tmp_path):
+    """`seal` refuses a plan with no tickets, so nudging one costs a whole turn
+    budget to reach a refusal — then reports a rejected charter for a model that
+    never proposed one."""
+    from cobirb.flock.brainy import DECLARE_SEAM
+
+    _skeleton(tmp_path)
+    calls = [
+        (DECLARE_SEAM, {"at": "types.py", "kind": "formal", "what": "the vocabulary"}),
+        None,
+        None,
+    ]
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(calls))
+    prompts = []
+    original = orchestrator.run
+    monkeypatch.setattr(
+        orchestrator, "run",
+        lambda prompt, *a, **k: (prompts.append(prompt), original(prompt, *a, **k))[1],
+    )
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert not any("sealed" in p for p in prompts)
+    assert run.stopped_at == "planning"

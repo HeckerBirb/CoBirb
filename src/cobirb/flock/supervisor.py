@@ -97,7 +97,14 @@ class FlockOutcome:
             f"{len(self.complete)} of {len(self.reports)} ticket(s) complete."
         ]
         if self.stopped:
-            lines.append("Stopped early at your request; some workers never ran.")
+            # Both halves, because stopping can land in either: before a worker
+            # started, or after it finished but before it was reviewed. Saying
+            # only "never ran" would misreport a worker whose work is on disk
+            # and simply unchecked.
+            lines.append(
+                "Stopped early at your request; some workers never ran, and some may have "
+                "finished without being reviewed."
+            )
         if self.outstanding:
             lines.append("")
             lines.append("Still outstanding:")
@@ -372,7 +379,25 @@ def run_flock(
 
     # After the join, never during it. Review puts an implementation back to
     # its stub for a moment, and a colleague still running could import it.
+    #
+    # **Checked between reviews, for the same reason it is checked between
+    # workers, and it was missing here.** A review is not cheap and it is not
+    # read-only: each one writes over the worker's files, runs the acceptance
+    # command with its own timeout, and puts the files back in a `finally`. So a
+    # stopped round went on rewriting the user's tree and spawning test runs for
+    # minutes after they asked it not to — and `Canceller` cannot reach any of
+    # it, because reviews run subprocesses rather than orchestrators. Worse, the
+    # window between mutating and restoring is one `review.py` documents as
+    # survivable only for an outright kill; a stop followed by quitting the app
+    # landed squarely in it.
+    #
+    # Never mid-review: the restore is part of the operation, so a review that
+    # has started finishes and puts its files back.
     for report in outcome.reports:
+        if stop.is_set():
+            outcome.stopped = True
+            logger.info("flock: stopping before reviewing %s", report.worker_id)
+            break
         worker = charter.worker(report.worker_id)
         if worker is None:  # pragma: no cover - reports are built from workers
             continue

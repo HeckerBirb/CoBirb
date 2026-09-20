@@ -331,3 +331,56 @@ def test_an_uncheckable_worker_does_not_review_clean(tmp_path):
     baseline = Baseline.capture(charter, str(tmp_path))
 
     assert not review_worker(charter.workers[0], baseline, str(tmp_path)).clean
+
+
+# --------------------------------------------------------------------------- #
+# When pass two cannot discriminate, it must not report a pass
+# --------------------------------------------------------------------------- #
+def test_an_undeclared_tests_field_makes_the_stub_pass_uncheckable(tmp_path):
+    """With `tests` undeclared every file the worker owns counts as
+    implementation, so the restore returns its whole scope to the skeleton and
+    the check fails whatever the worker did — which this used to call "caught"."""
+    charter = _charter(tmp_path, tests_field="")
+    (tmp_path / "work.py").write_text(_STUB)
+    (tmp_path / "test_work.py").write_text(_TESTS)
+    baseline = Baseline.capture(charter, str(tmp_path))
+    (tmp_path / "work.py").write_text(_REAL)
+    (tmp_path / "test_work.py").write_text(_VACUOUS_TESTS)
+
+    check = put_the_stub_back(charter.workers[0], baseline, str(tmp_path))
+
+    assert not check.caught
+    assert "declares no `tests`" in check.error
+
+
+def test_a_worker_that_changed_nothing_cannot_be_checked_this_way(tmp_path):
+    """Removing an implementation that was never written removes nothing, so
+    the check fails for the skeleton's own reasons."""
+    charter, baseline = _skeleton(tmp_path)
+
+    check = put_the_stub_back(charter.workers[0], baseline, str(tmp_path))
+
+    assert not check.caught
+    assert "changed none of its files" in check.error
+
+
+def test_a_single_file_ticket_without_tests_is_still_checkable(tmp_path):
+    """Its acceptance tests live in a file the skeleton owns and no worker
+    writes, so the restore leaves them standing. Refusing this would fail an
+    honest ticket."""
+    (tmp_path / "work.py").write_text(_STUB)
+    (tmp_path / "test_work.py").write_text(_TESTS)
+    charter = parse_charter(textwrap.dedent(f"""
+        objective = "x"
+        [[workers]]
+        id     = "a"
+        writes = ["work.py"]
+        accept = '"{sys.executable}" -m pytest test_work.py -q'
+        brief  = "go"
+    """))
+    baseline = Baseline.capture(charter, str(tmp_path))
+    (tmp_path / "work.py").write_text(_REAL)
+
+    check = put_the_stub_back(charter.workers[0], baseline, str(tmp_path))
+
+    assert check.caught

@@ -275,19 +275,79 @@ def put_the_stub_back(worker: WorkerBrief, baseline: Baseline, cwd: str, **kwarg
 
     A worker whose brief named no implementation files (all of its writes are
     tests) cannot be checked this way, and says so rather than passing quietly.
+
+    **The vacuous case is refused rather than reported as a pass**, and it was
+    reachable by omitting one optional field. ``implementation`` is ``writes``
+    minus ``tests``; with ``tests`` undeclared it is *every* file the worker
+    owns, so restoring it puts the tree back to the skeleton exactly — and the
+    skeleton's check fails by construction, which this pass then read as
+    "caught". It reported a pass for every worker in that shape, whatever the
+    work was, and the charter template's own second ticket omits ``tests``.
+
+    Detected without a filename heuristic — the thing AGENTS.md rules out,
+    because a rule matching ``test_*.py`` and missing ``*_test.go`` would turn
+    the strongest check in the design into a silent no-op. Instead, two states
+    where this pass provably cannot discriminate:
+
+    - **The worker changed nothing.** Removing its implementation removes
+      nothing, so the check fails for the skeleton's own reasons.
+    - **``tests`` is undeclared, the worker owns more than one file, and every
+      file it changed is one being restored.** Then the restore returns its
+      whole scope to the skeleton, acceptance tests included. The extra
+      ``writes`` condition matters: a worker owning a single file whose
+      acceptance tests live in a skeleton-owned file *is* checkable this way,
+      and refusing that would fail an honest ticket.
+
+    Reported as "could not be checked", so ``Review.clean`` is False: we did not
+    check, and that must never read the same as checking and finding it fine.
     """
+    label = f"[{worker.id}] stub reversion"
     implementation = worker.implementation
     if not implementation:
         return RedCheck(
-            label=f"[{worker.id}] stub reversion",
+            label=label,
             caught=False,
             error="this worker writes only tests, so there is no implementation to remove",
         )
+
+    if not worker.accept.strip():
+        # ``expect_red``'s own answer, reached before the checks below so that
+        # "nobody said what done looks like" is not reported as something
+        # subtler than it is. Empty replacements: it returns before writing.
+        return expect_red({}, worker.accept, cwd, label=label, **kwargs)
+
+    changed = {
+        path for path in worker.writes
+        if _read(os.path.join(cwd, path)) != baseline.content(path)
+    }
+    if not changed:
+        return RedCheck(
+            label=label,
+            caught=False,
+            error=(
+                "could not be checked: this worker changed none of its files, so removing "
+                "its implementation removes nothing and the check fails for the skeleton's "
+                "own reasons rather than for anything about this ticket"
+            ),
+        )
+    if not worker.tests and len(worker.writes) > 1 and not changed - set(implementation):
+        return RedCheck(
+            label=label,
+            caught=False,
+            error=(
+                "could not be checked: this ticket declares no `tests`, so every file it "
+                "owns counts as implementation and is restored — including whichever of "
+                "them holds the acceptance tests. The check would then run against the "
+                "skeleton alone and fail whatever the worker did. Name the test files in "
+                "the charter's `tests` for this worker and this pass works"
+            ),
+        )
+
     return expect_red(
         {path: baseline.content(path) for path in implementation},
         worker.accept,
         cwd,
-        label=f"[{worker.id}] stub reversion",
+        label=label,
         **kwargs,
     )
 

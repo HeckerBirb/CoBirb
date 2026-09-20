@@ -375,6 +375,32 @@ context name all of them, so a missing one is an `Unknown tool` the model cannot
 front-end still reaches a charter through `tools[PROPOSE_CHARTER]`, whose `charter`/`attempts`/
 `reset` delegate to the desk.
 
+**Brainy Birb's planning turn runs with the project's `verify_command` off**
+(`run._without_project_verification`). Its job is to write *failing* tests — `BRAINY_RULES` step 3
+— so the planning turn ends with a project whose check fails by design. That went straight into
+`_verify_and_fix`, which saw changed files, ran the user's command, watched it fail, and handed
+Brainy Birb "VERIFICATION FAILED. Fix the cause." with four turns and its file tools still
+attached. The obedient answer is to implement its own stubs or weaken its own tests, destroying the
+artifact the whole design rests on and the one the workers were about to build against. It also
+spent a second full run of the suite and clobbered `turns_exhausted` (reset at the top of every
+`_loop`), silently degrading the "ran out of planning turns" outcome into "decided not to divide".
+`build_subagent` already scopes each worker's verification so it "never meets somebody else's
+failing test to helpfully fix"; this is the same rule for the agent that *authors* the failing
+tests, which had simply been missed. Safe to mutate the orchestrator because a flock holds the
+session. The workers' own checks and the review passes are untouched.
+
+**Pass 2 refuses the cases it cannot discriminate rather than reporting a pass**
+(`review.put_the_stub_back`). `implementation` is `writes` minus `tests`, so with `tests`
+undeclared it is *every* file the worker owns — the restore returns the whole scope to the skeleton,
+whose check fails by construction, which this read as "caught". It reported a pass for every worker
+in that shape whatever the work was, and `CHARTER_TEMPLATE`'s own second ticket omits `tests`. Two
+states are now refused with "could not be checked": the worker changed nothing, and (`tests`
+undeclared, more than one file owned, every changed file being restored). The extra `writes`
+condition matters — a worker owning one file whose acceptance tests live in a skeleton-owned file
+*is* checkable, and refusing that would fail an honest ticket. No filename heuristic, which
+§"tests" rules out for good reason. `plan.add_worker` also warns when `accept` is set and `tests`
+is not.
+
 **A plan built and never sealed is its own outcome** (`PlanResult.unsealed` → `stopped_at="unsealed"`,
 and `brainy.seal_reminder_prompt` for the one nudge that precedes it). It is the incremental
 route's version of the bug `e91c565` fixed for the document route, and it arrives by the same
@@ -542,7 +568,8 @@ scopes, are reviewed, and Brainy Birb reports.
   Headless has nobody to ask and still refuses everything outside the charter.
 - Workers run concurrently, then join, **then** review one at a time (review reverts a stub
   temporarily, which would break a colleague's check). A failed worker never stops the others.
-  Stopping is checked between workers; a model call in flight cannot be interrupted.
+  Stopping is checked between workers **and between reviews**; a model call in flight cannot be
+  interrupted, and neither can a review already under way — its restore is part of the operation.
 - Review, cheapest first: (1) read the diff for suspicious changes, (2) restore the stub and assert
   the acceptance check **fails**, (3) mutate each stated behaviour. Pass 2 is the reliable one.
 - `preflight.missing_models()` warns before planning if a role's model is absent; `probe` measures

@@ -13,6 +13,8 @@ import time
 from cobirb.flock.charter import parse_charter
 import pytest
 
+from cobirb.flock import supervisor
+from cobirb.flock.review import Review
 from cobirb.flock.supervisor import Canceller, Slots, check_partition, run_flock
 from cobirb.flock.worker import WorkerReport
 
@@ -140,9 +142,15 @@ def test_concurrency_can_be_held_down_to_one(monkeypatch, tmp_path):
 def test_one_worker_failing_does_not_take_down_the_others(monkeypatch, tmp_path):
     """Brainy Birb needs the whole picture to plan the next round; losing the
     finished tickets because one blew up would be a poor trade."""
+    honest = _honest_worker()
+
     def run(worker, cwd, **kwargs):
         if worker.id == "a":
             return WorkerReport(worker_id="a", ok=False, error="it fell over")
+        # 'b' implements its stub, as a real worker does: a worker that changed
+        # nothing cannot be reviewed, so it would never reach `complete` and the
+        # surviving ticket would look like a casualty of a's failure.
+        honest(worker, cwd, **kwargs)
         return WorkerReport(worker_id="b", ok=True, accepted=True)
 
     _fake_workers(monkeypatch, run)
@@ -258,7 +266,13 @@ def test_the_report_leads_with_what_is_not_done(monkeypatch, tmp_path):
     """A report that opens with successes reads as progress even when the
     remainder is the interesting half — and the remainder is what the next
     decision is about."""
+    honest = _honest_worker()
+
     def run(worker, cwd, **kwargs):
+        # Both implement their stub, as a real worker does — a worker that
+        # changed nothing is not reviewable, and 'b' has to reach `complete`
+        # for this test to be about the ordering of the report.
+        honest(worker, cwd, **kwargs)
         if worker.id == "a":
             return WorkerReport(worker_id="a", ok=True, accepted=False, summary="could not finish")
         return WorkerReport(worker_id="b", ok=True, accepted=True)
@@ -593,3 +607,29 @@ def test_reports_stay_in_charter_order_however_they_were_scheduled(monkeypatch, 
     outcome = run_flock(_charter(_dependent_project(tmp_path)), str(tmp_path))
 
     assert [r.worker_id for r in outcome.reports] == ["a", "b"]
+
+
+def test_asking_to_stop_also_stops_the_review_passes(monkeypatch, tmp_path):
+    """A review is not read-only: it rewrites the worker's files, runs the
+    acceptance command, and puts them back. A stopped round that kept doing
+    that went on touching the user's tree for minutes after they said stop."""
+    reviewed = []
+    stop = threading.Event()
+    honest = _honest_worker()
+
+    def run(worker, cwd, **kwargs):
+        honest(worker, cwd, **kwargs)
+        stop.set()  # the user asks to stop once the first worker is done
+        return WorkerReport(worker_id=worker.id, ok=True, accepted=True)
+
+    _fake_workers(monkeypatch, run)
+    monkeypatch.setattr(
+        supervisor, "review_worker",
+        lambda worker, baseline, cwd, **k: reviewed.append(worker.id) or Review(worker.id),
+    )
+
+    outcome = run_flock(_charter(_two_ticket_project(tmp_path)), str(tmp_path), stop=stop)
+
+    assert reviewed == []
+    assert outcome.stopped
+    assert "without being reviewed" in outcome.describe()
