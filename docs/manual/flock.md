@@ -47,6 +47,30 @@ orient can't work.
 
 The charter lives in the session. It is never written into your repository.
 
+### When one doesn't take
+
+If a charter fails validation, Brainy Birb is told exactly what was wrong and asked to correct
+it. If it still doesn't produce a usable one, the run stops and **says so** — naming how many
+attempts there were and why the last was rejected. Nothing started, nothing changed beyond
+whatever skeleton got written.
+
+That is a different outcome from Brainy Birb deciding the work shouldn't be divided at all,
+which is a legitimate answer and is reported as one.
+
+### Asking for it again
+
+Brainy Birb can propose a charter at any point, not only while planning — so "redo the plan, the
+partition didn't hold" works after a round has finished. A charter it proposes puts itself in
+front of you for approval as soon as the current turn ends.
+
+```
+/charter        # review the last proposed charter and run it if you approve
+/flock          # with no objective, the same thing
+```
+
+Useful if you dismissed the dialog, or if a charter was proposed while another flock was still
+running.
+
 ## What a worker knows
 
 Its brief, and nothing else. No plan, no project instructions, no repo map, no memory. That

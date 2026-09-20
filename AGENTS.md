@@ -313,6 +313,33 @@ persistent was not done: see §17's note on `ShellTool`'s per-call process state
 
 ## 13. The Flock (`flock/`)
 
+**`propose_charter` is registered for the whole session, not just the planning turn**
+(`run.install_charter_tool`), and permitted outright. It was previously added before planning and
+popped in a `finally` afterwards; but the planning transcript — `BRAINY_RULES` included, which
+tells Brainy Birb to deliver a charter by calling it — stays in context for the rest of the
+session, so "redo the plan" produced a call to a tool that had been taken away. The blanket
+permission is a considered exception to §2's default-deny rather than an oversight: that rule
+gates *capability* (filesystem, network, subprocess) and this tool reaches none of it — it parses
+text and keeps the result in memory.
+
+**A rejected charter is not the same outcome as no charter.** `ProposeCharterTool` counts
+`attempts` and keeps `last_error`; `PlanResult.failed` is what distinguishes "tried and every
+attempt was invalid" (`stopped_at="charter"`, reported with the reason) from "decided the work
+does not divide" (`stopped_at="planning"`, a legitimate answer). Conflated, the first was reported
+through the model's own narration — which, in the run that prompted this, claimed the charter had
+been "finalized and submitted successfully" while nothing had run and no approval dialog had
+appeared. `_plan` also retries once with the rejection quoted back (`charter_retry_prompt`),
+because a model told its charter is invalid will otherwise often end the turn by declaring
+success.
+
+**A charter accepted outside a flock run reaches the user through `on_proposed`.** The TUI holds
+it (`note_proposed_charter`) rather than acting at once — the call arrives from inside a tool, with
+the turn that made it still waiting on the result — and offers it when the turn ends
+(`offer_pending_charter`). Approval runs the flock with `run_flock_session(charter=...)`, which
+skips planning. `/charter`, and `/flock` with no objective, reach the same dialog for a charter
+that was dismissed or proposed while another flock was running.
+
+
 One **Brainy Birb** plans, designs the seams, writes the skeleton (interfaces, typed stubs,
 semantic docstrings, failing tests), and proposes a TOML **charter**. The user approves it — the
 single decision point in the run. **Worker Birbs** then run unattended inside charter-derived
@@ -358,7 +385,7 @@ answered "no" got what they asked for.
 
 **TUI** — four tabs: Current, Flock, Sessions, Plugins. Slash commands `/help`, `/model`,
 `/persona`, `/plan`, `/context`, `/clear` (§7), `/undo`, `/export`, `/diff`, `/commands`,
-`/flock`, `/memories`, `/remember`, `/image`; `@path` in the prompt box opens a five-row fuzzy picker
+`/flock`, `/charter` (§13), `/memories`, `/remember`, `/image`; `@path` in the prompt box opens a five-row fuzzy picker
 (`tui/mention_picker.py`, ranked by `runtime/mentions.py`) and sends the named file with the
 message — expanded on the way to the model, never into the transcript. Anything else
 starting with `/` is tried as a custom command, then sent to the model unchanged.

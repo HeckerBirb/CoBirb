@@ -21,6 +21,7 @@ modes, which a full-screen app's stderr is invisible to).
 """
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -62,6 +63,8 @@ from .screens import (
     TextPromptModal,
 )
 from .widgets import ActivityBar, PromptInput, StatusBar, StreamPreview, TranscriptLog
+
+logger = logging.getLogger("cobirb")
 
 _TAB_ORDER = ["current", "flock", "sessions", "plugins"]
 
@@ -186,6 +189,10 @@ class CoBirbApp(App[None]):
         self.attachments = PendingAttachments()
         # How anything reaches the transcript, and in what order.
         self.transcript = TranscriptView(self)
+        # A charter `propose_charter` accepted outside a flock run, waiting
+        # for the turn that proposed it to finish so it can be put to the user.
+        # See note_proposed_charter.
+        self._pending_charter: Any = None
         # Set for the duration of a flock engagement. The Event is what
         # ctrl+c sets: a model call in flight cannot be interrupted, so
         # stopping means no further Worker Birbs start.
@@ -551,6 +558,74 @@ class CoBirbApp(App[None]):
         prompt_input = self.query_one("#prompt-input", PromptInput)
         prompt_input.disabled = False
         prompt_input.focus()
+        self.offer_pending_charter()
+
+    # ------------------------------------------------------------------ #
+    # A charter proposed outside a flock run
+    # ------------------------------------------------------------------ #
+    def note_proposed_charter(self, charter: Any) -> None:
+        """Hold a charter `propose_charter` just accepted. Main thread only.
+
+        Held rather than acted on, because this arrives from inside a tool
+        call: the turn that made it is still running and still waiting for the
+        tool's result. Putting a modal up here would ask the user to approve
+        something while the agent that proposed it is mid-sentence, and
+        approving it would start a flock on top of a turn that has not
+        finished — the one thing `/flock` already refuses to do.
+
+        Suppressed entirely while a flock is running, because `run_flock_session`
+        asks for approval itself at its own stage, and two dialogs for one
+        charter is one too many.
+        """
+        if self._flock_stop is not None:
+            return
+        self._pending_charter = charter
+        self.write_transcript(
+            render.build_notice(
+                f"Brainy Birb proposed a charter: {len(charter.workers)} worker(s). "
+                "You will be asked to approve it when this turn finishes."
+            )
+        )
+
+    def offer_pending_charter(self) -> None:
+        """Put a held charter in front of the user, and run it if they agree."""
+        charter = self._pending_charter
+        if charter is None or self._flock_stop is not None or self._turn_in_progress:
+            return
+        self._pending_charter = None
+        self._approve_charter(charter)
+
+    @work
+    async def _approve_charter(self, charter: Any) -> None:
+        """The approval dialog for a charter proposed outside a flock run.
+
+        The same question `run_flock_session` asks at its own stage 3, asked
+        here because this charter did not come from one — and it is the whole
+        of the user's decision either way: approving it is what lets Worker
+        Birbs run unattended inside the scopes it names.
+        """
+        approved = await self.push_screen_wait(
+            ConfirmModal(
+                f"Approve this charter? {len(charter.workers)} Worker Birb(s) will run "
+                "unattended inside exactly these scopes, with no further prompts.",
+                charter.describe(),
+            )
+        )
+        if not approved:
+            self.write_transcript(render.build_notice("Charter not approved; nothing ran."))
+            return
+        if self._turn_in_progress or self._flock_stop is not None:
+            self.write_transcript(
+                render.build_notice("Something else started in the meantime; nothing ran.")
+            )
+            return
+        self.query_one(TabbedContent).active = "flock"
+        self._turn_in_progress = True
+        self.query_one("#prompt-input", PromptInput).disabled = True
+        self._flock_stop = threading.Event()
+        self._flock_canceller = Canceller()
+        self.set_activity("Fanning out…")
+        self._run_flock(charter.objective, charter=charter)
 
     # ------------------------------------------------------------------ #
     # The turn itself: a blocking Orchestrator.run() on a worker thread
@@ -581,6 +656,7 @@ class CoBirbApp(App[None]):
                     self.model_name,
                     io_factory=lambda: self.io_bridge,
                 )
+                self._arm_charter_tool()
             # Named `turn_result`, not `session`: this module also imports
             # `cobirb.session` (the Sessions-tab code below needs it), and a
             # same-named local here would shadow it for the rest of this
@@ -780,8 +856,35 @@ class CoBirbApp(App[None]):
     # ------------------------------------------------------------------ #
     # The Flock
     # ------------------------------------------------------------------ #
+    def _arm_charter_tool(self) -> None:
+        """Keep `propose_charter` on the orchestrator, and route what it accepts.
+
+        Called wherever the orchestrator is built, so the tool is there for
+        every turn rather than only inside a planning one. Without it, the
+        planning transcript keeps telling Brainy Birb to call a tool that was
+        taken away the moment planning ended, and "redo the plan" dead-ends on
+        `Unknown tool`.
+        """
+        from ..flock.run import install_charter_tool
+
+        if self.orchestrator is None:
+            return
+        try:
+            install_charter_tool(
+                self.orchestrator,
+                self.cwd,
+                on_proposed=lambda charter: self.call_from_thread(
+                    self.note_proposed_charter, charter
+                ),
+            )
+        except Exception:  # noqa: BLE001 - flock arming must not cost an ordinary turn
+            # Losing the charter tool costs flock mode, which will say so
+            # plainly when it cannot find it. Taking the turn down with it
+            # would cost the conversation the user is actually having.
+            logger.debug("could not install the charter tool", exc_info=True)
+
     @work(thread=True, exclusive=True, group="flock")
-    def _run_flock(self, objective: str) -> None:
+    def _run_flock(self, objective: str, charter: Any = None) -> None:
         """Run a whole flock engagement on a thread worker.
 
         Same shape as ``_run_turn``: the flock is synchronous and blocking, so
@@ -799,6 +902,7 @@ class CoBirbApp(App[None]):
                     self.session_path, self.password, self.model_name,
                     io_factory=lambda: TuiIO(self),
                 )
+                self._arm_charter_tool()
             run = run_flock_session(
                 self.orchestrator,
                 objective,
@@ -812,6 +916,7 @@ class CoBirbApp(App[None]):
                 ),
                 canceller=self._flock_canceller,
                 password=self.password,
+                charter=charter,
             )
         except Exception as exc:  # noqa: BLE001 - a failed flock is a message, not a crash
             self.call_from_thread(

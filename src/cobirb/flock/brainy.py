@@ -165,13 +165,40 @@ class ProposeCharterTool(Tool):
 
     NAME = PROPOSE_CHARTER
 
-    def __init__(self, cwd: str | None = None) -> None:
+    def __init__(
+        self, cwd: str | None = None, on_proposed: "Any | None" = None
+    ) -> None:
         self._cwd = cwd
+        # Called with a charter the moment one is accepted. This is what lets a
+        # charter proposed outside a flock run reach the user: the front-end
+        # decides whether to act on it (it does nothing while a flock is
+        # already running and about to ask for approval itself), so the tool
+        # does not need to know which of the two situations it is in.
+        self.on_proposed = on_proposed
         self.charter: Charter | None = None
         self.raw: str = ""
+        # What was attempted and what was wrong with it. Without these, a
+        # charter that was rejected four times and a decision not to divide
+        # the work at all both arrive at the caller as `charter is None` —
+        # indistinguishable, so the first gets reported as the second. See
+        # `run._plan`.
+        self.attempts: int = 0
+        self.last_error: str = ""
 
     def name(self) -> str:
         return self.NAME
+
+    def reset(self) -> None:
+        """Forget any charter and any failures, before a fresh planning turn.
+
+        The tool now lives as long as the session does, so a second flock
+        would otherwise start holding the first one's charter and be handed it
+        as though it had just been proposed.
+        """
+        self.charter = None
+        self.raw = ""
+        self.attempts = 0
+        self.last_error = ""
 
     def description(self) -> str:
         return (
@@ -201,16 +228,25 @@ class ProposeCharterTool(Tool):
         attention later.
         """
         text = str(arguments.get("toml") or "")
+        self.attempts += 1
         try:
             charter = parse_charter(text)
         except CharterError as exc:
+            self.last_error = str(exc)
             return ToolResult(
                 ok=False,
                 content=f"That charter could not be read: {exc}\n\nThe shape is:\n{CHARTER_TEMPLATE}",
                 error="bad_charter",
             )
 
+        self.last_error = ""
         self.charter, self.raw = charter, text
+        if self.on_proposed is not None:
+            try:
+                self.on_proposed(charter)
+            except Exception:  # noqa: BLE001 - a front-end that cannot display it
+                # must not turn an accepted charter into a failed tool call.
+                logger.debug("a charter handler raised", exc_info=True)
         disjoint, partition = check_partition(charter)
         if not disjoint:
             return ToolResult(
@@ -236,6 +272,28 @@ class ProposeCharterTool(Tool):
 def plan_prompt(objective: str) -> str:
     """The whole prompt for the planning turn."""
     return f"{BRAINY_RULES}\n\n--- The work ---\n\n{objective.strip()}"
+
+
+def charter_retry_prompt(last_error: str) -> str:
+    """One more attempt, with the rejection quoted back.
+
+    A planning turn ends when the model stops calling tools, and a model whose
+    charter has just been rejected can end it by announcing success instead of
+    correcting the charter — at which point the flock stops with nothing to
+    show. Quoting the reason and asking plainly for another call is cheap and
+    usually enough; the alternative is a run that reports itself finished
+    without a single worker having started.
+    """
+    return (
+        "Your charter was NOT accepted, and no Flock has been created. Nothing you have "
+        "said since changes that — the only thing that proposes a charter is a call to "
+        "`propose_charter`, and the last one was rejected:\n\n"
+        f"    {last_error}\n\n"
+        "Fix exactly that and call `propose_charter` again now. Do not describe the "
+        "charter in prose and do not report success: neither creates one. If you have "
+        "concluded that this work should not be divided between workers at all, say so "
+        "plainly instead — that is a legitimate answer, and a different one from this."
+    )
 
 
 def round_summary(outcome: FlockOutcome) -> str:
@@ -278,10 +336,11 @@ def round_summary(outcome: FlockOutcome) -> str:
         "design, or just the affected workers re-briefed if the remaining work is "
         "isolated. Say plainly if no second round is needed.",
         "",
-        "DESCRIBE THAT SECOND ROUND IN PROSE. DO NOT CALL `propose_charter` — it "
-        "belonged to the planning phase and is no longer available to you. This round "
-        "is over; starting another is the user's decision, made from the account you "
-        "are writing now. What you write here is read by a person, not executed.",
+        "DESCRIBE THAT SECOND ROUND IN PROSE. DO NOT CALL `propose_charter` here. "
+        "This round is finished and nothing you propose now would start another one; "
+        "that is the user's decision, made from the account you are writing. If they "
+        "want the round you describe, they will ask for it and you can propose it "
+        "then. What you write here is read by a person, not executed.",
         "",
         "A surviving mutant or a stub reversion that was not caught usually means a "
         "behaviour you specified has no test behind it. That is your omission to fix "

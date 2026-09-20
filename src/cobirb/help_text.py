@@ -92,6 +92,9 @@ INTERACTIVE COMMANDS
   /flock <what>      Divide a piece of work between several agents. Opens
                      the Flock tab; you approve the charter before anything
                      runs. See 'help flock'.
+  /charter           Review the charter Brainy Birb last proposed and run
+                     it if you approve. '/flock' with no objective does the
+                     same. Useful if you dismissed the dialog.
   /memories          Load, create, rename, or delete memory catalogues —
                      named lists of facts fed into the system prompt.
   /remember <fact>   Save a fact into a catalogue you pick. A plain command,

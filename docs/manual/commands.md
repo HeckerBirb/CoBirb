@@ -19,6 +19,7 @@ Type these in the app. Anything else starting with `/` is tried as one of your o
 | `/remember <fact>` | Save a fact into a catalogue you pick. |
 | `/image <path> [message]` | Attach an image to your next message. |
 | `/flock <objective>` | Split work across several agents. |
+| `/charter` | Review the last proposed charter and run it if you approve. |
 | `/commands` | List your own prompt files. |
 
 `?` on its own opens help too.

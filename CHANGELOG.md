@@ -4,6 +4,32 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Fixed: a rejected charter ended a flock as though nothing had been wrong.** When validation
+  refused a charter, `charter` came back as `None` — which is also what Brainy Birb deciding the
+  work should not be divided looks like. So the run reported the model's own account of it, which
+  in one case was *"The charter has been finalized and submitted successfully"*, and returned
+  before ever reaching the approval dialog. A charter that was attempted and rejected is now its
+  own outcome, reported with the number of attempts and the reason the last one failed. Brainy
+  Birb also gets one more try, with the rejection quoted back, because a model told its charter is
+  invalid will otherwise often end the turn by announcing success.
+- **Fixed: a charter validation message stopped mid-sentence.** `worker 'w3' lists … under tests
+  but does not write them — a worker's acceptance tests are its own files, so that they can be
+  added to` — and that was the whole message. It now says what to do about it. This was the error
+  the model was given in the run above, which is some of why it could not correct itself.
+- **`propose_charter` is available for the whole session.** It used to be registered for the
+  planning turn and taken away afterwards, while the planning transcript — which tells Brainy Birb
+  to deliver a charter by calling it — stayed in context for the rest of the session. So "redo the
+  plan" produced a call to a tool that was no longer there, an `Unknown tool` result, and a model
+  reasonably concluding something had broken. It stays registered and permitted now.
+- **A charter proposed outside a flock run now reaches you.** Brainy Birb can propose one at any
+  point, not only while planning; the approval dialog appears as soon as the current turn finishes.
+  Approving it runs the flock from that charter without planning again.
+- **`/charter`** — review the last proposed charter and run it if you approve, for one that was
+  dismissed or proposed while another flock was still running. `/flock` with no objective does the
+  same thing.
+
 ## [0.15.2]
 
 - **`scripts/release.sh` cuts a release.** Bump level in, version bump and CHANGELOG heading out,

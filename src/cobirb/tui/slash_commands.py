@@ -280,6 +280,12 @@ def cmd_flock(app: "CoBirbApp", argument: str) -> None:
     prevent.
     """
     if not argument.strip():
+        # With a charter already proposed, "/flock" on its own means "get on
+        # with that one" far more often than it means "what are the arguments
+        # again?" — so it does what /charter does. Usage is still the answer
+        # when there is nothing waiting.
+        if cmd_charter(app, "", quiet=True):
+            return
         app.write_transcript(
             render.build_notice(
                 "Usage: /flock <objective>, e.g. /flock add CSV export to the reporting "
@@ -305,6 +311,53 @@ def cmd_flock(app: "CoBirbApp", argument: str) -> None:
     app._run_flock(argument.strip())
 
 
+def cmd_charter(app: "CoBirbApp", argument: str, *, quiet: bool = False) -> bool:
+    """Review the charter Brainy Birb last proposed, and run it if you approve.
+
+    The manual way back to the approval dialog. A charter normally puts itself
+    in front of you the moment it is accepted, but the dialog can be dismissed,
+    or proposed during a flock that was already running — and without this
+    there is no way to ask for it again, which leaves a perfectly good charter
+    sitting in memory with nothing able to reach it.
+
+    ``quiet`` suppresses the "nothing to show" notice, for ``/flock`` with no
+    argument — which falls through to its own usage message instead. Returns
+    whether there was a charter to offer.
+    """
+    charter = getattr(app, "_pending_charter", None) or _last_proposed_charter(app)
+    if charter is None:
+        if not quiet:
+            app.write_transcript(
+                render.build_notice(
+                    "No charter has been proposed yet. '/flock <objective>' starts one."
+                )
+            )
+        return False
+    if app._turn_in_progress or app._flock_stop is not None:
+        if not quiet:
+            app.write_transcript(
+                render.build_notice("Wait for the current turn to finish first.")
+            )
+        return True
+    app._pending_charter = charter
+    app.offer_pending_charter()
+    return True
+
+
+def _last_proposed_charter(app: "CoBirbApp"):
+    """The charter still held by the orchestrator's `propose_charter` tool.
+
+    Separate from ``app._pending_charter`` because the two go stale at
+    different moments: the app clears its copy once it has put the dialog up,
+    while the tool keeps the last charter it accepted until the next planning
+    turn resets it. That is what makes a dismissed dialog recoverable.
+    """
+    from ..flock.brainy import PROPOSE_CHARTER
+
+    tools = getattr(app.orchestrator, "tools", None) or {}
+    return getattr(tools.get(PROPOSE_CHARTER), "charter", None)
+
+
 def cmd_commands(app: "CoBirbApp", argument: str) -> None:
     """List the prompt files that are available as commands here."""
     app.write_transcript(render.build_notice(describe_commands(discover_commands(app.cwd))))
@@ -325,6 +378,7 @@ COMMANDS: "dict[str, Callable[[CoBirbApp, str], None]]" = {
     "/diff": cmd_diff,
     "/commands": cmd_commands,
     "/flock": cmd_flock,
+    "/charter": cmd_charter,
     "/memories": cmd_memories,
     "/remember": cmd_remember,
     "/image": cmd_image,

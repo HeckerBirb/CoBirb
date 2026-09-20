@@ -255,11 +255,15 @@ def test_flock_without_an_objective_says_what_it_needs(capsys, tmp_path):
 # --------------------------------------------------------------------------- #
 # The review phase and the charter tool have to agree about what exists
 # --------------------------------------------------------------------------- #
-def test_the_charter_tool_is_gone_once_planning_is_over(monkeypatch, tmp_path):
-    """It answers one question during planning; it is not a capability Brainy
-    Birb keeps for the rest of the session. Anything asked of it later — the
-    review phase especially — is therefore asking for a tool that is not
-    there."""
+def test_the_charter_tool_outlives_the_planning_turn(monkeypatch, tmp_path):
+    """It used to be popped off the orchestrator as soon as planning ended.
+
+    But the planning transcript stays in context for the rest of the session,
+    BRAINY_RULES — "call propose_charter" — included. So "redo the plan" asked
+    afterwards produced a call to a tool that had been taken away, and an
+    `Unknown tool` result the model could only conclude something was wrong
+    with. It stays registered now.
+    """
     _skeleton(tmp_path)
     orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_charter_toml(tmp_path)))
 
@@ -268,10 +272,30 @@ def test_the_charter_tool_is_gone_once_planning_is_over(monkeypatch, tmp_path):
         ask=Asker(confirm=lambda q, detail="": False), probe=False,
     )
 
-    assert PROPOSE_CHARTER not in orchestrator.tools
+    assert PROPOSE_CHARTER in orchestrator.tools
+    assert orchestrator.policy.is_allowed(PROPOSE_CHARTER, {})
 
 
-def test_the_review_prompt_warns_off_the_tool_it_no_longer_has():
+def test_a_second_flock_does_not_inherit_the_first_charter(monkeypatch, tmp_path):
+    """The tool lives as long as the session now, so planning has to start from
+    a clean slate — otherwise a fresh flock would be handed the last one's
+    charter as though it had just been proposed."""
+    from cobirb.flock.run import install_charter_tool
+
+    _skeleton(tmp_path)
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_charter_toml(tmp_path)))
+    tool = install_charter_tool(orchestrator, str(tmp_path))
+    tool.execute({"toml": _charter_toml(tmp_path)})
+    assert tool.charter is not None
+
+    tool.reset()
+
+    assert tool.charter is None
+    assert tool.attempts == 0
+    assert tool.last_error == ""
+
+
+def test_the_review_prompt_steers_the_verdict_into_prose():
     """An overnight flock died here. The review runs on the same session as
     planning, so BRAINY_RULES — "call propose_charter" — is still in context
     along with Brainy Birb's own successful call. The prompt then asked for
@@ -287,7 +311,10 @@ def test_the_review_prompt_warns_off_the_tool_it_no_longer_has():
     text = round_summary(FlockOutcome(charter=Charter(objective="x", workers=[])))
 
     assert PROPOSE_CHARTER in text
-    assert "no longer available" in text
+    assert "DO NOT CALL" in text
+    # The tool is registered for the whole session now, so the prompt must not
+    # claim otherwise — it steers on the grounds that the round is over.
+    assert "no longer available" not in text
 
 
 def test_the_review_still_asks_what_a_second_round_should_be():
@@ -300,3 +327,97 @@ def test_the_review_still_asks_what_a_second_round_should_be():
     text = round_summary(FlockOutcome(charter=Charter(objective="x", workers=[])))
 
     assert "second round" in text
+
+
+class _BadCharterBrainy:
+    """Proposes an invalid charter, then announces that it worked.
+
+    Not a strawman: this is what the model actually did in the run that
+    prompted the fix — one `propose_charter` call rejected for a malformed
+    worker entry, then "The charter has been finalized and submitted
+    successfully" and a stop.
+    """
+
+    def __init__(self, attempts_before_giving_up=99):
+        self._calls = 0
+        self._limit = attempts_before_giving_up
+
+    def name(self):
+        return "bad-charter-brainy"
+
+    def chat(self, system, context, tools=None, *, stream=False):
+        return "The charter has been finalized and submitted successfully."
+
+    def parse_tool_calls(self, reply):
+        if self._calls >= self._limit:
+            return []
+        self._calls += 1
+        return [ToolCall(name=PROPOSE_CHARTER, arguments={"toml": 'objective = "x"'})]
+
+    def supports_tool_calling(self):
+        return True
+
+    def supports_streaming(self):
+        return False
+
+
+def test_a_rejected_charter_is_reported_as_a_failure_not_a_decision(monkeypatch, tmp_path):
+    """The bug this was written for: a charter rejected by validation left
+    `charter is None`, which read identically to Brainy Birb deciding the work
+    should not be divided. The run then reported the model's own account of it
+    — "finalized and submitted successfully" — and no approval dialog ever
+    appeared, because the run had already returned.
+    """
+    _skeleton(tmp_path)
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _BadCharterBrainy(attempts_before_giving_up=1))
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert run.stopped_at == "charter"
+    assert "rejected" in run.report
+    assert "successfully" not in run.report  # not the model's version of events
+    assert not run.ran
+
+
+def test_a_charter_that_was_never_attempted_is_still_a_legitimate_answer(monkeypatch, tmp_path):
+    """The other half of the distinction. Proposing nothing at all means
+    "this does not divide", which is a conclusion Brainy Birb is meant to be
+    able to reach — and must not be reported as a failure."""
+    _skeleton(tmp_path)
+    model = _ScriptedBrainy(_charter_toml(tmp_path), propose=False)
+    orchestrator = _orchestrator(monkeypatch, tmp_path, model)
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert run.stopped_at == "planning"
+    assert "rejected" not in run.report
+
+
+def test_a_rejected_charter_gets_one_more_try_with_the_reason_quoted(monkeypatch, tmp_path):
+    """A model that has just been told its charter is invalid may stop by
+    declaring success. Asked once more, with the reason, it usually corrects
+    it — and that turns a dead run into a working one."""
+    _skeleton(tmp_path)
+    prompts = []
+    model = _BadCharterBrainy(attempts_before_giving_up=1)
+    orchestrator = _orchestrator(monkeypatch, tmp_path, model)
+    original = orchestrator.run
+
+    def record(prompt, *args, **kwargs):
+        prompts.append(prompt)
+        return original(prompt, *args, **kwargs)
+
+    monkeypatch.setattr(orchestrator, "run", record)
+
+    run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": False), probe=False,
+    )
+
+    assert any("was NOT accepted" in p for p in prompts)

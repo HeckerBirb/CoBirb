@@ -29,7 +29,13 @@ from typing import Any, Callable
 from ..config import Config
 from ..orchestrator import Orchestrator
 from . import branch
-from .brainy import PROPOSE_CHARTER, ProposeCharterTool, plan_prompt, round_summary
+from .brainy import (
+    PROPOSE_CHARTER,
+    ProposeCharterTool,
+    charter_retry_prompt,
+    plan_prompt,
+    round_summary,
+)
 from .charter import Charter
 from .preflight import missing_models
 from .probe import ProbeResult, probe_concurrency
@@ -79,25 +85,94 @@ class FlockRun:
         return self.outcome is not None
 
 
-def _plan(
-    orchestrator: Orchestrator, objective: str, cwd: str, turns: int
-) -> tuple[Charter | None, str]:
-    """Let Brainy Birb plan and scaffold, and take the charter it proposes.
+@dataclass
+class PlanResult:
+    """What planning produced, and — when it produced nothing — why not."""
 
-    The charter tool is registered for this turn only, and removed afterwards:
-    it is a way of answering one question, not a capability the agent keeps for
-    the rest of the session.
+    charter: Charter | None
+    narration: str
+    attempts: int = 0
+    last_error: str = ""
+
+    @property
+    def failed(self) -> bool:
+        """Whether a charter was attempted and none of the attempts held up.
+
+        The distinction the caller cannot do without. **No attempts at all is
+        a legitimate answer** — "this is a single person's job, do not fan it
+        out" is a conclusion Brainy Birb is supposed to be able to reach.
+        Attempts with nothing to show for them is a failure. Reported as the
+        first, the second hands the user the model's own account of a round
+        that never happened, and a model that has just had a charter rejected
+        is quite capable of announcing that it succeeded.
+        """
+        return self.charter is None and self.attempts > 0
+
+
+def install_charter_tool(
+    orchestrator: Orchestrator, cwd: str, on_proposed: "Callable[[Charter], None] | None" = None
+) -> ProposeCharterTool:
+    """Put the charter tool on ``orchestrator`` and leave it there.
+
+    **Registered for the session rather than for the planning turn**, which is
+    the opposite of what this used to do. The tool was previously added before
+    planning and popped in a ``finally`` afterwards, on the reasoning that it
+    answers one question rather than being a capability worth keeping. That
+    reasoning ignored where the conversation goes next: the planning
+    transcript — ``BRAINY_RULES`` included, which says to deliver a charter by
+    calling this — stays in context for the rest of the session, so "redo the
+    plan" produces a call to a tool that has been taken away, and an ``Unknown
+    tool`` result the model cannot argue its way past.
+
+    It is granted permission too, and that is a considered exception to the
+    default-deny rule rather than an oversight. The rule exists to gate
+    *capability*: reaching the filesystem, the network, a subprocess. This
+    reaches none of them — it parses text and keeps the result in memory — so
+    an approval prompt for it would be asking the user to authorise CoBirb to
+    talk to itself.
+
+    Idempotent, and returns whichever tool is now installed, so the flock and
+    the front-end can both call it without racing to own the instance.
     """
-    tool = ProposeCharterTool(cwd)
+    existing = orchestrator.tools.get(PROPOSE_CHARTER)
+    if isinstance(existing, ProposeCharterTool):
+        if on_proposed is not None:
+            existing.on_proposed = on_proposed
+        return existing
+    tool = ProposeCharterTool(cwd, on_proposed=on_proposed)
     orchestrator.tools[PROPOSE_CHARTER] = tool
     orchestrator.policy.allow(PROPOSE_CHARTER, "")
-    try:
+    return tool
+
+
+def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> PlanResult:
+    """Let Brainy Birb plan and scaffold, and take the charter it proposes.
+
+    One retry when the charter came back rejected. The planning turn ends
+    whenever the model stops calling tools, and a model that has just been
+    told its charter is invalid may well stop by declaring success instead of
+    correcting it — which is how a rejected charter used to become a finished
+    flock that never ran. Being asked once more, with the reason quoted back,
+    costs one turn and recovers the common case.
+    """
+    tool = install_charter_tool(orchestrator, cwd)
+    tool.reset()
+    session = orchestrator.run(
+        plan_prompt(objective), system="", cwd=cwd, persona="Brainy Birb", max_turns=turns
+    )
+
+    if tool.charter is None and tool.attempts:
         session = orchestrator.run(
-            plan_prompt(objective), system="", cwd=cwd, persona="Brainy Birb", max_turns=turns
+            charter_retry_prompt(tool.last_error),
+            system="", cwd=cwd, persona="Brainy Birb", max_turns=turns,
         )
-    finally:
-        orchestrator.tools.pop(PROPOSE_CHARTER, None)
-    return tool.charter, session.summary or ""
+
+    return PlanResult(
+        charter=tool.charter,
+        narration=session.summary or "",
+        attempts=tool.attempts,
+        last_error=tool.last_error,
+    )
 
 
 def run_flock_session(
@@ -115,6 +190,7 @@ def run_flock_session(
     io_for: Callable[[Any], Any] | None = None,
     on_charter: Callable[[Charter], None] | None = None,
     canceller: Canceller | None = None,
+    charter: Charter | None = None,
 ) -> FlockRun:
     """Engage flock mode for one objective, and come back with a report.
 
@@ -137,7 +213,7 @@ def run_flock_session(
 
     try:
         return _drive(run, orchestrator, objective, cwd, ask, config, stop, on_event,
-                      plan_turns, probe, io_for, on_charter, canceller)
+                      plan_turns, probe, io_for, on_charter, canceller, charter)
     finally:
         _close_branch(main, flock_session, run, password)
 
@@ -156,8 +232,15 @@ def _drive(
     io_for: Callable[[Any], Any] | None = None,
     on_charter: Callable[[Charter], None] | None = None,
     canceller: Canceller | None = None,
+    charter: Charter | None = None,
 ) -> FlockRun:
-    """The five stages. Split out so the branch above closes on every path."""
+    """The five stages. Split out so the branch above closes on every path.
+
+    ``charter`` skips the first of them. A charter can now be proposed outside
+    a planning turn — Brainy Birb keeps the tool for the whole session — and
+    one that arrives that way has already been written; planning again would
+    throw it away and ask the model to invent a second one.
+    """
     # ---- 0. Can this run at all? ---------------------------------------- #
     # Before the planning work, not after: a missing worker model costs
     # nothing to find now and costs a whole skeleton to find later.
@@ -168,14 +251,35 @@ def _drive(
         return run
 
     # ---- 1. Plan and scaffold ------------------------------------------- #
-    ask.show("Brainy Birb is planning and building the skeleton…")
-    charter, narration = _plan(orchestrator, objective, cwd, plan_turns)
-    if charter is None:
-        run.report = narration or "Brainy Birb did not propose a charter."
-        run.stopped_at = "planning"
-        # Not a failure. "This is a single person's job, do not fan it out" is
-        # a correct answer, and the narration is where it says so.
+    if charter is not None:
+        # Already written, by a `propose_charter` call outside a planning turn.
+        # Planning again would discard it and ask for a second one.
+        plan = PlanResult(charter=charter, narration="")
+    else:
+        ask.show("Brainy Birb is planning and building the skeleton…")
+        plan = _plan(orchestrator, objective, cwd, plan_turns)
+    if plan.failed:
+        # A charter was attempted and every attempt was rejected. Reported as
+        # its own outcome rather than through `narration`, which at this point
+        # is whatever the model chose to say about a round that did not happen
+        # — in the case this was written for, that it had "finalized and
+        # submitted the charter successfully".
+        run.stopped_at = "charter"
+        run.report = (
+            f"No flock ran. Brainy Birb proposed a charter {plan.attempts} time(s) and the "
+            f"last was rejected:\n\n    {plan.last_error}\n\n"
+            "Nothing was started and nothing was changed beyond whatever skeleton it wrote. "
+            "Run /flock again, or say what to correct."
+        )
         return run
+    if plan.charter is None:
+        run.report = plan.narration or "Brainy Birb did not propose a charter."
+        run.stopped_at = "planning"
+        # Not a failure, and distinct from the branch above: no charter was
+        # attempted at all. "This is a single person's job, do not fan it out"
+        # is a correct answer, and the narration is where it says so.
+        return run
+    charter = plan.charter
     run.charter = charter
     if on_charter is not None:
         # Before the partition check and before approval, so a front-end can

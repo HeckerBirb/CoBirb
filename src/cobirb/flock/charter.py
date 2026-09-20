@@ -251,7 +251,9 @@ def _worker(entry: Any, index: int) -> WorkerBrief:
     if stray:
         raise CharterError(
             f"worker {worker_id!r} lists {', '.join(stray)} under tests but does not write "
-            "them — a worker's acceptance tests are its own files, so that they can be added to"
+            "them — a worker's acceptance tests are its own files, so that it can add to them "
+            f"as it works. Either add {', '.join(stray)} to that worker's writes, or drop "
+            "them from its tests."
         )
     return WorkerBrief(
         id=worker_id,

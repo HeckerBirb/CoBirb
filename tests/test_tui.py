@@ -31,6 +31,7 @@ from conftest import StubSession, StubSessionManager
 from cobirb import cli, memory, paths, session
 from cobirb import session as session_mod
 from cobirb.plugins.core import render
+from cobirb.policy import Policy
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 from cobirb.runtime import personas, plugins, wiring
 from cobirb.tui.app import CoBirbApp
@@ -101,6 +102,10 @@ class _StubOrchestrator:
         self.last_turn_streamed = False
         self.calls = []
         self.tools = tools if tools is not None else {}
+        # A real Policy, because the app registers the charter tool on
+        # whatever orchestrator it has and grants it — a stub without one is
+        # no longer standing in for an Orchestrator.
+        self.policy = Policy()
         self._run_raises = run_raises
         self._on_run = on_run
 
@@ -3286,3 +3291,96 @@ async def test_every_built_in_command_has_a_description_to_show():
 
     blank = [entry.name for entry in entries if not entry.description]
     assert blank == []
+
+
+# --------------------------------------------------------------------------- #
+# A charter proposed outside a flock run
+# --------------------------------------------------------------------------- #
+def _a_charter(objective="do the thing"):
+    from cobirb.flock.charter import Charter, WorkerBrief
+
+    return Charter(
+        objective=objective,
+        workers=[WorkerBrief(id="a", brief="b", writes=["a.py"], reads=[], tests=[], accept="x")],
+    )
+
+
+async def test_the_charter_tool_is_armed_on_the_orchestrator():
+    """The whole point of registering it for the session: it is there for an
+    ordinary turn, not only inside a planning one."""
+    from cobirb.flock.brainy import PROPOSE_CHARTER
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.orchestrator = _StubOrchestrator()
+        app._arm_charter_tool()
+
+        assert PROPOSE_CHARTER in app.orchestrator.tools
+
+
+async def test_a_charter_proposed_mid_turn_is_held_until_the_turn_ends():
+    """It arrives from inside a tool call, with the turn that proposed it still
+    running and still waiting on the result. A modal here would ask the user to
+    approve something mid-sentence."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._turn_in_progress = True
+
+        app.note_proposed_charter(_a_charter())
+
+        assert app._pending_charter is not None
+        assert "proposed a charter" in _transcript_text(app)
+
+
+async def test_a_charter_proposed_during_a_flock_is_left_to_the_flock():
+    """`run_flock_session` asks for approval itself at its own stage. Two
+    dialogs for one charter is one too many."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._flock_stop = threading.Event()
+
+        app.note_proposed_charter(_a_charter())
+
+        assert app._pending_charter is None
+
+
+async def test_charter_command_says_so_when_nothing_has_been_proposed():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        await _submit(pilot, app, "/charter")
+
+        assert "No charter has been proposed yet" in _transcript_text(app)
+
+
+async def test_bare_flock_still_explains_itself_when_nothing_is_pending():
+    """It only means "get on with that charter" when there is one."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        await _submit(pilot, app, "/flock")
+
+        assert "Usage: /flock" in _transcript_text(app)
+
+
+async def test_a_dismissed_charter_is_still_reachable_from_the_tool():
+    """The app clears its own copy once it has put the dialog up, so without
+    reading it back off the tool a dismissed dialog would strand a perfectly
+    good charter in memory with nothing able to reach it."""
+    from cobirb.tui.slash_commands import _last_proposed_charter
+    from cobirb.flock.run import install_charter_tool
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.orchestrator = _StubOrchestrator()
+        tool = install_charter_tool(app.orchestrator, "/tmp")
+        tool.charter = _a_charter()
+        app._pending_charter = None
+
+        assert _last_proposed_charter(app) is not None
