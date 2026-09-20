@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.15.5]
 
 - **Fixed: a charter Brainy Birb wrote into its reply left the run dead.** CoBirb reads tool calls
   only from Ollama's native `tool_calls` field, so a model that writes the charter into its
