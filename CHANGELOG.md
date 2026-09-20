@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.15.3]
 
 - **Fixed: a rejected charter ended a flock as though nothing had been wrong.** When validation
   refused a charter, `charter` came back as `None` — which is also what Brainy Birb deciding the
