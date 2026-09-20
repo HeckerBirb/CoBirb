@@ -4,6 +4,18 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **The flock review's third pass — mutation testing — has been removed.** It mutated each behaviour
+  a docstring claimed and required the tests to catch every one, which made it a review of the
+  *contract* as much as of the work. It was also wired to nothing: the code existed, the reviewer
+  accepted the mutants as an argument, and nothing ever passed any — so it ran zero times in every
+  flock while the docs described it as part of how review works. Writing the mutants needs a model
+  round-trip per stated behaviour, and review otherwise costs no tokens at all, so it is gone rather
+  than connected. Review is now two passes, as it always was in practice, and the hole this one
+  covered is closed from the other side: pass 2 reports "could not be checked" where it cannot
+  judge. `cobirb help flock` and the manual no longer claim otherwise.
+
 ## [0.20.2]
 
 Four defects found by a static read of flock mode. The first two had been there for many releases

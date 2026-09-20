@@ -23,8 +23,8 @@ cobirb flock -p "add CSV export to the reporting tool"
    Nothing runs until you say yes, and it is the only place capability is granted up front — a
    worker can still ask for something later (see below), which pauses only itself.
 3. **Workers run**, concurrently, unattended, each inside its own scope.
-4. **Review**, one worker at a time: read the diff, restore the stub and check the test
-   actually fails, probe each stated behaviour.
+4. **Review**, one worker at a time: read the diff for weakened assertions, then restore the stub
+   and check the tests actually go red. No model is involved, so it can't be argued with.
 5. **Brainy Birb reports.**
 
 The **Flock** tab shows one column per worker while it happens.

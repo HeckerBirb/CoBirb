@@ -391,10 +391,12 @@ still has it, there is a baseline to compare against and a stub to put back:
     colleagues a worker cannot see.
   • The implementation is put back to its stub and the worker's tests are run
     again. They MUST fail. A suite that passes against an unimplemented
-    function is testing nothing.
-  • Each behaviour a docstring claims is mutated in turn, and each must be
-    caught. A surviving mutant is a promise nothing is holding — usually
-    Brainy Birb's omission rather than the worker's.
+    function is testing nothing. Where that cannot be judged — the worker
+    changed nothing, or its ticket never said which of its files hold the
+    tests — it reports "could not be checked" rather than a pass.
+
+Neither check uses a model, so a review costs you no tokens and cannot be
+talked out of a finding.
 
 WHEN A WORKER GETS STUCK
 

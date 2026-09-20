@@ -11,7 +11,7 @@ It works because **Brainy Birb authored the skeleton and still has it**. There
 is a baseline to compare against and a stub to put back, so "did this worker
 cut corners?" is a question with evidence behind it rather than a vibe.
 
-Three passes, cheapest first, each independently useful:
+Two passes, cheapest first, each independently useful:
 
 1. **Read the diff** (free). What changed in the acceptance criteria, with the
    suspicious parts called out: an assertion that was there and is not, a skip
@@ -23,20 +23,30 @@ Three passes, cheapest first, each independently useful:
    **must fail**. A test suite that passes against an unimplemented function is
    testing nothing, and this catches it with no parsing, no language knowledge
    and no model involvement. This is the reliable one.
-3. **Mutate the stated behaviours** (one run per claim). A docstring is a list
-   of promises; that list is the mutation list. Brainy Birb writes one
-   deliberately-wrong implementation per promise and each must be caught. A
-   surviving mutant is a promise nothing is holding — often the skeleton's
-   fault rather than the worker's, which makes this a review of the contract
-   as much as of the work.
 
-Passes 2 and 3 are the same primitive with different content (see
-``expect_red``), which is why this module does not care who wrote the mutant.
+Neither uses a model, so a review costs no tokens and cannot be argued out of a
+finding.
+
+**There was a third pass and it is gone.** It mutated each behaviour a
+docstring claimed — one deliberately-wrong implementation per promise, each of
+which had to be caught — and a surviving mutant named a promise nothing was
+testing, which made it a review of the *contract* as much as of the work. Good
+idea, never connected to anything: ``review_worker`` took the mutants as a
+keyword argument, ``supervisor.run_flock`` (its only caller) never passed any,
+and nothing anywhere constructed one, so it ran zero times in every real flock
+while three documents described it as part of how review works. Writing the
+mutants needs Brainy Birb — one model round-trip per stated behaviour, far and
+away the most expensive thing in a review that otherwise costs nothing — and
+this module deliberately holds no model, so the piece that would supply them was
+never built. Deleted rather than wired up. ``expect_red`` is kept as the
+primitive and does not care where broken content comes from, so reviving this
+means writing the mutants and passing them in.
 
 **Files are edited in place and put back afterwards.** No sentinel, no
-crash-recovery machinery: a kill between mutating and restoring leaves a broken
-file, which is the same situation as any agent being killed mid-edit and is
-version control's problem. A Worker Birb is not special, and neither is this.
+crash-recovery machinery: a kill between restoring a stub and putting the
+worker's version back leaves a broken file, which is the same situation as any
+agent being killed mid-edit and is version control's problem. A Worker Birb is
+not special, and neither is this.
 """
 from __future__ import annotations
 
@@ -233,9 +243,11 @@ def expect_red(
 ) -> RedCheck:
     """Swap in broken content, run the check, and put everything back.
 
-    The shared primitive behind passes two and three: pass two's "broken
-    content" is the original stub, pass three's is a mutant Brainy Birb wrote.
-    Neither cares where it came from.
+    Kept as its own function with a single caller. It is the primitive the whole
+    "trust, then verify" idea rests on — break the code deliberately, require
+    the check to notice — and it says nothing about *where* the broken content
+    came from, which is what made it reusable by the deleted mutation pass and
+    would again.
 
     Restoring happens in a ``finally`` because putting the files back is part
     of the operation, not a safety net bolted onto it. A process killed outright
@@ -352,63 +364,16 @@ def put_the_stub_back(worker: WorkerBrief, baseline: Baseline, cwd: str, **kwarg
     )
 
 
-@dataclass(frozen=True)
-class Mutant:
-    """One promise from a docstring, and the code that breaks it.
-
-    Written by Brainy Birb, which read the contract and knows what it claims.
-    ``promise`` is the claim in the docstring's own terms ("a missing key
-    writes an empty cell") so that a surviving mutant names the behaviour
-    nothing is testing, rather than a line number.
-    """
-
-    promise: str
-    path: str
-    content: str
-
-
-def check_mutants(worker: WorkerBrief, mutants: list[Mutant], cwd: str, **kwargs) -> list[RedCheck]:
-    """Pass three. One deliberately-wrong implementation per stated behaviour.
-
-    A surviving mutant is a promise nothing is holding. Read it as a finding
-    about the *contract* first: more often than not the skeleton stated a
-    behaviour and never wrote an acceptance test for it, which is Brainy Birb's
-    omission rather than the worker's.
-
-    A mutant naming a file this worker does not own is refused rather than
-    applied. Brainy Birb writes these, and a mutation that reached outside the
-    partition would be editing somebody else's work to test this one.
-    """
-    owned = set(worker.implementation)
-    checks: list[RedCheck] = []
-    for mutant in mutants:
-        label = f"[{worker.id}] {mutant.promise}"
-        if mutant.path not in owned:
-            checks.append(
-                RedCheck(
-                    label=label,
-                    caught=False,
-                    error=f"{mutant.path} is not this worker's to mutate",
-                )
-            )
-            continue
-        checks.append(
-            expect_red({mutant.path: mutant.content}, worker.accept, cwd, label=label, **kwargs)
-        )
-    return checks
-
-
 # --------------------------------------------------------------------------- #
 # The whole review
 # --------------------------------------------------------------------------- #
 @dataclass
 class Review:
-    """Everything the three passes found, for one Worker Birb."""
+    """Everything the two passes found, for one Worker Birb."""
 
     worker_id: str
     findings: list[Finding] = field(default_factory=list)
     stub: RedCheck | None = None
-    mutants: list[RedCheck] = field(default_factory=list)
 
     @property
     def clean(self) -> bool:
@@ -419,16 +384,12 @@ class Review:
         """
         if self.findings:
             return False
-        if self.stub is not None and not self.stub.caught:
-            return False
-        return all(check.caught for check in self.mutants)
+        return self.stub is None or self.stub.caught
 
     def describe(self) -> str:
         lines = [f"[{self.worker_id}] review"]
         if self.stub is not None:
             lines.append(f"  {self.stub.describe()}")
-        for check in self.mutants:
-            lines.append(f"  {check.describe()}")
         if self.findings:
             lines.append("  worth a look in the diff:")
             lines += [f"    • {finding.describe()}" for finding in self.findings]
@@ -442,17 +403,18 @@ def review_worker(
     baseline: Baseline,
     cwd: str,
     *,
-    mutants: list[Mutant] | None = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> Review:
-    """Run every pass that can be run for this worker.
+    """Run both passes for this worker.
 
-    Pass three is skipped when no mutants are supplied, because writing them
-    needs Brainy Birb and this module deliberately holds no model.
+    No model, deliberately: everything here is a file comparison or a scoped
+    subprocess, so a review costs no tokens and cannot itself be talked out of
+    a finding. That was also what made the deleted mutation pass awkward — it
+    needed Brainy Birb to write the mutants, so it could not live here, and
+    nothing ever ended up passing them in.
     """
     return Review(
         worker_id=worker.id,
         findings=read_the_diff(worker, baseline, cwd),
         stub=put_the_stub_back(worker, baseline, cwd, timeout=timeout),
-        mutants=check_mutants(worker, mutants or [], cwd, timeout=timeout),
     )

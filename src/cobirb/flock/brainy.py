@@ -137,8 +137,9 @@ worker nothing. "Returns None for a missing key; writes an empty cell rather \
 than raising on a partial record; the count excludes the header" is a \
 contract someone can implement against blind.
   - Failing tests that pin EVERY behaviour the docstring claims. A promise \
-with no test behind it is a promise nothing is holding, and it will be found \
-later by a check that mutates each claim and sees whether anything notices.
+with no test behind it is a promise nothing is holding, and nothing downstream \
+will catch it for you: review puts your stub back and requires the tests to go \
+red, so a behaviour you stated and never tested passes that check silently.
   - Stubs that fail loudly — raise NotImplementedError, or whatever the \
 language's equivalent is. Never a stub that returns a plausible value.
 
@@ -906,8 +907,9 @@ def round_summary(outcome: FlockOutcome) -> str:
         "want the round you describe, they will ask for it and you can propose it "
         "then. What you write here is read by a person, not executed.",
         "",
-        "A surviving mutant or a stub reversion that was not caught usually means a "
-        "behaviour you specified has no test behind it. That is your omission to fix "
-        "in the next skeleton, not the worker's.",
+        "A stub reversion that was not caught usually means a behaviour you specified "
+        "has no test behind it. That is your omission to fix in the next skeleton, not "
+        "the worker's. One reported as 'could not be checked' is a charter problem "
+        "instead — most often a ticket that never named its test files in `tests`.",
     ]
     return "\n".join(lines)

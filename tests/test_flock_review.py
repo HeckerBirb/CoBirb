@@ -16,7 +16,6 @@ from cobirb.flock.review import (
     FINDING_FILE_EMPTIED,
     FINDING_SKIP_ADDED,
     Baseline,
-    Mutant,
     put_the_stub_back,
     read_the_diff,
     review_worker,
@@ -237,64 +236,6 @@ def test_a_worker_with_no_acceptance_check_cannot_be_checked_this_way(tmp_path):
 
     assert not check.caught
     assert "no acceptance check" in check.error
-
-
-# --------------------------------------------------------------------------- #
-# Pass three — mutate the stated behaviours
-# --------------------------------------------------------------------------- #
-def test_a_mutant_that_the_tests_catch_is_reported_as_caught(tmp_path):
-    charter, baseline = _skeleton(tmp_path)
-    (tmp_path / "work.py").write_text(_REAL)
-
-    review = review_worker(
-        charter.workers[0], baseline, str(tmp_path),
-        mutants=[Mutant("doubles its argument", "work.py", "def double(n):\n    return n * 3\n")],
-    )
-
-    assert review.mutants[0].caught
-
-
-def test_a_surviving_mutant_names_the_promise_nothing_tests(tmp_path):
-    """Often the skeleton's fault rather than the worker's — it stated a
-    behaviour and never wrote an acceptance test for it."""
-    charter, baseline = _skeleton(tmp_path, tests=_VACUOUS_TESTS)
-    (tmp_path / "work.py").write_text(_REAL)
-
-    review = review_worker(
-        charter.workers[0], baseline, str(tmp_path),
-        mutants=[Mutant("doubles its argument", "work.py", "def double(n):\n    return n * 3\n")],
-    )
-
-    assert not review.mutants[0].caught
-    assert "doubles its argument" in review.mutants[0].describe()
-
-
-def test_a_mutant_is_put_back_afterwards(tmp_path):
-    charter, baseline = _skeleton(tmp_path)
-    (tmp_path / "work.py").write_text(_REAL)
-
-    review_worker(
-        charter.workers[0], baseline, str(tmp_path),
-        mutants=[Mutant("doubles", "work.py", "def double(n):\n    return n * 3\n")],
-    )
-
-    assert (tmp_path / "work.py").read_text() == _REAL
-
-
-def test_a_mutant_cannot_reach_outside_the_workers_own_files(tmp_path):
-    """Brainy Birb writes these, and a mutation that edited somebody else's
-    work to test this one would be corrupting the partition."""
-    charter, baseline = _skeleton(tmp_path)
-    (tmp_path / "work.py").write_text(_REAL)
-    (tmp_path / "elsewhere.py").write_text("untouched\n")
-
-    review = review_worker(
-        charter.workers[0], baseline, str(tmp_path),
-        mutants=[Mutant("something", "elsewhere.py", "broken")],
-    )
-
-    assert "not this worker's to mutate" in review.mutants[0].error
-    assert (tmp_path / "elsewhere.py").read_text() == "untouched\n"
 
 
 # --------------------------------------------------------------------------- #

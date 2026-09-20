@@ -570,13 +570,11 @@ scopes, are reviewed, and Brainy Birb reports.
   temporarily, which would break a colleague's check). A failed worker never stops the others.
   Stopping is checked between workers **and between reviews**; a model call in flight cannot be
   interrupted, and neither can a review already under way — its restore is part of the operation.
-- Review, cheapest first: (1) read the diff for suspicious changes, (2) restore the stub and assert
-  the acceptance check **fails**, (3) mutate each stated behaviour. Pass 2 is the reliable one, and
-  it reports "could not be checked" for the states it cannot judge rather than passing them.
-  **Pass 3 never runs.** `review_worker` takes `mutants` as a keyword argument,
-  `supervisor.run_flock` calls it without one, and nothing in the codebase constructs a `Mutant` —
-  so in every real flock the review is passes 1 and 2 only. The code is all there and is reached by
-  nothing; see §17.
+- Review is **two passes**, cheapest first: (1) read the diff for suspicious changes, (2) restore
+  the stub and assert the acceptance check **fails**. Pass 2 is the reliable one, and it reports
+  "could not be checked" for the states it cannot judge rather than passing them. Neither uses a
+  model, so a review costs no tokens and cannot be argued out of a finding. A third pass that
+  mutated each stated behaviour was **deleted** — see §17.
 - `preflight.missing_models()` warns before planning if a role's model is absent; `probe` measures
   whether the endpoint truly serves two requests at once (B must start answering before A finishes).
 - `branch.py` mints a GUID written into both the main session and a paired flock session file. One
@@ -752,17 +750,22 @@ fresh decision to take with the user, not a gap to helpfully fill.
   auto-commit (writes to someone's repository history — needs decisions about when to commit, what
   to do with pre-existing uncommitted work, and whether to touch their branch; `/diff` covers the
   reviewing half without any of them).
-- **The flock review's third pass — mutation testing — is built but wired to nothing, and is
-  therefore dead code.** `review.Mutant` and `review.check_mutants` exist and work;
-  `review_worker` accepts `mutants=`; `supervisor.run_flock` (the only caller) never passes any,
-  and nothing anywhere constructs a `Mutant`. So the pass has run **zero times in every real
-  flock**. The gap is that writing the mutants needs Brainy Birb — one model round-trip per stated
-  behaviour — and `review` deliberately holds no model, so nobody ever built the piece that would
-  supply them. Connecting it means deciding who pays for those round-trips and when; deleting it
-  means giving up the one check that reviews the *contract* rather than the work. Either is a
-  decision to take with the user, not a gap to helpfully fill. Until then, do not describe review
-  as three passes anywhere a user reads — **`help_text.py` and `docs/manual/flock.md` currently
-  still do, and are wrong.**
+- **The flock review's third pass — mutation testing — was built, never wired up, and has been
+  deleted.** It mutated each behaviour a docstring claimed, one deliberately-wrong implementation
+  per promise, and required each to be caught; a surviving mutant named a promise nothing was
+  testing, which made it a review of the *contract* as much as of the work. But `review_worker`
+  took the mutants as a keyword argument, `supervisor.run_flock` (its only caller) never passed
+  any, and nothing anywhere constructed a `Mutant` — so it ran **zero times in every real flock**
+  while AGENTS.md, `help_text.py` and `docs/manual/flock.md` all described it as part of how review
+  works, and `round_summary` asked Brainy Birb to interpret surviving mutants that could not exist.
+  The reason it was never connected: writing the mutants needs Brainy Birb, one model round-trip
+  *per stated behaviour*, which is far and away the most expensive thing in a review that otherwise
+  costs no tokens — and `review` deliberately holds no model, so the piece that would supply them
+  was never built. `review.expect_red` is kept as the primitive and does not care where broken
+  content comes from, so reviving this means writing the mutants and passing them in. **Do not
+  reintroduce it without deciding who pays for those round-trips and when**, and note that the hole
+  it was there to cover is now closed from the other side: pass 2 reports "could not be checked"
+  for the states it cannot judge instead of reporting them as passes.
 - **The TUI header/banner panel was removed. Do not reintroduce it without deciding how it stays
   accurate.** It was written at mount from the model resolved at `__init__`, *before* the async
   startup model check ran — so a startup picker change left it permanently wrong, and the

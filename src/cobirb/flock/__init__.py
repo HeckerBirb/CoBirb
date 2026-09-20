@@ -53,7 +53,7 @@ from .charter import (
 )
 from .plan import PlanDraft
 from .probe import ProbeResult, probe_concurrency
-from .review import Baseline, Mutant, Review, review_worker
+from .review import Baseline, Review, review_worker
 from .supervisor import FlockOutcome, check_partition, run_flock
 from .worker import WorkerReport, run_worker
 
@@ -70,7 +70,6 @@ __all__ = [
     "DeclareSeamTool",
     "DropWorkerTool",
     "FlockOutcome",
-    "Mutant",
     "PlanDraft",
     "ProbeResult",
     "ProposeCharterTool",
