@@ -150,7 +150,12 @@ def build_for_role(
     """
     config = config or Config()
     spec = resolve_role(role, config, override)
-    return LocalModelProvider(model=spec.name, base_url=spec.base_url)
+    max_num_ctx = config.get("max_num_ctx")
+    return LocalModelProvider(
+        model=spec.name,
+        base_url=spec.base_url,
+        max_num_ctx=int(max_num_ctx) if max_num_ctx else None,
+    )
 
 
 def describe_roles(config: Config, override: str | None = None) -> list[ModelSpec]:

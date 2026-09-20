@@ -27,6 +27,25 @@ def _config(tmp_path, data) -> Config:
     return Config()
 
 
+def _advertising(context_length: int):
+    """An endpoint whose /api/show says the model can do ``context_length``."""
+
+    class _Response:
+        def __init__(self):
+            self._body = json.dumps({"model_info": {"qwen2.context_length": context_length}}).encode()
+
+        def read(self) -> bytes:
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+    return lambda request, timeout=None: _Response()
+
+
 def test_a_config_with_no_roles_gives_every_role_the_same_model(tmp_path):
     """The overwhelmingly common case, and the one that must not have changed:
     one model, used for everything."""
@@ -123,6 +142,24 @@ def test_build_for_role_produces_a_usable_provider(tmp_path):
     config = _config(tmp_path, {"models": {"worker": {"name": "small"}}})
 
     assert build_for_role(ROLE_WORKER, config).name() == "ollama/small"
+
+
+def test_max_num_ctx_caps_the_window_every_role_asks_for(tmp_path, monkeypatch):
+    """A global cap, not a per-role one: the flock runs a planner and several
+    workers against one endpoint, so a ceiling that only one role honoured
+    would not keep the card's VRAM inside itself."""
+    monkeypatch.setattr("urllib.request.urlopen", _advertising(262144))
+    config = _config(tmp_path, {"model": "m", "max_num_ctx": 32768})
+
+    for role in (ROLE_DEFAULT, ROLE_ORCHESTRATOR, ROLE_WORKER):
+        assert build_for_role(role, config).context_window() == 32768
+
+
+def test_without_max_num_ctx_the_model_still_gets_what_it_advertises(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", _advertising(262144))
+    config = _config(tmp_path, {"model": "m"})
+
+    assert build_for_role(ROLE_DEFAULT, config).context_window() == 262144
 
 
 def test_the_listing_says_where_each_answer_came_from(tmp_path):

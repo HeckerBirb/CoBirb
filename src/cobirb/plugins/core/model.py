@@ -261,10 +261,20 @@ class LocalModelProvider(ModelProvider):
     embedded model and no default remote endpoint.
     """
 
-    def __init__(self, model: str = "", base_url: str | None = None, cwd: str | None = None) -> None:
+    def __init__(
+        self,
+        model: str = "",
+        base_url: str | None = None,
+        cwd: str | None = None,
+        max_num_ctx: int | None = None,
+    ) -> None:
         self._model = model or os.environ.get("COBIRB_MODEL_NAME", "")
         self._base_url = (base_url or os.environ.get("COBIRB_OLLAMA_URL") or DEFAULT_BASE_URL).rstrip("/")
         self.cwd = cwd or os.getcwd()
+        # A ceiling on what context_window() will ever ask the server for —
+        # see context_window() for why this exists and what it does and does
+        # not affect.
+        self._max_num_ctx = max_num_ctx
         # Ollama returns structured tool calls alongside the assistant message
         # in the same response; stash them here so parse_tool_calls() doesn't
         # need to re-parse text or make a second round trip.
@@ -425,11 +435,27 @@ class LocalModelProvider(ModelProvider):
         it. What this resolves is therefore what to *ask for* — the Modelfile's
         own ``num_ctx`` if its author chose one, otherwise what the model says
         it can do.
+
+        ``max_num_ctx``, if the provider was built with one, is then applied
+        as a ceiling: the model still dictates the window whenever it asks
+        for less, and only gets clamped down when it asks for more than the
+        endpoint's hardware should be asked to hold. It never raises a window
+        that came out lower — capping is a one-directional safety net, not a
+        way to demand more than the model advertised.
+
+        A cap therefore moves two things at once, which is the point:
+        ``chat`` asks the server for less KV cache, and
+        ``Orchestrator._context_budget`` — which reads this same method —
+        packs history against the smaller window rather than one the server
+        was never asked for.
         """
         payload = self._show()
         # A Modelfile naming num_ctx is a deliberate choice by whoever built
         # the model, and outranks the architecture's maximum.
-        return _num_ctx(payload.get("parameters")) or _advertised_context(payload.get("model_info"))
+        window = _num_ctx(payload.get("parameters")) or _advertised_context(payload.get("model_info"))
+        if window and self._max_num_ctx:
+            return min(window, self._max_num_ctx)
+        return window
 
     def _show(self) -> dict[str, Any]:
         """This model's ``/api/show`` payload, fetched once and remembered.

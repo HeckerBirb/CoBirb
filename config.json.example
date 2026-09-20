@@ -33,6 +33,7 @@
   "repo_map": true,
   "repo_map_max_chars": 16000,
   "context_tokens": null,
+  "max_num_ctx": null,
   "plan_mode": false,
   "audit_log": false,
 

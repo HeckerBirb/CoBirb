@@ -806,6 +806,35 @@ def test_context_window_is_looked_up_once_per_model(monkeypatch):
     assert len(calls) == 1
 
 
+def test_max_num_ctx_clamps_an_advertised_window_that_exceeds_it(monkeypatch):
+    """An architecture's advertised max (Qwen2's is 262144) sized as KV cache
+    can exceed a card's VRAM well before weights and everything else sharing
+    it are counted. max_num_ctx is the ceiling for that."""
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _ShowResponses(parameters="stop \"x\"", model_info={"qwen2.context_length": 262144}),
+    )
+
+    assert LocalModelProvider(model="m", max_num_ctx=32768).context_window() == 32768
+
+
+def test_max_num_ctx_never_raises_a_window_that_came_out_lower(monkeypatch):
+    """The model still dictates the window whenever it asks for less than the
+    ceiling — max_num_ctx only ever clamps down, never up."""
+    monkeypatch.setattr("urllib.request.urlopen", _ShowResponses(parameters="num_ctx 8192"))
+
+    assert LocalModelProvider(model="m", max_num_ctx=32768).context_window() == 8192
+
+
+def test_max_num_ctx_does_nothing_when_the_endpoint_cannot_answer(monkeypatch):
+    def boom(*args, **kwargs):
+        raise urllib.error.URLError("nope")
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+
+    assert LocalModelProvider(model="m", max_num_ctx=32768).context_window() is None
+
+
 # --------------------------------------------------------------------------- #
 # What a failure actually says.
 #

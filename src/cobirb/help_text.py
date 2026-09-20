@@ -810,13 +810,25 @@ See config.json.example for a starting point. Keys:
                                  start. The repo_map tool stays either way.
   "repo_map_max_chars"           How large that outline may be (default
                                  16000).
-  "context_tokens"               Override the context window. CoBirb asks
-                                 the server for one on every request, using
-                                 the Modelfile's num_ctx if it sets one and
-                                 otherwise what the model says it can do —
-                                 so this is only needed to cap a window your
-                                 VRAM would rather not hold. /context shows
-                                 what is in use.
+  "context_tokens"               Override how much conversation history
+                                 CoBirb budgets against, for when the
+                                 endpoint can't say what its window is (or to
+                                 deliberately trim it). Does not change the
+                                 num_ctx CoBirb asks the server for — see
+                                 max_num_ctx for that. /context shows what is
+                                 in use.
+  "max_num_ctx"                  Ceiling on the num_ctx CoBirb requests from
+                                 the server on every /api/chat call. CoBirb
+                                 normally asks for whatever the model itself
+                                 advertises — the Modelfile's num_ctx, or
+                                 otherwise the architecture's max context
+                                 length, which can be far larger than your
+                                 VRAM should be asked to hold as KV cache.
+                                 The model still dictates the window whenever
+                                 it asks for less than this; only a request
+                                 above the ceiling gets clamped down to it.
+                                 Unset (default) asks for whatever the model
+                                 advertises, uncapped.
   "allow_read_dirs"              Directories CoBirb may read without asking,
                                  as a list. Covers subdirectories.
   "allow_write_dirs"             Directories CoBirb may change files in

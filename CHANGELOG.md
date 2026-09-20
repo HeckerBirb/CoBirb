@@ -4,6 +4,21 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **New: `max_num_ctx`, a ceiling on the context window CoBirb asks for.** CoBirb states `num_ctx`
+  on every request rather than letting Ollama serve its own 4096, and when a model's Modelfile
+  names no window of its own it asks for the architecture's advertised maximum — 262144 for a
+  Qwen2-family model. Sized as KV cache that can exceed a card's VRAM on its own, well before the
+  weights and whatever else shares the card are counted, and the server quietly offloads the
+  remainder to CPU. Set `"max_num_ctx": 32768` and a model asking for more is clamped to it, while
+  one asking for less is left alone. It also caps what history is packed against, so CoBirb stops
+  filling a window the server was never asked for.
+- **Fixed: `context_tokens` claimed to do that and never did.** Its help text said it was "only
+  needed to cap a window your VRAM would rather not hold". It is the history budget and never
+  reached the `num_ctx` sent to the server. The text now says what it is and points at
+  `max_num_ctx`.
+
 ## [0.16.1]
 
 - **Fixed: approving a charter asked twice.** `/charter`, and a charter proposed mid-conversation,

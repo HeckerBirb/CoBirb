@@ -217,6 +217,18 @@ all and CoBirb has to ask rather than assume. `/export` shows a `📎 filename` 
 states `num_ctx` on every request, so the window is asked for rather than guessed. `history_budget`
 reserves 20 % clamped to 2048–16384 tokens. Estimation is `len(text) // 4`.
 
+`LocalModelProvider.context_window()` (`plugins/core/model.py`) resolves what to ask for — the
+Modelfile's own `num_ctx` if set, otherwise the architecture's advertised max — and then clamps it
+against `max_num_ctx` (config key, wired through `runtime/models.build_for_role` to every role) if
+one is set. That ceiling only ever lowers the request: a model asking for less than the ceiling is
+untouched, and an endpoint with no `max_num_ctx` configured behaves exactly as before.
+`Orchestrator._context_budget` reads the same hook, so capping the window also caps what history is
+packed against it rather than leaving CoBirb filling a window the server was never asked for. It exists
+because an advertised architecture max (Qwen2's is 262144) sized as KV cache can exceed a card's
+VRAM on its own, well before weights and everything else sharing the card are counted — see
+`context_tokens` above, which is a different knob (history budget, not the wire `num_ctx`) and does
+not cap this.
+
 `/clear` (`session.turns_since_clear`) sets where the conversation is read *from*. It appends a
 turn with `role == "clear"` and nothing else: no deletion, no schema bump, no migration — a role
 rather than a new `Turn` field because `Turn.digest()` is compared against a hash written by
@@ -445,7 +457,8 @@ states what "always" would grant.
 **Config keys** — `default_model`, `models.*`, `persona`, `system_prompt`, `plugins.{model,io,crypto}`,
 `allow_tools`, `allow_read_dirs`, `allow_write_dirs`, `verify_command`, `verify_timeout`,
 `verify_fix_attempts`, `redact_secrets`, `checkpoints`, `instructions`, `instructions_max_chars`,
-`repo_map`, `repo_map_max_chars`, `context_tokens`, `plan_mode`, `audit_log`, `hooks`, `mcp_servers`.
+`repo_map`, `repo_map_max_chars`, `context_tokens`, `max_num_ctx`, `plan_mode`, `audit_log`, `hooks`,
+`mcp_servers`.
 `runtime/bootstrap.ensure_home()` seeds a starter config on first run (not at install — wheels have
 no reliable post-install hook).
 

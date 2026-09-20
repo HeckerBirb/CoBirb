@@ -44,7 +44,7 @@ KNOWN_KEYS = frozenset({
     "allow_tools", "allow_read_dirs", "allow_write_dirs",
     "checkpoints", "redact_secrets", "audit_log",
     "instructions", "instructions_max_chars",
-    "repo_map", "repo_map_max_chars", "context_tokens",
+    "repo_map", "repo_map_max_chars", "context_tokens", "max_num_ctx",
     "verify_command", "verify_timeout", "verify_fix_attempts",
     "hooks", "mcp_servers", "plugins",
 })
@@ -57,7 +57,8 @@ _EXPECTED_TYPES: dict[str, tuple[type, ...]] = {
     "checkpoints": (bool,), "redact_secrets": (bool,), "audit_log": (bool,),
     "instructions": (bool,), "repo_map": (bool,), "plan_mode": (bool,),
     "instructions_max_chars": (int,), "repo_map_max_chars": (int,),
-    "context_tokens": (int,), "verify_timeout": (int,), "verify_fix_attempts": (int,),
+    "context_tokens": (int,), "max_num_ctx": (int,),
+    "verify_timeout": (int,), "verify_fix_attempts": (int,),
     "persona": (str,), "system_prompt": (str,), "verify_command": (str,),
 }
 
