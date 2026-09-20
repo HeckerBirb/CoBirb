@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.21.0]
 
 - **Two model timeouts instead of one, and both configurable.** `connect_timeout` (10s) is how long
   to wait for your endpoint to accept a connection — short, because either something is listening or
