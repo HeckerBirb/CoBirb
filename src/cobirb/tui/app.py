@@ -960,6 +960,23 @@ class CoBirbApp(App[None]):
         if summary:
             self.set_activity("Flock running", summary)
 
+    def note_brainy_planning(self, line: str) -> None:
+        """One line of Brainy Birb's working-out, for the Flock tab.
+
+        Ignored outside a flock's planning phase: an ordinary turn's output
+        belongs in the transcript, and once a charter exists the worker panes
+        are what the tab is for.
+        """
+        if self._flock_stop is None or self.charter_in_hand:
+            return
+        self.query_one(FlockPane).planning_note(line)
+
+    def note_brainy_waiting(self, waiting: bool) -> None:
+        """Whether Brainy Birb is blocked on the model right now."""
+        if self._flock_stop is None or self.charter_in_hand:
+            return
+        self.query_one(FlockPane).planning_waiting(waiting)
+
     def note_flock_planning_progress(self, tool_name: str) -> None:
         """Keep the Flock tab moving while Brainy Birb builds the skeleton.
 
@@ -1011,14 +1028,16 @@ class CoBirbApp(App[None]):
 
     async def prepare_flock_panes(self, charter) -> None:
         """Lay out a pane per Worker Birb once the charter is approved."""
-        # Planning is over; the panes take over from the progress counter.
+        # Planning is over; the panes take over from the tail.
         self.charter_in_hand = True
+        self.query_one(FlockPane).end_planning()
         await self.query_one(FlockPane).begin(charter)
 
     def _on_flock_finished(self, run) -> None:
         self._flock_stop = None
         self._planning_calls = 0
         self.charter_in_hand = False
+        self.query_one(FlockPane).end_planning()
         self._flock_canceller = None
         self.set_activity("")
         self._turn_in_progress = False

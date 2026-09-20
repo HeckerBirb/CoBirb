@@ -298,6 +298,17 @@ FlockPane {
     padding: 1 1 0 1;
 }
 
+/* Brainy Birb's working-out while it plans, above the (still empty) worker
+   row. Removed the moment a charter exists, so it never competes with the
+   panes for the tab. */
+#brainy-status {
+    height: auto;
+    padding: 1 2;
+    margin: 0 1;
+    background: $panel;
+    color: $text;
+}
+
 #flock-workers {
     height: 1fr;
     padding: 1;

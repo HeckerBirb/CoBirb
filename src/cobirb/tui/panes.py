@@ -194,11 +194,31 @@ class FlockPane(Vertical):
     ticket that no longer exists is worse than an empty tab.
     """
 
+    # How many lines of Brainy Birb's working-out to keep on screen while it
+    # plans. Enough to see movement and read the last thing it did; few enough
+    # that it stays a status strip rather than a second transcript.
+    PLANNING_TAIL = 8
+
+    WAITING = "[ Waiting for LLM... ]"
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._planning_lines: list[str] = []
+        self._planning_waiting = False
+
+    def on_mount(self) -> None:
+        self.query_one("#brainy-status", Static).display = False
+
     def compose(self) -> ComposeResult:
         yield Static(
             Text("No flock running. Type /flock <objective> to start one.", style="dim"),
             id="flock-status",
         )
+        # Brainy Birb's working-out, while it has the tab to itself. Hidden
+        # until planning starts and removed the moment a charter exists: from
+        # then on the worker panes are the thing worth looking at, and a stale
+        # tail of how the plan was written would only be in their way.
+        yield Static("", id="brainy-status")
         # HorizontalScroll, and each pane has a *minimum* width rather than an
         # equal share. Three agents at 1fr each squeeze the text past reading,
         # and a pane too narrow to read is the same as no pane — so they keep
@@ -207,6 +227,52 @@ class FlockPane(Vertical):
 
     def set_status(self, text: str, style: str = "") -> None:
         self.query_one("#flock-status", Static).update(Text(text, style=style or "bold"))
+
+    # ------------------------------------------------------------------ #
+    # Brainy Birb, while it plans
+    # ------------------------------------------------------------------ #
+    def planning_note(self, line: str) -> None:
+        """Add one line to the tail of what Brainy Birb is doing.
+
+        `/flock` switches to this tab, but the worker panes do not exist until
+        a charter does — which is the *end* of the longest phase of the run.
+        Without this the tab is blank for all of it, and a flock that is
+        working hard is indistinguishable from one that has hung.
+        """
+        line = " ".join(line.split())
+        if not line:
+            return
+        self._planning_lines.append(line)
+        del self._planning_lines[: -self.PLANNING_TAIL]
+        self._draw_planning()
+
+    def planning_waiting(self, waiting: bool) -> None:
+        """Whether Brainy Birb is currently blocked on the model."""
+        self._planning_waiting = waiting
+        self._draw_planning()
+
+    def end_planning(self) -> None:
+        """Take the section away. The worker panes speak for themselves."""
+        self._planning_lines = []
+        self._planning_waiting = False
+        panel = self.query_one("#brainy-status", Static)
+        panel.update("")
+        panel.display = False
+
+    def _draw_planning(self) -> None:
+        panel = self.query_one("#brainy-status", Static)
+        if not self._planning_lines and not self._planning_waiting:
+            panel.display = False
+            return
+        body = Text()
+        body.append("Brainy Birb\n", style="bold")
+        for line in self._planning_lines:
+            body.append(f"  {line[:200]}\n", style="dim")
+        if self._planning_waiting:
+            body.append("\n")
+            body.append(f"  {self.WAITING}", style="bold")
+        panel.update(body)
+        panel.display = True
 
     async def begin(self, charter) -> None:
         """Lay out one pane per worker in the approved charter."""

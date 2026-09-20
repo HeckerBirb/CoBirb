@@ -133,10 +133,12 @@ class TuiIO(I_OAdapter):
         the same information instead.
         """
         self._call(self._app.set_busy, label)
+        self._call(self._app.note_brainy_waiting, True)
         try:
             yield
         finally:
             self._call(self._app.set_busy, "")
+            self._call(self._app.note_brainy_waiting, False)
 
     def begin_stream(self, persona_name: str) -> None:
         """Deliberately draws nothing.
@@ -164,6 +166,12 @@ class TuiIO(I_OAdapter):
         if not text:
             return
         self._write(render.build_assistant_message(text))
+        # Prose Brainy Birb wrote on the way to a charter, for the Flock tab's
+        # tail. Streamed tokens deliberately do not feed it: a per-token feed
+        # would rewrite the strip faster than anyone can read it, and what
+        # makes progress legible is the sequence of things done, not the
+        # sentences being formed.
+        self._call(self._app.note_brainy_planning, text)
 
     def render_plan(self, persona_name: str, text: str) -> None:
         if not text:
@@ -189,6 +197,8 @@ class TuiIO(I_OAdapter):
         # Through `_call` like everything else here: this runs on the
         # orchestrator's thread and touches widgets.
         self._call(self._app.note_flock_planning_progress, tool_name)
+        subject = arguments.get("path") or arguments.get("pattern") or arguments.get("command") or ""
+        self._call(self._app.note_brainy_planning, f"{tool_name} {subject}".strip())
 
     def write_error(self, persona_name: str, text: str) -> None:
         """A blocked tool call or a provider that fell over.

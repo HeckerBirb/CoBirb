@@ -3427,3 +3427,93 @@ async def test_planning_progress_is_silent_outside_a_flock():
         app.note_flock_planning_progress("write_file")
 
         assert app._planning_calls == 0
+
+
+# --------------------------------------------------------------------------- #
+# Brainy Birb's working-out, while the Flock tab is otherwise empty
+# --------------------------------------------------------------------------- #
+def _brainy_panel(app):
+    from textual.widgets import Static
+
+    return app.query_one("#brainy-status", Static)
+
+
+async def test_the_flock_tab_shows_what_brainy_birb_is_doing():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert not _brainy_panel(app).display
+
+        app._flock_stop = threading.Event()
+        app.charter_in_hand = False
+        app.note_brainy_planning("write_file src/export/types.py")
+
+        panel = _brainy_panel(app)
+        assert panel.display
+        assert "write_file src/export/types.py" in str(panel.render())
+
+
+async def test_the_tail_keeps_only_the_most_recent_lines():
+    """A status strip, not a second transcript."""
+    from cobirb.tui.panes import FlockPane
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._flock_stop = threading.Event()
+        app.charter_in_hand = False
+        for n in range(FlockPane.PLANNING_TAIL + 4):
+            app.note_brainy_planning(f"write_file file{n}.py")
+
+        text = str(_brainy_panel(app).render())
+        assert "file0.py" not in text
+        assert f"file{FlockPane.PLANNING_TAIL + 3}.py" in text
+
+
+async def test_waiting_on_the_model_says_so():
+    from cobirb.tui.panes import FlockPane
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._flock_stop = threading.Event()
+        app.charter_in_hand = False
+        app.note_brainy_planning("grep NotImplementedError")
+
+        app.note_brainy_waiting(True)
+        assert FlockPane.WAITING in str(_brainy_panel(app).render())
+
+        app.note_brainy_waiting(False)
+        assert FlockPane.WAITING not in str(_brainy_panel(app).render())
+
+
+async def test_the_section_goes_away_once_the_charter_arrives():
+    """From then on the worker panes are what the tab is for."""
+    from cobirb.flock.charter import Charter, WorkerBrief
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._flock_stop = threading.Event()
+        app.charter_in_hand = False
+        app.note_brainy_planning("write_file a.py")
+        assert _brainy_panel(app).display
+
+        await app.prepare_flock_panes(
+            Charter(objective="x", workers=[WorkerBrief(id="a", brief="b", writes=["a.py"])])
+        )
+
+        assert not _brainy_panel(app).display
+        assert app.charter_in_hand
+
+
+async def test_an_ordinary_turn_does_not_feed_the_flock_tab():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._flock_stop = None
+
+        app.note_brainy_planning("write_file a.py")
+        app.note_brainy_waiting(True)
+
+        assert not _brainy_panel(app).display

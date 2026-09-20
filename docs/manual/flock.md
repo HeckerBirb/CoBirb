@@ -47,6 +47,16 @@ orient can't work.
 
 The charter lives in the session. It is never written into your repository.
 
+### While it plans
+
+`/flock` moves you to the Flock tab, and the worker panes only exist once there is a charter — so
+until then the tab shows what Brainy Birb is doing: the last eight things it did, and
+`[ Waiting for LLM... ]` while it is blocked on a reply. It disappears the moment a charter is
+proposed and the panes take over.
+
+Building a skeleton for a large partition takes a while, and this is how you tell a run that is
+working from one that has stopped.
+
 ### When one doesn't take
 
 If a charter fails validation, Brainy Birb is told exactly what was wrong and asked to correct

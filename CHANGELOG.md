@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **The Flock tab shows Brainy Birb's working-out while it plans.** `/flock` moves you to that
+  tab, but its worker panes only exist once a charter does — the end of the longest phase of the
+  run — so until then it sat blank while everything happened on the tab you had just left. It now
+  carries the last eight things Brainy Birb did, and `[ Waiting for LLM... ]` while it is blocked
+  on a reply. The section disappears as soon as a charter is proposed and the panes take over.
+
 ## [0.15.5]
 
 - **Fixed: a charter Brainy Birb wrote into its reply left the run dead.** CoBirb reads tool calls

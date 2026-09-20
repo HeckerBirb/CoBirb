@@ -322,6 +322,14 @@ permission is a considered exception to §2's default-deny rather than an oversi
 gates *capability* (filesystem, network, subprocess) and this tool reaches none of it — it parses
 text and keeps the result in memory.
 
+**The Flock tab carries Brainy Birb's working-out while it plans** (`FlockPane.planning_note` /
+`planning_waiting` / `end_planning`, fed from `TuiIO`'s `render_tool_call`, `render_answer` and
+`spinner`). `/flock` switches to that tab, whose panes are built from `on_charter` — the *end* of
+the longest phase — so it was blank throughout. The last `PLANNING_TAIL` lines are kept and the
+section is torn down in `prepare_flock_panes`. **Streamed tokens deliberately do not feed it**:
+per-token updates rewrite the strip faster than it can be read, and what makes progress legible is
+the sequence of things done, not the sentences being formed.
+
 **A charter written into a reply is read from there** (`charter.recover_charter`, used by
 `_plan` only when the tool was not called). Tool calls are extracted from Ollama's native
 `tool_calls` field alone — there is deliberately no text fallback for tools in general — so a model
