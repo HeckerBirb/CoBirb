@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.21.1]
 
 - **Planning runs until the plan is finished.** A model's turn ends when it stops calling tools,
   which is the right rule for a conversation and the wrong one for a phase with an objective
