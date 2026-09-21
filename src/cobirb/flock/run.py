@@ -37,10 +37,9 @@ from .brainy import (
     DropWorkerTool,
     ProposeCharterTool,
     SealCharterTool,
-    charter_retry_prompt,
+    next_move_prompt,
     plan_prompt,
     round_summary,
-    seal_reminder_prompt,
 )
 from .charter import Charter, recover_charter
 from .preflight import missing_models
@@ -53,6 +52,20 @@ logger = logging.getLogger("cobirb")
 # skeleton means writing every interface, stub and failing test in the project
 # before anything is proposed.
 DEFAULT_PLAN_TURNS = 30
+
+# How many times planning may be asked for the next move before it gives up.
+# The first pass is the model's own; the rest are nudges computed from the
+# draft. Four is enough for the sequence a stalled plan actually needs —
+# declare, add, add, seal — and few enough that a model going nowhere does not
+# spend five full turn budgets doing it.
+MAX_PLAN_STEPS = 5
+
+# Consecutive nudges answered with prose and no tool call at all before
+# planning stops. A driven loop that cannot tell "working" from "talking"
+# replaces a halt with a loop, which is not an improvement: two is enough to
+# rule out a single stray narration and short enough that nobody watches a
+# model describe the same plan five times.
+MAX_SILENT_STEPS = 2
 
 
 @dataclass
@@ -111,6 +124,12 @@ class PlanResult:
     # not divide — and indistinguishable from it without this, because
     # `attempts` only counts attempts to *seal*.
     unsealed: int = 0
+    # True when the loop ran out of moves rather than reaching a conclusion:
+    # the plan was incomplete, the next move was named, and the model answered
+    # with prose and no tool call. Distinct from every field above, because it
+    # is the one case where CoBirb knows the model meant to divide the work and
+    # knows it never finished saying how.
+    stalled: bool = False
 
     @property
     def failed(self) -> bool:
@@ -226,47 +245,75 @@ def _without_project_verification(orchestrator: Orchestrator):
 def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> PlanResult:
     """Let Brainy Birb plan and scaffold, and take the charter it proposes.
 
-    One retry when the charter came back rejected. The planning turn ends
-    whenever the model stops calling tools, and a model that has just been
-    told its charter is invalid may well stop by declaring success instead of
-    correcting it — which is how a rejected charter used to become a finished
-    flock that never ran. Being asked once more, with the reason quoted back,
-    costs one turn and recovers the common case.
+    **A driven loop with a completion predicate, rather than one turn plus a
+    couple of ad-hoc retries.** A model's turn ends when it stops calling
+    tools, which is the right rule for a conversation and the wrong one here,
+    because planning has an objective completion test CoBirb can apply itself:
+    is there a sealed charter? A model that worked out its next move correctly
+    and then stopped to *say* it — "I will proceed by correcting the first
+    worker's ticket" — ended the phase on that sentence and never got to make
+    the move. The two recovery branches this replaces could not catch it: one
+    needed a seal attempt, which had not happened, and the other needed tickets
+    in the draft, which the one refused ``add_worker`` had kept out.
+
+    So each pass asks the completion predicate, and where the plan is
+    incomplete it computes the next move from the draft and asks for exactly
+    that (``next_move_prompt``). It converts "the model must sustain a long
+    agentic chain unaided" into "the model must make one correct move,
+    repeatedly, while CoBirb holds the state" — which is what a weaker model
+    can actually do.
+
+    Four ways out, all bounded:
+
+    - a sealed charter, which is the point;
+    - a model that called no tool at all and has no plan — prose *is* the
+      answer, and "this is a single person's job" is a legitimate one;
+    - a limit the desk itself enforces (attempts spent), or the turn budget;
+    - two nudges running answered with prose and no tool call, which is a
+      stall and is reported as one rather than looped over.
     """
     tool = install_charter_tool(orchestrator, cwd)
     tool.reset()
+    narration = ""
+    stalled = False
+    silent = 0
+    touched = False
     with _without_project_verification(orchestrator):
-        session = orchestrator.run(
-            plan_prompt(objective), system="", cwd=cwd, persona="Brainy Birb", max_turns=turns
-        )
-
-        # Not when the attempts are already spent. The retry is for a planning
-        # turn that ended early — a model that declared success over a rejected
-        # charter — and asking again after it has failed the tool's own limit
-        # buys another turn budget's worth of the identical failure.
-        if tool.charter is None and tool.attempts and not tool.exhausted:
+        prompt = plan_prompt(objective)
+        for _ in range(MAX_PLAN_STEPS):
             session = orchestrator.run(
-                charter_retry_prompt(tool.last_error),
-                system="", cwd=cwd, persona="Brainy Birb", max_turns=turns,
+                prompt, system="", cwd=cwd, persona="Brainy Birb", max_turns=turns
             )
-        elif tool.charter is None and tool.desk.draft.workers:
-            # A plan was built and never sealed. The likeliest new failure mode
-            # of the incremental route, because it has four steps where the
-            # document had one and the last of them is the easy one to drop —
-            # so it gets the same treatment a rejection gets: one nudge naming
-            # what is missing.
-            #
-            # Gated on *tickets*, not on the draft being non-empty. A draft
-            # holding only seams would otherwise be nudged to seal a plan that
-            # `seal` refuses for having no tickets at all: a whole turn budget
-            # spent reaching a refusal, reported afterwards as a rejected
-            # charter by a model that never proposed one.
-            session = orchestrator.run(
-                seal_reminder_prompt(tool.desk.draft),
-                system="", cwd=cwd, persona="Brainy Birb", max_turns=turns,
-            )
+            narration = session.summary or narration
+            called = bool(getattr(orchestrator, "last_run_tool_calls", None))
+            touched = touched or called
 
-    narration = session.summary or ""
+            if tool.charter is not None:
+                break
+            if not touched and tool.desk.draft.empty and not tool.attempts:
+                # Nothing was called, nothing was built, nothing was tried.
+                # This is a model that read the work and answered in prose, and
+                # the answer it is *supposed* to be able to give — "do not fan
+                # this out" — looks exactly like this. Nudging it would be
+                # arguing with a decision it was asked to make.
+                break
+            if tool.exhausted or bool(getattr(orchestrator, "turns_exhausted", False)):
+                # The desk has stopped inviting corrections, or the turn budget
+                # is gone. Both have their own outcome at the caller; another
+                # pass would buy a second budget's worth of the same failure.
+                break
+
+            silent = silent + 1 if not called else 0
+            if silent >= MAX_SILENT_STEPS:
+                stalled = True
+                break
+            prompt = next_move_prompt(tool.desk)
+        else:
+            # Out of moves with the plan still incomplete. Bounded by design:
+            # the point of the loop is to hold the state while the model makes
+            # one move at a time, not to keep asking forever.
+            stalled = tool.charter is None
+
     charter, recovered = tool.charter, False
     if charter is None:
         # Last resort: the model wrote the charter into its reply instead of
@@ -286,6 +333,7 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> P
         recovered=recovered,
         exhausted_turns=bool(getattr(orchestrator, "turns_exhausted", False)),
         unsealed=0 if charter is not None else len(tool.desk.draft.workers),
+        stalled=stalled and charter is None,
     )
 
 
@@ -421,6 +469,21 @@ def _drive(
             "budget allows, since every file written costs a turn.\n\n"
             "Whatever it wrote is still there. Run /flock again with a smaller slice of "
             "the work, or ask it to propose a charter for the skeleton it has already built."
+        )
+        return run
+    if plan.charter is None and plan.stalled:
+        # It meant to divide the work and never finished saying how. Reported
+        # as its own thing because the alternative is the narration — which at
+        # this point is a model describing the move it was about to make — sent
+        # to the user under a heading that reads as "decided not to fan out".
+        # That is the opposite of what happened, and it is the reason this
+        # whole loop exists.
+        run.stopped_at = "stalled"
+        run.report = (
+            "No flock ran. Brainy Birb stopped mid-plan: it was asked for the next move "
+            "and answered in prose without calling anything, so no charter was proposed.\n\n"
+            "Whatever skeleton it wrote is still there. Run /flock again — a smaller slice "
+            "of the work usually gets further — or ask it to finish the plan it started."
         )
         return run
     if plan.charter is None:

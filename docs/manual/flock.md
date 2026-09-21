@@ -164,6 +164,28 @@ starts generating. Two things keep that from costing you tickets:
 If your endpoint serves one request at a time, the real fix is on its side — `OLLAMA_NUM_PARALLEL` for
 Ollama. `/flock` offers to measure it before fanning out, and you can drop `concurrency` to 1.
 
+### Planning runs until the plan is finished
+
+A model's turn ends when it stops calling tools. That's the right rule for a conversation and the
+wrong one here, because planning has a test CoBirb can apply itself: **is there a sealed charter?**
+A model that works out its next move correctly and then stops to *say* it — "I'll proceed by
+correcting the first worker's ticket" — ends its turn on that sentence, having never made the move.
+
+So planning is a loop. After each pass, if there's no charter, CoBirb reads the draft and asks for
+exactly the move that's missing:
+
+| What the draft holds | What it's asked for |
+|---|---|
+| nothing | declare the seams, then add the tickets |
+| seams, no tickets | `add_worker`, once per ticket — with the last refusal quoted back |
+| tickets, no charter | `seal_charter` |
+| a rejected charter | the rejection quoted, and a corrected one |
+
+Refusals carry the same imperative. "That file is already written by ticket 'a'" now ends with
+*call `add_worker` again* — a diagnosis on its own invites a model to narrate the correction
+instead of sending it. Once the same refusal repeats three times the imperative is dropped, since
+by then it's the one thing proven not to work.
+
 ### When one doesn't take
 
 If a charter fails validation, Brainy Birb is told exactly what was wrong and asked to correct
@@ -172,12 +194,17 @@ attempts there were and why the last was rejected. Nothing started, nothing chan
 whatever skeleton got written.
 
 That is a different outcome from Brainy Birb deciding the work shouldn't be divided at all,
-which is a legitimate answer and is reported as one.
+which is a legitimate answer and is reported as one — and it's read off what actually happened,
+not off the reply: a model that called no tool at all and built no plan has answered in prose,
+and prose is the answer there.
 
-A third case: a plan that was built and never sealed. Brainy Birb added every ticket and stopped
-without calling `seal_charter`, so there's no charter to approve even though the plan is finished.
-It gets one nudge with the plan quoted back; if it still doesn't seal, you're told how many tickets
-were built rather than being told the work doesn't divide.
+A plan that was built and never sealed is its own outcome too. Brainy Birb added every ticket and
+stopped without calling `seal_charter`, so there's no charter to approve even though the plan is
+finished; you're told how many tickets were built rather than being told the work doesn't divide.
+
+And a plan that **stalled**: the next move was named and answered with prose and no tool call,
+twice running. The loop stops there rather than becoming a loop with a turn limit for a brake, and
+reports the stall honestly. Whatever skeleton was written is still on disk either way.
 
 ### Asking for it again
 
@@ -199,6 +226,10 @@ Its brief, and nothing else. No plan, no project instructions, no repo map, no m
 need-to-know boundary is the whole design: a worker that can see everyone else's work starts
 making decisions that aren't its own.
 
+The planning prompt asks for the partition to be cut fine enough to hold that boundary up —
+as many workers as the work supports, each ticket isolated well enough that its holder can't
+reconstruct the feature from it. Say a worker count in your objective and that wins instead.
+
 Checkpoints, secret redaction and your hooks still apply — those belong to every agent working
 in your tree.
 
@@ -219,6 +250,13 @@ tests  = ["tests/test_csv.py"]
 
 A ticket that owns one file, whose acceptance tests live in a file the skeleton owns and nobody
 writes, needs no `tests` — nothing of its scope gets restored over.
+
+A path under `tests` that isn't also under `writes` is **added to `writes`** when the ticket is
+built with `add_worker`, and the tool says it did. There's only one thing it can mean — a worker's
+tests are files it owns — and refusing it asked a model to re-send an entire ticket to move one
+string between two lists. The ownership check still runs over the adopted paths, so a ticket can't
+claim a neighbour's file by calling it a test. The whole-document `propose_charter` route still
+refuses it outright.
 
 ## `verify_command` and the skeleton
 

@@ -227,11 +227,26 @@ def test_a_ticket_with_no_acceptance_check_is_told_it_can_never_be_complete():
     assert "never be reported complete" in verdict
 
 
-def test_tests_have_to_be_files_the_ticket_writes():
+def test_a_test_file_missing_from_writes_is_adopted_rather_than_refused():
+    """There is one thing it can mean — a worker's tests are its own files — so
+    refusing it asked the model to re-send a whole ticket to move one string."""
     draft = PlanDraft()
 
-    with pytest.raises(CharterError, match="tests but does not write them"):
-        draft.add_worker("a", brief="go", writes=["a.py"], tests=["test_a.py"])
+    verdict = draft.add_worker("a", brief="go", writes=["a.py"], tests=["test_a.py"])
+
+    assert draft.worker("a").writes == ("a.py", "test_a.py")
+    assert "test_a.py" in verdict
+
+
+def test_an_adopted_test_file_is_still_refused_when_someone_else_owns_it():
+    """Adoption is not an exemption: the adopted paths go through the ownership
+    check with the rest, or a ticket could claim a neighbour's file by calling
+    it a test."""
+    draft = PlanDraft()
+    draft.add_worker("a", brief="go", writes=["a.py", "test_shared.py"])
+
+    with pytest.raises(CharterError, match="already written by ticket 'a'"):
+        draft.add_worker("b", brief="go", writes=["b.py"], tests=["test_shared.py"])
 
 
 def test_a_ticket_that_writes_nothing_is_refused():

@@ -898,10 +898,11 @@ def test_the_projects_verify_command_is_put_back_after_planning(monkeypatch, tmp
     assert orchestrator.verify is settings
 
 
-def test_a_draft_of_only_seams_is_not_nudged_to_seal(monkeypatch, tmp_path):
-    """`seal` refuses a plan with no tickets, so nudging one costs a whole turn
-    budget to reach a refusal — then reports a rejected charter for a model that
-    never proposed one."""
+def test_a_draft_of_only_seams_is_asked_for_tickets_not_for_a_seal(monkeypatch, tmp_path):
+    """`seal` refuses a plan with no tickets, so nudging one to seal costs a
+    whole turn budget to reach a refusal. The move it actually needs is
+    `add_worker` — and a run that stops here stopped mid-plan, which is a
+    different thing from deciding the work does not divide."""
     from cobirb.flock.brainy import DECLARE_SEAM
 
     _skeleton(tmp_path)
@@ -924,4 +925,134 @@ def test_a_draft_of_only_seams_is_not_nudged_to_seal(monkeypatch, tmp_path):
     )
 
     assert not any("sealed" in p for p in prompts)
-    assert run.stopped_at == "planning"
+    assert any("add_worker" in p for p in prompts)
+    assert run.stopped_at == "stalled"
+
+
+# --------------------------------------------------------------------------- #
+# The driven planning loop
+# --------------------------------------------------------------------------- #
+def test_a_plan_that_stopped_to_narrate_its_next_move_is_driven_to_a_charter(
+    monkeypatch, tmp_path
+):
+    """The run this loop was written for.
+
+    Two seams declared, one `add_worker` refused, and then the model stopped to
+    *say* it would correct the ticket — which ended the phase on the sentence,
+    before it could make the move it had just worked out. Neither old recovery
+    branch fired: nothing had been sealed, so there was no rejection to quote,
+    and the refused ticket meant there were no tickets to be reminded about.
+    """
+    from cobirb.flock.brainy import ADD_WORKER, DECLARE_SEAM, SEAL_CHARTER
+
+    _skeleton(tmp_path)
+    _honest_workers(monkeypatch, tmp_path)
+    calls = [
+        (DECLARE_SEAM, {"at": "types.py", "kind": "formal", "what": "the vocabulary"}),
+        # Refused: a formal seam is nobody's to write.
+        (ADD_WORKER, {"id": "a", "brief": "go", "writes": ["a.py", "types.py"]}),
+        None,  # "I will proceed by correcting the first worker's ticket." — and stop.
+        (ADD_WORKER, {"id": "a", "brief": "go", "writes": ["a.py"]}),
+        (ADD_WORKER, {"id": "b", "brief": "go", "writes": ["b.py"]}),
+        (SEAL_CHARTER, {"objective": "two things"}),
+    ]
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(calls))
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert run.charter is not None
+    assert [w.id for w in run.charter.workers] == ["a", "b"]
+    assert run.stopped_at == ""
+
+
+def test_the_nudge_quotes_the_refusal_that_stopped_the_plan(monkeypatch, tmp_path):
+    """A model that lost the thread re-sends what it already sent. The refusal
+    is the one thing that tells it which move to make differently."""
+    from cobirb.flock.brainy import ADD_WORKER, DECLARE_SEAM
+
+    _skeleton(tmp_path)
+    calls = [
+        (DECLARE_SEAM, {"at": "types.py", "kind": "formal", "what": "the vocabulary"}),
+        (ADD_WORKER, {"id": "a", "brief": "go", "writes": ["types.py"]}),
+        None,
+        None,
+        None,
+    ]
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(calls))
+    prompts = []
+    original = orchestrator.run
+    monkeypatch.setattr(
+        orchestrator, "run",
+        lambda prompt, *a, **k: (prompts.append(prompt), original(prompt, *a, **k))[1],
+    )
+
+    run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    nudge = next(p for p in prompts if "was refused" in p)
+    assert "formal seam" in nudge
+    assert "add_worker" in nudge
+
+
+def test_planning_stops_rather_than_looping_on_a_model_that_only_narrates(
+    monkeypatch, tmp_path
+):
+    """A driven loop that cannot tell working from talking replaces a halt with
+    a loop, which is not an improvement."""
+    from cobirb.flock.brainy import DECLARE_SEAM
+    from cobirb.flock.run import MAX_PLAN_STEPS
+
+    _skeleton(tmp_path)
+    calls = [
+        (DECLARE_SEAM, {"at": "types.py", "kind": "formal", "what": "the vocabulary"}),
+    ] + [None] * 20
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(calls))
+    runs = []
+    original = orchestrator.run
+    monkeypatch.setattr(
+        orchestrator, "run",
+        lambda prompt, *a, **k: (runs.append(prompt), original(prompt, *a, **k))[1],
+    )
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert run.stopped_at == "stalled"
+    assert "stopped mid-plan" in run.report
+    assert len(runs) <= MAX_PLAN_STEPS
+
+
+def test_a_refused_move_names_the_call_to_make_again(monkeypatch, tmp_path):
+    """A diagnosis without an instruction invites narration, and narration ends
+    the phase."""
+    from cobirb.flock.brainy import ADD_WORKER, AddWorkerTool, CharterDesk
+
+    desk = CharterDesk()
+    desk.draft.declare_seam("types.py", "formal", "the vocabulary")
+
+    result = AddWorkerTool(desk).execute({"id": "a", "brief": "go", "writes": ["types.py"]})
+
+    assert not result.ok
+    assert f"call `{ADD_WORKER}` again" in result.content
+
+
+def test_a_refusal_that_keeps_repeating_stops_asking_for_the_same_call():
+    """The imperative is the one thing that has to stop once it is proven not
+    to work."""
+    from cobirb.flock.brainy import MAX_REPEATED_REFUSALS, AddWorkerTool, CharterDesk
+
+    desk = CharterDesk()
+    desk.draft.declare_seam("types.py", "formal", "the vocabulary")
+    tool = AddWorkerTool(desk)
+    for _ in range(MAX_REPEATED_REFUSALS):
+        result = tool.execute({"id": "a", "brief": "go", "writes": ["types.py"]})
+
+    assert "again now" not in result.content
+    assert "Do something different" in result.content

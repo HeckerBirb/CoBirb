@@ -166,6 +166,9 @@ class TuiIO(I_OAdapter):
         if not text:
             return
         self._write(render.build_assistant_message(text))
+        # What the transcript now ends with, so that a flock report which is
+        # this same text is not written into it a second time.
+        self._call(self._app.note_answer, text)
         # Prose Brainy Birb wrote on the way to a charter, for the Flock tab's
         # tail. Streamed tokens deliberately do not feed it: a per-token feed
         # would rewrite the strip faster than anyone can read it, and what

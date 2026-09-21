@@ -195,6 +195,10 @@ class CoBirbApp(App[None]):
         # progress line, and whether planning has finished.
         self._planning_calls = 0
         self.charter_in_hand = False
+        # The last reply written into the transcript, so that a report which is
+        # that same reply is not written a second time — see
+        # `_on_flock_finished`.
+        self._last_answer = ""
         # A charter `propose_charter` accepted outside a flock run, waiting
         # for the turn that proposed it to finish so it can be put to the user.
         # See note_proposed_charter.
@@ -1012,6 +1016,18 @@ class CoBirbApp(App[None]):
         if tool is not None:
             tool.reset()
 
+    def note_answer(self, text: str) -> None:
+        """Remember the reply just written into the transcript.
+
+        A flock's ``run.report`` is often a reply the transcript already has:
+        for a planning phase that stopped, the report *is* the narration, and
+        for a round that finished it is the verdict turn's own answer. Both
+        reach the transcript once through ``render_answer`` and once more from
+        ``_on_flock_finished``, and nothing dedupes two copies of the same text
+        arriving by two routes. This is what lets the second one be skipped.
+        """
+        self._last_answer = text or ""
+
     def note_brainy_planning(self, line: str) -> None:
         """One line of Brainy Birb's working-out, for the Flock tab.
 
@@ -1123,11 +1139,22 @@ class CoBirbApp(App[None]):
                 f"{done} of {len(run.outcome.reports)} ticket(s) complete.",
                 "bold green" if run.outcome.all_done else "bold yellow",
             )
-        if run is not None and run.report:
+        if run is not None and run.report and run.report.strip() != self._last_answer.strip():
+            # Skipped when it is the reply the transcript already ends with.
+            # A stopped planning phase reports the narration, and a finished
+            # round reports the verdict turn's answer; both were written here
+            # by `render_answer` on the way past, and printing them again is
+            # the same text twice by two routes.
             self.write_transcript(render.build_assistant_message(run.report))
         prompt_input = self.query_one("#prompt-input", PromptInput)
         prompt_input.disabled = False
-        prompt_input.focus()
+        # Only when the user is on the tab the prompt lives in. `PromptInput`
+        # sits inside the Current pane, so focusing it makes Textual activate
+        # that pane — which yanked the user off the Flock tab at the exact
+        # moment it had the most worth looking at, on every run, including the
+        # ones that worked.
+        if self.query_one(TabbedContent).active == "current":
+            prompt_input.focus()
 
     @work(thread=True, exclusive=True, group="plugins")
     def _describe_plugins_worker(self) -> None:

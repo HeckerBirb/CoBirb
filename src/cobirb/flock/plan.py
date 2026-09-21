@@ -207,13 +207,18 @@ class PlanDraft:
         test_paths = _norm_all(tests, f"ticket {worker_id!r} tests")
         need_ids = self._needs(needs, worker_id)
 
-        stray = [path for path in test_paths if path not in write_paths]
-        if stray:
-            raise CharterError(
-                f"ticket {worker_id!r} lists {', '.join(stray)} under tests but does not "
-                "write them — a worker's acceptance tests are its own files, so that it "
-                "can add to them as it works. Add them to writes, or drop them from tests."
-            )
+        # A test file the ticket did not also claim to write. **Adopted rather
+        # than refused**, because there is exactly one thing it can mean: a
+        # worker's acceptance tests are its own files — it has to be able to
+        # add to them as it works — so a path under `tests` is a path this
+        # ticket writes, and the model simply did not say so twice. Refusing it
+        # asked a model to re-send a whole ticket to move one string between two
+        # lists, and a model that narrates the correction instead of sending it
+        # loses the round. Nothing is given away by adopting: the adopted paths
+        # go through `_check_writes_are_free` with the rest, so a genuine
+        # collision with another ticket or a formal seam is still refused below.
+        adopted = tuple(path for path in test_paths if path not in write_paths)
+        write_paths = write_paths + adopted
 
         self._check_writes_are_free(worker_id, write_paths)
         self._check_reads_are_still(worker_id, read_paths, need_ids)
@@ -225,6 +230,14 @@ class PlanDraft:
             )
         )
         note = f"Ticket {worker_id!r} added: writes {', '.join(write_paths)}."
+        if adopted:
+            # Said, not silent. The model's next move may well be a second
+            # ticket claiming one of these paths, and it needs to know this
+            # ticket now owns them.
+            note += (
+                f" {', '.join(adopted)} was listed under tests but not writes, so it has "
+                "been added to writes — a worker's acceptance tests are files it owns."
+            )
         if not (accept or "").strip():
             # Said rather than refused: a ticket with no check is legal and
             # occasionally right, but it can never be reported as complete —

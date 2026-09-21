@@ -469,6 +469,55 @@ async def test_the_finished_report_re_enables_the_prompt():
         assert app._flock_stop is None
 
 
+async def test_a_finished_flock_leaves_you_on_the_tab_you_were_watching():
+    """`PromptInput` lives inside the Current pane, so focusing it makes
+    Textual activate that pane — which used to yank the user off the Flock tab
+    on every run, including the successful ones it is most worth reading."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await _flock_tab(pilot, app)
+        app._flock_stop = threading.Event()
+
+        app._on_flock_finished(
+            FlockRun(charter=_CHARTER, outcome=FlockOutcome(charter=_CHARTER), report="done")
+        )
+        await pilot.pause()
+
+        assert app.query_one(TabbedContent).active == "flock"
+
+
+async def test_a_report_the_transcript_already_holds_is_not_written_twice():
+    """A stopped planning phase reports the model's own narration, which
+    `render_answer` has already put in the transcript on the way past."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await _flock_tab(pilot, app)
+        written = []
+        app.write_transcript = lambda renderable: written.append(renderable)
+        app.note_answer("Brainy Birb's account of the round.")
+
+        app._on_flock_finished(
+            FlockRun(report="Brainy Birb's account of the round.", stopped_at="planning")
+        )
+        await pilot.pause()
+
+        assert written == []
+
+
+async def test_a_report_that_is_not_the_last_reply_is_still_written():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await _flock_tab(pilot, app)
+        written = []
+        app.write_transcript = lambda renderable: written.append(renderable)
+        app.note_answer("Something else entirely.")
+
+        app._on_flock_finished(FlockRun(report="No flock ran.", stopped_at="stalled"))
+        await pilot.pause()
+
+        assert len(written) == 1
+
+
 async def _settle(pilot, predicate, tries: int = 60) -> None:
     for _ in range(tries):
         if predicate():

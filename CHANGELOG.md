@@ -4,6 +4,37 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Planning runs until the plan is finished.** A model's turn ends when it stops calling tools,
+  which is the right rule for a conversation and the wrong one for a phase with an objective
+  completion test: is there a sealed charter? A Brainy Birb that worked out its next move and
+  stopped to *say* it — "I will proceed by correcting the first worker's ticket" — ended the phase
+  on that sentence without making the move, and the run was reported as "did not propose a charter",
+  the opposite of what it had concluded. Planning is now a loop: after each pass, if there is no
+  charter, CoBirb reads the draft and asks for exactly the move that is missing — declare the seams,
+  add the tickets, seal, or correct the rejection it quotes back. Bounded by attempts and the turn
+  budget, and a model that called no tool at all and built nothing still gets the answer it always
+  had, since "do not fan this out" is a legitimate one.
+- **A refusal ends with the call to make.** "That file is already written by ticket 'a'" now closes
+  with *call `add_worker` again* — a diagnosis on its own invites a weak model to narrate the
+  correction instead of sending it, and the narration ends the phase. Dropped once the same refusal
+  has repeated, where "send it again" is the one thing proven not to work.
+- **A test file missing from `writes` is adopted rather than refused.** A worker's acceptance tests
+  are its own files, so a path under `tests` is a path that ticket writes; refusing it asked for a
+  whole ticket to be re-sent to move one string between two lists. The ownership check still runs
+  over the adopted paths, so a ticket cannot claim a neighbour's file by calling it a test.
+- **A stalled plan is reported as a stall.** Two nudges running answered with prose and no tool call
+  stops planning and says so, rather than replacing a halt with a loop.
+- **A finished flock no longer prints its report twice or steals the tab.** The report is frequently
+  the reply the transcript already holds — for a stopped planning phase it *is* the narration, for a
+  finished round it is the verdict — and it was written again on the way out. The prompt box is also
+  focused only when you are already on the Current tab, instead of yanking you off the Flock tab at
+  the moment it has the most worth looking at.
+- **Brainy Birb is asked to cut the partition fine enough to hold the need-to-know boundary up** —
+  as many Worker Birbs as the work supports, each ticket isolated well enough that its holder cannot
+  reconstruct the feature from it. A worker count named in your objective overrides it.
+
 ## [0.21.0]
 
 - **Two model timeouts instead of one, and both configurable.** `connect_timeout` (10s) is how long

@@ -409,7 +409,9 @@ door: `attempts` counts attempts to *seal*, so a model that called `add_worker` 
 stopped has `attempts == 0` and `charter is None` — indistinguishable from "this work does not
 divide", which is what the user was told while a finished plan sat in the session unrun. The
 nudge quotes the draft back, because a model told only "call `seal_charter`" starts re-adding
-tickets and collides with itself. An empty draft is still the legitimate decision it always was.
+tickets and collides with itself. An empty draft with no tool call behind it is still the
+legitimate decision it always was; an empty draft the model *worked* at is a stall, and is
+reported as one.
 
 **A Worker Birb runs its own acceptance check**, and `shell` is granted for the *programs* that
 check names — `charter.policy_for` calls `Policy.allow_command(worker.accept, any_arguments=True)`.
@@ -517,9 +519,38 @@ attempt was invalid" (`stopped_at="charter"`, reported with the reason) from "de
 does not divide" (`stopped_at="planning"`, a legitimate answer). Conflated, the first was reported
 through the model's own narration — which, in the run that prompted this, claimed the charter had
 been "finalized and submitted successfully" while nothing had run and no approval dialog had
-appeared. `_plan` also retries once with the rejection quoted back (`charter_retry_prompt`),
-because a model told its charter is invalid will otherwise often end the turn by declaring
-success.
+appeared. The rejection is quoted back on the next pass of the planning loop
+(`charter_retry_prompt`), because a model told its charter is invalid will otherwise often end the
+turn by declaring success.
+
+**Planning is a driven loop with a completion predicate, not one turn plus ad-hoc retries**
+(`run._plan`, `MAX_PLAN_STEPS = 5`). A turn ends when the model stops calling tools, which is the
+right rule for a conversation and the wrong one here: planning has an objective completion test —
+is there a sealed charter? — so a model that worked out its next move and stopped to *say* it
+("I will proceed by correcting the first worker's ticket") ended the phase on that sentence
+without making the move. The two branches this replaced could not catch it: retry-on-rejection
+needed a seal attempt, which had not happened, and the seal nudge needed `draft.workers`, which
+the one refused `add_worker` had kept empty — so it fell through to "did not propose a charter",
+which reads as the opposite of what the model had concluded. Each pass now asks the predicate and,
+where the plan is incomplete, computes the next move from the draft (`brainy.next_move_prompt`:
+rejected seal → quote it; tickets → seal; no tickets → `add_worker`, with the last refusal quoted).
+Four bounded exits: a charter; a model that called no tool at all and built nothing (prose *is* the
+answer, and "do not fan this out" is a legitimate one); `tool.exhausted` or the turn budget; and
+`MAX_SILENT_STEPS = 2` nudges running answered with no tool call, which is `stopped_at="stalled"`
+— a halt replaced by a loop would not have been an improvement.
+
+**A refusal ends with the call to make.** `CharterDesk.refuse(message, retry=...)` appends "call
+`<tool>` again now"; `_DeskTool._refuse` passes its own name. A diagnosis without an instruction —
+"Add them to writes, or drop them from tests" — invites a weak model to narrate the correction
+rather than send it, and the narration ends the phase. The imperative is dropped at
+`MAX_REPEATED_REFUSALS`, where "send it again" is precisely what has been proven not to work.
+
+**`tests ⊄ writes` is adopted, not refused** (`plan.PlanDraft.add_worker`). A worker's acceptance
+tests are its own files, so a path under `tests` is a path the ticket writes and the model simply
+did not say so twice; refusing it asked for a whole ticket to be re-sent to move one string. The
+adopted paths go through `_check_writes_are_free` with the rest, so a genuine collision is still
+refused, and the verdict says what was adopted because the next ticket may try to claim it. The
+whole-document route (`charter._worker`) still refuses, which is the one asymmetry here.
 
 **Stage 3 is the only place a charter is approved**, including for one that arrived outside a
 planning turn. `_start_flock_with` deliberately does not ask before handing a charter to
@@ -610,6 +641,14 @@ scopes, are reviewed, and Brainy Birb reports.
   an answer. It is also not a fair question to put to a person, who would have to hold the whole
   partition in their head at the moment a dialog appears; CoBirb has the charter and can check.
   Headless has nobody to ask and still refuses everything outside the charter.
+- **A finished flock does not steal the tab or print its report twice** (`_on_flock_finished`).
+  `PromptInput` lives inside the Current `TabPane`, so focusing it makes Textual activate that
+  pane — which yanked the user off the Flock tab on *every* run end, including the successful ones
+  the tab is most worth reading; it is now focused only when Current is already active. And
+  `run.report` is frequently a reply the transcript already holds — for a stopped planning phase it
+  *is* the narration, for a finished round it is the verdict turn's own answer, both written by
+  `io_bridge.render_answer` on the way past — so `app.note_answer` records the last reply and the
+  report is skipped when it matches.
 - Workers run concurrently, then join, **then** review one at a time (review reverts a stub
   temporarily, which would break a colleague's check). A failed worker never stops the others.
   Stopping is checked between workers **and between reviews**; a model call in flight cannot be

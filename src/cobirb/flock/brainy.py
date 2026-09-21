@@ -362,20 +362,39 @@ class CharterDesk:
             "It now goes to the user for approval."
         ), True
 
-    def refuse(self, message: str) -> str:
-        """A move-level refusal, with a stop attached once it starts repeating.
+    @property
+    def last_refusal(self) -> str:
+        """The last move-level refusal, for a nudge that has to quote it."""
+        return self._last_refusal
+
+    def refuse(self, message: str, retry: str = "") -> str:
+        """A move-level refusal, with the call to make next attached.
 
         The refusals from ``PlanDraft`` are already specific — one path, one
-        owner, what to do about it — so this adds nothing to a first or second
-        one. What it adds on the third is the only thing the model has not
-        already been told: that repeating this is not working.
+        owner, what to do about it — but **a diagnosis is not an instruction**,
+        and that gap is where a weak model stops. "Add them to writes, or drop
+        them from tests" describes the fix perfectly and never says to send the
+        call again, so the obedient answer is to narrate the correction; the
+        planning turn ends on the sentence, and the round ends with it. So
+        ``retry`` names the tool to call and the refusal closes with the
+        imperative.
+
+        Once the same refusal starts repeating, the imperative is exactly what
+        has to stop: telling a model to send it again is the one thing already
+        proven not to work, so at the cap it is replaced by a stop.
         """
         if message == self._last_refusal:
             self._repeats += 1
         else:
             self._last_refusal, self._repeats = message, 1
         if self._repeats < MAX_REPEATED_REFUSALS:
-            return message
+            if not retry:
+                return message
+            return (
+                f"{message}\n\nNothing has been added to the plan. Fix that one thing and "
+                f"call `{retry}` again now — correcting it in your reply changes nothing, "
+                "because the plan only holds what the tools were told."
+            )
         return (
             f"{message}\n\nThat is the {self._repeats}th time you have sent this same move "
             "and been refused it, so sending it again will not work either. Do something "
@@ -494,7 +513,12 @@ class _DeskTool(Tool):
         return self.NAME
 
     def _refuse(self, exc: CharterError) -> ToolResult:
-        return ToolResult(ok=False, content=self.desk.refuse(str(exc)), error="bad_move")
+        # ``retry`` is this tool's own name: a refused move is corrected by
+        # making the same move again, and naming it is what turns the
+        # diagnosis into something to do.
+        return ToolResult(
+            ok=False, content=self.desk.refuse(str(exc), retry=self.NAME), error="bad_move"
+        )
 
 
 class DeclareSeamTool(_DeskTool):
@@ -591,7 +615,9 @@ class AddWorkerTool(_DeskTool):
                 "tests": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Which of `writes` hold the acceptance tests.",
+                    "description": "Which of `writes` hold the acceptance tests. A path "
+                    "named here that is missing from `writes` is added to it for you — a "
+                    "worker's tests are files it owns.",
                 },
                 "needs": {
                     "type": "array",
@@ -684,7 +710,11 @@ class SealCharterTool(_DeskTool):
             )
         except (CharterError, TypeError, ValueError) as exc:
             self.desk.last_error = str(exc)
-            return ToolResult(ok=False, content=self.desk.refuse(str(exc)), error="bad_charter")
+            return ToolResult(
+                ok=False,
+                content=self.desk.refuse(str(exc), retry=SEAL_CHARTER),
+                error="bad_charter",
+            )
         content, disjoint = self.desk.accept(charter)
         return ToolResult(ok=True, content=content, meta={"disjoint": disjoint})
 
@@ -801,9 +831,26 @@ class ProposeCharterTool(_DeskTool):
         return ToolResult(ok=True, content=content, meta={"disjoint": disjoint})
 
 
+# How finely to cut, said after the objective rather than inside
+# ``BRAINY_RULES`` so that "previously specified" covers everything above it:
+# the rules and the user's own objective both override it. The isolation this
+# asks for is a security property, not a performance one — a worker whose brief
+# lets it infer the epic knows more than its job requires, which is the same
+# need-to-know boundary section 4 draws, applied to the size of the pieces
+# rather than the wording of the briefs.
+NEED_TO_KNOW_DIRECTIVE = """\
+Unless previously specified, use as many Worker Birbs as appropriate for this \
+assignment so that each fragmentation of the plan is isolated so well from the \
+context that it is impossible for each individual Worker Birb to correctly \
+guess the full picture."""
+
+
 def plan_prompt(objective: str) -> str:
     """The whole prompt for the planning turn."""
-    return f"{BRAINY_RULES}\n\n--- The work ---\n\n{objective.strip()}"
+    return (
+        f"{BRAINY_RULES}\n\n--- The work ---\n\n{objective.strip()}"
+        f"\n\n--- How to divide it ---\n\n{NEED_TO_KNOW_DIRECTIVE}"
+    )
 
 
 def charter_retry_prompt(last_error: str) -> str:
@@ -858,6 +905,83 @@ def seal_reminder_prompt(draft: PlanDraft) -> str:
         "all, say so plainly instead and do not seal anything. That is a legitimate answer, "
         "and a different one from this."
     )
+
+
+def no_tickets_prompt(desk: "CharterDesk") -> str:
+    """The nudge for a plan with no tickets in it yet.
+
+    The state the old recovery branches had no answer for. ``_plan`` retried a
+    *rejected* charter and nudged an *unsealed* draft, and a draft holding
+    seams and nothing else is neither: nothing was ever sealed, so there was no
+    rejection to quote, and there were no tickets to be reminded about. It fell
+    through to "did not propose a charter", which the user reads as "decided
+    the work does not divide" — the opposite of what a model that has just
+    declared two seams has concluded.
+
+    The last refusal is quoted when there is one, because the commonest way to
+    arrive here is an ``add_worker`` that was refused and never re-sent.
+    """
+    draft = desk.draft
+    if draft.seams:
+        state = (
+            f"The plan holds {draft.describe()}. The seams are recorded; not one ticket is."
+        )
+        move = (
+            "Call `add_worker` now — once for each ticket, with its id, its brief and every "
+            "file it may write. The seams you declared stay as they are; do not declare them "
+            "again. When every ticket is in, call `seal_charter`."
+        )
+    else:
+        state = "The plan is empty: no seams and no tickets."
+        move = (
+            "Call `declare_seam` once for each agreement the workers meet at, then "
+            "`add_worker` once for each ticket, then `seal_charter`."
+        )
+    lines = [
+        "You have NOT proposed a charter, and no Flock has been created. " + state,
+        "",
+    ]
+    if desk.last_refusal:
+        lines += [
+            "Your last planning move was refused:",
+            "",
+            f"    {desk.last_refusal}",
+            "",
+            "Correct exactly that and send the call again — a correction you only describe "
+            "changes nothing, because the plan holds what the tools were told and nothing "
+            "else.",
+            "",
+        ]
+    lines += [
+        move,
+        "",
+        "If you have concluded that this work should not be divided between workers at all, "
+        "say so plainly instead and call nothing. That is a legitimate answer, and a "
+        "different one from this.",
+    ]
+    return "\n".join(lines)
+
+
+def next_move_prompt(desk: "CharterDesk") -> str:
+    """The one move to make next, read off the draft.
+
+    **The planner's completion test is objective** — there is a sealed charter
+    or there is not — so the phase does not have to end where the model's
+    sentence does. This is the other half of that: given an incomplete plan,
+    exactly what is missing is a question the draft answers, so CoBirb holds
+    the state and names the next call rather than hoping the model sustains a
+    long chain unaided.
+
+    Three states, in the order they have to be tested. A rejected seal is
+    quoted back first because it is the most specific thing known. Tickets with
+    no charter means the work is done and the last call was missed. No tickets
+    means the plan has not been built yet — the state that used to end a run.
+    """
+    if desk.attempts and desk.last_error:
+        return charter_retry_prompt(desk.last_error)
+    if desk.draft.workers:
+        return seal_reminder_prompt(desk.draft)
+    return no_tickets_prompt(desk)
 
 
 def round_summary(outcome: FlockOutcome) -> str:
