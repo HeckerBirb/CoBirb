@@ -297,6 +297,9 @@ class Policy:
         # the agent the user talks to, never for a Worker Birb, whose shell is
         # the charter's to grant.
         self.sandbox_auto = False
+        # Set while auto-pilot is on (Orchestrator.enable_autopilot): reads and
+        # writes inside this directory are allowed without asking.
+        self.autopilot_root: str | None = None
         self.audit = audit or AuditLog()
 
     def is_denied(self, tool_name: str) -> bool:
@@ -327,6 +330,11 @@ class Policy:
 
         if tool_name in self._allowed:
             return True
+
+        if self.autopilot_root and tool_name in READ_TOOLS | WRITE_TOOLS and arguments is not None:
+            target = _target_path(tool_name, arguments)
+            if target is not None and _within(self._resolve(target), self.autopilot_root):
+                return True
 
         if tool_name in READ_TOOLS and arguments is not None:
             return self._scoped_allowed(tool_name, arguments, self._allowed_read_dirs)
@@ -382,9 +390,25 @@ class Policy:
         if target is None:
             return None
         resolved = self._resolve(target)
+        project = self._project_root()
+        if tool_name in READ_TOOLS and project and _within(resolved, project):
+            # One question per project, not one per directory (decision D5):
+            # agreeing that CoBirb may read *this project* is the decision the
+            # user is actually making, and being asked again for every
+            # subdirectory taught people to stop reading the prompt. Writes keep
+            # their narrower scope — rewriting is a bigger thing than reading.
+            return project
         if tool_name in WRITE_TOOLS or tool_name == "read_file":
             return os.path.dirname(resolved) or os.sep
         return resolved
+
+    def _project_root(self) -> str | None:
+        """The working directory as the project, unless it is too broad to be
+        one — the filesystem root or the home directory, where "read the
+        project" would mean "read everything"."""
+        root = self._resolve(self.cwd)
+        broad = {os.sep, os.path.realpath(os.path.expanduser("~"))}
+        return None if root in broad else root
 
     def allow_read_dir(self, directory: str) -> None:
         """Approve reading ``directory`` and everything beneath it."""

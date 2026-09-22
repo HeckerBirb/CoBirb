@@ -22,6 +22,7 @@ different command with a different name, and a much larger promise.
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -341,6 +342,9 @@ def _check_sandbox(report: Report, config: Config) -> None:
     elif not box.active:
         report.add("sandbox", WARN, "bubblewrap is not installed or cannot create namespaces here, so "
                    "shell commands run unsandboxed (and are always asked about)")
+    elif box.mode == sandbox.MODE_AUTO and not box.explicit and not shutil.which("git"):
+        report.add("sandbox", OK, "bubblewrap, asks first — commands would run without asking, "
+                   "but git is missing so their changes could not be undone")
     else:
         report.add("sandbox", OK, box.describe())
 

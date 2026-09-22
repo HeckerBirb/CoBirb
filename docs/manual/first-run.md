@@ -34,7 +34,7 @@ Allow read_file
 ```
 
 - **y** — this one call.
-- **a** — that directory, for the rest of the session.
+- **a** — for a read, the whole project, for the rest of the session; for a write, that directory.
 - **n** or **escape** — no.
 
 Nothing is pre-approved. See [Permissions](permissions.md).

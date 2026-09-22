@@ -3729,3 +3729,37 @@ async def test_a_configured_model_is_never_offered_for_saving(monkeypatch):
         await _until(pilot, lambda: app.model_name == "llama3.1")
         await pilot.pause()
         assert not isinstance(app.screen, ConfirmModal)
+
+
+async def test_autopilot_says_why_it_cannot_start_and_marks_the_status_bar_when_it_does(monkeypatch):
+    class _Pilotable(_StubOrchestrator):
+        autopilot = False
+        problem = "the shell sandbox is not active here"
+
+        def enable_autopilot(self):
+            if self.problem:
+                return self.problem
+            self.autopilot = True
+            return ""
+
+        def disable_autopilot(self):
+            self.autopilot = False
+
+    orchestrator = _Pilotable()
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/autopilot on")
+        await pilot.pause()
+        assert "cannot start: the shell sandbox is not active" in _transcript_text(app)
+        assert "AUTOPILOT" not in str(app.query_one(StatusBar).render())
+
+        orchestrator.problem = ""
+        await _submit(pilot, app, "/autopilot on")
+        await pilot.pause()
+        assert "AUTOPILOT" in str(app.query_one(StatusBar).render())
+
+        await _submit(pilot, app, "/autopilot off")
+        await pilot.pause()
+        assert "AUTOPILOT" not in str(app.query_one(StatusBar).render())

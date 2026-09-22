@@ -71,7 +71,9 @@ def test_parse_allow_tools_accepts_a_list():
 def test_config_allow_tools_permits_a_tool_without_a_prompt(tmp_path):
     """The user's own standing rules are the escape hatch from a policy that
     otherwise permits nothing — a tool named in config must run unprompted."""
-    write_config(tmp_path, json.loads('{"allow_tools": ["read_file", "shell(git)"]}'))
+    # Sandbox off: this is about the allow rules, and a contained command
+    # running without asking is a different grant (see test_sandbox.py).
+    write_config(tmp_path, json.loads('{"allow_tools": ["read_file", "shell(git)"], "sandbox": "off"}'))
     orchestrator = wiring.build_orchestrator(str(tmp_path), {})
 
     assert orchestrator.policy.is_allowed("read_file", {"path": "anything.txt"})
@@ -114,7 +116,9 @@ def test_build_orchestrator_applies_allow_tool_overrides_to_the_policy(tmp_path)
     """The --allow-tool CLI flag has to actually reach the orchestrator's
     live Policy, not just get parsed — this is the glue between
     parse_allow_tools() and Policy.allow() that nothing else exercises."""
-    # A tool the default policy would not otherwise permit.
+    # A tool the default policy would not otherwise permit. Sandbox off: this
+    # is about --allow-tool, not about contained commands running unasked.
+    write_config(tmp_path, {"sandbox": "off"})
     allow_overrides = {"shell": "curl"}
 
     orchestrator = wiring.build_orchestrator(str(tmp_path), allow_overrides)

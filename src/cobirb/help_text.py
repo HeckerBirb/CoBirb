@@ -82,6 +82,8 @@ INTERACTIVE COMMANDS
   /clear             Start over from here: clears the screen and the
                      model's context. Nothing is deleted — the turns
                      before it stay in the session file.
+  /autopilot on|off  Work unattended: files in the project and commands in the
+                     sandbox run without asking; anything else is refused.
   /plan on|off       Toggle plan mode mid-conversation.
   /plan              Show whether plan mode is currently on.
   /commands          List your own prompt files, invocable by name. Any

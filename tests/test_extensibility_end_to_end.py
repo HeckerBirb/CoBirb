@@ -210,7 +210,9 @@ def test_a_cobirb_json_in_the_project_changes_nothing_at_all(monkeypatch, tmp_pa
     orchestrator = wiring.build_orchestrator(str(project), {})
     try:
         assert not orchestrator.policy.is_allowed("write_file", {"path": "x"})
-        assert not orchestrator.policy.is_allowed("shell", {"command": "curl x"})
+        # Unsandboxed, so what is asked is whether the project's own allow rule
+        # took effect — not whether the user's sandbox would contain it.
+        assert not orchestrator.policy.is_allowed("shell", {"command": "curl x", "unsandboxed": True})
     finally:
         orchestrator.close()
 

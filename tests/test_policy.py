@@ -173,31 +173,48 @@ def test_read_grant_does_not_imply_write(tmp_path):
         assert not policy.is_allowed(name, {"path": "notes.txt"})
 
 
-def test_grant_widens_a_call_to_its_own_directory(tmp_path):
-    """`grant` is what an "always" answer applies: the directory, like a read.
-    Handing a write tool the entire filesystem would be a great deal more than
-    the question appeared to be asking."""
-    policy = Policy(cwd=str(tmp_path))
+def test_always_on_a_read_inside_the_project_covers_the_project(tmp_path):
+    """One question per project, not one per directory (decision D5)."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    policy = Policy(cwd=str(project))
 
     policy.grant("read_file", {"path": "docs/a.txt"})
-    assert policy.is_allowed("read_file", {"path": "docs/b.txt"})
-    assert not policy.is_allowed("read_file", {"path": "elsewhere/c.txt"})
+
+    assert policy.is_allowed("read_file", {"path": "elsewhere/c.txt"})
+    assert policy.is_allowed("grep", {"pattern": "x", "path": "src"})
+    assert not policy.is_allowed("read_file", {"path": str(tmp_path / "outside.txt")})
+
+
+def test_always_on_a_write_still_covers_only_its_own_directory(tmp_path):
+    """Handing a write tool the whole project on one answer would be a great
+    deal more than the question appeared to be asking."""
+    policy = Policy(cwd=str(tmp_path))
 
     policy.grant("write_file", {"path": "src/a.py"})
     assert policy.is_allowed("write_file", {"path": "src/deep/b.py"})
     assert not policy.is_allowed("write_file", {"path": "elsewhere/c.py"})
 
 
+def test_a_read_in_a_directory_too_broad_to_be_a_project_stays_narrow(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    policy = Policy(cwd=str(tmp_path))
+
+    policy.grant("read_file", {"path": "docs/a.txt"})
+
+    assert not policy.is_allowed("read_file", {"path": "elsewhere/c.txt"})
+
+
 def test_a_read_grant_and_a_write_grant_never_imply_each_other(tmp_path):
     """Agreeing CoBirb may read a project is a far smaller thing than
     agreeing it may rewrite one."""
-    policy = Policy(cwd=str(tmp_path))
+    reading = Policy(cwd=str(tmp_path))
+    reading.grant("read_file", {"path": "src/a.py"})
+    assert not reading.is_allowed("write_file", {"path": "src/a.py"})
 
-    policy.grant("read_file", {"path": "src/a.py"})
-    assert not policy.is_allowed("write_file", {"path": "src/a.py"})
-
-    policy.grant("edit_file", {"path": "other/b.py"})
-    assert not policy.is_allowed("read_file", {"path": "other/b.py"})
+    writing = Policy(cwd=str(tmp_path))
+    writing.grant("edit_file", {"path": "other/b.py"})
+    assert not writing.is_allowed("read_file", {"path": "other/b.py"})
 
 
 def test_describe_grant_says_what_always_would_permit(tmp_path):

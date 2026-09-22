@@ -15,7 +15,7 @@ Allow shell
 | Answer | Grants |
 |---|---|
 | **Once** | This call |
-| **Always** | For a file tool: that directory, for the session. For `shell`: that command |
+| **Always** | For a read inside the project: the whole project, for the session. For a write: that directory. For `shell`: that command |
 | **Deny** / escape | Nothing |
 
 The prompt says what "Always" would actually grant before you press it.
@@ -33,14 +33,22 @@ similar) hidden. `cobirb doctor` tells you whether it is active.
 
 | Mode | Does |
 |---|---|
-| `"ask"` (default) | Contained, and you are still asked before each command |
-| `"auto"` | Contained, and runs **without asking** — nothing inside can reach past the project |
+| `"auto"` (default) | Contained, and runs **without asking** — nothing inside can reach past the project. As a default, only where git is installed so `/undo` can take back what a command changed; otherwise it asks |
+| `"ask"` | Contained, and you are still asked before each command |
 | `"off"` | No sandbox; commands run with your full access, as before 0.34 |
 
 Hide more with `"sandbox": {"mode": "auto", "hide": ["~/secrets"]}`. A command that needs the
 network (installing packages, say) must be sent with `unsandboxed`, which is always asked about,
 whatever the mode. Worker Birbs are contained too, but their shell is only ever what the charter
 grants.
+
+## Auto-pilot
+
+`/autopilot on` (or `--autopilot` with `-p`) lets the agent work unattended: it reads and changes
+files in the project and runs commands in the sandbox without asking, and anything else — writing
+outside the project, a command outside the sandbox, an MCP or plugin tool — is **refused instead of
+asked about**, so a long job never stalls on a dialog nobody is watching. It will not start unless
+the sandbox and git-backed undo are both active. Review with `/diff`, take a turn back with `/undo`.
 
 ## Reading and writing are separate
 

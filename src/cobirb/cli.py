@@ -116,6 +116,7 @@ def _run_one_shot(
     plan_mode: bool = False,
     headless: bool = False,
     output: str = "text",
+    autopilot: bool = False,
 ) -> int:
     """Run one prompt and exit.
 
@@ -147,6 +148,17 @@ def _run_one_shot(
         print(f"cobirb: {message}", file=sys.stderr)
         return EXIT_ERROR
 
+    if autopilot:
+        problem = orchestrator.enable_autopilot()
+        if problem:
+            orchestrator.close()
+            message = f"auto-pilot cannot start: {problem}"
+            if as_json:
+                report.error = message
+                print(report.to_json())
+            else:
+                print(f"cobirb: {message}", file=sys.stderr)
+            return EXIT_ERROR
     try:
         return _drive_one_shot(
             orchestrator, prompt, system, session_path, password, cwd,
@@ -628,6 +640,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "'allow_tools' config key. Without one, every tool call asks.",
     )
     opts.add_argument(
+        "--autopilot",
+        action="store_true",
+        help="With -p: work unattended — read and change files in the project and run commands "
+        "in the sandbox without asking, and refuse anything else. Needs the sandbox and git "
+        "(see 'cobirb doctor'). In the interactive app, use /autopilot.",
+    )
+    opts.add_argument(
         "--plan-mode",
         choices=["on", "off"],
         default=None,
@@ -785,6 +804,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.branch_at is not None:
         print("cobirb: --branch-at only means something with --branch.", file=sys.stderr)
         return EXIT_ERROR
+    if args.autopilot and args.prompt is None:
+        print("cobirb: --autopilot goes with -p. In the interactive app, use /autopilot.", file=sys.stderr)
+        return EXIT_ERROR
 
     if args.prompt is not None:
         status = _run_one_shot(
@@ -798,6 +820,7 @@ def main(argv: list[str] | None = None) -> int:
             plan_mode,
             headless=args.headless,
             output=args.output,
+            autopilot=args.autopilot,
         )
         # Only on success: the hint is about a session this run actually
         # wrote to. Printing it after a failure ("could not open …" followed

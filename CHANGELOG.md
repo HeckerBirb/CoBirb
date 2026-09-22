@@ -4,6 +4,22 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Auto-pilot.** `/autopilot on` (or `--autopilot` with `-p`) lets the agent work unattended: it
+  reads and changes files in your project and runs commands in the sandbox without asking, and
+  anything else — writing outside the project, a command outside the sandbox, an MCP or plugin
+  tool — is refused instead of asked about, so a long job never stalls on a dialog nobody is
+  watching. It will not start unless the sandbox and git-backed undo are both active, since those
+  are what make it safe. The status bar says AUTOPILOT while it is on.
+- **Contained commands no longer ask by default.** With the sandbox active and git installed, a
+  shell command that cannot reach the network or anything outside your project runs without a
+  prompt, and `/undo` can take back whatever it changed. Set `"sandbox": "ask"` to be asked anyway.
+  Without git, it still asks.
+- **One question to read your project.** Answering "Always" to a read inside the project now covers
+  the whole project for the session, instead of only that file's directory. Writes still ask per
+  directory. A project that is your home directory or `/` keeps the narrow scope.
+
 ## [0.35.0]
 
 - **`/undo` and `/diff` cover what shell commands did.** Every turn is now snapshotted as a whole

@@ -31,7 +31,10 @@ MODE_ASK = "ask"      # sandboxed, and still asked about
 MODE_AUTO = "auto"    # sandboxed, and not asked about
 MODE_OFF = "off"      # no sandbox: the pre-0.34 behaviour
 MODES = (MODE_ASK, MODE_AUTO, MODE_OFF)
-DEFAULT_MODE = MODE_ASK
+# Auto by default — but a *default* auto only takes effect where every turn is
+# checkpointed whole, so what a command changes can be undone (see
+# wiring.attach_sandbox). A mode the user set is honoured as written.
+DEFAULT_MODE = MODE_AUTO
 
 # Relative to the home directory. Hidden only when they exist; directories are
 # covered by an empty tmpfs, files by /dev/null.
@@ -50,6 +53,7 @@ class Sandbox:
     project: str = "."
     hidden: list[str] = field(default_factory=list)
     bwrap: str | None = None
+    explicit: bool = False  # whether the mode came from the user's config
 
     @property
     def active(self) -> bool:
@@ -110,10 +114,11 @@ def from_config(value: object, project: str, extra_hidden: object = None) -> San
     ``value`` is a mode string, or ``{"mode": ..., "hide": [...]}``. Anything
     unreadable is the default mode rather than an error.
     """
-    mode, hide = DEFAULT_MODE, extra_hidden
+    mode, hide, explicit = DEFAULT_MODE, extra_hidden, False
     if isinstance(value, str):
-        mode = value
+        mode, explicit = value, True
     elif isinstance(value, dict):
+        explicit = "mode" in value
         mode = str(value.get("mode", DEFAULT_MODE))
         hide = value.get("hide", hide)
     mode = mode.strip().lower() if isinstance(mode, str) else DEFAULT_MODE
@@ -123,7 +128,7 @@ def from_config(value: object, project: str, extra_hidden: object = None) -> San
     hidden = [os.path.join(home, rel) for rel in DEFAULT_HIDDEN]
     for path in hide if isinstance(hide, list) else []:
         hidden.append(os.path.abspath(os.path.expanduser(str(path))))
-    return Sandbox(mode=mode, project=project, hidden=hidden, bwrap=find_bwrap())
+    return Sandbox(mode=mode, project=project, hidden=hidden, bwrap=find_bwrap(), explicit=explicit)
 
 
 _PROBED: dict[str, bool] = {}

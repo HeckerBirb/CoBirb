@@ -258,6 +258,41 @@ def cmd_plan(app: "CoBirbApp", argument: str) -> None:
     app.write_transcript(render.build_notice(message))
 
 
+def cmd_autopilot(app: "CoBirbApp", argument: str) -> None:
+    """Work unattended in this project. `/autopilot on|off`.
+
+    Inside auto-pilot the agent reads and changes files in the project and
+    runs commands in the sandbox without asking; anything else is refused
+    rather than asked about. It needs the sandbox and whole-tree undo, and
+    says which is missing when it cannot start.
+    """
+    word = argument.strip().lower()
+    if word not in ("", "on", "off"):
+        app.write_transcript(render.build_notice("Usage: /autopilot on|off"))
+        return
+    try:
+        orchestrator = app.ensure_orchestrator()
+    except Exception as exc:  # noqa: BLE001 - reported, never a crash
+        app.io_bridge.write_error("CoBirb", f"could not start — {exc}")
+        return
+    turn_on = (word == "on") or (word == "" and not orchestrator.autopilot)
+    if not turn_on:
+        orchestrator.disable_autopilot()
+        app.query_one(StatusBar).autopilot = False
+        app.write_transcript(render.build_notice("Auto-pilot off. Changes outside the sandbox ask first again."))
+        return
+    problem = orchestrator.enable_autopilot()
+    if problem:
+        app.write_transcript(render.build_notice(f"Auto-pilot cannot start: {problem}."))
+        return
+    app.query_one(StatusBar).autopilot = True
+    app.write_transcript(render.build_notice(
+        "Auto-pilot on. The agent will read and change files in this project and run commands in "
+        "the sandbox without asking, and refuse anything else instead of stopping for you. "
+        "/diff shows what it did; /undo takes back a turn; /autopilot off to stop."
+    ))
+
+
 def cmd_flock(app: "CoBirbApp", argument: str) -> None:
     """Divide a piece of work between several agents.
 
@@ -361,6 +396,7 @@ COMMANDS: "dict[str, Callable[[CoBirbApp, str], None]]" = {
     "/help": cmd_help,
     "/model": cmd_model,
     "/plan": cmd_plan,
+    "/autopilot": cmd_autopilot,
     "/context": cmd_context,
     "/clear": cmd_clear,
     "/undo": cmd_undo,

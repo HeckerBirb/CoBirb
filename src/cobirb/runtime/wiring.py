@@ -224,8 +224,11 @@ def build_orchestrator(
         for name, arg in rules.items():
             policy.allow(name, arg)
     # Where shell commands run (cobirb.sandbox), and whether a contained one
-    # may run without asking.
-    policy.sandbox_auto = attach_sandbox(registry, config).auto_approve
+    # may run without asking: always when the user said "auto", and by default
+    # only where whole-tree checkpoints can undo what a command changed.
+    checkpoints = None if config.get("checkpoints") is False else checkpoints_for(cwd)
+    box = attach_sandbox(registry, config)
+    policy.sandbox_auto = box.auto_approve and (box.explicit or hasattr(checkpoints, "end_turn"))
     # Standing directory scopes, for a project the user has already decided
     # CoBirb may work in. Separate keys because reading and writing are
     # separate decisions.
@@ -267,7 +270,7 @@ def build_orchestrator(
         # worse deal than one that spends a little disk.
         # The whole tree, shell changes included, when git is installed; the
         # per-file snapshots otherwise (see checkpoints.for_workspace).
-        checkpoints=None if config.get("checkpoints") is False else checkpoints_for(cwd),
+        checkpoints=checkpoints,
         # The user's own commands at the lifecycle points.
         hooks=HookRunner.from_config(config, cwd),
         mcp_clients=mcp_clients,

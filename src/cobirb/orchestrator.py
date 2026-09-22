@@ -214,6 +214,16 @@ def _denial_message(tool_name: str, instruction: str = "") -> str:
     return f"{denial}\nThe user says to do this instead: {instruction}"
 
 
+def _autopilot_refusal(tool_name: str) -> str:
+    """What the model is told when auto-pilot refuses something rather than
+    stopping to ask — nobody is there to ask, by design."""
+    return (
+        f"Refused: '{tool_name}' needs approval, and auto-pilot does not stop to ask. Inside "
+        "auto-pilot you may read and change files in the project and run commands in the "
+        "sandbox. Do without this, or finish and say in your answer what still needs doing."
+    )
+
+
 def _malformed_message(problem: str) -> str:
     """What the model is told when a tool call it made could not be read."""
     return (
@@ -290,6 +300,10 @@ class Orchestrator:
         self.model = model
         # The ceiling for a run() that names none — see DEFAULT_MAX_TURNS.
         self.max_turns = max_turns
+        # Auto-pilot (enable_autopilot): unattended work inside the project and
+        # the sandbox; anything else is refused instead of asked about.
+        self.autopilot = False
+        self._before_autopilot = False
         self.tools = tools
         self.policy = policy
         self.io = io
@@ -952,6 +966,37 @@ class Orchestrator:
         for call in tool_calls:
             self._execute_tool(call, phase)
 
+    def enable_autopilot(self) -> str:
+        """Turn auto-pilot on. Returns ``""``, or why it cannot be turned on.
+
+        Auto-pilot is only as safe as what contains it, so it refuses to start
+        without both halves: the shell sandbox (nothing a command does reaches
+        past the project or onto the network) and whole-tree checkpoints
+        (anything it changes in the project can be undone). A project that is
+        really the home directory or ``/`` is refused too — "change anything
+        in the project" would mean "change anything".
+        """
+        box = getattr(self.tools.get("shell"), "sandbox", None)
+        if box is None or not getattr(box, "active", False):
+            return "the shell sandbox is not active here (bubblewrap is needed — see 'cobirb doctor')"
+        if not callable(getattr(self.checkpoints, "end_turn", None)):
+            return ("whole-tree checkpoints are not active (git is needed, and \"checkpoints\" "
+                    "must not be false), so what it changed could not be undone")
+        root = self.policy._project_root()
+        if root is None:
+            return "the working directory is your home directory or /, which is too broad a project"
+        self._before_autopilot = self.policy.sandbox_auto
+        self.policy.autopilot_root = root
+        self.policy.sandbox_auto = True
+        self.autopilot = True
+        return ""
+
+    def disable_autopilot(self) -> None:
+        if self.autopilot:
+            self.policy.autopilot_root = None
+            self.policy.sandbox_auto = self._before_autopilot
+        self.autopilot = False
+
     def _request_approval(
         self, tool_name: str, arguments: dict[str, Any]
     ) -> tuple[str, str]:
@@ -1052,11 +1097,16 @@ class Orchestrator:
         # out it could have worked." Fails closed (denies) with no adapter,
         # or one that can't ask (see I_OAdapter.confirm's contract).
         if not self.policy.is_allowed(tool_name, arguments):
-            decision, instruction = self._request_approval(tool_name, arguments)
+            if self.autopilot:
+                decision, instruction = cobirb_typing.DECISION_DENY, ""
+            else:
+                decision, instruction = self._request_approval(tool_name, arguments)
             if decision == cobirb_typing.DECISION_DENY:
                 self._record_call(tool_name, ok=False, denied=True)
                 result = cobirb_typing.ToolResult(
-                    ok=False, content=_denial_message(tool_name, instruction)
+                    ok=False,
+                    content=_autopilot_refusal(tool_name) if self.autopilot
+                    else _denial_message(tool_name, instruction),
                 )
                 session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
                 self._render_tool_call(tool_name, arguments, result)

@@ -17,9 +17,13 @@ outbound network unless the user explicitly asks for it.
 
 ## 2. Invariants — do not violate
 
-1. **Default-deny.** A fresh `Policy` permits nothing. Capability comes from an approval prompt,
-   `allow_tools`/`allow_read_dirs`/`allow_write_dirs` in config, or `--allow-tool`. There is no
-   pre-approved set and deliberately no "approve everything" flag.
+1. **Default-deny — with one contained exception.** A fresh `Policy` permits nothing. Capability
+   comes from an approval prompt, `allow_tools`/`allow_read_dirs`/`allow_write_dirs` in config,
+   `--allow-tool`, or auto-pilot (below). There is deliberately no "approve everything" flag. The
+   exception (0.36.0, decision D2): a shell command **inside the sandbox** runs without asking by
+   default, because it can reach no network and write nothing outside the project — and only where
+   whole-tree checkpoints can undo what it changed in the project (§5). Anything the sandbox does
+   not contain still asks.
 2. **One config file: `~/.cobirb/config.json`.** No repo-local config is read, merged, or looked
    for. A repository may *describe* itself (`AGENTS.md`, repo map, `<project>/.cobirb/commands/`)
    but may never grant capability.
@@ -149,13 +153,25 @@ prompt → model call → tool calls (policy-gated) → results into history →
   main conversation reaches workers, and one made by a worker reaches the main conversation.
   Memory only, never written to config (a permission surviving a restart is the user's decision to
   make in their own file), and policies are held weakly so finished workers do not accumulate.
+- **"Always" on a read inside the project grants the whole project** (`path_scope`, decision D5),
+  not the file's directory: one question per project rather than one per subdirectory, which had
+  taught people to stop reading the prompt. `_project_root` refuses a working directory that is `/`
+  or the home directory, where "the project" would mean everything. Writes keep the directory scope.
+- **Auto-pilot** (`Orchestrator.enable_autopilot`, `/autopilot`, `--autopilot` with `-p`): reads and
+  writes inside the project (`Policy.autopilot_root`) and contained shell commands run unasked;
+  **everything else is refused without asking** (`_autopilot_refusal`, a reason the model can act
+  on) — unsandboxed commands, writes outside the project, MCP and plugin tools. It refuses to start
+  without an active sandbox *and* whole-tree checkpoints, or in a too-broad project, because it is
+  exactly as safe as what contains it. Combined with the progress brakes (§4) it is the recommended
+  way to run long work unattended.
 - **Shell commands run in a sandbox** (`cobirb/sandbox.py`, bubblewrap): the filesystem read-only
   except the project and a private `/tmp`, no network namespace, own PID/IPC/UTS namespaces, and
   credential paths hidden (`DEFAULT_HIDDEN`, resolved to real paths because on WSL `~/.aws` is a
   symlink into the Windows drive and bubblewrap resolves links inside the new root). Modes:
-  `"ask"` (default — contained and still asked), `"auto"` (contained and not asked:
-  `Policy.sandbox_auto`, set by `wiring.attach_sandbox` for the main agent only — a Worker Birb's
-  shell stays the charter's to grant) and `"off"`. In `auto` even a command the segment scan
+  `"auto"` (default since 0.36.0 — contained and not asked, via `Policy.sandbox_auto`, set by the
+  wiring for the main agent only, so a Worker Birb's shell stays the charter's to grant; a
+  *default* auto only takes effect where whole-tree checkpoints exist, `Sandbox.explicit`
+  distinguishing the user's own choice), `"ask"` (contained and still asked) and `"off"`. In `auto` even a command the segment scan
   cannot read is allowed, because containment rather than the scan is the guarantee; `unsandboxed:
   true` runs outside and always goes through the normal policy. `find_bwrap` *probes* bubblewrap
   once with the real isolation flags, since installed-but-no-user-namespaces would fail every
@@ -750,7 +766,7 @@ config refused rather than replaced — then runs doctor; it **asks and never pr
 `help [topic]`, `models`, `commands`, `flock -p "..."`,
 `plugin install <path> [--replace] | list | remove <name>`. Flags: `-p/--prompt`, `--session`,
 `-w/--password`, `--model`, `--allow-tool` (repeatable, `name` or `name(arg)`),
-`--plan-mode on|off`, `--system-prompt off|harness`, `--export PATH`, `--branch PATH`,
+`--plan-mode on|off`, `--autopilot` (with `-p`), `--system-prompt off|harness`, `--export PATH`, `--branch PATH`,
 `--branch-at N`, `--headless`, `--output text|json`, `--cwd`, `--upgrade [TAG]`, `--force`,
 `--continue` (reopens the most recently touched session; implies a password), `--doctor`.
 Subcommand `doctor` is the same thing — `runtime/doctor.py` checks config keys/types/references,
@@ -765,7 +781,7 @@ managed install: that is a request to GitHub, and doctor talks to the configured
 answered "no" got what they asked for.
 
 **TUI** — four tabs: Current, Flock, Sessions, Plugins. Slash commands `/help`, `/model`,
-`/plan`, `/context`, `/clear` (§7), `/undo`, `/export`, `/diff`, `/commands`,
+`/plan`, `/autopilot` (§5), `/context`, `/clear` (§7), `/undo`, `/export`, `/diff`, `/commands`,
 `/flock`, `/charter` (§13), `/memories`, `/remember`, `/image`; `@path` in the prompt box opens a five-row fuzzy picker
 (`tui/mention_picker.py`, ranked by `runtime/mentions.py`) and sends the named file with the
 message — expanded on the way to the model, never into the transcript. Anything else

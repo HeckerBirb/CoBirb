@@ -1857,3 +1857,72 @@ def test_a_call_that_could_not_be_read_is_sent_back_rather_than_taken_as_the_ans
 
     assert session.summary == "The answer is 42."
     assert "could not be read" in model.contexts[-1]
+
+
+# --------------------------------------------------------------------------- #
+# Auto-pilot
+# --------------------------------------------------------------------------- #
+class _Box:
+    active = True
+
+
+class _Tree:
+    def begin_turn(self):
+        pass
+
+    def end_turn(self):
+        pass
+
+    def record(self, path):
+        pass
+
+
+def _autopilot_orchestrator(tmp_path, calls, box=_Box(), checkpoints=_Tree()):
+    registry = ToolRegistry(cwd=str(tmp_path))
+    registry.tools["shell"].sandbox = box
+    return Orchestrator(model=_ScriptedCalls(calls), tools=registry.tools,
+                        policy=Policy(cwd=str(tmp_path)), checkpoints=checkpoints)
+
+
+def test_autopilot_needs_the_sandbox_and_whole_tree_undo(tmp_path):
+    class _Inactive:
+        active = False
+
+    assert "sandbox" in _autopilot_orchestrator(tmp_path, [], box=_Inactive()).enable_autopilot()
+    assert "checkpoints" in _autopilot_orchestrator(tmp_path, [], checkpoints=None).enable_autopilot()
+    assert _autopilot_orchestrator(tmp_path, []).enable_autopilot() == ""
+
+
+def test_autopilot_works_in_the_project_and_refuses_the_rest_without_asking(tmp_path):
+    project = tmp_path / "proj"
+    project.mkdir()
+    outside = tmp_path / "outside.txt"
+    calls = [
+        ToolCall("write_file", {"path": "inside.txt", "content": "ok"}),
+        ToolCall("write_file", {"path": str(outside), "content": "no"}),
+    ]
+    orchestrator = _autopilot_orchestrator(project, calls)
+
+    class _MustNotAsk:
+        def confirm(self, *a, **k):
+            raise AssertionError("auto-pilot asked")
+
+        def render(self, text):
+            pass
+
+    orchestrator.io = _MustNotAsk()
+    assert orchestrator.enable_autopilot() == ""
+    session = orchestrator.run("go", "sys", cwd=str(project))
+
+    assert (project / "inside.txt").read_text() == "ok"
+    assert not outside.exists()
+    assert any("auto-pilot does not stop to ask" in t.content for t in session.turns if t.role == "tool")
+
+
+def test_turning_autopilot_off_restores_asking(tmp_path):
+    orchestrator = _autopilot_orchestrator(tmp_path, [])
+    orchestrator.enable_autopilot()
+    orchestrator.disable_autopilot()
+
+    assert not orchestrator.policy.is_allowed("write_file", {"path": "x.txt"})
+    assert not orchestrator.policy.sandbox_auto
