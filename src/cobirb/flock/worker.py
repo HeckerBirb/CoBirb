@@ -26,11 +26,12 @@ from .charter import WorkerBrief, policy_for
 
 logger = logging.getLogger("cobirb")
 
-# How many model turns one brief gets. Generous compared to the verify loop's
-# budget because this is the whole of a worker's work rather than a follow-up
-# fix, and bounded because a worker that has not converged by now is reporting
-# a shortcoming rather than one turn from finishing.
-DEFAULT_MAX_TURNS = 12
+# How many model turns one brief gets. A ceiling, not the usual way a worker
+# stops: the orchestrator's no-progress brakes (repeated identical calls, a run
+# of failures) end a stuck worker long before this. It was 12, set before a
+# worker could run its own acceptance check; implementing, running the check,
+# reading the failure and fixing it spends that in one or two iterations.
+DEFAULT_MAX_TURNS = 30
 
 # How many times a worker may be *started*. Not a retry of the work — see
 # `run_worker` for the condition, which is that nothing happened at all.

@@ -12,7 +12,7 @@ from typing import Callable
 from ..checkpoints import Checkpoints
 from ..config import Config
 from ..mcp import connect_servers
-from ..orchestrator import Orchestrator, build_default_policy
+from ..orchestrator import DEFAULT_MAX_TURNS, Orchestrator, build_default_policy
 from ..plugins.core import LocalModelProvider, TerminalIO, ToolRegistry
 from ..policy import Policy, SessionGrants
 from ..session import SessionManager
@@ -140,6 +140,17 @@ def _verify_settings(cwd: str, config: Config) -> VerifySettings | None:
     )
 
 
+def _max_turns(config: Config) -> int:
+    """The ``max_turns`` ceiling, or the default when unset or unreadable —
+    a typo costs the setting, never the session."""
+    value = config.get("max_turns")
+    try:
+        parsed = int(value) if value is not None else DEFAULT_MAX_TURNS
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_TURNS
+    return parsed if parsed >= 1 else DEFAULT_MAX_TURNS
+
+
 def build_orchestrator(
     cwd: str,
     allow_overrides: dict[str, str],
@@ -244,6 +255,7 @@ def build_orchestrator(
         # The user's own commands at the lifecycle points.
         hooks=HookRunner.from_config(config, cwd),
         mcp_clients=mcp_clients,
+        max_turns=_max_turns(config),
         # Approvals that reach every agent in the session rather than only
         # this policy. Created here when nobody supplied one, so a run that
         # never fans out still has somewhere for a "for the session" answer

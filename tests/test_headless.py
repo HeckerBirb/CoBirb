@@ -100,16 +100,33 @@ def test_a_failure_is_reported_as_json_rather_than_a_traceback(tmp_path, monkeyp
 def test_running_out_of_turns_is_a_failure_with_its_reason(tmp_path, monkeypatch, capsys):
     """It used to exit 0 with "Stopped after N turns" as the summary, so a
     pipeline read an unfinished task as a finished one."""
+    from conftest import write_config
+
+    write_config(tmp_path, {"max_turns": 3})
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
     code = _run(
         monkeypatch, tmp_path,
-        ["-p", "loop", "--headless", "--output", "json"],
-        [ToolCall("list_dir", {}) for _ in range(50)],
+        ["-p", "loop", "--headless", "--output", "json", "--allow-tool", "list_dir"],
+        [ToolCall("list_dir", {"path": f"p{i}"}) for i in range(50)],
     )
 
     report = json.loads(capsys.readouterr().out)
     assert not report["ok"]
     assert report["stop_reason"] == "turn_limit"
     assert not report["summary"]
+    assert code == EXIT_ERROR
+
+
+def test_a_model_repeating_itself_is_stopped_and_says_why(tmp_path, monkeypatch, capsys):
+    code = _run(
+        monkeypatch, tmp_path,
+        ["-p", "loop", "--headless", "--output", "json", "--allow-tool", "list_dir"],
+        [ToolCall("list_dir", {}) for _ in range(50)],
+    )
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["stop_reason"] == "no_progress"
+    assert "same list_dir call" in report["error"]
     assert code == EXIT_ERROR
 
 

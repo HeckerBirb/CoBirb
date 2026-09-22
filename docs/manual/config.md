@@ -96,6 +96,7 @@ If your endpoint serves one request at a time, the more direct fix is on its sid
 | `models` | — | Per-role model and endpoint (above) |
 | `system_prompt` | `"off"` | `"harness"` adds CoBirb's own system block |
 | `plan_mode` | `false` | Start in plan mode |
+| `max_turns` | `40` | Ceiling on model turns per message. A backstop: a run that repeats the same call or keeps failing is stopped long before it |
 | `allow_tools` | `[]` | Pre-approved tools, e.g. `["read_file", "shell(git status)"]` |
 | `allow_read_dirs` | `[]` | Directories readable without asking |
 | `allow_write_dirs` | `[]` | Directories writable without asking |

@@ -4,6 +4,19 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **A task is no longer cut off after 8 turns.** That cap ended an ordinary task — read a few files,
+  edit, run the tests, fix — before it was half done, and it was the commonest way a real task
+  ended. A run now stops when it stops making progress: the same call with the same arguments made
+  twice in a row gets a note telling the model so, four in a row ends the run, and so do six failed
+  or refused calls in a row. `max_turns` (default 40) remains as a backstop; the reason a run stopped
+  is reported, and in `--output json` it is `"stop_reason": "no_progress"` or `"turn_limit"`.
+- Worker Birbs get up to 30 turns (was 12) now that they run their own acceptance check and fix what
+  it reports; the same no-progress brakes apply to them.
+- **Fixed:** `cobirb doctor` reported `connect_timeout` and `request_timeout` as settings CoBirb does
+  not read, calling a correct config broken, since they were added in 0.21.0.
+
 ## [0.24.0]
 
 - **Sampling options per model role.** `models.<role>.options` is sent to the server with every

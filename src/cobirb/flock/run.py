@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from ..config import Config
-from ..orchestrator import Orchestrator
+from ..orchestrator import STOP_NO_PROGRESS, Orchestrator
 from . import branch
 from .brainy import (
     PROPOSE_CHARTER,
@@ -297,10 +297,16 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> P
                 # this out" — looks exactly like this. Nudging it would be
                 # arguing with a decision it was asked to make.
                 break
-            if tool.exhausted or bool(getattr(orchestrator, "turns_exhausted", False)):
-                # The desk has stopped inviting corrections, or the turn budget
-                # is gone. Both have their own outcome at the caller; another
-                # pass would buy a second budget's worth of the same failure.
+            stop = getattr(orchestrator, "last_stop", None)
+            if (
+                tool.exhausted
+                or bool(getattr(orchestrator, "turns_exhausted", False))
+                or getattr(stop, "reason", None) == STOP_NO_PROGRESS
+            ):
+                # The desk has stopped inviting corrections, the turn budget is
+                # gone, or the loop saw the model repeating itself. Each has its
+                # own outcome at the caller; another pass would buy a second
+                # budget's worth of the same failure.
                 break
 
             silent = silent + 1 if not called else 0

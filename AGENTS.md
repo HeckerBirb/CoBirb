@@ -88,7 +88,14 @@ prompt → model call → tool calls (policy-gated) → results into history →
        → plain reply with no tool calls == final answer (becomes session.summary)
 ```
 
-- Bounded by `max_turns` (default 8; validate phase 4). **How a run ended is `Orchestrator.last_stop`**
+- **Stopped by lack of progress, not by a turn count.** `DEFAULT_MAX_TURNS = 40` (config `max_turns`)
+  is a backstop; what ends an unproductive run is `_loop`'s brakes: the same call with the same
+  arguments back to back gets a note appended to its result (`_REPEAT_NOTE_AT = 2`) and ends the run
+  at `_REPEAT_STOP_AT = 4`, and `_FAILURE_STOP_AT = 6` failed-or-denied calls in a row end it too —
+  both as `STOP_NO_PROGRESS`. The cap was a flat 8, which an ordinary read-edit-test-fix task spends
+  before it is half done. The Flock's planning loop treats `STOP_NO_PROGRESS` like an exhausted
+  budget, since another pass would buy more of the same repetition. Worker Birbs get 30 (was 12).
+  Validate phase 4. **How a run ended is `Orchestrator.last_stop`**
   (`RunStop`: `STOP_ANSWERED` or `STOP_TURN_LIMIT`), never text in the summary. Running out of turns
   used to return a made-up reply — "Stopped after N turns without a final answer." — which was
   stored as the model's answer and read by every consumer as a conclusion (headless exited 0 on it).

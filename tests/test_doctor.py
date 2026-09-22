@@ -363,3 +363,11 @@ def test_an_unmanaged_install_warns_and_names_the_installer(tmp_path, monkeypatc
     assert check.status == doctor.WARN
     assert "install.sh" in check.detail
     assert report.ok  # worth knowing, but nothing here is broken
+
+
+def test_the_timeout_and_turn_settings_are_known_keys(tmp_path):
+    """connect_timeout and request_timeout shipped in 0.21.0 without being added
+    here, so doctor called a correct config broken."""
+    report = _run(tmp_path, {"connect_timeout": 5, "request_timeout": 900, "max_turns": 60})
+
+    assert report.ok

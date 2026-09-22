@@ -46,7 +46,8 @@ KNOWN_KEYS = frozenset({
     "instructions", "instructions_max_chars",
     "repo_map", "repo_map_max_chars", "context_tokens", "max_num_ctx",
     "verify_command", "verify_timeout", "verify_fix_attempts",
-    "hooks", "mcp_servers", "plugins",
+    "hooks", "mcp_servers", "plugins", "max_turns",
+    "connect_timeout", "request_timeout",
 })
 
 # What each key should look like, for the shape check. Only the keys whose
@@ -62,7 +63,7 @@ _EXPECTED_TYPES: dict[str, tuple[type, ...]] = {
     # Whether that string *says* anything is checked below, since a type is
     # all this table can ask about.
     "max_num_ctx": (int, str),
-    "verify_timeout": (int,), "verify_fix_attempts": (int,),
+    "verify_timeout": (int,), "verify_fix_attempts": (int,), "max_turns": (int,),
     "system_prompt": (str,), "verify_command": (str,),
 }
 

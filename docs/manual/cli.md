@@ -57,7 +57,9 @@ cobirb -p "run the tests and report" \
 ```
 
 Exit codes: `0` clean, `1` failed, `2` completed but something was refused (`--headless` only).
-A run that ran out of turns before answering is a failure: `"ok": false`, `"stop_reason": "turn_limit"`.
+A run that did not reach an answer is a failure: `"ok": false`, with `"stop_reason"` either
+`"turn_limit"` (hit `max_turns`) or `"no_progress"` (the model kept making the same call, or kept
+failing), and `"error"` saying which.
 A finished run reports `"stop_reason": "answered"`.
 
 ## Environment

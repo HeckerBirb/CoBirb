@@ -69,6 +69,27 @@ _STEER_PREAMBLE = (
 # something the model said, so it is reported as one (see RunStop).
 STOP_ANSWERED = "answered"
 STOP_TURN_LIMIT = "turn_limit"
+STOP_NO_PROGRESS = "no_progress"
+
+# A run stops when it stops making progress, not after a fixed number of
+# turns. The fixed number used to be 8, which an ordinary task — read three
+# files, edit, run the tests, fix — spends before it is half done, so the
+# commonest ending of a real task was "Stopped after 8 turns". The ceiling is
+# now a backstop against a runaway loop, and the brakes below are what
+# actually end an unproductive run:
+#
+# - the same call, with the same arguments, made back to back: the second gets
+#   a note saying so, the fourth ends the run. Nothing changes between two
+#   identical consecutive calls, so neither will the answer.
+# - a run of failed or denied calls with nothing succeeding in between.
+DEFAULT_MAX_TURNS = 40
+_REPEAT_NOTE_AT = 2
+_REPEAT_STOP_AT = 4
+_FAILURE_STOP_AT = 6
+_REPEAT_NOTE = (
+    "\n\n[CoBirb: this is exactly the call you just made, with the same arguments, "
+    "so it gives the same result. Do something different, or give your answer if you have one.]"
+)
 
 
 @dataclass(frozen=True)
@@ -78,6 +99,7 @@ class RunStop:
 
     reason: str = STOP_ANSWERED
     turns: int = 0
+    detail: str = ""
 
     @property
     def finished(self) -> bool:
@@ -91,6 +113,8 @@ class RunStop:
                 f"Stopped after {self.turns} model turn(s) without a final answer. "
                 "Send another message to let it carry on."
             )
+        if self.reason == STOP_NO_PROGRESS:
+            return f"Stopped: {self.detail} Send another message to try a different approach."
         return ""
 
 
@@ -252,8 +276,11 @@ class Orchestrator:
         hooks: "HookRunner | None" = None,
         mcp_clients: list[Any] | None = None,
         grants: "SessionGrants | None" = None,
+        max_turns: int = DEFAULT_MAX_TURNS,
     ) -> None:
         self.model = model
+        # The ceiling for a run() that names none — see DEFAULT_MAX_TURNS.
+        self.max_turns = max_turns
         self.tools = tools
         self.policy = policy
         self.io = io
@@ -338,7 +365,7 @@ class Orchestrator:
         *,
         cwd: str = ".",
         label: str = REPLY_LABEL,
-        max_turns: int = 8,
+        max_turns: int | None = None,
         session_path: str | None = None,
         plan_mode: bool = False,
         images: "list[dict[str, str]] | None" = None,
@@ -355,7 +382,7 @@ class Orchestrator:
 
         Stops as soon as the model gives a plain-text reply with no further
         tool calls (that reply becomes ``session.summary``), or after
-        ``max_turns`` iterations if the model keeps calling tools without
+        ``max_turns`` iterations (default ``self.max_turns``) if the model keeps calling tools without
         ever producing a final answer.
 
         When the model and I/O adapter both support it, the model's reply is
@@ -402,7 +429,7 @@ class Orchestrator:
                 system=system,
                 cwd=cwd,
                 label=label,
-                max_turns=max_turns,
+                max_turns=max_turns or self.max_turns,
                 plan_mode=plan_mode,
                 session=session,
             )
@@ -599,6 +626,7 @@ class Orchestrator:
         parsing tool calls out of a reply that never finished.
         """
         self.last_stop = RunStop()
+        last_calls, repeats, failures = "", 0, 0
         for _ in range(max_turns):
             # One place builds the context, once per model call, from
             # whatever the session holds right now — so every path that adds
@@ -644,7 +672,32 @@ class Orchestrator:
                         phase=phase,
                     )
                 )
+                before = len(self.last_run_tool_calls)
                 self._execute_tool_calls(tool_calls, phase=phase)
+                outcomes = self.last_run_tool_calls[before:]
+
+                signature = json.dumps(
+                    [[c.name, c.arguments] for c in tool_calls], sort_keys=True, default=str
+                )
+                repeats = repeats + 1 if signature == last_calls else 1
+                last_calls = signature
+                failed = bool(outcomes) and not any(o["ok"] for o in outcomes)
+                failures = failures + len(outcomes) if failed else 0
+
+                if repeats >= _REPEAT_STOP_AT:
+                    self.last_stop = RunStop(
+                        STOP_NO_PROGRESS, max_turns,
+                        f"the model made the same {tool_calls[0].name} call {repeats} times in a row.",
+                    )
+                    return "", False
+                if failures >= _FAILURE_STOP_AT:
+                    self.last_stop = RunStop(
+                        STOP_NO_PROGRESS, max_turns,
+                        f"{failures} tool calls in a row failed or were refused.",
+                    )
+                    return "", False
+                if repeats >= _REPEAT_NOTE_AT and session.turns and session.turns[-1].role == "tool":
+                    session.turns[-1].content += _REPEAT_NOTE
                 continue
 
             # No tool calls: this is the model's final answer for this turn.

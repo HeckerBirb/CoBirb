@@ -1752,3 +1752,82 @@ def test_context_is_unchanged_by_a_session_that_was_never_cleared():
     context = json.loads(orchestrator._build_context(session))
 
     assert len(context) == len(session.turns)
+
+
+# --------------------------------------------------------------------------- #
+# Progress, not a turn count, is what ends a run
+# --------------------------------------------------------------------------- #
+class _ScriptedCalls(_DummyModel):
+    """Makes the given calls in order, then answers."""
+
+    def __init__(self, calls, answer="done"):
+        super().__init__(reply=answer)
+        self._calls = list(calls)
+
+    def chat(self, *args, **kwargs):
+        return "" if self._calls else self.reply
+
+    def parse_tool_calls(self, reply):
+        return [self._calls.pop(0)] if self._calls else []
+
+    def supports_tool_calling(self):
+        return True
+
+
+def _listing_tools(tmp_path):
+    return {"list_dir": ToolRegistry(cwd=str(tmp_path)).tools["list_dir"]}
+
+
+def test_a_task_needing_more_than_eight_turns_is_allowed_to_finish(tmp_path):
+    """The old flat cap was 8 — an ordinary task spent it before half done."""
+    for i in range(12):
+        (tmp_path / f"d{i}").mkdir()
+    policy = Policy(cwd=str(tmp_path))
+    policy.allow_read_dir(str(tmp_path))
+    calls = [ToolCall("list_dir", {"path": f"d{i}"}) for i in range(12)]
+    orchestrator = Orchestrator(model=_ScriptedCalls(calls), tools=_listing_tools(tmp_path), policy=policy)
+
+    session = orchestrator.run("look around", "sys", cwd=str(tmp_path))
+
+    assert orchestrator.last_stop.finished
+    assert session.summary == "done"
+
+
+def test_the_same_call_back_to_back_is_pointed_out_then_stopped(tmp_path):
+    policy = Policy(cwd=str(tmp_path))
+    policy.allow_read_dir(str(tmp_path))
+    calls = [ToolCall("list_dir", {"path": "."}) for _ in range(10)]
+    orchestrator = Orchestrator(model=_ScriptedCalls(calls), tools=_listing_tools(tmp_path), policy=policy)
+
+    session = orchestrator.run("loop", "sys", cwd=str(tmp_path))
+
+    assert orchestrator.last_stop.reason == "no_progress"
+    assert "same list_dir call" in orchestrator.last_stop.describe()
+    tool_turns = [t for t in session.turns if t.role == "tool"]
+    assert "exactly the call you just made" in tool_turns[1].content
+    assert len(tool_turns) < 10
+
+
+def test_a_run_of_refusals_ends_the_run(tmp_path):
+    calls = [ToolCall("list_dir", {"path": f"p{i}"}) for i in range(20)]
+    orchestrator = Orchestrator(model=_ScriptedCalls(calls), tools=_listing_tools(tmp_path), policy=Policy())
+
+    orchestrator.run("keep trying", "sys", cwd=str(tmp_path))
+
+    assert orchestrator.last_stop.reason == "no_progress"
+    assert "failed or were refused" in orchestrator.last_stop.describe()
+
+
+def test_the_ceiling_still_applies(tmp_path):
+    for i in range(6):
+        (tmp_path / f"d{i}").mkdir()
+    policy = Policy(cwd=str(tmp_path))
+    policy.allow_read_dir(str(tmp_path))
+    calls = [ToolCall("list_dir", {"path": f"d{i}"}) for i in range(6)]
+    orchestrator = Orchestrator(
+        model=_ScriptedCalls(calls), tools=_listing_tools(tmp_path), policy=policy, max_turns=3
+    )
+
+    orchestrator.run("look", "sys", cwd=str(tmp_path))
+
+    assert orchestrator.last_stop.reason == "turn_limit"
