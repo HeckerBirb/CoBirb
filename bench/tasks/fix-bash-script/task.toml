@@ -1,0 +1,6 @@
+category = "fix"
+shell = ["bash count_txt.sh"]
+prompt = """
+count_txt.sh should print how many .txt files are directly inside the directory given as its
+argument, but it counts every file. Fix it.
+"""

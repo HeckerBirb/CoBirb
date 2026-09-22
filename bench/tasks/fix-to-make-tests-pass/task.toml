@@ -1,0 +1,6 @@
+category = "fix"
+shell = ["python -m pytest"]
+prompt = """
+The tests in tests/ fail. Fix the code so they pass, without changing the tests.
+You can run them with `python -m pytest -q`.
+"""

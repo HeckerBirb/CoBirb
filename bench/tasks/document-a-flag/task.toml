@@ -1,0 +1,2 @@
+category = "docs"
+prompt = "The --limit option of fetch.py is not documented. Add it to the Usage section of README.md."

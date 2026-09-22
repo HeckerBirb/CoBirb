@@ -1,0 +1,5 @@
+category = "fix"
+prompt = """
+handle_delete in handlers.py should return code 204 on success, not 200. Change only that function;
+every other handler must keep returning 200.
+"""

@@ -1,0 +1,12 @@
+{
+  "name": "inventory",
+  "logging": {
+    "level": "INFO",
+    "file": "logs/app.log"
+  },
+  "plugins": {
+    "enabled": ["auth", "search"],
+    "disabled": ["legacy"]
+  },
+  "limits": {"items": 500, "users": 20}
+}

@@ -1,0 +1,6 @@
+category = "implement"
+prompt = """
+Create a module stack.py with a class Stack: push(item), pop() which returns the most recently
+pushed item and raises IndexError when empty, peek() which returns it without removing it (also
+IndexError when empty), and len(stack) giving the number of items.
+"""

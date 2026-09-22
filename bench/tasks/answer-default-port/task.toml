@@ -1,0 +1,6 @@
+category = "answer"
+changes_files = false
+prompt = """
+What port does the server listen on by default, according to the code (not the README)?
+Reply with just the number.
+"""

@@ -1,0 +1,6 @@
+category = "fix"
+shell = ["node"]
+prompt = """
+sumPrices() in cart.js returns "0102030" instead of 60 when prices are strings like "10". Make it
+return the numeric total. Numbers must keep working too.
+"""

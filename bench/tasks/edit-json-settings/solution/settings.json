@@ -1,0 +1,6 @@
+{
+  "name": "inventory",
+  "logging": {"level": "DEBUG", "file": "logs/app.log"},
+  "plugins": {"enabled": ["auth", "search", "metrics"], "disabled": ["legacy"]},
+  "limits": {"items": 500, "users": 20}
+}

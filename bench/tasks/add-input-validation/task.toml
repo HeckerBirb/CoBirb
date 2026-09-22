@@ -1,0 +1,5 @@
+category = "implement"
+prompt = """
+create_user() in users.py accepts anything. Make it raise ValueError when the name is empty or only
+whitespace, or when age is negative. Valid input must keep working exactly as before.
+"""

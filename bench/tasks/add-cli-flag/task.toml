@@ -1,0 +1,6 @@
+category = "implement"
+shell = ["python wc.py"]
+prompt = """
+wc.py prints the number of lines in a file. Add a --words flag: with it, print the number of words
+instead. Without it, behaviour must stay the same.
+"""

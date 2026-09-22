@@ -9,3 +9,4 @@ __pycache__/
 .vscode/
 *.session.json
 .claude/settings.local.json
+bench/results/

@@ -1,0 +1,5 @@
+category = "fix"
+prompt = """
+paginate() in pager.py returns the wrong page: page 1 should be the first `size` items, page 2 the
+next `size`, and so on. Fix it.
+"""

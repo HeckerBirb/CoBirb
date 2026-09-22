@@ -1,0 +1,2 @@
+category = "implement"
+prompt = "Implement slugify() in text.py according to its docstring."

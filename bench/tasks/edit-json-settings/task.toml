@@ -1,0 +1,5 @@
+category = "config"
+prompt = """
+In settings.json, set the logging level to DEBUG and add "metrics" to the list of enabled plugins.
+Keep everything else exactly as it is.
+"""

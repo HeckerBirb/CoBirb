@@ -1,0 +1,14 @@
+category = "fix"
+shell = ["python report.py"]
+prompt = """
+Running `python report.py` crashes:
+
+Traceback (most recent call last):
+  File "report.py", line 17, in <module>
+    print(summarise(load()))
+  File "report.py", line 12, in summarise
+    return ", ".join(r["email"].lower() for r in records)
+KeyError: 'email'
+
+Records without an email should be skipped rather than crashing the report. Fix it.
+"""

@@ -1,0 +1,6 @@
+category = "implement"
+prompt = """
+Add an optional discount to orders: Order should accept `discount_percent` (default 0), and
+order_total() should apply it to the subtotal before tax. Keep existing behaviour for orders without
+a discount.
+"""

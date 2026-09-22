@@ -1,0 +1,6 @@
+category = "tests"
+shell = ["python -m pytest"]
+prompt = """
+Write pytest tests for parse_duration() in tests/test_duration.py. Cover hours, minutes, seconds,
+combinations like "1h30m", and invalid input. Make sure they pass (`python -m pytest -q`).
+"""

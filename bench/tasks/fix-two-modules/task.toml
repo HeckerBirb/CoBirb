@@ -1,0 +1,3 @@
+category = "fix"
+shell = ["python -m pytest"]
+prompt = "Run the test suite with `python -m pytest -q` and fix whatever fails. Do not modify the tests."
