@@ -895,3 +895,74 @@ def test_a_missing_shell_cwd_is_reported_as_such(tmp_path):
 
     assert not result.ok
     assert "No such directory" in result.content
+
+
+# --------------------------------------------------------------------------- #
+# edit_file: one region, or a refusal that says why
+# --------------------------------------------------------------------------- #
+def _edit(tmp_path, text, **arguments):
+    f = tmp_path / "a.py"
+    f.write_text(text)
+    result = EditFileTool(str(tmp_path)).execute({"path": "a.py", **arguments})
+    return result, f.read_text()
+
+
+def test_an_ambiguous_match_is_refused_and_names_every_line(tmp_path):
+    """It used to edit the first match and report success — in a file of
+    similar functions, a different function from the one meant."""
+    text = "def a():\n    return 200\n\ndef b():\n    return 200\n"
+    result, after = _edit(tmp_path, text, old_str="    return 200", new_str="    return 204")
+
+    assert not result.ok
+    assert "2 places" in result.content and "lines 2, 5" in result.content
+    assert after == text
+
+
+def test_replace_all_changes_every_occurrence(tmp_path):
+    result, after = _edit(tmp_path, "x = 1\ny = 1\n", old_str="1", new_str="2", replace_all=True)
+
+    assert result.ok and after == "x = 2\ny = 2\n"
+
+
+def test_enough_context_makes_an_ambiguous_edit_unique(tmp_path):
+    text = "def a():\n    return 200\n\ndef b():\n    return 200\n"
+    result, after = _edit(tmp_path, text, old_str="def b():\n    return 200",
+                          new_str="def b():\n    return 204")
+
+    assert result.ok
+    assert after == "def a():\n    return 200\n\ndef b():\n    return 204\n"
+    assert "Lines 4–5 now read" in result.content
+
+
+def test_trailing_whitespace_and_crlf_differences_still_match(tmp_path):
+    result, after = _edit(tmp_path, "a = 1   \r\nb = 2\r\n", old_str="a = 1\nb = 2", new_str="a = 3\nb = 4")
+
+    assert result.ok and "ignoring whitespace" in result.content
+    assert after.startswith("a = 3\nb = 4")
+
+
+def test_a_dropped_indent_is_matched_and_put_back(tmp_path):
+    text = "class C:\n    def f(self):\n        return 1\n"
+    result, after = _edit(tmp_path, text, old_str="def f(self):\n    return 1",
+                          new_str="def f(self):\n    return 2")
+
+    assert result.ok
+    assert after == "class C:\n    def f(self):\n        return 2\n"
+
+
+def test_a_miss_quotes_the_closest_region(tmp_path):
+    text = "def total(items):\n    return sum(i.price for i in items)\n"
+    result, after = _edit(tmp_path, text, old_str="return sum(i.cost for i in items)", new_str="x")
+
+    assert not result.ok
+    assert "not found" in result.content
+    assert "line 2" in result.content and "i.price" in result.content
+    assert after == text
+
+
+def test_the_preview_says_an_ambiguous_edit_will_fail(tmp_path):
+    (tmp_path / "a.py").write_text("x = 1\nx = 1\n")
+
+    preview = EditFileTool(str(tmp_path)).preview({"path": "a.py", "old_str": "x = 1", "new_str": "x = 2"})
+
+    assert "will fail" in preview and "2 places" in preview

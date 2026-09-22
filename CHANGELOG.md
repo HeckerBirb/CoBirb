@@ -4,6 +4,18 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Fixed: `edit_file` could change the wrong place and say it had succeeded.** When the text to
+  replace appeared more than once, it edited the first occurrence — in a file of similar functions,
+  a different function from the one meant — and the model then reported the job done. An ambiguous
+  edit is now refused with the line of every match, so the model can add context; `replace_all`
+  changes every occurrence on purpose.
+- **`edit_file` forgives small copying slips.** Trailing whitespace, Windows line endings and a
+  missing level of indentation no longer make an edit fail, as long as the match is unique. When
+  the text really isn't there, the error quotes the closest lines so the model can copy them exactly.
+  A successful edit shows the lines it produced.
+
 ## [0.26.0]
 
 - **Tool calls a model writes as text are now made.** Many local models put the call in their reply

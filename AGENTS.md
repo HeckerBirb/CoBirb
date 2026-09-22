@@ -274,6 +274,14 @@ Built-ins: `read_file`, `write_file`, `edit_file`, `apply_patch`, `glob`, `grep`
 `repo_map`, `shell`. Subclasses of `CobirbTool` declare `NAME: ClassVar[str]` and inherit `name()`
 — the SPI declares `name` as a **method**, and `ToolRegistry.register` rejects anything else.
 
+**`edit_file` changes exactly one region or refuses** (`_plan_edit`). It used to replace the first
+match and report success, so in a file of near-identical functions it edited a different function
+than the one meant and the model then told the user it had done what was asked — the first real
+defect cobirb-bench found. Now: several matches are refused with every line number (`replace_all`
+opts in); a miss tries a unique whitespace-tolerant whole-line match (trailing space, CRLF, and an
+indent *missing* uniformly from `old_str`, which is re-added to `new_str`); a true miss quotes the
+closest region with line numbers. Success reports the edited lines, so the model sees what it did.
+
 Every result is bounded: 256 KiB per read (paged — a short read says which lines it returned and
 what offset continues), 500 grep matches, 300 chars per matching line, 1000 list/glob entries,
 64 KiB of shell output (head **and** tail kept), 8 KiB of approval preview.
