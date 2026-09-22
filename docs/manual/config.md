@@ -21,6 +21,18 @@ version.
 Every role inherits from `default`, field by field. Name only `default` and everything uses it.
 Check with `cobirb models`.
 
+`options` are sent to the server with every request — sampling settings such as `temperature`,
+`top_p` or `seed`. A role's options are merged over the default's, key by key:
+
+```json
+"models": {
+  "default": { "name": "qwen3-coder:30b", "options": { "temperature": 0.7 } },
+  "worker":  { "options": { "temperature": 0.2 } }
+}
+```
+
+`num_ctx` is ignored here; set `max_num_ctx` instead (below).
+
 ## Capping the context window
 
 ```json

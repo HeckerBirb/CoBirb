@@ -980,3 +980,12 @@ def test_a_historical_turn_with_no_data_field_attaches_nothing():
     )
     messages = _build_messages("", context, include_images=True)
     assert "images" not in messages[0]
+
+
+def test_configured_options_ride_on_every_chat_request_beside_the_window(monkeypatch):
+    responses = _RoutingResponses(model_info={"llama.context_length": 8192})
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+
+    LocalModelProvider(model="m", options={"seed": 42, "temperature": 0.2}).chat("", "[]")
+
+    assert responses.chat_request["options"] == {"seed": 42, "temperature": 0.2, "num_ctx": 8192}

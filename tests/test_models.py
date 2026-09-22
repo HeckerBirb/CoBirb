@@ -14,6 +14,7 @@ from conftest import write_config
 
 from cobirb.config import Config
 from cobirb.runtime.models import (
+    model_options,
     ROLE_DEFAULT,
     ROLE_ORCHESTRATOR,
     ROLE_WORKER,
@@ -250,3 +251,28 @@ def test_an_unusable_timeout_costs_the_setting_not_the_run(tmp_path, value):
     provider = build_for_role("worker", _config(tmp_path, {"request_timeout": value}))
 
     assert provider._request_timeout == DEFAULT_REQUEST_TIMEOUT
+
+
+# --------------------------------------------------------------------------- #
+# Sampling options
+# --------------------------------------------------------------------------- #
+def test_a_role_inherits_the_default_options_key_by_key(tmp_path):
+    write_config(tmp_path, {"models": {
+        "default": {"name": "m", "options": {"temperature": 0.7, "seed": 1}},
+        "worker": {"options": {"seed": 7}},
+    }})
+
+    assert model_options("worker", Config()) == {"temperature": 0.7, "seed": 7}
+    assert model_options("default", Config()) == {"temperature": 0.7, "seed": 1}
+
+
+def test_num_ctx_is_not_an_option_because_max_num_ctx_owns_the_window(tmp_path):
+    write_config(tmp_path, {"models": {"default": {"name": "m", "options": {"num_ctx": 4096, "top_p": 0.9}}}})
+
+    assert model_options("default", Config()) == {"top_p": 0.9}
+
+
+def test_options_that_are_not_an_object_are_ignored(tmp_path):
+    write_config(tmp_path, {"models": {"default": {"name": "m", "options": "hot"}}})
+
+    assert model_options("default", Config()) == {}

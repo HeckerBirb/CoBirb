@@ -293,6 +293,7 @@ class LocalModelProvider(ModelProvider):
         max_num_ctx: int | None = None,
         connect_timeout: int | None = None,
         request_timeout: int | None = None,
+        options: dict[str, Any] | None = None,
     ) -> None:
         self._model = model or os.environ.get("COBIRB_MODEL_NAME", "")
         self._base_url = (base_url or os.environ.get("COBIRB_OLLAMA_URL") or DEFAULT_BASE_URL).rstrip("/")
@@ -305,6 +306,10 @@ class LocalModelProvider(ModelProvider):
         # see context_window() for why this exists and what it does and does
         # not affect.
         self._max_num_ctx = max_num_ctx
+        # Sampling options sent with every chat request (temperature, seed,
+        # top_p, ...), from ``models.<role>.options``. The window is stated
+        # separately and wins — see runtime.models.model_options.
+        self._options = dict(options or {})
         # Ollama returns structured tool calls alongside the assistant message
         # in the same response; stash them here so parse_tool_calls() doesn't
         # need to re-parse text or make a second round trip.
@@ -598,8 +603,11 @@ class LocalModelProvider(ModelProvider):
         # model can do, and a long conversation is truncated from the front
         # with nobody told.
         window = self.context_window()
+        options = dict(self._options)
         if window:
-            payload["options"] = {"num_ctx": window}
+            options["num_ctx"] = window
+        if options:
+            payload["options"] = options
         if tools:
             payload["tools"] = [_tool_schema(t) for t in tools]
 

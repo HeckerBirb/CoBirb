@@ -188,7 +188,29 @@ def build_for_role(
         max_num_ctx=parse_context_size(config.get("max_num_ctx")),
         connect_timeout=_timeout(config, "connect_timeout"),
         request_timeout=_timeout(config, "request_timeout"),
+        options=model_options(role, config),
     )
+
+
+def model_options(role: str, config: Config) -> dict[str, Any]:
+    """Sampling options for ``role`` — ``models.<role>.options`` over
+    ``models.default.options``, key by key, passed to the server as-is.
+
+    ``num_ctx`` is dropped: the window has one owner (``max_num_ctx`` and
+    ``LocalModelProvider.context_window``), and a second place to set it would
+    be a second answer to "how big is the window" that the history budget
+    never hears about.
+    """
+    merged: dict[str, Any] = {}
+    for name in dict.fromkeys((ROLE_DEFAULT, role)):
+        value = config.get("models", name, "options")
+        if isinstance(value, dict):
+            merged.update(value)
+        elif value is not None:
+            logger.warning("models.%s.options is not an object; ignoring it", name)
+    if merged.pop("num_ctx", None) is not None:
+        logger.warning("num_ctx in models.*.options is ignored; set max_num_ctx instead")
+    return merged
 
 
 def _timeout(config: Config, key: str) -> int | None:

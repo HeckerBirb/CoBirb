@@ -4,6 +4,12 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Sampling options per model role.** `models.<role>.options` is sent to the server with every
+  request — `temperature`, `top_p`, `seed` and the like — and a role's options are merged over the
+  default's key by key. `num_ctx` is ignored there, since `max_num_ctx` already owns the window.
+
 ## [0.23.1]
 
 - **CoBirb reports its real version.** `cobirb.__version__` was a literal nobody bumped: it said
