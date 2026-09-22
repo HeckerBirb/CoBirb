@@ -2,7 +2,18 @@
 
 All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
-and its §12 decisions record for the ones that were designed and then deliberately *not* built.
+and its §17 decisions record for the ones that were designed and then deliberately *not* built.
+
+## [Unreleased]
+
+- **CoBirb reports its real version.** `cobirb.__version__` was a literal nobody bumped: it said
+  0.13.1 for eight releases, and the MCP client announces it to every server it starts. It is now
+  read from the installed package.
+- Documentation that described a different program is corrected: the version in AGENTS.md, a line
+  claiming vision support did not exist, the worker approval dialog 0.21.0 replaced, and the
+  README's description of which API CoBirb speaks.
+- The test suite now fails any unit test that reaches a model endpoint or the network, instead of
+  letting it pass slowly against a running Ollama or hang against a stopped one.
 
 ## [0.23.0]
 

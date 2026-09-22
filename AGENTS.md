@@ -8,7 +8,8 @@ CoBirb is a **privacy-first agentic coding CLI**: the capabilities people get fr
 coding assistants, against models running on the user's own machine, with no telemetry and no
 outbound network unless the user explicitly asks for it.
 
-- `v0.9.2`, Python ≥3.11, MIT. Entry point `cobirb = cobirb.cli:main`.
+- Version: `pyproject.toml` (the one place it is written; `cobirb.__version__` reads the installed
+  metadata). Python ≥3.11, MIT. Entry point `cobirb = cobirb.cli:main`.
 - Runtime deps: `rich` (rendering), `cryptography` (session cipher), `textual` (interactive app,
   imported lazily so one-shot never loads it). Dev extras: `pytest`, `pytest-cov`, `pytest-asyncio`.
 - Ships **no models**. The core model provider speaks to a local Ollama-compatible endpoint
@@ -299,7 +300,7 @@ persistent was not done: see §17's note on `ShellTool`'s per-call process state
   `cancel()` latches the provider closed; `interrupt_current_reply()` cuts one reply and leaves the
   provider usable — `_steer_signal` is cleared before every request so a late interrupt never
   reports the *next* request's failure as a steer.
-- `supports_vision()` is a constant `False`; nothing consumes images anywhere.
+- `supports_vision()` reads `capabilities` off the cached `/api/show` payload (§6c).
 
 ## 10. Plugin SPI (`typing/spi.py`)
 
@@ -705,10 +706,11 @@ never wrap a row onto a second line and push another off the bottom. Keys: `f1` 
 `f2` next tab, `ctrl+q` quit, `ctrl+c` copy selection else cancel the turn, `up`/`down` recall the
 last 100 prompts (memory only). The prompt box stays enabled during a turn — submitting again
 steers rather than queueing. Tool approval is a modal (`y` once / `a` always / `n`/escape deny) and
-states what "always" would grant. A Worker Birb's request uses `WorkerApprovalModal` instead
-(`y` once / `s` session / `n` deny), which names the worker, says a session grant reaches agents
-that have not started, and carries a placeholder-only field for "do this instead" — a placeholder
-so the prompt text can never be submitted as though the user had typed it.
+states what "always" would grant. A Worker Birb's request is asked in that worker's own pane instead
+(`panes.WorkerRequest`, §13): once / session / deny, naming the worker, saying a session grant
+reaches agents that have not started, with a placeholder-only field for "do this instead" — a
+placeholder so the prompt text can never be submitted as though the user had typed it. Nothing is
+focused by default.
 
 **Config keys** — `default_model`, `models.*`, `system_prompt`, `plugins.{model,io,crypto}`,
 `allow_tools`, `allow_read_dirs`, `allow_write_dirs`, `verify_command`, `verify_timeout`,

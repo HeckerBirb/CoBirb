@@ -178,7 +178,7 @@ Being straight about the edges, since the rest of this page makes strong claims:
   read what you send it or issue its own requests — fetches weights from a registry, and
   makes outbound requests on its own schedule. None of that is malicious; all of it is trust
   rather than enforcement. `llama-server`, LM Studio and vLLM have the same shape. **CoBirb will
-  not close this itself** — it is a client of an OpenAI-compatible endpoint and deliberately does
+  not close this itself** — it is a client of your model server's HTTP API and deliberately does
   not run models (an embedded GGUF runtime was considered and dropped; see §17 of
   [`AGENTS.md`](./AGENTS.md)). Where inference happens is yours to choose, including an endpoint
   you wrote. If the endpoint's trustworthiness matters to you, that is a property to fix in the
