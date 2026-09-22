@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.27.1]
 
 - **The tools describe themselves properly.** Several descriptions were one line that said what a
   tool is, not when to use it or what it gives back — and a small local model leans on exactly
