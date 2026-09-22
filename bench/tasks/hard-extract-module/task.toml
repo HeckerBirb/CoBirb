@@ -1,0 +1,7 @@
+category = "refactor"
+shell = ["python -m pytest"]
+prompt = """
+Move the parsing functions (everything named parse_*) out of app.py into a new module parsing.py,
+and update every import in the project to use it. app.py must no longer define them. Behaviour must
+not change; the tests (`python -m pytest -q`) must pass without modification.
+"""

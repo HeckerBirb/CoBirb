@@ -25,12 +25,15 @@ def attempt(task: Task, solved: bool) -> bool:
         solution = task.path / "solution"
         if solved and solution.is_dir():
             for path in solution.rglob("*"):
-                if path.is_file() and path.name != "ANSWER":
+                if path.is_file() and path.name not in ("ANSWER", "DELETE"):
                     target = work / path.relative_to(solution)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy(path, target)
             if (solution / "ANSWER").is_file():
                 answer = (solution / "ANSWER").read_text()
+            if (solution / "DELETE").is_file():
+                for rel in (solution / "DELETE").read_text().split():
+                    (work / rel).unlink()
         passed, output = _check(task, work, scratch, answer)
         if passed != solved:
             print(f"  {'solution' if solved else 'fixture'}: {output[-400:]}")

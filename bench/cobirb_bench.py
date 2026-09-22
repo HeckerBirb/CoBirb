@@ -61,7 +61,7 @@ _TEXT_TOOL_CALL = re.compile(
 )
 
 FAILURE_CLASSES = (
-    "pass", "turn_limit", "unparsed_tool_call", "edit_miss", "no_change",
+    "pass", "turn_limit", "no_progress", "unparsed_tool_call", "edit_miss", "no_change",
     "wrong_result", "error", "timeout", "crash",
 )
 
@@ -151,8 +151,8 @@ def _classify(task: Task, report: dict[str, Any] | None, passed: bool) -> str:
         return "pass"
     if report is None:
         return "crash"
-    if report.get("stop_reason") == "turn_limit":
-        return "turn_limit"
+    if report.get("stop_reason") in ("turn_limit", "no_progress"):
+        return report["stop_reason"]
     summary = report.get("summary") or ""
     if _TEXT_TOOL_CALL.search(summary):
         return "unparsed_tool_call"

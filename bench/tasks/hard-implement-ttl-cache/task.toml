@@ -1,0 +1,4 @@
+category = "implement"
+prompt = """
+Implement the `ttl_cache` decorator in cache.py exactly as its docstring specifies.
+"""

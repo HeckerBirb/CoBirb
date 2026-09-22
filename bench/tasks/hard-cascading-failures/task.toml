@@ -1,0 +1,3 @@
+category = "fix"
+shell = ["python -m pytest"]
+prompt = "Run the tests with `python -m pytest -q` and make them all pass. Do not modify the tests."

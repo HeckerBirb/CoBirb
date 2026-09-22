@@ -1,0 +1,3 @@
+category = "fix"
+shell = ["python -m pytest"]
+prompt = "tests/test_restock.py fails. Find the bug in the code and fix it; do not change the tests."

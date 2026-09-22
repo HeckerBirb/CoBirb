@@ -1,0 +1,9 @@
+category = "refactor"
+shell = ["python -m pytest"]
+timeout = 1500
+prompt = """
+This project logs through the old helper `log(message, level)` in util/logging_compat.py. Migrate
+every call to the new API in util/logger.py — `get_logger(__name__).<level>(message)`, e.g.
+`log("saved", "info")` becomes `get_logger(__name__).info("saved")` — then delete
+util/logging_compat.py. The tests (`python -m pytest -q`) must still pass.
+"""
