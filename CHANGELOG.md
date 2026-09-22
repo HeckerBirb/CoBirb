@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.23.1]
 
 - **CoBirb reports its real version.** `cobirb.__version__` was a literal nobody bumped: it said
   0.13.1 for eight releases, and the MCP client announces it to every server it starts. It is now
