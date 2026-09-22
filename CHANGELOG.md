@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.35.0]
 
 - **`/undo` and `/diff` cover what shell commands did.** Every turn is now snapshotted as a whole
   tree, so a file a command deleted, created or rewrote comes back like any other. Before, undo only
