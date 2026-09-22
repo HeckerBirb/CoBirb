@@ -33,6 +33,22 @@ Check with `cobirb models`.
 
 `num_ctx` is ignored here; set `max_num_ctx` instead (below).
 
+### llama.cpp, LM Studio, vLLM
+
+Set `"api": "openai"` to talk to any server of `/v1/chat/completions` instead of Ollama's own API:
+
+```json
+"models": {
+  "default": { "name": "qwen3-coder", "base_url": "http://localhost:8080", "api": "openai" }
+}
+```
+
+`base_url` works with or without a trailing `/v1`. These servers fix the context window when they
+start, so CoBirb reads it from what the server reports (llama.cpp's `/props`, vLLM's
+`max_model_len`) instead of asking for one; `max_num_ctx` still caps it. `options` are sent as
+request fields, so use the server's own names (`temperature`, `top_p`, `seed`, …). Images are sent
+when llama.cpp reports vision support, or when you set `"vision": true` on the role.
+
 ## Capping the context window
 
 ```json

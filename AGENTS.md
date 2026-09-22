@@ -69,7 +69,7 @@ not let it quietly pick a default, narrow a feature or rule an approach out. Rai
 | `config.py` / `paths.py` | The single config file; every `~/.cobirb` path derived in one place. |
 | `typing/spi.py` | **The plugin contract.** All SPI interfaces + shared dataclasses. |
 | `plugins/loader.py` | Discovery (entry points + local dirs), fail-closed. |
-| `plugins/core/` | Built-ins: `tools`, `model`, `io`, `crypto`, `render`, `repomap`, `ignores`. |
+| `plugins/core/` | Built-ins: `tools`, `model` (Ollama), `openai` (OpenAI-compatible servers, §9), `toolcalls` (calls written as text), `io`, `crypto`, `render`, `repomap`, `ignores`. |
 | `runtime/` | Composition layer both front-ends share: `wiring`, `plugins`, `models`, `system_prompt` (CoBirb's own system-prompt block, empty by default), `commands`, `command_index` (what the `/` picker lists and how it ranks), `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues` (which catalogues a session has open — see §6b), `mentions` (`@path` ranking + expansion), `doctor` (the readiness checks). |
 | `mcp/` | stdio MCP client (`client`) and its tool adapter (`tools`). |
 | `flock/` | Multi-agent runs: `charter`, `plan` (the incremental builder), `brainy`, `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. |
@@ -335,6 +335,17 @@ persistent was not done: see §17's note on `ShellTool`'s per-call process state
   provider usable — `_steer_signal` is cleared before every request so a late interrupt never
   reports the *next* request's failure as a steer.
 - `supports_vision()` reads `capabilities` off the cached `/api/show` payload (§6c).
+- **`OpenAICompatibleProvider` (`plugins/core/openai.py`) speaks `/v1/chat/completions`** for
+  llama.cpp, LM Studio and vLLM, selected by `models.<role>.api = "openai"` (config, never probing;
+  `runtime.models.model_api`). Before it existed those servers listed models over `/v1/models` and
+  then failed every chat, because chat went to Ollama's `/api/chat`. It **subclasses** the Ollama
+  provider so connection tracking, cancel, steering, the two timeouts and text tool calls are shared
+  — `_stream_lines` is the protocol-independent half of streaming. Differences: tool-call ids are
+  minted on replay (`call_<turn>_<k>`, echoed by the matching tool result), arguments are JSON
+  strings and stream as index-keyed fragments, options are top-level request fields, there is no
+  Modelfile `SYSTEM`, and **the window is read rather than requested** (llama.cpp `/props`
+  `n_ctx`, else `/v1/models` `max_model_len`/`context_length`/`meta.n_ctx`), capped by
+  `max_num_ctx`. Vision: `models.<role>.vision`, else llama.cpp's `modalities`.
 
 ## 10. Plugin SPI (`typing/spi.py`)
 

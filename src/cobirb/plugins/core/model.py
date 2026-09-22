@@ -194,7 +194,7 @@ def _server_parse_problem(message: str) -> str:
     return f"a tool call the model server could not parse ({detail})"
 
 
-def _unreachable(base_url: str, exc: Exception, model: str = "") -> RuntimeError:
+def _unreachable(base_url: str, exc: Exception, model: str = "", server: str = "Ollama") -> RuntimeError:
     """Turn a failed request into something that names the actual problem.
 
     ``urllib.error.HTTPError`` is a *subclass* of ``URLError``, so a single
@@ -216,15 +216,15 @@ def _unreachable(base_url: str, exc: Exception, model: str = "") -> RuntimeError
             return RuntimeError(
                 f"The model provider at {base_url} does not have{named}"
                 f"{f' — it said: {detail}' if detail else ''}. "
-                "Check the spelling with 'cobirb models', and that it is pulled "
-                "('ollama list')."
+                "Check the spelling with 'cobirb models'"
+                + (", and that it is pulled ('ollama list')." if server == "Ollama" else ".")
             )
         return RuntimeError(
             f"The model provider at {base_url} refused the request for{named}: "
             f"{exc.code} {exc.reason}{f' — {detail}' if detail else ''}"
         )
     return RuntimeError(
-        f"Could not reach the model provider at {base_url}: {exc}. Is Ollama running?"
+        f"Could not reach the model provider at {base_url}: {exc}. Is {server} running?"
     )
 
 
@@ -290,6 +290,11 @@ def _drop(connections: "list[http.client.HTTPConnection]") -> None:
 class LocalModelProvider(ModelProvider):
     """Chats with a local Ollama server.
 
+    ``OpenAICompatibleProvider`` (``plugins/core/openai.py``) subclasses this
+    for llama.cpp, LM Studio and vLLM; what the two share — connection
+    tracking, cancellation, steering, the two timeouts, text tool calls — lives
+    here once.
+
     No inference happens unless a model name is supplied; there is no
     embedded model and no default remote endpoint.
     """
@@ -305,6 +310,9 @@ class LocalModelProvider(ModelProvider):
         options: dict[str, Any] | None = None,
     ) -> None:
         self._model = model or os.environ.get("COBIRB_MODEL_NAME", "")
+        # Named in error messages ("Is Ollama running?"); a subclass for a
+        # different server says its own name.
+        self._server = "Ollama"
         self._base_url = (base_url or os.environ.get("COBIRB_OLLAMA_URL") or DEFAULT_BASE_URL).rstrip("/")
         self.cwd = cwd or os.getcwd()
         # Two numbers, not one, because they answer different questions — see
@@ -464,7 +472,7 @@ class LocalModelProvider(ModelProvider):
             with urllib.request.urlopen(request, timeout=self._request_timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
-            raise _unreachable(self._base_url, exc, self._model) from exc
+            raise _unreachable(self._base_url, exc, self._model, self._server) from exc
 
     def list_models(self) -> list[str]:
         """Return the model names available from the configured endpoint.
@@ -486,7 +494,7 @@ class LocalModelProvider(ModelProvider):
             with urllib.request.urlopen(request, timeout=self._connect_timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
-            raise _unreachable(self._base_url, exc) from exc
+            raise _unreachable(self._base_url, exc, server=self._server) from exc
         entries = payload.get("data") or []
         return sorted({entry["id"] for entry in entries if entry.get("id")})
 
@@ -667,15 +675,65 @@ class LocalModelProvider(ModelProvider):
         # genuine failure (an unreachable server, say) would then be reported
         # as a steer instead of as what it was. That is exactly the class of
         # mistake the 0.5.1 field note about 404s existed to stamp out.
+        tool_calls: list[ToolCall] = []
+        for raw_line in self._stream_lines("/api/chat", payload):
+            line = raw_line.strip()
+            if not line:
+                continue
+            chunk = json.loads(line)
+            if chunk.get("error"):
+                # Ollama reports a failure part-way through a stream as an
+                # `error` line. Its own tool-call parser failing is the model
+                # getting the format wrong, which it can correct; anything
+                # else is a real failure and is raised as one.
+                if self._stream_error(str(chunk["error"])):
+                    break
+            message = chunk.get("message", {})
+            content = message.get("content", "")
+            if content:
+                yield content
+            if message.get("tool_calls"):
+                # Extended, not replaced: a model that splits its calls
+                # across chunks would otherwise have every one but the
+                # last silently dropped.
+                tool_calls.extend(_extract_tool_calls(message))
+            if chunk.get("done"):
+                break
+        self._last_tool_calls = tool_calls
+
+    def _stream_error(self, error: str) -> bool:
+        """Handle an error reported inside a stream: ``True`` when it was the
+        server's tool-call parser failing (recorded for ``malformed_tool_call``
+        and the stream should stop), otherwise raised as a real failure."""
+        if self._offered and toolcalls.looks_like_server_parse_error(error):
+            self._malformed = _server_parse_problem(error)
+            return True
+        raise RuntimeError(f"The model provider reported an error: {error}")
+
+    def _stream_lines(self, path: str, payload: dict[str, Any]) -> Iterable[bytes]:
+        """POST ``payload`` to ``path`` and yield the response body line by line.
+
+        Shared by every streaming protocol — Ollama's NDJSON and the OpenAI
+        server-sent events differ only in what a line means. This is where the
+        connection is tracked for ``cancel()``, the two timeouts are split, and
+        a transport failure or an HTTP error is turned into one that names the
+        endpoint; a tool-call parse failure in an error body is recorded
+        rather than raised.
+        """
+        # A fresh request cannot already have been interrupted. Without this,
+        # an `interrupt_current_reply()` that lands in the moment between the
+        # last chunk arriving and the generator finishing leaves `_steer_signal`
+        # set with no exception to consume it — and the *next* request's first
+        # genuine failure (an unreachable server, say) would then be reported
+        # as a steer instead of as what it was.
         self._steer_signal.clear()
         conn, prefix = self._connect()
-        tool_calls: list[ToolCall] = []
         try:
             try:
                 self._open(conn)
                 conn.request(
                     "POST",
-                    f"{prefix}/api/chat",
+                    f"{prefix}{path}",
                     body=json.dumps(payload).encode("utf-8"),
                     headers={"Content-Type": "application/json"},
                 )
@@ -683,13 +741,14 @@ class LocalModelProvider(ModelProvider):
             except OSError as exc:
                 if self._cancelled or self._steer_signal.is_set():
                     raise self._as_control_exception(exc) from exc
-                raise _unreachable(self._base_url, urllib.error.URLError(exc), self._model) from exc
+                raise _unreachable(
+                    self._base_url, urllib.error.URLError(exc), self._model, self._server
+                ) from exc
             if response.status >= 400:
                 body = response.read()
-                if self._offered and toolcalls.looks_like_server_parse_error(
-                    body.decode("utf-8", "replace")
-                ):
-                    self._malformed = _server_parse_problem(body.decode("utf-8", "replace"))
+                text = body.decode("utf-8", "replace")
+                if self._offered and toolcalls.looks_like_server_parse_error(text):
+                    self._malformed = _server_parse_problem(text)
                     return
                 raise _unreachable(
                     self._base_url,
@@ -698,38 +757,14 @@ class LocalModelProvider(ModelProvider):
                         io.BytesIO(body),
                     ),
                     self._model,
+                    self._server,
                 )
             for raw_line in response:
-                line = raw_line.strip()
-                if not line:
-                    continue
-                chunk = json.loads(line)
-                if chunk.get("error"):
-                    # Ollama reports a failure part-way through a stream as an
-                    # `error` line. Its own tool-call parser failing is the model
-                    # getting the format wrong, which it can correct; anything
-                    # else is a real failure and is raised as one.
-                    error = str(chunk["error"])
-                    if self._offered and toolcalls.looks_like_server_parse_error(error):
-                        self._malformed = _server_parse_problem(error)
-                        break
-                    raise RuntimeError(f"The model provider reported an error: {error}")
-                message = chunk.get("message", {})
-                content = message.get("content", "")
-                if content:
-                    yield content
-                if message.get("tool_calls"):
-                    # Extended, not replaced: a model that splits its calls
-                    # across chunks would otherwise have every one but the
-                    # last silently dropped.
-                    tool_calls.extend(_extract_tool_calls(message))
-                if chunk.get("done"):
-                    break
+                yield raw_line
         except Exception as exc:  # noqa: BLE001 - see _as_control_exception
             raise self._as_control_exception(exc) from exc
         finally:
             self._release(conn)
-        self._last_tool_calls = tool_calls
 
     def cancel(self) -> None:
         """Abort any request in flight, and refuse any that starts after.

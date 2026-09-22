@@ -182,7 +182,7 @@ def build_for_role(
     """
     config = config or Config()
     spec = resolve_role(role, config, override)
-    return LocalModelProvider(
+    common = dict(
         model=spec.name,
         base_url=spec.base_url,
         max_num_ctx=parse_context_size(config.get("max_num_ctx")),
@@ -190,6 +190,36 @@ def build_for_role(
         request_timeout=_timeout(config, "request_timeout"),
         options=model_options(role, config),
     )
+    if model_api(role, config) == API_OPENAI:
+        from ..plugins.core.openai import OpenAICompatibleProvider
+
+        vision = _inherited(config, role, "vision")
+        return OpenAICompatibleProvider(**common, vision=None if vision is None else bool(vision))
+    return LocalModelProvider(**common)
+
+
+API_OLLAMA = "ollama"
+API_OPENAI = "openai"
+
+
+def _inherited(config: Config, role: str, key: str) -> Any:
+    """``models.<role>.<key>``, else ``models.default.<key>``."""
+    value = config.get("models", role, key)
+    return value if value is not None else config.get("models", ROLE_DEFAULT, key)
+
+
+def model_api(role: str, config: Config) -> str:
+    """Which protocol the endpoint speaks: ``"ollama"`` (the default) or
+    ``"openai"`` for llama.cpp, LM Studio, vLLM and other servers of
+    ``/v1/chat/completions``. Chosen by config, never by probing — CoBirb talks
+    to what it is told to and nothing else. Anything unrecognised is Ollama,
+    with a warning, since a typo should cost the setting rather than the run."""
+    value = str(_inherited(config, role, "api") or API_OLLAMA).strip().lower()
+    if value in ("openai", "openai-compatible", "openai_compatible"):
+        return API_OPENAI
+    if value != API_OLLAMA:
+        logger.warning("models.%s.api %r is not 'ollama' or 'openai'; using ollama", role, value)
+    return API_OLLAMA
 
 
 def model_options(role: str, config: Config) -> dict[str, Any]:

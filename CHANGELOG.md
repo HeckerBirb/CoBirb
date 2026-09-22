@@ -4,6 +4,16 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **llama.cpp, LM Studio and vLLM work.** Set `"api": "openai"` on a model role and CoBirb talks
+  `/v1/chat/completions` to it — streaming, tool calls, images and cancellation included. These
+  servers could list their models in CoBirb before, and then failed every single message, because
+  chat always went to Ollama's own API. They fix their context window at start-up, so CoBirb reads
+  it from what the server reports instead of asking for one; `max_num_ctx` still caps it.
+- Connection errors name the server you are actually using instead of always asking whether
+  Ollama is running.
+
 ## [0.29.0]
 
 - **`--system-prompt harness` now tells the model how to work,** not only how permissions work:
