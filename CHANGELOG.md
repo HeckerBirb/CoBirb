@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.33.0]
 
 - **One key names your default model: `models.default.name`.** The older top-level `model` and
   `default_model` still work when it is unset, but no longer outrank it — "which setting is in
