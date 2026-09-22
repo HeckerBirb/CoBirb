@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.27.0]
 
 - **Fixed: `edit_file` could change the wrong place and say it had succeeded.** When the text to
   replace appeared more than once, it edited the first occurrence — in a file of similar functions,
