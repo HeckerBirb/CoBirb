@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.34.0]
 
 - **Shell commands run in a sandbox.** With bubblewrap installed, every command the agent runs is
   contained: no network at all, the filesystem read-only except your project and a private `/tmp`,
