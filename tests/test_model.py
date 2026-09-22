@@ -989,3 +989,62 @@ def test_configured_options_ride_on_every_chat_request_beside_the_window(monkeyp
     LocalModelProvider(model="m", options={"seed": 42, "temperature": 0.2}).chat("", "[]")
 
     assert responses.chat_request["options"] == {"seed": 42, "temperature": 0.2, "num_ctx": 8192}
+
+
+# --------------------------------------------------------------------------- #
+# Tool calls written as text
+# --------------------------------------------------------------------------- #
+class _Tool:
+    def name(self):
+        return "read_file"
+
+    def description(self):
+        return "read"
+
+    def parameters(self):
+        return {"type": "object", "properties": {"path": {"type": "string"}}}
+
+
+def test_a_call_written_into_the_reply_is_read_when_no_native_call_came(monkeypatch):
+    content = '<tool_call>{"name": "read_file", "arguments": {"path": "a.py"}}</tool_call>'
+    responses = _RoutingResponses(chat_payload={"message": {"role": "assistant", "content": content}})
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+    provider = LocalModelProvider(model="m")
+
+    reply = provider.chat("", "[]", [_Tool()])
+    calls = provider.parse_tool_calls(reply)
+
+    assert [(c.name, c.arguments) for c in calls] == [("read_file", {"path": "a.py"})]
+
+
+def test_text_is_not_read_for_calls_when_no_tools_were_offered(monkeypatch):
+    content = '{"name": "read_file", "arguments": {"path": "a.py"}}'
+    responses = _RoutingResponses(chat_payload={"message": {"role": "assistant", "content": content}})
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+    provider = LocalModelProvider(model="m")
+
+    assert provider.parse_tool_calls(provider.chat("", "[]")) == []
+
+
+def test_the_servers_own_parse_failure_is_a_problem_not_an_answer(monkeypatch):
+    responses = _RoutingResponses(chat_payload={"message": {
+        "role": "assistant", "content": "error parsing tool call: raw='<function=read_file>', err=XML syntax error"}})
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+    provider = LocalModelProvider(model="m")
+
+    reply = provider.chat("", "[]", [_Tool()])
+
+    assert reply == ""
+    assert provider.parse_tool_calls(reply) == []
+    assert "could not parse" in provider.malformed_tool_call()
+
+
+def test_replayed_history_carries_a_text_call_once_not_twice():
+    context = json.dumps([
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": 'Reading.<tool_call>{"name":"read_file"}</tool_call>',
+         "tool_use": [{"name": "read_file", "arguments": {"path": "a"}}]},
+    ])
+    messages = _build_messages("", context)
+    assert messages[-1]["content"] == "Reading."
+    assert messages[-1]["tool_calls"][0]["function"]["name"] == "read_file"

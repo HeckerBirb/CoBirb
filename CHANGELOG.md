@@ -4,6 +4,19 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Tool calls a model writes as text are now made.** Many local models put the call in their reply
+  instead of the structured field — Qwen3-coder switches to its XML format once it has more than a
+  handful of tools, others write `<tool_call>` JSON or a bare JSON object — and CoBirb took that
+  for the model's final answer, so the task ended on a call that never ran. These are now read and
+  run through exactly the same permission check as any other call. Only tools CoBirb actually
+  offered count, and plain JSON only when it is the whole reply, so a JSON example in an explanation
+  is never executed.
+- **A call that can't be read is sent back instead of ending the task** — a misspelled tool, broken
+  JSON, or the model server's own tool-call parser failing (which Ollama can return as if it were
+  the answer). The model is told what went wrong and gets to send it again.
+
 ## [0.25.0]
 
 - **A task is no longer cut off after 8 turns.** That cap ended an ordinary task — read a few files,

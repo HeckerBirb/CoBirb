@@ -214,6 +214,15 @@ def _denial_message(tool_name: str, instruction: str = "") -> str:
     return f"{denial}\nThe user says to do this instead: {instruction}"
 
 
+def _malformed_message(problem: str) -> str:
+    """What the model is told when a tool call it made could not be read."""
+    return (
+        f"[CoBirb: your last reply contained {problem}, so nothing was run. "
+        "Make the call again through the tool-calling interface, with valid arguments — "
+        "or, if you were finished, give your final answer as plain text.]"
+    )
+
+
 def _tool_failure_message(tool_name: str, tool: Any, exc: Exception) -> str:
     """Turn a tool's exception into something the model can act on.
 
@@ -700,6 +709,24 @@ class Orchestrator:
                     session.turns[-1].content += _REPEAT_NOTE
                 continue
 
+            problem = self._malformed_tool_call(tools)
+            if problem:
+                # The model plainly tried to act and the call could not be read.
+                # Taking this reply for its final answer ended the task on a
+                # call that never ran; tell it what went wrong and let it send
+                # the call again. Counted as a failure, so a model that cannot
+                # produce a readable call is stopped by the same brake.
+                session.add(Turn(role="assistant", content=_materialize(reply), phase=phase))
+                session.add(Turn(role="user", content=_malformed_message(problem), phase=phase))
+                failures += 1
+                if failures >= _FAILURE_STOP_AT:
+                    self.last_stop = RunStop(
+                        STOP_NO_PROGRESS, max_turns,
+                        f"the model's last {failures} tool calls could not be read or failed.",
+                    )
+                    return "", False
+                continue
+
             # No tool calls: this is the model's final answer for this turn.
             content = _materialize(reply)
             session.add(Turn(role="assistant", content=content, phase=phase))
@@ -709,6 +736,19 @@ class Orchestrator:
         # stays empty, and the stop is reported as a fact about the run.
         self.last_stop = RunStop(STOP_TURN_LIMIT, max_turns)
         return "", False
+
+    def _malformed_tool_call(self, tools: "list[cobirb_typing.Tool] | None") -> str:
+        """The provider's report of a tool call it could not read, if it has
+        the optional ``malformed_tool_call`` hook and tools were on offer."""
+        if tools == [] or not self.model.supports_tool_calling():
+            return ""
+        probe = getattr(self.model, "malformed_tool_call", None)
+        if not callable(probe):
+            return ""
+        try:
+            return str(probe() or "")
+        except Exception:  # noqa: BLE001 - an optional hook never breaks a turn
+            return ""
 
     def _spun(self, label: str, fn: Callable[[], Any]) -> Any:
         """Run ``fn()``, showing ``io``'s spinner (if it has one) around the

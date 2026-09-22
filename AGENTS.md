@@ -115,7 +115,7 @@ prompt → model call → tool calls (policy-gated) → results into history →
   in-flight stream via `SteeringInterrupted`. The partial reply is kept as a real turn. Distinct
   from `cancel()`, which is the one-way stop.
 - **Optional, duck-typed hooks the loop probes for** (never part of the ABC): on the model,
-  `context_window()`, `cancel()`, `interrupt_current_reply()`; on tools, `writes()`, `preview()`,
+  `context_window()`, `cancel()`, `interrupt_current_reply()`, `malformed_tool_call()` (§9); on tools, `writes()`, `preview()`,
   `cancel_running()`; on the I/O adapter, `spinner`, `begin_stream`, `confirm_scoped`,
   `render_answer`, `render_plan`, `render_validation`, `render_tool_call`, `render_notice`,
   `write_error`. `render_through()` is the shared probe-with-fallback helper.
@@ -303,7 +303,20 @@ persistent was not done: see §17's note on `ShellTool`'s per-call process state
   else advertised `context_length`), cached per model.
 - `compose_system()`: empty in → empty out (no system message at all); model has none → send ours;
   both → model's first, ours appended.
-- Streaming is NDJSON; `_last_tool_calls` is only accurate once the generator is exhausted.
+- **Tool calls written as text are read** (`plugins/core/toolcalls.py`, via `parse_tool_calls`) when
+  the structured `tool_calls` field is empty: Hermes `<tool_call>` JSON, Qwen3-coder `<function=…>`
+  XML, leaked gpt-oss channel markup, and JSON that *is* the whole reply. This reverses an earlier
+  "native field only" rule (decision D1): Qwen3-coder switches to XML in its content once offered
+  more than ~5 tools, so the loop was taking calls for final answers. Guards against inventing calls:
+  only names offered this turn count; explicit call syntax is read anywhere, plain JSON only when the
+  surrounding prose is under `_BARE_JSON_SLACK`. Every call still goes through policy and approval.
+  A call that is clearly attempted but unreadable — unknown tool, broken JSON, or **the server's own
+  tool-call parser failing** (Ollama returns that as the reply with HTTP 200, as a streamed `error`
+  line, or as a 500 body; ollama/ollama#18563) — is reported through the optional
+  `malformed_tool_call()` hook, and `_loop` feeds it back as a user turn and counts it toward the
+  failure brake. Assistant turns replay with the markup stripped, so a call is not sent twice.
+- Streaming is NDJSON; `_last_tool_calls` is only accurate once the generator is exhausted. An
+  `error` line mid-stream is raised, unless it is a tool-call parse failure (above).
   `cancel()` latches the provider closed; `interrupt_current_reply()` cuts one reply and leaves the
   provider usable — `_steer_signal` is cleared before every request so a late interrupt never
   reports the *next* request's failure as a steer.
@@ -475,10 +488,9 @@ per-token updates rewrite the strip faster than it can be read, and what makes p
 the sequence of things done, not the sentences being formed.
 
 **A charter written into a reply is read from there** (`charter.recover_charter`, used by
-`_plan` only when the tool was not called). Tool calls are extracted from Ollama's native
-`tool_calls` field alone — there is deliberately no text fallback for tools in general — so a model
-that writes the TOML into its *answer* produces no call, and `_loop` reads the reply as a final
-answer. That ends planning with the charter sitting in the transcript and nothing having happened,
+`_plan` only when the tool was not called). A model that writes the TOML into its *answer* as
+prose (not as a tool call — that case `plugins/core/toolcalls` now reads, §9) produces no call, and
+`_loop` reads the reply as a final answer. That ends planning with the charter sitting in the transcript and nothing having happened,
 which was the single commonest way a flock died. `PlanResult.recovered` says it happened and the
 run tells the user. **`BRAINY_RULES` also states the mechanism** — that a charter in a reply
 proposes nothing — because the instruction to call the tool never said what *not* calling it costs.

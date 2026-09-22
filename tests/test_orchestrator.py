@@ -1831,3 +1831,29 @@ def test_the_ceiling_still_applies(tmp_path):
     orchestrator.run("look", "sys", cwd=str(tmp_path))
 
     assert orchestrator.last_stop.reason == "turn_limit"
+
+
+def test_a_call_that_could_not_be_read_is_sent_back_rather_than_taken_as_the_answer(tmp_path):
+    class _FumblingModel(_DummyModel):
+        def __init__(self):
+            super().__init__()
+            self.turn = 0
+            self.contexts = []
+
+        def chat(self, system, context, tools=None, **kwargs):
+            self.contexts.append(context)
+            self.turn += 1
+            return "<tool_call>{broken" if self.turn == 1 else "The answer is 42."
+
+        def supports_tool_calling(self):
+            return True
+
+        def malformed_tool_call(self):
+            return "a tool call whose JSON could not be read" if self.turn == 1 else ""
+
+    model = _FumblingModel()
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
+    session = orchestrator.run("what is it", "sys", cwd=str(tmp_path))
+
+    assert session.summary == "The answer is 42."
+    assert "could not be read" in model.contexts[-1]

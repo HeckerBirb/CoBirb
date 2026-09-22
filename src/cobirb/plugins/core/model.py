@@ -28,6 +28,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Iterable, Optional
 
+from . import toolcalls
 from ...typing.spi import ModelProvider, SteeringInterrupted, Tool, ToolCall
 
 DEFAULT_BASE_URL = "http://localhost:11434"
@@ -157,7 +158,9 @@ Flattening is what stops a tool-calling loop converging: a "tool" result
             messages.append(
                 {
                     "role": "assistant",
-                    "content": content,
+                    # A call the model wrote as text is replayed as the call it
+                    # was, not twice over — once as markup, once as tool_calls.
+                    "content": toolcalls.strip_markup(content),
                     "tool_calls": [
                         {"function": {"name": tu["name"], "arguments": tu.get("arguments", {})}}
                         for tu in tool_use
@@ -183,6 +186,12 @@ Flattening is what stops a tool-calling loop converging: a "tool" result
                     message["images"] = data
             messages.append(message)
     return messages
+
+
+def _server_parse_problem(message: str) -> str:
+    """The problem to report when the server's own tool-call parser failed."""
+    detail = " ".join(message.split())[:240]
+    return f"a tool call the model server could not parse ({detail})"
 
 
 def _unreachable(base_url: str, exc: Exception, model: str = "") -> RuntimeError:
@@ -314,6 +323,13 @@ class LocalModelProvider(ModelProvider):
         # in the same response; stash them here so parse_tool_calls() doesn't
         # need to re-parse text or make a second round trip.
         self._last_tool_calls: list[ToolCall] = []
+        # The tools offered on the last request, name -> parameters schema, so
+        # a call the model wrote as text can be checked against what it was
+        # actually given (see toolcalls.extract).
+        self._offered: dict[str, dict[str, Any]] = {}
+        # A tool call that was clearly attempted but could not be read — see
+        # malformed_tool_call().
+        self._malformed = ""
         # Modelfile SYSTEM directives, keyed by model name. A model's own
         # prompt doesn't change between requests, so this is fetched once per
         # model rather than on every turn. Only successes are cached: a
@@ -610,14 +626,27 @@ class LocalModelProvider(ModelProvider):
             payload["options"] = options
         if tools:
             payload["tools"] = [_tool_schema(t) for t in tools]
+        self._offered = {t.name(): t.parameters() for t in (tools or [])}
+        self._malformed = ""
+        self._last_tool_calls = []
 
         if stream:
             return self._stream_chat(payload)
 
-        response = self._post("/api/chat", payload)
+        try:
+            response = self._post("/api/chat", payload)
+        except RuntimeError as exc:
+            if self._offered and toolcalls.looks_like_server_parse_error(str(exc)):
+                self._malformed = _server_parse_problem(str(exc))
+                return ""
+            raise
         message = response.get("message", {})
         self._last_tool_calls = _extract_tool_calls(message)
-        return message.get("content", "")
+        content = message.get("content", "")
+        if self._offered and not self._last_tool_calls and toolcalls.reply_is_server_parse_error(content):
+            self._malformed = _server_parse_problem(content)
+            return ""
+        return content
 
     def _stream_chat(self, payload: dict[str, Any]) -> Iterable[str]:
         """Yield content deltas as Ollama streams them (NDJSON response body).
@@ -657,6 +686,11 @@ class LocalModelProvider(ModelProvider):
                 raise _unreachable(self._base_url, urllib.error.URLError(exc), self._model) from exc
             if response.status >= 400:
                 body = response.read()
+                if self._offered and toolcalls.looks_like_server_parse_error(
+                    body.decode("utf-8", "replace")
+                ):
+                    self._malformed = _server_parse_problem(body.decode("utf-8", "replace"))
+                    return
                 raise _unreachable(
                     self._base_url,
                     urllib.error.HTTPError(
@@ -670,6 +704,16 @@ class LocalModelProvider(ModelProvider):
                 if not line:
                     continue
                 chunk = json.loads(line)
+                if chunk.get("error"):
+                    # Ollama reports a failure part-way through a stream as an
+                    # `error` line. Its own tool-call parser failing is the model
+                    # getting the format wrong, which it can correct; anything
+                    # else is a real failure and is raised as one.
+                    error = str(chunk["error"])
+                    if self._offered and toolcalls.looks_like_server_parse_error(error):
+                        self._malformed = _server_parse_problem(error)
+                        break
+                    raise RuntimeError(f"The model provider reported an error: {error}")
                 message = chunk.get("message", {})
                 content = message.get("content", "")
                 if content:
@@ -741,7 +785,24 @@ class LocalModelProvider(ModelProvider):
         return bool(connections)
 
     def parse_tool_calls(self, raw: str) -> list[ToolCall]:
-        return self._last_tool_calls
+        """The calls from the server's structured field, or — failing that —
+        calls the model wrote into its reply as text (see ``toolcalls``)."""
+        if self._last_tool_calls or not self._offered:
+            return self._last_tool_calls
+        if self._offered and not self._malformed and toolcalls.reply_is_server_parse_error(raw or ""):
+            self._malformed = _server_parse_problem(raw)
+            return []
+        calls, problem = toolcalls.extract(raw or "", self._offered)
+        if problem and not calls:
+            self._malformed = problem
+        return calls
+
+    def malformed_tool_call(self) -> str:
+        """What went wrong with a tool call the model plainly tried to make,
+        or ``""``. An optional hook the orchestrator probes for: a call that
+        could not be read is fed back so the model can send it again, instead
+        of being taken for its final answer."""
+        return self._malformed
 
     def supports_tool_calling(self) -> bool:
         return bool(self._model)
