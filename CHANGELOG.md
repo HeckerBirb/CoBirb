@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.36.0]
 
 - **Auto-pilot.** `/autopilot on` (or `--autopilot` with `-p`) lets the agent work unattended: it
   reads and changes files in your project and runs commands in the sandbox without asking, and
