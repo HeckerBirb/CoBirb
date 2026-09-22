@@ -282,6 +282,12 @@ opts in); a miss tries a unique whitespace-tolerant whole-line match (trailing s
 indent *missing* uniformly from `old_str`, which is re-added to `new_str`); a true miss quotes the
 closest region with line numbers. Success reports the edited lines, so the model sees what it did.
 
+**A write that leaves a file unparseable says so in its result** (`_syntax_note`): Python via
+`compile`, JSON, TOML — in-process, nothing run. A note rather than a refusal, since a half-finished
+multi-step change is legitimate; the point is that the model hears about it now rather than from a
+test failure it has to rediscover. A per-edit `lint_command` was considered and not built: the
+post-turn `verify_command` already runs the user's own check.
+
 Every result is bounded: 256 KiB per read (paged — a short read says which lines it returned and
 what offset continues), 500 grep matches, 300 chars per matching line, 1000 list/glob entries,
 64 KiB of shell output (head **and** tail kept), 8 KiB of approval preview.

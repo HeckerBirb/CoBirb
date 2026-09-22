@@ -966,3 +966,33 @@ def test_the_preview_says_an_ambiguous_edit_will_fail(tmp_path):
     preview = EditFileTool(str(tmp_path)).preview({"path": "a.py", "old_str": "x = 1", "new_str": "x = 2"})
 
     assert "will fail" in preview and "2 places" in preview
+
+
+# --------------------------------------------------------------------------- #
+# A write that breaks a file says so at once
+# --------------------------------------------------------------------------- #
+def test_writing_python_that_does_not_parse_is_flagged(tmp_path):
+    result = WriteFileTool(str(tmp_path)).execute({"path": "a.py", "content": "def f(:\n    pass\n"})
+
+    assert result.ok  # a note, not a refusal: mid-change breakage is legitimate
+    assert "no longer parses as Python (line 1" in result.content
+
+
+def test_an_edit_that_breaks_json_is_flagged(tmp_path):
+    (tmp_path / "s.json").write_text('{"a": 1, "b": 2}\n')
+
+    result = EditFileTool(str(tmp_path)).execute({"path": "s.json", "old_str": '"b": 2', "new_str": '"b": 2,'})
+
+    assert "no longer valid JSON" in result.content
+
+
+def test_a_good_write_carries_no_warning(tmp_path):
+    result = WriteFileTool(str(tmp_path)).execute({"path": "a.py", "content": "x = 1\n"})
+
+    assert "Warning" not in result.content
+
+
+def test_files_nothing_can_check_carry_no_warning(tmp_path):
+    result = WriteFileTool(str(tmp_path)).execute({"path": "notes.md", "content": "{ not json"})
+
+    assert "Warning" not in result.content

@@ -123,6 +123,38 @@ _MAX_SHELL_OUTPUT = 64 * 1024
 _MAX_PREVIEW_BYTES = 8 * 1024
 
 
+def _syntax_note(path: str, content: str) -> str:
+    """A warning when a write left a file that no longer parses, else ``""``.
+
+    Checked in-process for the formats that can be checked without running
+    anything — Python, JSON, TOML. The alternative is finding out several turns
+    later, from a test run that fails for a reason the model has to rediscover,
+    or not at all when nothing imports the file. It is a note, not a refusal:
+    a half-written file mid-way through a multi-step change is legitimate.
+    """
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        if ext == ".py":
+            compile(content, path, "exec", dont_inherit=True)
+        elif ext == ".json":
+            import json
+
+            json.loads(content)
+        elif ext == ".toml":
+            import tomllib
+
+            tomllib.loads(content)
+        else:
+            return ""
+    except SyntaxError as exc:
+        where = f"line {exc.lineno}" if exc.lineno else "somewhere"
+        return f"\n\nWarning: {os.path.basename(path)} no longer parses as Python ({where}: {exc.msg})."
+    except ValueError as exc:  # json.JSONDecodeError and tomllib.TOMLDecodeError both subclass it
+        kind = "JSON" if ext == ".json" else "TOML"
+        return f"\n\nWarning: {os.path.basename(path)} is no longer valid {kind} ({exc})."
+    return ""
+
+
 def _unified(path: str, old: str, new: str) -> str:
     """A unified diff of a pending change, for the approval prompt."""
     import difflib
@@ -383,7 +415,9 @@ class WriteFileTool(CobirbTool):
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(content)
-            return ToolResult(ok=True, content=f"Wrote {len(content)} bytes to {path}")
+            return ToolResult(
+                ok=True, content=f"Wrote {len(content)} bytes to {path}{_syntax_note(path, content)}"
+            )
         except OSError as exc:
             return ToolResult(ok=False, content=f"Could not write {path}: {exc}", error=str(exc))
 
@@ -461,7 +495,7 @@ class EditFileTool(CobirbTool):
                 fh.write(edit.content)
         except OSError as exc:
             return ToolResult(ok=False, content=f"Could not edit {path}: {exc}", error=str(exc))
-        return ToolResult(ok=True, content=f"Edited {path}{edit.message}")
+        return ToolResult(ok=True, content=f"Edited {path}{edit.message}{_syntax_note(path, edit.content)}")
 
 
 class _EditPlan:
@@ -720,7 +754,7 @@ class ApplyPatchTool(CobirbTool):
                 fh.write(content)
         except OSError as exc:
             return ToolResult(ok=False, content=f"Could not patch {path}: {exc}", error=str(exc))
-        return ToolResult(ok=True, content=f"Applied patch to {path}")
+        return ToolResult(ok=True, content=f"Applied patch to {path}{_syntax_note(path, content)}")
 
 
 def _ignore_rules(tool: "CobirbTool") -> IgnoreRules:

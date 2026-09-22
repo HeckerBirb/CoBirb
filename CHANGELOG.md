@@ -4,6 +4,13 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **A write that breaks a file says so straight away.** When `write_file`, `edit_file` or
+  `apply_patch` leaves a Python, JSON or TOML file that no longer parses, the result tells the model
+  where, instead of it finding out turns later from a failing test — or never, if nothing loads
+  the file.
+
 ## [0.27.1]
 
 - **The tools describe themselves properly.** Several descriptions were one line that said what a
