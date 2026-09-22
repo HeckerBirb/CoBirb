@@ -21,7 +21,6 @@ cobirb help config                       # help on one topic
 | Flag | Does |
 |---|---|
 | `--model NAME` | Which model, this run |
-| `--persona NAME` | `noah`, `professional`, `neighbor`, `kawaii`, or your own |
 | `--allow-tool SPEC` | Pre-approve a tool. Repeatable. `read_file` or `shell(git status)` |
 | `--plan-mode on\|off` | Plan → act → validate as separate phases |
 | `--system-prompt off\|harness` | Whether CoBirb adds its own system block |
@@ -39,7 +38,7 @@ cobirb help config                       # help on one topic
 
 ```bash
 cobirb help [topic]      # commands, config, flock, hooks, mcp, model,
-                         # persona, plan, plugin, plugins, session, tools
+                         # plan, plugin, plugins, session, tools
 cobirb doctor            # is everything ready to go?
 cobirb models            # how each role resolves
 cobirb commands          # your custom commands here

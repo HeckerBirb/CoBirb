@@ -17,10 +17,10 @@ import pytest
 from conftest import DummyModel, StubSession, StubSessionManager, write_config
 
 from cobirb import cli, help_text, session
-from cobirb.runtime import commands, personas, plugins, sessions, wiring
+from cobirb.runtime import commands, plugins, sessions, system_prompt, wiring
+from cobirb.runtime.system_prompt import build_system_prompt
 from cobirb.cli import _resolve_plan_mode
 from cobirb.runtime.wiring import parse_allow_tools
-from cobirb.runtime.personas import available_personas, load_persona
 from cobirb.runtime.plugins import merge_tool_plugins, select_plugin
 from cobirb.runtime.wiring import build_orchestrator
 from cobirb.config import Config
@@ -29,7 +29,7 @@ from cobirb.plugins.core.io import TerminalIO
 from cobirb.plugins.core.tools import ToolRegistry
 from cobirb.session import SessionManager
 from cobirb.typing import spi as cobirb_typing
-from cobirb.typing.spi import Persona, Tool, ToolCall, ToolResult
+from cobirb.typing.spi import Tool, ToolCall, ToolResult
 
 
 def test_parse_allow_tools_bare_names():
@@ -72,7 +72,7 @@ def test_config_allow_tools_permits_a_tool_without_a_prompt(tmp_path):
     """The user's own standing rules are the escape hatch from a policy that
     otherwise permits nothing — a tool named in config must run unprompted."""
     write_config(tmp_path, json.loads('{"allow_tools": ["read_file", "shell(git)"]}'))
-    orchestrator = wiring.build_orchestrator(str(tmp_path), personas.load_persona(None), {})
+    orchestrator = wiring.build_orchestrator(str(tmp_path), {})
 
     assert orchestrator.policy.is_allowed("read_file", {"path": "anything.txt"})
     assert orchestrator.policy.is_allowed("shell", {"command": "git status"})
@@ -97,15 +97,12 @@ def test_resolve_plan_mode_cli_flag_overrides_config(tmp_path):
     assert _resolve_plan_mode("on", config) is True
 
 
-
-
 def test_build_orchestrator_creates_new_session_on_first_run(tmp_path):
     """A --session path that doesn't exist yet must be created, not loaded."""
     session_path = str(tmp_path / "new-session.json")
-    persona = Persona(name="Noah")
 
     orchestrator = wiring.build_orchestrator(
-        str(tmp_path), persona, {}, session_path, "pw"
+        str(tmp_path), {}, session_path, "pw"
     )
 
     assert orchestrator.session is not None
@@ -117,11 +114,10 @@ def test_build_orchestrator_applies_allow_tool_overrides_to_the_policy(tmp_path)
     """The --allow-tool CLI flag has to actually reach the orchestrator's
     live Policy, not just get parsed — this is the glue between
     parse_allow_tools() and Policy.allow() that nothing else exercises."""
-    persona = Persona(name="Noah")
     # A tool the default policy would not otherwise permit.
     allow_overrides = {"shell": "curl"}
 
-    orchestrator = wiring.build_orchestrator(str(tmp_path), persona, allow_overrides)
+    orchestrator = wiring.build_orchestrator(str(tmp_path), allow_overrides)
 
     assert orchestrator.policy.is_allowed("shell", {"command": "curl --version"})
     assert not orchestrator.policy.is_allowed("shell", {"command": "rm -rf /"})
@@ -132,47 +128,43 @@ def test_build_orchestrator_audit_log_is_off_by_default(tmp_path):
     unconditionally would keep a second, unencrypted, plaintext copy of every
     write_file/edit_file/apply_patch/shell call's full arguments — directly at
     odds with sessions being encrypted at rest."""
-    persona = Persona(name="Noah")
-    orchestrator = wiring.build_orchestrator(str(tmp_path), persona, {})
+    orchestrator = wiring.build_orchestrator(str(tmp_path), {})
     assert orchestrator.policy.audit.enabled is False
 
 
 def test_build_orchestrator_audit_log_can_be_turned_on_via_config(tmp_path):
     write_config(tmp_path, json.loads('{"audit_log": true}'))
-    persona = Persona(name="Noah")
-    orchestrator = wiring.build_orchestrator(str(tmp_path), persona, {})
+    orchestrator = wiring.build_orchestrator(str(tmp_path), {})
     assert orchestrator.policy.audit.enabled is True
 
 
 def test_build_orchestrator_loads_existing_session_with_correct_password(tmp_path):
     """The real password must reach SessionManager.load, not the cwd string."""
     session_path = str(tmp_path / "existing-session.json")
-    persona = Persona(name="Noah")
 
     orchestrator = wiring.build_orchestrator(
-        str(tmp_path), persona, {}, session_path, "correct-password"
+        str(tmp_path), {}, session_path, "correct-password"
     )
     orchestrator.session.session.add_text("user", "hello")
     orchestrator.session.save("correct-password")
 
     # Re-open with the same password: must decrypt and recover the turn.
     reopened = wiring.build_orchestrator(
-        str(tmp_path), persona, {}, session_path, "correct-password"
+        str(tmp_path), {}, session_path, "correct-password"
     )
     assert [t.content for t in reopened.session.session.turns] == ["hello"]
 
 
 def test_build_orchestrator_rejects_wrong_password_on_existing_session(tmp_path):
     session_path = str(tmp_path / "existing-session.json")
-    persona = Persona(name="Noah")
 
     orchestrator = wiring.build_orchestrator(
-        str(tmp_path), persona, {}, session_path, "correct-password"
+        str(tmp_path), {}, session_path, "correct-password"
     )
     orchestrator.session.save("correct-password")
 
     try:
-        wiring.build_orchestrator(str(tmp_path), persona, {}, session_path, "wrong-password")
+        wiring.build_orchestrator(str(tmp_path), {}, session_path, "wrong-password")
     except Exception:
         pass
     else:
@@ -184,10 +176,9 @@ def test_run_with_session_records_user_prompt(tmp_path):
     SessionManager was pre-injected (i.e. every --session run). Skipping it
     there loses the user's side of a resumed session's transcript."""
     session_path = str(tmp_path / "session.json")
-    persona = Persona(name="Noah")
 
     orchestrator = wiring.build_orchestrator(
-        str(tmp_path), persona, {}, session_path, "pw"
+        str(tmp_path), {}, session_path, "pw"
     )
     orchestrator.model = DummyModel(reply="hi there")
 
@@ -203,10 +194,9 @@ def test_run_twice_with_same_session_accumulates_history(tmp_path):
     """A second turn in the same (resumed) session must keep the first
     turn's history, not start over."""
     session_path = str(tmp_path / "session.json")
-    persona = Persona(name="Noah")
 
     orchestrator = wiring.build_orchestrator(
-        str(tmp_path), persona, {}, session_path, "pw"
+        str(tmp_path), {}, session_path, "pw"
     )
     orchestrator.model = DummyModel(reply="first reply")
     orchestrator.run("first message", "system prompt", cwd=str(tmp_path))
@@ -216,63 +206,6 @@ def test_run_twice_with_same_session_accumulates_history(tmp_path):
 
     contents = [t.content for t in session.turns]
     assert contents == ["first message", "first reply", "second message", "second reply"]
-
-
-@pytest.mark.parametrize("name", ["professional", "neighbor", "kawaii"])
-def test_bundled_personas_load(name):
-    persona = personas.load_persona(name)
-    assert persona.name  # every bundled persona must have a non-empty name
-    assert persona.tone
-
-
-def test_load_persona_defaults_to_no_persona():
-    """Personas are opt-in: an unconfigured run must not put a character on
-    the model, because the system prompt carrying one replaces the model's
-    own Modelfile SYSTEM directive."""
-    for name in (None, "none", ""):
-        persona = personas.load_persona(name)
-        assert persona.name == "CoBirb"
-        assert not cli.persona_shapes_voice(persona)
-
-
-def test_load_persona_still_loads_noah_when_asked_for():
-    assert personas.load_persona("noah").name == "Noah"
-    assert cli.persona_shapes_voice(personas.load_persona("noah"))
-
-
-def test_load_persona_resolves_a_stored_name_case_insensitively():
-    """Sessions record the persona name; "Noah" must reopen as noah."""
-    assert personas.load_persona("Noah").name == "Noah"
-    assert personas.load_persona("CoBirb").name == "CoBirb"
-
-
-def test_load_persona_falls_back_to_no_persona_when_unknown(capsys):
-    """A typo must not silently dress the model in a character either."""
-    persona = personas.load_persona("does-not-exist")
-    assert not cli.persona_shapes_voice(persona)
-    assert "unknown persona" in capsys.readouterr().err
-
-
-def test_available_personas_leads_with_none_so_a_persona_can_be_removed():
-    names = personas.available_personas()
-    assert names[0] == "none"
-    assert sorted(names[1:]) == sorted({"noah", "professional", "neighbor", "kawaii"})
-
-
-def test_persona_key_round_trips_a_persona_whose_display_name_differs():
-    """kawaii.json calls itself "Imouto"; a session storing that display name
-    could never be reopened, so sessions store the key instead."""
-    assert personas.persona_key(personas.load_persona("kawaii")) == "kawaii"
-    assert personas.load_persona(personas.persona_key(personas.load_persona("kawaii"))).name == "Imouto"
-
-
-def test_persona_key_is_none_for_the_plain_default():
-    assert personas.persona_key(personas.load_persona(None)) == "none"
-
-
-
-    def save(self, password):
-        self.saved_with.append(password)
 
 
 class _StubOrchestrator:
@@ -290,7 +223,7 @@ class _StubOrchestrator:
         child processes it owns. A no-op here; the stub starts nothing."""
         self.closed = True
 
-    def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False):
+    def run(self, prompt, system, *, cwd, label=None, session_path=None, plan_mode=False):
         if self._run_raises is not None:
             raise self._run_raises
         return self._run_result
@@ -393,7 +326,7 @@ def test_cli_one_shot_plan_mode_persists_phase_tags_to_a_real_encrypted_session(
     )
 
     assert result == 0
-    reloaded = SessionManager.load(session_path, AesGcmScryptSessionCrypto(), "pw", str(tmp_path), "noah")
+    reloaded = SessionManager.load(session_path, AesGcmScryptSessionCrypto(), "pw", str(tmp_path))
     assistant_phases = [t.phase for t in reloaded.session.turns if t.role == "assistant"]
     # plan, then the act phase's tool-call-announcing turn, then its final
     # answer turn (both "act"), then validate.
@@ -418,7 +351,7 @@ def test_main_help_prints_help_and_exits_zero(capsys):
     assert "CoBirb" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("topic", ["session", "persona", "plugins", "tools", "config"])
+@pytest.mark.parametrize("topic", ["session", "plugins", "tools", "config"])
 def test_main_help_topic_prints_that_topic_only(topic, capsys):
     assert cli.main(["help", topic]) == 0
     out = capsys.readouterr().out
@@ -445,7 +378,7 @@ def test_main_one_shot_mode_routes_prompt_and_options(monkeypatch):
     captured = {}
 
     def fake_run_one_shot(
-        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
+        prompt, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
     ):
         captured.update(
             prompt=prompt,
@@ -475,7 +408,7 @@ def test_main_plan_mode_flag_routes_through_to_run_one_shot(monkeypatch):
     captured = {}
 
     def fake_run_one_shot(
-        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
+        prompt, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
     ):
         captured["plan_mode"] = plan_mode
         return 0
@@ -499,28 +432,13 @@ def test_main_defaults_to_interactive_mode_without_a_prompt(monkeypatch):
     assert called
 
 
-def test_main_persona_flag_selects_the_requested_persona(monkeypatch):
-    captured = {}
-
-    def fake_run_one_shot(
-        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
-    ):
-        captured["persona_name"] = persona.name
-        return 0
-
-    monkeypatch.setattr(cli, "_run_one_shot", fake_run_one_shot)
-    cli.main(["-p", "hi", "--persona", "professional"])
-
-    assert captured["persona_name"] == "Professional"
-
-
 def test_main_defaults_cwd_to_current_directory(monkeypatch):
     """Resolved to the real, absolute directory — not the literal string
     ".", which reaches the status bar verbatim as "CoBirb · model · ."."""
     captured = {}
 
     def fake_run_one_shot(
-        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
+        prompt, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
     ):
         captured["cwd"] = cwd
         return 0
@@ -550,7 +468,7 @@ def test_main_one_shot_with_session_prompts_for_a_password(monkeypatch, tmp_path
     captured = {}
 
     def fake_run_one_shot(
-        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
+        prompt, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
     ):
         captured["password"] = password
         return 0
@@ -566,8 +484,8 @@ def test_main_interactive_with_session_prompts_for_a_password(monkeypatch, tmp_p
     captured = {}
 
     def fake_run_tui(
-        persona, system, allow_overrides, session_path, password, cwd,
-        model_name=None, plan_mode=False, harness=False,
+        system, allow_overrides, session_path, password, cwd,
+        model_name=None, plan_mode=False,
     ):
         captured["password"] = password
         return 0
@@ -590,8 +508,8 @@ def test_password_alone_starts_a_session_under_the_sessions_dir(monkeypatch, tmp
     captured = {}
 
     def fake_run_tui(
-        persona, system, allow_overrides, session_path, password, cwd,
-        model_name=None, plan_mode=False, harness=False,
+        system, allow_overrides, session_path, password, cwd,
+        model_name=None, plan_mode=False,
     ):
         captured.update(session_path=session_path, password=password)
         return 0
@@ -656,7 +574,7 @@ def test_password_alone_starts_a_session_in_one_shot_mode_too(monkeypatch, tmp_p
     captured = {}
 
     def fake_run_one_shot(
-        prompt, persona, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
+        prompt, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
     ):
         captured.update(session_path=session_path, password=password)
         return 0
@@ -702,7 +620,7 @@ def test_run_tui_prints_the_resume_hint_for_a_session_that_was_written(monkeypat
     import cobirb.tui.app as tui_app
 
     monkeypatch.setattr(tui_app, "CoBirbApp", _FakeApp)
-    cli._run_tui(personas.load_persona(None), "system", {}, str(written), "pw", "/work")
+    cli._run_tui("system", {}, str(written), "pw", "/work")
 
     out = capsys.readouterr().out
     assert "Resume it with:" in out
@@ -722,7 +640,7 @@ def test_run_tui_prints_no_hint_when_the_session_was_never_written(monkeypatch, 
     import cobirb.tui.app as tui_app
 
     monkeypatch.setattr(tui_app, "CoBirbApp", _FakeApp)
-    cli._run_tui(personas.load_persona(None), "system", {}, str(tmp_path / "never.json"), "pw", "/work")
+    cli._run_tui("system", {}, str(tmp_path / "never.json"), "pw", "/work")
 
     assert "Resume it with:" not in capsys.readouterr().out
 
@@ -745,7 +663,7 @@ def test_run_tui_reports_the_session_the_app_ended_on_not_the_one_it_started_wit
     import cobirb.tui.app as tui_app
 
     monkeypatch.setattr(tui_app, "CoBirbApp", _FakeApp)
-    cli._run_tui(personas.load_persona(None), "system", {}, None, None, "/work")
+    cli._run_tui("system", {}, None, None, "/work")
 
     assert str(switched) in capsys.readouterr().out
 
@@ -759,10 +677,9 @@ def test_run_tui_reports_the_session_the_app_ended_on_not_the_one_it_started_wit
 # --------------------------------------------------------------------------- #
 def test_run_one_shot_reports_the_final_answer(monkeypatch, capsys):
     monkeypatch.setattr(wiring, "build_orchestrator", lambda *a, **k: _StubOrchestrator())
-    persona = personas.load_persona(None)
-    system = personas.build_system_prompt(persona)
+    system = build_system_prompt()
 
-    result = cli._run_one_shot("do something", persona, system, {}, None, None, "/tmp")
+    result = cli._run_one_shot("do something", system, {}, None, None, "/tmp")
 
     assert result == 0
     out = capsys.readouterr().out
@@ -773,10 +690,9 @@ def test_run_one_shot_reports_the_final_answer(monkeypatch, capsys):
 def test_run_one_shot_returns_1_and_reports_a_permission_error(monkeypatch, capsys):
     orchestrator = _StubOrchestrator(run_raises=cli.PermissionError("nope"))
     monkeypatch.setattr(wiring, "build_orchestrator", lambda *a, **k: orchestrator)
-    persona = personas.load_persona(None)
-    system = personas.build_system_prompt(persona)
+    system = build_system_prompt()
 
-    result = cli._run_one_shot("do something", persona, system, {}, None, None, "/tmp")
+    result = cli._run_one_shot("do something", system, {}, None, None, "/tmp")
 
     assert result == 1
     assert "blocked" in capsys.readouterr().out
@@ -787,10 +703,9 @@ def test_run_one_shot_returns_1_and_reports_unexpected_errors_without_crashing(m
     exit code, not an unhandled traceback."""
     orchestrator = _StubOrchestrator(run_raises=RuntimeError("model exploded"))
     monkeypatch.setattr(wiring, "build_orchestrator", lambda *a, **k: orchestrator)
-    persona = personas.load_persona(None)
-    system = personas.build_system_prompt(persona)
+    system = build_system_prompt()
 
-    result = cli._run_one_shot("do something", persona, system, {}, None, None, "/tmp")
+    result = cli._run_one_shot("do something", system, {}, None, None, "/tmp")
 
     assert result == 1
     out = capsys.readouterr().out
@@ -801,10 +716,9 @@ def test_run_one_shot_returns_1_and_reports_unexpected_errors_without_crashing(m
 def test_run_one_shot_saves_the_session_when_a_session_path_was_given(monkeypatch):
     orchestrator = _StubOrchestrator(with_session_manager=True)
     monkeypatch.setattr(wiring, "build_orchestrator", lambda *a, **k: orchestrator)
-    persona = personas.load_persona(None)
-    system = personas.build_system_prompt(persona)
+    system = build_system_prompt()
 
-    cli._run_one_shot("do something", persona, system, {}, "/tmp/s.json", "pw", "/tmp")
+    cli._run_one_shot("do something", system, {}, "/tmp/s.json", "pw", "/tmp")
 
     assert orchestrator.session.saved_with == ["pw"]
 
@@ -812,38 +726,16 @@ def test_run_one_shot_saves_the_session_when_a_session_path_was_given(monkeypatc
 def test_run_one_shot_does_not_save_when_no_session_path_was_given(monkeypatch):
     orchestrator = _StubOrchestrator(with_session_manager=True)
     monkeypatch.setattr(wiring, "build_orchestrator", lambda *a, **k: orchestrator)
-    persona = personas.load_persona(None)
-    system = personas.build_system_prompt(persona)
+    system = build_system_prompt()
 
-    cli._run_one_shot("do something", persona, system, {}, None, None, "/tmp")
+    cli._run_one_shot("do something", system, {}, None, None, "/tmp")
 
     assert orchestrator.session.saved_with == []
 
 
 # --------------------------------------------------------------------------- #
-# System prompt: the only channel through which persona data reaches the
-# model. Carrying only the name and species would leave tone, phrasings,
-# emoji density and squawks as inert data no persona could act on — while the
-# prompt itself claims the model has been given them.
+# System prompt: what CoBirb adds of its own, which is nothing by default.
 # --------------------------------------------------------------------------- #
-def test_system_prompt_carries_every_persona_field():
-    persona = Persona(
-        name="Tester",
-        species="Owl",
-        tone="terse and dry",
-        phrasings=["Noted.", "Working on it."],
-        emoji_density="none",
-        known_squawks=["Hoot."],
-    )
-
-    prompt = personas.build_system_prompt(persona)
-
-    assert "Tester" in prompt
-    assert "Owl" in prompt
-    assert "terse and dry" in prompt
-    assert "Noted." in prompt and "Working on it." in prompt
-    assert "none" in prompt
-    assert "Hoot." in prompt
 
 
 def test_system_prompt_is_empty_by_default():
@@ -851,32 +743,15 @@ def test_system_prompt_is_empty_by_default():
     CoBirb contributes no system prompt, and an empty one means the provider
     sends no system message at all (see test_model.py), leaving the SYSTEM
     directive the model was built with in force."""
-    assert personas.build_system_prompt(personas.load_persona(None)) == ""
+    assert build_system_prompt() == ""
 
 
 def test_the_harness_block_is_opt_in():
-    prompt = personas.build_system_prompt(personas.load_persona(None), harness=True)
+    prompt = build_system_prompt(harness=True)
 
-    assert prompt == personas._HARNESS_PROMPT
+    assert prompt == system_prompt._HARNESS_PROMPT
     assert "denied call is the user's decision" in prompt
     assert "no outbound network by default" in prompt
-
-
-def test_a_persona_alone_sends_only_voice_and_no_harness_block():
-    """Adopting a persona is asking for a voice, not for CoBirb's commentary
-    about its own permission model."""
-    prompt = personas.build_system_prompt(personas.load_persona("noah"))
-
-    assert "You are Noah, an African Grey Parrot." in prompt
-    assert personas._HARNESS_PROMPT not in prompt
-    assert "no telemetry" not in prompt
-
-
-def test_the_harness_block_leads_when_both_are_on():
-    prompt = personas.build_system_prompt(personas.load_persona("noah"), harness=True)
-
-    assert prompt.startswith(personas._HARNESS_PROMPT)
-    assert "You are Noah, an African Grey Parrot." in prompt
 
 
 @pytest.mark.parametrize(
@@ -904,46 +779,32 @@ def test_main_passes_the_system_prompt_choice_through_to_the_tui(monkeypatch):
     captured = {}
 
     def fake_run_tui(
-        persona, system, allow_overrides, session_path, password, cwd,
-        model_name=None, plan_mode=False, harness=False,
+        system, allow_overrides, session_path, password, cwd,
+        model_name=None, plan_mode=False,
     ):
-        captured.update(system=system, harness=harness)
+        captured.update(system=system)
         return 0
 
     monkeypatch.setattr(cli, "_run_tui", fake_run_tui)
     cli.main(["--system-prompt", "harness"])
 
-    assert captured["harness"] is True
-    assert captured["system"] == personas._HARNESS_PROMPT
+    assert captured["system"] == system_prompt._HARNESS_PROMPT
 
 
 def test_main_sends_no_system_prompt_by_default(monkeypatch):
     captured = {}
 
     def fake_run_tui(
-        persona, system, allow_overrides, session_path, password, cwd,
-        model_name=None, plan_mode=False, harness=False,
+        system, allow_overrides, session_path, password, cwd,
+        model_name=None, plan_mode=False,
     ):
-        captured.update(system=system, harness=harness)
+        captured.update(system=system)
         return 0
 
     monkeypatch.setattr(cli, "_run_tui", fake_run_tui)
     cli.main([])
 
     assert captured["system"] == ""
-    assert captured["harness"] is False
-
-
-def test_system_prompt_omits_fields_a_persona_leaves_empty():
-    """A persona with no squawks shouldn't get a dangling empty line."""
-    prompt = personas.build_system_prompt(Persona(name="Plain", species="Assistant", known_squawks=[]))
-
-    assert "Interjections" not in prompt
-
-
-def test_system_prompt_uses_the_right_article_for_the_species():
-    assert "an Owl" in personas.build_system_prompt(Persona(name="X", species="Owl"))
-    assert "a Parrot" in personas.build_system_prompt(Persona(name="X", species="Parrot"))
 
 
 # --------------------------------------------------------------------------- #
@@ -1127,9 +988,8 @@ def test_build_orchestrator_merges_discovered_tool_plugins(monkeypatch, tmp_path
     monkeypatch.setattr(
         plugins, "load_plugins", lambda: ({"tool:fake": _FakeToolPlugin}, {})
     )
-    persona = Persona(name="Noah")
 
-    orchestrator = wiring.build_orchestrator(str(tmp_path), persona, {})
+    orchestrator = wiring.build_orchestrator(str(tmp_path), {})
 
     assert "fake_plugin_tool" in orchestrator.tools
     assert "fake_plugin_tool" in orchestrator.tools
@@ -1139,9 +999,8 @@ def test_build_orchestrator_reports_plugin_errors_to_stderr(monkeypatch, tmp_pat
     monkeypatch.setattr(
         plugins, "load_plugins", lambda: ({}, {"entry-point:broken": "boom"})
     )
-    persona = Persona(name="Noah")
 
-    wiring.build_orchestrator(str(tmp_path), persona, {})
+    wiring.build_orchestrator(str(tmp_path), {})
 
     assert "boom" in capsys.readouterr().err
 
@@ -1152,9 +1011,8 @@ def test_build_orchestrator_uses_a_configured_io_plugin(monkeypatch, tmp_path):
 
     write_config(tmp_path, json.loads('{"plugins": {"io": "custom-io"}}'))
     monkeypatch.setattr(plugins, "load_plugins", lambda: ({"io:custom-io": _CustomIO}, {}))
-    persona = Persona(name="Noah")
 
-    orchestrator = wiring.build_orchestrator(str(tmp_path), persona, {})
+    orchestrator = wiring.build_orchestrator(str(tmp_path), {})
 
     assert isinstance(orchestrator.io, _CustomIO)
 
@@ -1162,9 +1020,8 @@ def test_build_orchestrator_uses_a_configured_io_plugin(monkeypatch, tmp_path):
 def test_build_orchestrator_reports_an_unknown_configured_model_plugin(monkeypatch, tmp_path, capsys):
     write_config(tmp_path, json.loads('{"plugins": {"model": "ghost"}}'))
     monkeypatch.setattr(plugins, "load_plugins", lambda: ({}, {}))
-    persona = Persona(name="Noah")
 
-    wiring.build_orchestrator(str(tmp_path), persona, {})
+    wiring.build_orchestrator(str(tmp_path), {})
 
     assert "unknown model plugin 'ghost'" in capsys.readouterr().err
 
@@ -1317,8 +1174,8 @@ class _RecordingAnswerIO:
     def __init__(self):
         self.answers = []
 
-    def render_answer(self, persona_name, text):
-        self.answers.append((persona_name, text))
+    def render_answer(self, label, text):
+        self.answers.append((label, text))
 
 
 def test_render_final_answer_uses_the_io_hook_when_present():
@@ -1372,61 +1229,6 @@ def test_resolve_model_name_swallows_a_broken_model_build(monkeypatch):
 # so both front-ends share the exact same logic and wording instead of each
 # reimplementing it. See cobirb/tui/app.py's on_input_submitted.
 # --------------------------------------------------------------------------- #
-def test_apply_persona_switch_with_no_argument_lists_personas_and_changes_nothing():
-    persona = personas.load_persona(None)
-    system = personas.build_system_prompt(persona)
-
-    result_persona, result_system, message = commands.apply_persona_switch("", persona, system)
-
-    assert result_persona is persona
-    assert result_system == system
-    assert "Available personas:" in message
-    for name in ("noah", "professional", "neighbor", "kawaii"):
-        assert name in message
-
-
-def test_apply_persona_switch_loads_the_persona_and_rebuilds_the_system_prompt():
-    """Switching has to change the system prompt too, not just the label —
-    otherwise every later turn still speaks as the old persona."""
-    persona = personas.load_persona(None)
-    system = personas.build_system_prompt(persona)
-
-    new_persona, new_system, message = commands.apply_persona_switch("professional", persona, system)
-
-    assert new_persona.name == "Professional"
-    assert "Professional" in new_system
-    assert new_system != system
-    assert message.startswith("Professional:")
-
-
-def test_apply_persona_switch_falls_back_to_no_persona_for_an_unknown_name(capsys):
-    persona = personas.load_persona("noah")
-    system = personas.build_system_prompt(persona)
-
-    new_persona, _, _ = commands.apply_persona_switch("does-not-exist", persona, system)
-
-    assert not cli.persona_shapes_voice(new_persona)
-    assert "unknown persona" in capsys.readouterr().err
-
-
-def test_apply_persona_switch_to_none_takes_the_persona_back_off():
-    persona = personas.load_persona("noah")
-    system = personas.build_system_prompt(persona)
-
-    new_persona, new_system, message = commands.apply_persona_switch("none", persona, system)
-
-    assert not cli.persona_shapes_voice(new_persona)
-    assert new_system == ""  # nothing left to send; the model's own applies
-    assert "own voice" in message
-
-
-def test_apply_persona_switch_keeps_the_harness_choice_the_run_started_with():
-    persona = personas.load_persona(None)
-    system = personas.build_system_prompt(persona, harness=True)
-
-    _, new_system, _ = commands.apply_persona_switch("noah", persona, system, harness=True)
-
-    assert new_system.startswith(personas._HARNESS_PROMPT)
 
 
 @pytest.mark.parametrize(
@@ -1475,14 +1277,12 @@ def test_run_tui_builds_the_app_with_everything_it_was_given(monkeypatch):
 
     monkeypatch.setattr(tui_app, "CoBirbApp", _FakeApp)
 
-    persona = personas.load_persona(None)
     result = cli._run_tui(
-        persona, "system", {"shell": "git"}, "/tmp/s.json", "pw", "/work", "llama3.1", True
+        "system", {"shell": "git"}, "/tmp/s.json", "pw", "/work", "llama3.1", True
     )
 
     assert result == 0
     assert captured["ran"] is True
-    assert captured["persona"] is persona
     assert captured["allow_overrides"] == {"shell": "git"}
     assert captured["session_path"] == "/tmp/s.json"
     assert captured["password"] == "pw"
@@ -1507,7 +1307,7 @@ def test_run_tui_reports_a_missing_textual_instead_of_crashing(monkeypatch, caps
 
     monkeypatch.setattr(builtins, "__import__", blocked_import)
 
-    result = cli._run_tui(personas.load_persona(None), "system", {}, None, None, "/tmp")
+    result = cli._run_tui("system", {}, None, None, "/tmp")
 
     assert result == 1
     err = capsys.readouterr().err
@@ -1558,7 +1358,7 @@ def test_a_session_that_will_not_unlock_never_starts_the_app(monkeypatch, tmp_pa
 
     monkeypatch.setattr(wiring, "build_orchestrator", wrong_password)
 
-    status = cli._run_tui(personas.load_persona(None), "", {}, str(locked), "nope", "/work")
+    status = cli._run_tui("", {}, str(locked), "nope", "/work")
 
     assert status == 1
     assert _never_runs_app.started is False
@@ -1577,7 +1377,7 @@ def test_a_wrong_password_is_explained_rather_than_printed_blank(monkeypatch, tm
         raise InvalidTag()
 
     monkeypatch.setattr(wiring, "build_orchestrator", wrong_password)
-    cli._run_tui(personas.load_persona(None), "", {}, str(locked), "nope", "/work")
+    cli._run_tui("", {}, str(locked), "nope", "/work")
 
     err = capsys.readouterr().err
     assert "wrong password, or the file has been modified" in err
@@ -1594,7 +1394,7 @@ def test_a_tampered_session_keeps_its_own_explanation(monkeypatch, tmp_path, cap
         raise ValueError("tampered session detected in s.json (turn user corrupted)")
 
     monkeypatch.setattr(wiring, "build_orchestrator", tampered)
-    cli._run_tui(personas.load_persona(None), "", {}, str(locked), "nope", "/work")
+    cli._run_tui("", {}, str(locked), "nope", "/work")
 
     assert "tampered session detected" in capsys.readouterr().err
 
@@ -1621,7 +1421,7 @@ def test_a_session_that_unlocks_is_handed_to_the_app_already_open(monkeypatch, t
 
     monkeypatch.setattr(_NeverRunsApp, "__init__", record_init)
 
-    status = cli._run_tui(personas.load_persona(None), "", {}, str(unlocked), "pw", "/work")
+    status = cli._run_tui("", {}, str(unlocked), "pw", "/work")
 
     assert status == 0
     assert _never_runs_app.started is True
@@ -1638,7 +1438,7 @@ def test_a_new_session_path_does_not_try_to_unlock_anything(monkeypatch, tmp_pat
 
     monkeypatch.setattr(wiring, "build_orchestrator", fail_if_called)
 
-    status = cli._run_tui(personas.load_persona(None), "", {}, str(tmp_path / "new.json"), "pw", "/work")
+    status = cli._run_tui("", {}, str(tmp_path / "new.json"), "pw", "/work")
 
     assert status == 0
     assert _never_runs_app.started is True
@@ -1655,7 +1455,7 @@ def test_one_shot_reports_a_session_that_will_not_unlock_instead_of_tracebacking
     monkeypatch.setattr(wiring, "build_orchestrator", wrong_password)
 
     status = cli._run_one_shot(
-        "hi", personas.load_persona(None), "", {}, str(tmp_path / "s.json"), "nope", "/work"
+        "hi", "", {}, str(tmp_path / "s.json"), "nope", "/work"
     )
 
     assert status == 1
@@ -1671,7 +1471,7 @@ def test_one_shot_does_not_echo_a_prompt_it_never_ran(monkeypatch, tmp_path, cap
         raise InvalidTag()
 
     monkeypatch.setattr(wiring, "build_orchestrator", wrong_password)
-    cli._run_one_shot("do the thing", personas.load_persona(None), "", {}, str(tmp_path / "s.json"), "no", "/w")
+    cli._run_one_shot("do the thing", "", {}, str(tmp_path / "s.json"), "no", "/w")
 
     assert "do the thing" not in capsys.readouterr().out
 
@@ -1698,7 +1498,7 @@ def test_no_resume_hint_is_printed_after_a_failed_run(monkeypatch, tmp_path, cap
 # the actual branching logic, exercised there in more depth.
 # --------------------------------------------------------------------------- #
 def _seed_session(path: str, *, turns: int = 3) -> None:
-    manager = SessionManager.create(path, AesGcmScryptSessionCrypto(), "/work", "noah", "pw")
+    manager = SessionManager.create(path, AesGcmScryptSessionCrypto(), "/work", "pw")
     for i in range(turns):
         manager.session.add_text("user" if i % 2 == 0 else "assistant", f"turn {i}")
     manager.save("pw")
@@ -1881,7 +1681,7 @@ def test_continue_reaches_the_orchestrator_with_that_session(tmp_path, monkeypat
     newest = _session_file(tmp_path, "new.json")
     captured = {}
 
-    def fake_build(cwd, persona, allow_overrides, session_path=None, password=None,
+    def fake_build(cwd, allow_overrides, session_path=None, password=None,
                    model_name=None, io_factory=None):
         captured["session_path"] = session_path
         captured["password"] = password

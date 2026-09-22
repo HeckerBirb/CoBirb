@@ -4,6 +4,22 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Personas are gone.** `--persona`, `/persona` and its picker, the `persona` config key, the
+  bundled `professional`, `neighbor` and `kawaii` files and `~/.cobirb/personas/` are all removed.
+  They had nothing to do with what CoBirb is for, and in testing they made models behave worse — a
+  voice layered over the instructions that make an agent work is a voice competing with them. Replies
+  are simply labelled "CoBirb" (Brainy Birb and the Worker Birbs keep their own names), and the
+  status bar now starts with the model.
+- **Nothing you already have breaks.** A config that still sets `"persona"` starts normally;
+  `cobirb doctor` says the key was removed and can be deleted, rather than calling it a typo.
+  Sessions saved with a persona open as before, and the field is dropped on the next save. The
+  plugin interface's `Persona` class stays, unused, so a plugin that imports it still loads.
+  `--persona` on the command line is now an error, since a flag that silently does nothing is worse.
+- Personas are listed in the new [`ROADMAP.md`](./ROADMAP.md) as an idea that may return one day
+  as an optional plugin.
+
 ## [0.21.1]
 
 - **Planning runs until the plan is finished.** A model's turn ends when it stops calling tools,

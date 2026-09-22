@@ -23,7 +23,6 @@ A privacy-first, agentic coding CLI for local LLMs and your eyes only.
 - 🔒 Your model's own `SYSTEM` prompt is left alone, broken or not.
 - 🔒 Encrypted coding sessions on demand (sessions disabled by default).
 - 🦜 "Flock" mode lets you use one model to distribute isolated workloads to worker agents; "broken" Brainy Birbs tell expert Worker Birbs what to do on need-to-know basis.
-- 🦜 Optional personas - various twists on the replies. Off by default.
 
 ## Quick start
 
@@ -141,8 +140,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) before sending a patch.
 Copy [`config.json.example`](./config.json.example) to `~/.cobirb/config.json` and edit it. See
 `cobirb help config` for what each key does.
 
-This is enough to get started with Ollama (localhost:11434), default `SYSTEM` prompts 
-(no personas) and separate Flock-mode models:
+This is enough to get started with Ollama (localhost:11434), default `SYSTEM` prompts
+and separate Flock-mode models:
 
 ```json
 {
@@ -159,7 +158,6 @@ This is enough to get started with Ollama (localhost:11434), default `SYSTEM` pr
     }
   },
 
-  "persona": "none",
   "system_prompt": "off",
   "plugins": {
     "model": "core-model",

@@ -140,7 +140,7 @@ class TuiIO(I_OAdapter):
             self._call(self._app.set_busy, "")
             self._call(self._app.note_brainy_waiting, False)
 
-    def begin_stream(self, persona_name: str) -> None:
+    def begin_stream(self, label: str) -> None:
         """Deliberately draws nothing.
 
         The scrolling renderer writes a ``>`` marker here because it can only
@@ -150,15 +150,15 @@ class TuiIO(I_OAdapter):
         marker *inside* the streamed text.
 
         It exists so that the hook is answered rather than skipped, which is
-        what keeps the persona label out of the stream (see
+        what keeps the reply label out of the stream (see
         ``Orchestrator._chat``).
         """
         return None
 
-    def render_answer(self, persona_name: str, text: str) -> None:
+    def render_answer(self, label: str, text: str) -> None:
         """The finished reply, as a marked message rather than a titled panel.
 
-        ``persona_name`` is accepted (the hook's signature is shared with
+        ``label`` is accepted (the hook's signature is shared with
         ``TerminalIO`` and the orchestrator calls it positionally) but not
         shown: who is speaking is carried by the marker's colour and by the
         status bar, not by a label on every single reply.
@@ -176,15 +176,15 @@ class TuiIO(I_OAdapter):
         # sentences being formed.
         self._call(self._app.note_brainy_planning, text)
 
-    def render_plan(self, persona_name: str, text: str) -> None:
+    def render_plan(self, label: str, text: str) -> None:
         if not text:
             return
-        self._write(render.build_plan_panel(persona_name, text))
+        self._write(render.build_plan_panel(label, text))
 
-    def render_validation(self, persona_name: str, text: str) -> None:
+    def render_validation(self, label: str, text: str) -> None:
         if not text:
             return
-        self._write(render.build_validation_panel(persona_name, text))
+        self._write(render.build_validation_panel(label, text))
 
     def render_notice(self, text: str) -> None:
         """A note about the session, into the transcript.
@@ -210,14 +210,14 @@ class TuiIO(I_OAdapter):
         )
         self._call(self._app.note_brainy_planning, f"{tool_name} {subject}".strip())
 
-    def write_error(self, persona_name: str, text: str) -> None:
+    def write_error(self, label: str, text: str) -> None:
         """A blocked tool call or a provider that fell over.
 
         The scrolling CLI prints these; a full-screen app owns the whole
         terminal, so they become a panel in the transcript instead of a
         stray line painted over the layout.
         """
-        self._write(render.build_error_panel(persona_name, text))
+        self._write(render.build_error_panel(label, text))
 
 
     def _write(self, renderable: Any) -> None:

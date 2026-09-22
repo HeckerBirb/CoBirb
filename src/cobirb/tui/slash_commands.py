@@ -53,17 +53,6 @@ def cmd_model(app: "CoBirbApp", argument: str) -> None:
     app._select_model_worker(auto=False)
 
 
-def cmd_persona(app: "CoBirbApp", argument: str) -> None:
-    """Pick a persona. `/persona <name>` switches directly."""
-    # Bare /persona opens the picker, exactly like bare /model; /persona
-    # <name> still switches directly, so anything scripted or recalled
-    # from history keeps working.
-    if argument:
-        app._apply_persona(argument)
-    else:
-        app.pick_persona()
-
-
 def cmd_context(app: "CoBirbApp", argument: str) -> None:
     """How much of the model's window this session is using.
 
@@ -371,7 +360,6 @@ def cmd_commands(app: "CoBirbApp", argument: str) -> None:
 COMMANDS: "dict[str, Callable[[CoBirbApp, str], None]]" = {
     "/help": cmd_help,
     "/model": cmd_model,
-    "/persona": cmd_persona,
     "/plan": cmd_plan,
     "/context": cmd_context,
     "/clear": cmd_clear,

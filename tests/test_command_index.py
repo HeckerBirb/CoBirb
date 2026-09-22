@@ -118,9 +118,9 @@ def test_a_prefix_beats_a_scattered_match():
 
 
 def test_a_query_the_name_does_not_contain_at_all_is_dropped():
-    """Subsequence, not "close enough": /persona has no c, so "co" is not a
+    """Subsequence, not "close enough": /model has no c, so "co" is not a
     worse match for it — it is not a match."""
-    assert rank("co", _entries("persona")) == []
+    assert rank("co", _entries("model")) == []
 
 
 def test_a_leading_slash_in_the_query_is_ignored():

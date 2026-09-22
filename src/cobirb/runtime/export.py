@@ -41,7 +41,6 @@ def session_to_markdown(session: Session, *, title: str = "CoBirb session") -> s
     lines: list[str] = [f"# {title}", ""]
     lines.append(f"- Created: {session.created_at}")
     lines.append(f"- Working directory: `{session.working_dir}`")
-    lines.append(f"- Persona: {session.persona}")
     lines.append(f"- Turns: {len(session.turns)}")
     lines.append("")
 

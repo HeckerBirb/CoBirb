@@ -8,7 +8,7 @@ that led to it. Every writer here flushes before it writes, which is why they
 belong together rather than scattered across the application class.
 
 Deliberately knows nothing about the application's state. It holds a query
-root so it can find its two widgets, and takes everything else — the persona
+root so it can find its two widgets, and takes everything else — the reply
 name, the attachments on a prompt — as arguments. A view that reads the app's
 fields would have to change whenever they do; this one changes when the
 *transcript* changes.
@@ -97,7 +97,7 @@ class TranscriptView:
     # ------------------------------------------------------------------ #
     # Replaying a resumed conversation
     # ------------------------------------------------------------------ #
-    def render_history(self, turns: list[Any], label: str, persona_name: str) -> None:
+    def render_history(self, turns: list[Any], label: str, speaker: str) -> None:
         """Replay a resumed conversation into the transcript.
 
         Without this, resuming drops you into an empty screen: the
@@ -124,11 +124,11 @@ class TranscriptView:
         log.write(Text(""))
         log.write(render.build_history_divider(f"{label} · {len(turns)} earlier turn(s)"))
         for turn in turns:
-            self._replay_turn(log, turn, persona_name)
+            self._replay_turn(log, turn, speaker)
         log.write(Text(""))
         log.write(render.build_history_divider("end of restored history"))
 
-    def _replay_turn(self, log: TranscriptLog, turn: Any, persona_name: str) -> None:
+    def _replay_turn(self, log: TranscriptLog, turn: Any, speaker: str) -> None:
         """Write one saved turn, matching how it looked when it happened."""
         role = getattr(turn, "role", "")
         content = getattr(turn, "content", "") or ""
@@ -158,8 +158,8 @@ class TranscriptView:
             # follows, so an empty bubble here would be noise.
             return
         if phase == "plan":
-            log.write(render.build_plan_panel(persona_name, content))
+            log.write(render.build_plan_panel(speaker, content))
         elif phase == "validate":
-            log.write(render.build_validation_panel(persona_name, content))
+            log.write(render.build_validation_panel(speaker, content))
         else:
             log.write(render.build_assistant_message(content))

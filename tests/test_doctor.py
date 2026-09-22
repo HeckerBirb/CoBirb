@@ -30,7 +30,7 @@ def _check(report, name):
 # Config: the half that fails silently today
 # --------------------------------------------------------------------------- #
 def test_a_clean_config_is_ready_to_go(tmp_path):
-    report = _run(tmp_path, {"persona": "none", "redact_secrets": True})
+    report = _run(tmp_path, {"system_prompt": "off", "redact_secrets": True})
 
     assert report.ok
     assert "ready to go" in report.describe()
@@ -49,10 +49,20 @@ def test_an_unknown_key_is_a_failure_not_a_shrug(tmp_path):
 
 
 def test_several_unknown_keys_are_all_named(tmp_path):
-    report = _run(tmp_path, {"modles": {}, "persona": "none", "reddact": 1})
+    report = _run(tmp_path, {"modles": {}, "system_prompt": "off", "reddact": 1})
 
     detail = _check(report, "config keys").detail
     assert "modles" in detail and "reddact" in detail
+
+
+def test_a_retired_key_says_what_happened_rather_than_suggesting_a_typo(tmp_path):
+    """"persona" was spelled right; it just stopped meaning anything. Calling it
+    a key CoBirb does not read sends someone looking for a typo that isn't there."""
+    report = _run(tmp_path, {"persona": "noah"})
+
+    assert report.ok  # worth knowing, not a reason to refuse to start
+    assert "removed" in _check(report, "retired config keys").detail
+    assert "persona" not in _check(report, "config keys").detail
 
 
 def test_a_value_of_the_wrong_type_is_reported(tmp_path):

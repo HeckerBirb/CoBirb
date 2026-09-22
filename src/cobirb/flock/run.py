@@ -282,7 +282,7 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> P
         prompt = plan_prompt(objective)
         for _ in range(MAX_PLAN_STEPS):
             session = orchestrator.run(
-                prompt, system="", cwd=cwd, persona="Brainy Birb", max_turns=turns
+                prompt, system="", cwd=cwd, label="Brainy Birb", max_turns=turns
             )
             narration = session.summary or narration
             called = bool(getattr(orchestrator, "last_run_tool_calls", None))
@@ -585,7 +585,7 @@ def _drive(
 
     ask.show("Brainy Birb is reviewing the round…")
     verdict = orchestrator.run(
-        round_summary(outcome), system="", cwd=cwd, persona="Brainy Birb", max_turns=6
+        round_summary(outcome), system="", cwd=cwd, label="Brainy Birb", max_turns=6
     )
     run.report = verdict.summary or outcome.describe()
     return run

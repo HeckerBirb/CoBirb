@@ -11,7 +11,7 @@ and sending one *replaces* the ``SYSTEM`` directive the model was built with.
 A model created with ``ollama create`` around a custom ``SYSTEM`` is a
 configuration its user made deliberately, so CoBirb defaults to sending no
 system message at all and letting that directive apply untouched. When CoBirb
-does have something to add — a persona, plan-mode phase instructions — the
+does have something to add — the harness block, plan-mode phase instructions — the
 model's own prompt is read back via ``/api/show`` and placed first, so the
 addition supplements it instead of discarding it. See ``compose_system``.
 """
@@ -548,7 +548,7 @@ class LocalModelProvider(ModelProvider):
         The rule, in order:
 
         - CoBirb has nothing to say (``system`` empty — the default, with no
-          persona and no harness block): return ``""``, which sends **no**
+          harness block): return ``""``, which sends **no**
           system message and leaves the model's own Modelfile ``SYSTEM``
           doing exactly what it does outside CoBirb. This is the case that
           matters: a client that injects its own prompt on every request

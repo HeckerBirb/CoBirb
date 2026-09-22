@@ -15,7 +15,6 @@
     }
   },
 
-  "persona": "none",
   "system_prompt": "off",
   "plugins": {
     "model": "core-model",

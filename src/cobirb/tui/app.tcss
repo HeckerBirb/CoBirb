@@ -50,7 +50,7 @@
     height: 2;
 }
 
-/* persona · model · plan mode · cwd, kept current for the whole session. */
+/* model · plan mode · cwd, kept current for the whole session. */
 StatusBar {
     height: 1;
     padding: 0 1;
@@ -143,8 +143,8 @@ HelpModal {
     background: $surface;
 }
 
-/* Matches ModelPickerModal and PersonaPickerModal alike: Textual's type
-   selectors match base class names too, and both pickers are the same
+/* Matches ModelPickerModal and any other PickerModal: Textual's type
+   selectors match base class names too, and every picker is the same
    dialog with a different title. */
 PickerModal {
     align: center middle;

@@ -22,7 +22,6 @@ from .headless import HeadlessIO
 from .hooks import HookRunner
 from .instructions import DEFAULT_MAX_CHARS, load_instructions
 from .models import ROLE_ORCHESTRATOR, ROLE_WORKER, build_for_role
-from .personas import persona_key
 from .plugins import build_crypto, discover_plugins, report_plugin_issues, resolve_slot
 from .verify import DEFAULT_MAX_FIX_ATTEMPTS, DEFAULT_TIMEOUT_SECONDS, VerifySettings
 
@@ -143,7 +142,6 @@ def _verify_settings(cwd: str, config: Config) -> VerifySettings | None:
 
 def build_orchestrator(
     cwd: str,
-    persona: cobirb_typing.Persona,
     allow_overrides: dict[str, str],
     session_path: str | None = None,
     password: str | None = None,
@@ -217,9 +215,9 @@ def build_orchestrator(
         if crypto_issue:
             report_plugin_issues({"crypto": crypto_issue})
         if os.path.isfile(session_path):
-            manager = SessionManager.load(session_path, crypto, password, cwd, persona_key(persona))
+            manager = SessionManager.load(session_path, crypto, password, cwd)
         else:
-            manager = SessionManager.create(session_path, crypto, cwd, persona_key(persona), password)
+            manager = SessionManager.create(session_path, crypto, cwd, password)
     else:
         manager = None
 

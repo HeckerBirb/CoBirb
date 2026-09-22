@@ -7,7 +7,6 @@ Type these in the app. Anything else starting with `/` is tried as one of your o
 |---|---|
 | `/help` | The help screen. `/help <topic>` for one topic. |
 | `/model` | Pick a model from what your endpoint offers. |
-| `/persona` | Pick a persona. `/persona <name>` to switch directly. |
 | `/plan on` · `/plan off` | Plan → act → validate as three separate phases. |
 | `/plan` | Say whether plan mode is on. |
 | `/context` | How much of the model's window this session is using. |

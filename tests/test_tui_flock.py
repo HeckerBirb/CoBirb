@@ -22,7 +22,6 @@ from cobirb.tui.widgets import PromptInput
 from cobirb.tui.flock_bridge import TuiAsker, WorkerPaneIO
 from cobirb.tui.panes import FlockPane, WorkerPane
 from cobirb.tui.screens import ConfirmModal
-from cobirb.runtime.personas import load_persona
 
 _CHARTER = parse_charter("""
 objective = "two things"
@@ -53,7 +52,7 @@ def _text(app, selector: str) -> str:
 
 def _make_app(**kwargs) -> CoBirbApp:
     return CoBirbApp(
-        persona=load_persona(None), system="", allow_overrides={},
+        system="", allow_overrides={},
         session_path=None, password=None, cwd=".", **kwargs
     )
 

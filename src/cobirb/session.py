@@ -241,11 +241,6 @@ class Session:
     schema: int = SCHEMA_VERSION
     created_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     working_dir: str = "."
-    # "none" rather than "noah": personas are opt-in, so a session that
-    # doesn't record one reloads without one. Defaulting to a named persona
-    # here would bring a persona-less session back wearing a costume nobody
-    # asked for.
-    persona: str = "none"
     turns: list[Turn] = field(default_factory=list)
     summary: str | None = None
     # Set only when a run used plan mode (Orchestrator.run(plan_mode=True)):
@@ -304,7 +299,6 @@ class Session:
             "schema": self.schema,
             "created_at": self.created_at,
             "working_dir": self.working_dir,
-            "persona": self.persona,
             "turns": [t.to_dict() for t in self.turns],
             "summary": self.summary,
             "validation": self.validation,
@@ -324,7 +318,6 @@ class Session:
             schema=data.get("schema", SCHEMA_VERSION),
             created_at=data.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             working_dir=data.get("working_dir", "."),
-            persona=data.get("persona", "none"),
             turns=[Turn.from_dict(t) for t in data.get("turns", [])],
             summary=data.get("summary"),
             validation=data.get("validation"),
@@ -346,7 +339,6 @@ class SessionManager:
         path: str,
         crypto: Any,
         working_dir: str = ".",
-        persona: str = "none",
         password: str | None = None,
     ) -> None:
         # `password` is accepted for call-compatibility but deliberately not
@@ -356,7 +348,6 @@ class SessionManager:
         self.path = path
         self.crypto = crypto
         self.working_dir = working_dir
-        self.persona = persona
         self.session: Session | None = None
 
     @classmethod
@@ -365,27 +356,25 @@ class SessionManager:
         path: str,
         crypto: Any,
         working_dir: str = ".",
-        persona: str = "none",
         password: str | None = None,
     ) -> "SessionManager":
-        manager = cls(path, crypto, working_dir, persona, password)
+        manager = cls(path, crypto, working_dir, password)
         manager.session = Session(
             created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             working_dir=working_dir,
-            persona=persona,
         )
         return manager
 
     @classmethod
     def load(
-        cls, path: str, crypto: Any, password: str | None, working_dir: str = ".", persona: str = "none"
+        cls, path: str, crypto: Any, password: str | None, working_dir: str = "."
     ) -> "SessionManager":
         """Load an existing session, verifying turn hashes against the file.
 
         The ``password`` decrypts the blob and is not retained; ``save()``
         takes it again per call.
         """
-        manager = cls(path, crypto, working_dir, persona, password)
+        manager = cls(path, crypto, working_dir, password)
         blob = _read_blob(path)
         plaintext = crypto.decrypt(blob, password)
         data = json.loads(plaintext)
@@ -519,7 +508,6 @@ def fork_session(
     truncated = len(kept) < total
     branch = Session(
         working_dir=source.working_dir,
-        persona=source.persona,
         # Deep-copied via to_dict/from_dict rather than kept as the same Turn
         # objects: a fresh Turn.from_dict recomputes nothing but re-parses
         # cleanly independent of the source, so mutating the branch later can
@@ -540,7 +528,7 @@ def fork_session(
             if image.get("id") in source.images
         },
     )
-    branch_manager = SessionManager(branch_path, crypto, source.working_dir, source.persona)
+    branch_manager = SessionManager(branch_path, crypto, source.working_dir)
     branch_manager.session = branch
     branch_manager.save(password)
     return branch_manager

@@ -1,7 +1,7 @@
 """CoBirb — a privacy-first, agentic coding CLI.
 
 The core is intentionally thin: it wires together pluggable providers
-(model, tools, I/O, crypto, persona) and enforces a privacy-first,
+(model, tools, I/O, crypto) and enforces a privacy-first,
 default-deny policy layer.
 """
 from __future__ import annotations
@@ -29,6 +29,7 @@ __all__ = [
     "ToolCall",
     "I_OAdapter",
     "SessionCrypto",
+    # Unused since personas were removed; kept so v1 plugins importing it load.
     "Persona",
     "SteeringInterrupted",
     # The frozen SPI's own version surface (v0.7.0) — a plugin author checking

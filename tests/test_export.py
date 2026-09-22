@@ -10,7 +10,7 @@ from cobirb.session import Session, SessionManager, Turn
 
 
 def _session() -> Session:
-    session = Session(working_dir="/proj", persona="none")
+    session = Session(working_dir="/proj")
     session.add(Turn(role="user", content="add rate limiting"))
     session.add(Turn(role="assistant", content="Reading the router.",
                      tool_use=[{"name": "read_file", "arguments": {"path": "r.py"}}]))
@@ -72,7 +72,7 @@ def test_a_real_encrypted_session_round_trips_to_markdown(tmp_path):
     """End to end through the crypto, since that is the only way to know the
     export path actually reaches a decrypted session."""
     path = str(tmp_path / "s.json")
-    manager = SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path), "none", "pw")
+    manager = SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path), "pw")
     manager.session.add(Turn(role="user", content="the secret plan"))
     manager.save("pw")
 

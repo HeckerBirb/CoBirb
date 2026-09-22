@@ -550,29 +550,29 @@ def test_the_model_is_described_once_however_much_is_wanted_from_it(monkeypatch)
 
     provider = LocalModelProvider(model="gemma4-unchained")
     provider.chat("", "[]")
-    provider.chat("with a persona this time", "[]")
+    provider.chat("with a system prompt this time", "[]")
 
     assert responses.show_calls == 1
 
 
-def test_the_models_own_prompt_leads_when_cobirb_adds_a_persona(monkeypatch):
+def test_the_models_own_prompt_leads_when_cobirb_adds_its_own(monkeypatch):
     responses = _RoutingResponses(system="You are Karen Gemmason, a large language model.")
     monkeypatch.setattr("urllib.request.urlopen", responses)
 
-    LocalModelProvider(model="gemma4-unchained").chat("You are Noah, a Parrot.", "[]")
+    LocalModelProvider(model="gemma4-unchained").chat("CoBirb's harness block.", "[]")
 
     system = next(m for m in responses.chat_messages if m["role"] == "system")["content"]
-    assert system == "You are Karen Gemmason, a large language model.\n\nYou are Noah, a Parrot."
+    assert system == "You are Karen Gemmason, a large language model.\n\nCoBirb's harness block."
 
 
 def test_cobirbs_prompt_stands_alone_when_the_model_declares_no_system(monkeypatch):
     responses = _RoutingResponses(system=None)
     monkeypatch.setattr("urllib.request.urlopen", responses)
 
-    LocalModelProvider(model="plain").chat("You are Noah, a Parrot.", "[]")
+    LocalModelProvider(model="plain").chat("CoBirb's harness block.", "[]")
 
     system = next(m for m in responses.chat_messages if m["role"] == "system")["content"]
-    assert system == "You are Noah, a Parrot."
+    assert system == "CoBirb's harness block."
 
 
 def test_the_models_own_prompt_is_fetched_once_and_reused(monkeypatch):

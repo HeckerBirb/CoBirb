@@ -14,7 +14,7 @@ from cobirb.session import Session, SessionManager, Turn, fork_session
 @pytest.fixture
 def manager(tmp_path):
     path = str(tmp_path / "session.json")
-    return SessionManager.create(path, AesGcmScryptSessionCrypto(), persona="noah", password="pw")
+    return SessionManager.create(path, AesGcmScryptSessionCrypto(), password="pw")
 
 
 def test_create_adds_opening_turn(manager):
@@ -23,16 +23,13 @@ def test_create_adds_opening_turn(manager):
     assert manager.session.turns[0].role == "user"
 
 
-def test_create_records_the_persona_and_working_dir_on_the_session(tmp_path):
-    """SessionManager.create must pass ``persona``/``working_dir`` into the
-    ``Session`` it builds, not just store them on the manager — otherwise
-    every created session's saved JSON silently records "noah"
-    and "." regardless of what was actually passed — caught by the TUI's
-    Sessions tab, which resumes a session under the persona it names."""
+def test_create_records_the_working_dir_on_the_session(tmp_path):
+    """SessionManager.create must pass ``working_dir`` into the ``Session`` it
+    builds, not just store it on the manager — otherwise every created
+    session's saved JSON silently records "." regardless of what was passed."""
     path = str(tmp_path / "s.json")
-    manager = SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path), "professional", "pw")
+    manager = SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path), "pw")
 
-    assert manager.session.persona == "professional"
     assert manager.session.working_dir == str(tmp_path)
 
 
@@ -243,13 +240,13 @@ def test_discover_sessions_reports_size_and_path(tmp_path):
     assert entry.size == len("hello")
 
 
-def test_a_session_without_a_persona_reloads_without_one(tmp_path):
-    """Personas are opt-in, so a session file that records none must come
-    back with none. Defaulting to a named persona here puts a costume on a
-    model the user never asked to dress up."""
-    session = Session.from_dict({"turns": []})
+def test_a_session_saved_while_personas_existed_still_loads(tmp_path):
+    """Sessions written before 0.22.0 record a ``persona`` field. It means
+    nothing now, and must not stop the file opening or survive the next save."""
+    session = Session.from_dict({"turns": [{"role": "user", "content": "hi"}], "persona": "noah"})
 
-    assert session.persona == "none"
+    assert [t.content for t in session.turns] == ["hi"]
+    assert "persona" not in session.to_dict()
 
 
 def test_session_files_are_written_readable_only_by_their_owner(tmp_path):
@@ -324,7 +321,7 @@ def test_migrations_chain_in_order_up_to_the_current_version(monkeypatch):
 # --------------------------------------------------------------------------- #
 def _seeded_manager(tmp_path, name="session.json"):
     path = str(tmp_path / name)
-    manager = SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path), "noah", "pw")
+    manager = SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path), "pw")
     for i in range(4):
         manager.session.add_text("user" if i % 2 == 0 else "assistant", f"turn {i}")
     manager.save("pw")
@@ -468,7 +465,7 @@ def test_attached_image_bytes_live_inside_the_encrypted_session(tmp_path):
     a password the orchestrator never has."""
     path = str(tmp_path / "s.json")
     crypto = AesGcmScryptSessionCrypto()
-    manager = SessionManager.create(path, crypto, persona="noah", password="pw")
+    manager = SessionManager.create(path, crypto, password="pw")
     manager.session.images["abc"] = "QUJD"
     manager.session.add(Turn(role="user", content="see this", images=[{"id": "abc", "filename": "s.png"}]))
     manager.save("pw")
@@ -485,7 +482,7 @@ def test_attached_image_bytes_live_inside_the_encrypted_session(tmp_path):
 def test_a_session_written_before_images_existed_still_loads(tmp_path):
     path = str(tmp_path / "old.json")
     crypto = AesGcmScryptSessionCrypto()
-    manager = SessionManager.create(path, crypto, persona="noah", password="pw")
+    manager = SessionManager.create(path, crypto, password="pw")
     manager.save("pw")
     # Strip the key the way a file written by an older CoBirb would lack it.
     payload = json.loads(crypto.decrypt(open(path, "rb").read(), "pw"))
@@ -499,7 +496,7 @@ def test_a_session_written_before_images_existed_still_loads(tmp_path):
 def test_forking_a_session_carries_its_images(tmp_path):
     path = str(tmp_path / "s.json")
     crypto = AesGcmScryptSessionCrypto()
-    manager = SessionManager.create(path, crypto, persona="noah", password="pw")
+    manager = SessionManager.create(path, crypto, password="pw")
     manager.session.images["abc"] = "QUJD"
     manager.session.add(Turn(role="user", content="see this", images=[{"id": "abc", "filename": "s.png"}]))
     manager.save("pw")
@@ -511,7 +508,7 @@ def test_forking_a_session_carries_its_images(tmp_path):
 def test_forking_before_an_attachment_does_not_carry_its_bytes(tmp_path):
     path = str(tmp_path / "s.json")
     crypto = AesGcmScryptSessionCrypto()
-    manager = SessionManager.create(path, crypto, persona="noah", password="pw")
+    manager = SessionManager.create(path, crypto, password="pw")
     manager.session.images["abc"] = "QUJD"
     manager.session.add(Turn(role="user", content="plain turn"))
     manager.session.add(Turn(role="user", content="with image", images=[{"id": "abc", "filename": "s.png"}]))

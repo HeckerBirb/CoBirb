@@ -8,12 +8,6 @@ from __future__ import annotations
 from .crypto import AesGcmScryptSessionCrypto
 from .io import TerminalIO
 from .model import LocalModelProvider
-from .persona import (
-    PLAIN_PERSONA_NAME,
-    build_default_persona,
-    build_plain_persona,
-    persona_shapes_voice,
-)
 from .tools import ToolRegistry
 
 __all__ = [
@@ -21,8 +15,4 @@ __all__ = [
     "LocalModelProvider",
     "TerminalIO",
     "AesGcmScryptSessionCrypto",
-    "PLAIN_PERSONA_NAME",
-    "build_default_persona",
-    "build_plain_persona",
-    "persona_shapes_voice",
 ]

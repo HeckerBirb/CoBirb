@@ -37,8 +37,7 @@ outbound network unless the user explicitly asks for it.
    broad `except Exception` blocks are deliberate; each carries a comment saying why.
 7. **The model's own system prompt wins.** With nothing to add, CoBirb sends *no* system message,
    leaving the Modelfile `SYSTEM` in force. When it must add something, the model's own goes first.
-8. **Persona data never affects behaviour or permissions.** It is pure data about voice.
-9. **Every version bump gets a matching `vX.Y.Z` git tag** — `cobirb --upgrade` resolves releases
+8. **Every version bump gets a matching `vX.Y.Z` git tag** — `cobirb --upgrade` resolves releases
    only from tags, so an untagged bump is unreachable.
 
 ## 2b. The hardware this targets
@@ -69,14 +68,13 @@ not let it quietly pick a default, narrow a feature or rule an approach out. Rai
 | `config.py` / `paths.py` | The single config file; every `~/.cobirb` path derived in one place. |
 | `typing/spi.py` | **The plugin contract.** All SPI interfaces + shared dataclasses. |
 | `plugins/loader.py` | Discovery (entry points + local dirs), fail-closed. |
-| `plugins/core/` | Built-ins: `tools`, `model`, `io`, `crypto`, `persona`, `render`, `repomap`, `ignores`. |
-| `runtime/` | Composition layer both front-ends share: `wiring`, `plugins`, `models`, `personas`, `commands`, `command_index` (what the `/` picker lists and how it ranks), `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues` (which catalogues a session has open — see §6b), `mentions` (`@path` ranking + expansion), `doctor` (the readiness checks). |
+| `plugins/core/` | Built-ins: `tools`, `model`, `io`, `crypto`, `render`, `repomap`, `ignores`. |
+| `runtime/` | Composition layer both front-ends share: `wiring`, `plugins`, `models`, `system_prompt` (CoBirb's own system-prompt block, empty by default), `commands`, `command_index` (what the `/` picker lists and how it ranks), `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues` (which catalogues a session has open — see §6b), `mentions` (`@path` ranking + expansion), `doctor` (the readiness checks). |
 | `mcp/` | stdio MCP client (`client`) and its tool adapter (`tools`). |
 | `flock/` | Multi-agent runs: `charter`, `plan` (the incremental builder), `brainy`, `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. |
 | `tui/` | Textual app: `app` (the application itself — mount, input, the turn, workers, actions), `slash_commands` (what each `/command` does, as `(app, argument)` functions + the `COMMANDS` table), `transcript` (everything written to the transcript, and the flush-before-write ordering rule), `attachments` (images queued by `/image` for the next message), `mention_picker` (the five-row `@path` list), `command_picker` (the five-row `/command` list), `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. |
 | `help_text.py` | The prose `cobirb help [topic]` prints. |
 | `install.sh` | The installer, shipped inside the package. Also the upgrader and downgrader — see §14. |
-| `personas/*.json` | Bundled personas: `professional`, `neighbor`, `kawaii`. |
 | `tests/` | One file per module; `conftest.py` isolates `COBIRB_HOME` for every test. |
 
 ## 4. The loop
@@ -306,7 +304,8 @@ persistent was not done: see §17's note on `ShellTool`'s per-call process state
   non-integer declaration is an error, not a shrug. Incompatible → `IncompatiblePlugin`, refused at
   the loader boundary, non-fatally.
 - Interfaces: `Tool`, `ModelProvider`, `I_OAdapter`, `SessionCrypto`; data: `ToolCall`,
-  `ToolResult`, `ApprovalRequest`, `ApprovalOutcome`, `Persona`, `SteeringInterrupted`, and the
+  `ToolResult`, `ApprovalRequest`, `ApprovalOutcome`, `Persona` (unused since personas were removed
+  in 0.22.0; kept because the SPI is frozen and may carry them again as a plugin), `SteeringInterrupted`, and the
   `once`/`always`/`session`/`deny` decision constants. `confirm_scoped` and `confirm_request` are
   **optional duck-typed hooks**, probed with `getattr` and never on the ABC; `_request_approval`
   tries them richest first and normalises anything unrecognised to deny.
@@ -336,7 +335,6 @@ persistent was not done: see §17's note on `ShellTool`'s per-call process state
 | Custom commands (`runtime/custom_commands.py`) | `~/.cobirb/commands/*.md`, `<project>/.cobirb/commands/*.md` | `/name` sends the body; `$ARGUMENTS` and `$1`…`$9` substitute, otherwise arguments are appended. Optional `---\ndescription: …\n---` frontmatter. |
 | MCP (`mcp/`) | `mcp_servers` in config, **stdio only** | Tools register as `mcp__<server>__<tool>` and go through the same policy, prompt, audit and redaction path. Environment is **not** inherited (only `PATH`, `HOME`, `LANG`, `LC_ALL`, `TMPDIR`, `SYSTEMROOT` + configured `env`, unless `inherit_env`). Not members of `READ_TOOLS` — "always" grants that one tool, for the session. |
 | Per-role models (`runtime/models.py`) | `models.default` / `.orchestrator` / `.worker` | Roles inherit from `default` field by field. Name resolution: `--model` → `models.<role>.name` → `model` → `models.default.name` → `default_model`. `cobirb models` prints the result. |
-| Personas (`runtime/personas.py`) | `--persona`, `/persona`, `"persona"` | Off by default (`none` → a label, no voice instructions). Bundled: `professional`, `neighbor`, `kawaii`; user files in `~/.cobirb/personas/`. |
 
 ## 13. The Flock (`flock/`)
 
@@ -667,7 +665,7 @@ scopes, are reviewed, and Brainy Birb reports.
 
 **CLI** — subcommands `help [topic]`, `models`, `commands`, `flock -p "..."`,
 `plugin install <path> [--replace] | list | remove <name>`. Flags: `-p/--prompt`, `--session`,
-`-w/--password`, `--model`, `--persona`, `--allow-tool` (repeatable, `name` or `name(arg)`),
+`-w/--password`, `--model`, `--allow-tool` (repeatable, `name` or `name(arg)`),
 `--plan-mode on|off`, `--system-prompt off|harness`, `--export PATH`, `--branch PATH`,
 `--branch-at N`, `--headless`, `--output text|json`, `--cwd`, `--upgrade [TAG]`, `--force`,
 `--continue` (reopens the most recently touched session; implies a password), `--doctor`.
@@ -683,7 +681,7 @@ managed install: that is a request to GitHub, and doctor talks to the configured
 answered "no" got what they asked for.
 
 **TUI** — four tabs: Current, Flock, Sessions, Plugins. Slash commands `/help`, `/model`,
-`/persona`, `/plan`, `/context`, `/clear` (§7), `/undo`, `/export`, `/diff`, `/commands`,
+`/plan`, `/context`, `/clear` (§7), `/undo`, `/export`, `/diff`, `/commands`,
 `/flock`, `/charter` (§13), `/memories`, `/remember`, `/image`; `@path` in the prompt box opens a five-row fuzzy picker
 (`tui/mention_picker.py`, ranked by `runtime/mentions.py`) and sends the named file with the
 message — expanded on the way to the model, never into the transcript. Anything else
@@ -707,11 +705,12 @@ states what "always" would grant. A Worker Birb's request uses `WorkerApprovalMo
 that have not started, and carries a placeholder-only field for "do this instead" — a placeholder
 so the prompt text can never be submitted as though the user had typed it.
 
-**Config keys** — `default_model`, `models.*`, `persona`, `system_prompt`, `plugins.{model,io,crypto}`,
+**Config keys** — `default_model`, `models.*`, `system_prompt`, `plugins.{model,io,crypto}`,
 `allow_tools`, `allow_read_dirs`, `allow_write_dirs`, `verify_command`, `verify_timeout`,
 `verify_fix_attempts`, `redact_secrets`, `checkpoints`, `instructions`, `instructions_max_chars`,
 `repo_map`, `repo_map_max_chars`, `context_tokens`, `max_num_ctx`, `plan_mode`, `audit_log`, `hooks`,
-`mcp_servers`.
+`mcp_servers`. `persona` is retired (0.22.0): `doctor.RETIRED_KEYS` names it as removed rather than
+as an unknown key, since "not a setting CoBirb reads" sends someone hunting for a typo.
 `runtime/bootstrap.ensure_home()` seeds a starter config on first run (not at install — wheels have
 no reliable post-install hook).
 
@@ -728,7 +727,7 @@ would work instead. Managed is decided by the marker's `venv` matching `sys.pref
 marker existing: having a managed install *and* a clone to work in is ordinary, and the question is
 which interpreter is running.
 
-**Releases** — every version bump gets a `vX.Y.Z` tag (§2, invariant 9); `release.yml` builds a
+**Releases** — every version bump gets a `vX.Y.Z` tag (§2, invariant 8); `release.yml` builds a
 wheel and sdist on that tag push and attaches them, `SHA256SUMS` and `install.sh` to the GitHub
 release.
 
@@ -853,7 +852,7 @@ fresh decision to take with the user, not a gap to helpfully fill.
   accurate.** It was written at mount from the model resolved at `__init__`, *before* the async
   startup model check ran — so a startup picker change left it permanently wrong, and the
   transcript (`TranscriptLog`/`RichLog`) is append-only, so a second corrected panel below the
-  first reads as a bug, not a correction. `StatusBar` already carries persona/model/plan/cwd/session
+  first reads as a bug, not a correction. `StatusBar` already carries model/plan/cwd/session
   and self-corrects because it is a reactive widget.
 
 Vision (attached images) is built — see §6c. What's still not built is the rest of the deferred

@@ -357,7 +357,14 @@ class SessionCrypto(abc.ABC):
 # --------------------------------------------------------------------------- #
 @dataclass
 class Persona:
-    """Pure data describing how CoBirb speaks. Never affects behavior/permissions."""
+    """Pure data describing a voice for replies. **Unused since 0.22.0.**
+
+    CoBirb no longer has personas: they were irrelevant to what it is for, and
+    in testing they degraded how models behaved. The class stays because the
+    SPI is frozen within a version (see ``SPI_VERSION``) — a v1 plugin that
+    imports it must keep loading — and because personas may return one day as
+    an optional plugin. Nothing in CoBirb constructs or reads one.
+    """
 
     name: str
     species: str = "Parrot"

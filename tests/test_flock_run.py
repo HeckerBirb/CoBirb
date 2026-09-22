@@ -76,10 +76,9 @@ class _ScriptedBrainy:
 
 def _orchestrator(monkeypatch, tmp_path, model):
     from cobirb.runtime import wiring
-    from cobirb.runtime.personas import load_persona
 
     monkeypatch.setattr(wiring, "build_model", lambda *a, **k: model)
-    return wiring.build_orchestrator(str(tmp_path), load_persona(None), {})
+    return wiring.build_orchestrator(str(tmp_path), {})
 
 
 def _skeleton(tmp_path):

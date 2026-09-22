@@ -46,9 +46,6 @@ STARTER_CONFIG = """\
     }
   },
 
-  "// persona": "'none' leaves your model's own voice alone. Bundled: noah, professional, neighbor, kawaii.",
-  "persona": "none",
-
   "// system_prompt": "'off' sends no system message at all, so your model's own SYSTEM directive applies exactly as it does in Ollama.",
   "system_prompt": "off",
 

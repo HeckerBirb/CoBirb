@@ -37,10 +37,6 @@ by default, so your model's own SYSTEM directive is what shapes it.
 OPTIONS
   --model NAME        Model name (config/COBIRB_MODEL_NAME if omitted); pick
                       one interactively any time with /model.
-  --persona NAME      Adopt a persona (default: none — the model's own voice
-                      is left alone). Bundled: noah, professional, neighbor,
-                      kawaii. Or set "persona" in config, or point at your
-                      own <name>.json. Pick one with /persona.
   -w [PASSWORD]       Run in an encrypted session, starting one under
                       ~/.cobirb/sessions if --session names none. '-w' alone
                       prompts without echo; '-w hunter2' is visible in shell
@@ -71,9 +67,6 @@ OPTIONS
 INTERACTIVE COMMANDS
   /model             List models available from the configured endpoint
                      and pick one for this session.
-  /persona           Pick a persona from a list (including "none", the
-                     default, which hands the voice back to the model).
-  /persona <name>    Switch to a named persona directly.
   /export [PATH]     Write this session out as readable markdown. The
                      file is plaintext; the session stays encrypted.
   /diff              Everything the agent has changed this session, as one
@@ -146,7 +139,7 @@ EXTENDING IT
   tool, install a hook, or start a server. See 'cobirb help config'.
 
 TOPICS
-  Run 'cobirb help <topic>' for more: session, persona, plan, model,
+  Run 'cobirb help <topic>' for more: session, plan, model,
   commands, hooks, mcp, flock, plugin, plugins, tools, config.
 """
 
@@ -197,30 +190,6 @@ was. In interactive mode, the Sessions tab's "Branch…" button forks the
 whole of the selected session and switches straight into it — the same way
 "Resume" does. Branching from an earlier point (--branch-at) rather than the
 end is CLI-only for now.
-""",
-    "persona": """\
-PERSONA — how CoBirb speaks
-
-  cobirb --persona <name>       Adopt a persona for this run.
-  /persona                      Pick one from a list, "none" included.
-  /persona <name>               Switch to a named persona directly.
-
-Personas are OFF by default. A persona is a costume for the model — a name, a
-species, a tone, stock phrases — and CoBirb sends it as a system message,
-which replaces whatever SYSTEM directive the local model's own Modelfile
-sets. Wearing one by default would silently override your model's own
-configuration on every turn, so an unconfigured run sends no voice
-instructions at all and the model sounds like itself.
-
-Bundled: noah, professional, neighbor, kawaii. Set "persona" in config to
-adopt one by default, or point --persona at your own <name>.json (same shape
-as the bundled files — see cobirb/personas/*.json). "none" turns it back
-off.
-
-Personas are pure data: name, tone, greeting, phrasings, emoji density,
-squawks. They shape tone only and can never grant permission to skip
-encryption, network, or permission controls — the CLI's system prompt says
-so explicitly, and no persona field can override it.
 """,
     "plan": """\
 PLAN MODE — explicit plan → act → validate
@@ -279,7 +248,7 @@ CoBirb does not overwrite it:
   • By default CoBirb sends no system message at all. Your model behaves
     inside CoBirb exactly as it does in 'ollama run' — same SYSTEM, same
     voice, same everything.
-  • When CoBirb does have something to add (a persona, plan-mode phase
+  • When CoBirb does have something to add (plan-mode phase
     instructions, or --system-prompt harness), it reads your model's own
     SYSTEM back via /api/show and puts it FIRST, then appends its own part.
     Yours is supplemented, never discarded.
@@ -879,8 +848,6 @@ See config.json.example for a starting point. Keys:
                                   "shell(python -m pytest)"].
                                  Nothing is permitted without a rule here or
                                  an approval at the prompt.
-  "persona"                      Persona to adopt by default (or --persona).
-                                 Unset means none: the model keeps its voice.
   "system_prompt"                "off" (default) or "harness" — whether
                                  CoBirb sends a system prompt of its own.
                                  See 'cobirb help model'.

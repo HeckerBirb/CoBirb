@@ -245,7 +245,7 @@ def run_worker(
                     brief,
                     system="",
                     cwd=cwd,
-                    persona=f"worker-{worker.id}",
+                    label=f"worker-{worker.id}",
                     max_turns=max_turns,
                 )
                 break

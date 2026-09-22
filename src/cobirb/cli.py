@@ -10,7 +10,7 @@ Three modes:
   encrypted session on disk.
 
 This module parses arguments, prints help, and runs the one-shot mode. The
-wiring — persona resolution, plugin slots, building an orchestrator, resolving
+wiring — plugin slots, building an orchestrator, resolving
 a session — lives in ``cobirb.runtime``, because interactive mode needs
 exactly the same wiring and neither front-end should reach into the other's
 private functions to get it.
@@ -25,10 +25,11 @@ from typing import Any
 
 from .config import Config
 from .help_text import HELP_TEXT, HELP_TOPICS
-from .orchestrator import render_through
+from .orchestrator import REPLY_LABEL, render_through
 from .policy import PermissionError
 from .plugins.core import render
-from .runtime import personas, plugins, sessions, wiring
+from .runtime import plugins, sessions, wiring
+from .runtime.system_prompt import build_system_prompt
 from .plugins.core import TerminalIO
 from .runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
 from .runtime.plugin_install import PluginInstallError, install_plugin, list_installed, remove_plugin
@@ -44,8 +45,6 @@ from .runtime.plugins import describe_plugins
 # Re-exported, not used here: tui.panes annotates with PluginsSummary and
 # test_render imports both through this module.
 from .runtime.plugins import PluginsSummary, ToolInfo  # noqa: F401
-from .typing import spi as cobirb_typing
-from .plugins.core import persona_shapes_voice  # noqa: F401  (re-exported)
 
 
 def _resolve_harness_prompt(cli_value: str | None, config: Config) -> bool:
@@ -87,7 +86,7 @@ def _render_user_prompt(prompt: str) -> None:
     print()
 
 
-def _render_final_answer(orchestrator: Any, persona_name: str, text: str) -> None:
+def _render_final_answer(orchestrator: Any, label: str, text: str) -> None:
     """Show the model's finished reply.
 
     Prefers the orchestrator's ``io`` adapter's ``render_answer`` hook when
@@ -99,16 +98,15 @@ def _render_final_answer(orchestrator: Any, persona_name: str, text: str) -> Non
     answer = text or "Completed."
 
     def plain() -> None:
-        _render(f"{persona_name}: {answer}")
+        _render(f"{label}: {answer}")
 
     io_adapter = getattr(orchestrator, "io", None)
-    if not render_through(io_adapter, "render_answer", persona_name, answer, fallback=plain):
+    if not render_through(io_adapter, "render_answer", label, answer, fallback=plain):
         plain()  # no adapter at all (a bare stub orchestrator)
 
 
 def _run_one_shot(
     prompt: str,
-    persona: cobirb_typing.Persona,
     system: str,
     allow_overrides: dict[str, str],
     session_path: str | None,
@@ -134,7 +132,7 @@ def _run_one_shot(
     # open reads as though the task was attempted, when nothing ran at all.
     try:
         orchestrator = wiring.build_orchestrator(
-            cwd, persona, allow_overrides, session_path, password, model_name,
+            cwd, allow_overrides, session_path, password, model_name,
             io_factory=io_factory,
         )
     except Exception as exc:  # noqa: BLE001 - a bad password must not traceback
@@ -151,7 +149,7 @@ def _run_one_shot(
 
     try:
         return _drive_one_shot(
-            orchestrator, prompt, persona, system, session_path, password, cwd,
+            orchestrator, prompt, system, session_path, password, cwd,
             plan_mode, headless, as_json,
         )
     finally:
@@ -165,7 +163,6 @@ def _run_one_shot(
 def _drive_one_shot(
     orchestrator: Any,
     prompt: str,
-    persona: cobirb_typing.Persona,
     system: str,
     session_path: str | None,
     password: str | None,
@@ -185,21 +182,21 @@ def _drive_one_shot(
         _render_user_prompt(prompt)
     try:
         session = orchestrator.run(
-            prompt, system, cwd=cwd, persona=persona.name, session_path=session_path, plan_mode=plan_mode
+            prompt, system, cwd=cwd, session_path=session_path, plan_mode=plan_mode
         )
     except PermissionError as exc:
         report.error = f"blocked — {exc}"
         if as_json:
             print(report.to_json())
             return report.exit_code(unattended=headless)
-        _render(f"{persona.name}: blocked — {exc}\n")
+        _render(f"{REPLY_LABEL}: blocked — {exc}\n")
         return EXIT_ERROR
     except Exception as exc:  # noqa: BLE001 - surface provider/tool errors cleanly
         report.error = f"could not complete — {exc}"
         if as_json:
             print(report.to_json())
             return report.exit_code(unattended=headless)
-        _render(f"{persona.name}: could not complete — {exc}\n")
+        _render(f"{REPLY_LABEL}: could not complete — {exc}\n")
         return EXIT_ERROR
 
     if session_path is not None and orchestrator.session is not None:
@@ -223,7 +220,7 @@ def _drive_one_shot(
     # If the final answer already streamed live via the I/O adapter, printing
     # session.summary again here would just show it a second time.
     if not orchestrator.last_turn_streamed:
-        _render_final_answer(orchestrator, persona.name, session.summary)
+        _render_final_answer(orchestrator, REPLY_LABEL, session.summary)
     return report.exit_code(unattended=headless)
 
 
@@ -287,7 +284,6 @@ def _run_branch(
 
 
 def _run_tui(
-    persona: cobirb_typing.Persona,
     system: str,
     allow_overrides: dict[str, str],
     session_path: str | None,
@@ -295,7 +291,6 @@ def _run_tui(
     cwd: str,
     model_name: str | None = None,
     plan_mode: bool = False,
-    harness: bool = False,
 ) -> int:
     """Interactive mode: hand off to the full-screen Textual app.
 
@@ -315,7 +310,6 @@ def _run_tui(
         return 1
 
     app = CoBirbApp(
-        persona=persona,
         system=system,
         allow_overrides=allow_overrides,
         session_path=session_path,
@@ -323,7 +317,6 @@ def _run_tui(
         cwd=cwd,
         model_name=model_name,
         plan_mode=plan_mode,
-        harness=harness,
     )
 
     # Resuming an existing session file: open it *before* the app starts.
@@ -343,7 +336,6 @@ def _run_tui(
         try:
             app.orchestrator = wiring.build_orchestrator(
                 cwd,
-                persona,
                 allow_overrides,
                 session_path,
                 password,
@@ -390,9 +382,8 @@ def _run_flock(objective: str, cwd: str, model_name: str | None, *, headless: bo
         )
         return EXIT_ERROR
 
-    persona = personas.load_persona(None)
     try:
-        orchestrator = wiring.build_orchestrator(cwd, persona, {}, model_name=model_name)
+        orchestrator = wiring.build_orchestrator(cwd, {}, model_name=model_name)
     except Exception as exc:  # noqa: BLE001
         print(f"cobirb: could not start — {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -619,14 +610,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--model", help="Ollama model name, e.g. 'llama3.1' (or use config/COBIRB_MODEL_NAME)."
     )
     opts.add_argument(
-        "--persona",
-        "--agent",
-        dest="persona",
-        help="Adopt a persona (default: none — the model keeps its own voice). "
-        "Bundled: noah, professional, neighbor, kawaii; or point at your own "
-        "<name>.json. Pick one interactively any time with /persona.",
-    )
-    opts.add_argument(
         "--allow-tool",
         action="append",
         default=[],
@@ -653,8 +636,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "sent at all, so the SYSTEM directive your model was built with "
         "applies exactly as it does in Ollama. 'harness' adds a short "
         "description of the tool-permission model, which stops some models "
-        "retrying a denied tool call. Either way, a persona (if you adopt "
-        "one) is added after your model's own prompt, never instead of it.",
+        "retrying a denied tool call. It is added after your model's own "
+        "prompt, never instead of it.",
     )
     opts.add_argument(
         "--export",
@@ -762,10 +745,8 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     allow_overrides = wiring.parse_allow_tools(args.allow_tool)
-    persona_name = args.persona or config.get("persona")
-    persona = personas.load_persona(persona_name)
     harness = _resolve_harness_prompt(args.system_prompt, config)
-    system = personas.build_system_prompt(persona, harness=harness)
+    system = build_system_prompt(harness=harness)
     plan_mode = _resolve_plan_mode(args.plan_mode, config)
 
     # Either flag alone is enough to mean "this is a session": a path always
@@ -795,7 +776,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.prompt is not None:
         status = _run_one_shot(
             expand_custom_command(args.prompt, cwd),
-            persona,
             system,
             allow_overrides,
             session_path,
@@ -821,7 +801,6 @@ def main(argv: list[str] | None = None) -> int:
         return status
 
     return _run_tui(
-        persona,
         system,
         allow_overrides,
         session_path,
@@ -829,7 +808,6 @@ def main(argv: list[str] | None = None) -> int:
         cwd,
         args.model,
         plan_mode,
-        harness,
     )
 
 
@@ -837,5 +815,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        print("\nNoah: goodnight! 🐦")
+        print("\ncobirb: interrupted.")
         sys.exit(130)

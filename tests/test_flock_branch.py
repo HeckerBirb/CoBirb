@@ -17,7 +17,7 @@ from cobirb.session import Session, SessionManager
 def _main_session(tmp_path, password="hunter2"):
     path = str(tmp_path / "session.json")
     manager = SessionManager.create(
-        path, AesGcmScryptSessionCrypto(), str(tmp_path), "none", password
+        path, AesGcmScryptSessionCrypto(), str(tmp_path), password
     )
     manager.session.add_text("user", "let's build the exporter")
     return manager

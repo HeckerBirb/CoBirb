@@ -35,7 +35,7 @@ from cobirb import session as session_mod
 from cobirb.plugins.core import render
 from cobirb.policy import Policy
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
-from cobirb.runtime import personas, plugins, wiring
+from cobirb.runtime import plugins, wiring
 from cobirb.tui.app import CoBirbApp
 from cobirb.tui import slash_commands
 from cobirb.tui.command_picker import CommandPicker
@@ -48,7 +48,6 @@ from cobirb.tui.screens import (
     MemoryCataloguesModal,
     ModelPickerModal,
     NewCatalogueModal,
-    PersonaPickerModal,
     RememberModal,
     TextPromptModal,
     _ordered_catalogue_options,
@@ -117,9 +116,9 @@ class _StubOrchestrator:
         child processes it owns. A no-op here; the stub starts nothing."""
         self.closed = True
 
-    def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False, images=None):
+    def run(self, prompt, system, *, cwd, label=None, session_path=None, plan_mode=False, images=None):
         self.calls.append(
-            {"prompt": prompt, "system": system, "persona": persona, "plan_mode": plan_mode, "images": images}
+            {"prompt": prompt, "system": system, "plan_mode": plan_mode, "images": images}
         )
         if self._run_raises is not None:
             raise self._run_raises
@@ -137,27 +136,22 @@ def _stub_build(orchestrator=None, record=None):
     """
 
     def fake_build_orchestrator(
-        cwd, persona, allow_overrides, session_path=None, password=None,
+        cwd, allow_overrides, session_path=None, password=None,
         model_name=None, io_factory=None,
     ):
         target = orchestrator if orchestrator is not None else _StubOrchestrator()
         if io_factory is not None and target.io is None:
             target.io = io_factory()
         if record is not None:
-            record.append({"persona": persona.name, "io_factory": io_factory, "built": target})
+            record.append({"io_factory": io_factory, "built": target})
         return target
 
     return fake_build_orchestrator
 
 
 def _make_app(**overrides) -> CoBirbApp:
-    persona = personas.load_persona(overrides.pop("persona_name", None))
-    # Built here rather than taken as a plain string so `system` and
-    # `harness` can't disagree — the real CLI derives one from the other.
-    harness = overrides.get("harness", False)
     kwargs = dict(
-        persona=persona,
-        system=personas.build_system_prompt(persona, harness=harness),
+        system="",
         allow_overrides={},
         session_path=None,
         password=None,
@@ -210,12 +204,11 @@ async def test_app_boots_with_the_three_tabs_and_current_active():
         assert tabs.active == "current"
 
 
-async def test_status_bar_shows_persona_model_plan_mode_and_cwd():
+async def test_status_bar_shows_plan_mode_and_cwd():
     app = _make_app(cwd="/some/where", plan_mode=True)
     async with app.run_test() as pilot:
         await pilot.pause()
         line = str(app.query_one(StatusBar).render())
-        assert "CoBirb" in line  # no persona by default
         assert "plan: on" in line
         assert "/some/where" in line
 
@@ -248,8 +241,8 @@ async def test_the_greeting_is_in_the_transcript_at_startup():
     async with app.run_test() as pilot:
         await pilot.pause()
         text = _transcript_text(app)
-        assert "CoBirb ready." in text  # a plain line, not a persona greeting
-        assert "/persona" in text  # the hint line
+        assert "CoBirb ready." in text
+        assert "/model" in text  # the hint line
 
 
 async def test_next_tab_cycles_through_every_tab_and_wraps():
@@ -289,7 +282,7 @@ async def test_submitting_a_prompt_disables_the_input_runs_the_turn_and_re_enabl
         prompt_input = app.query_one("#prompt-input", PromptInput)
         await _until(pilot, lambda: not prompt_input.disabled)
 
-        assert [(c["prompt"], c["persona"]) for c in orchestrator.calls] == [("hello there", "CoBirb")]
+        assert [c["prompt"] for c in orchestrator.calls] == ["hello there"]
         text = _transcript_text(app)
         assert "hello there" in text  # the echoed user line
         assert "ok" in text  # the stub session's summary, via render_answer
@@ -452,8 +445,8 @@ class _CancellableOrchestrator(_StubOrchestrator):
         self.steer_calls.append(message)
         return self._steer_accepts
 
-    def run(self, prompt, system, *, cwd, persona, session_path=None, plan_mode=False, images=None):
-        self.calls.append({"prompt": prompt, "persona": persona, "plan_mode": plan_mode})
+    def run(self, prompt, system, *, cwd, label=None, session_path=None, plan_mode=False, images=None):
+        self.calls.append({"prompt": prompt, "plan_mode": plan_mode})
         self._release.wait(timeout=5)
         return StubSession()
 
@@ -613,46 +606,6 @@ async def test_attempt_cancel_is_false_when_the_active_tool_has_no_cancel_hook()
 # --------------------------------------------------------------------------- #
 # Slash commands
 # --------------------------------------------------------------------------- #
-async def test_persona_with_no_argument_opens_the_picker_without_building_anything(monkeypatch):
-    """Bare /persona is a menu, exactly like bare /model — you shouldn't have
-    to already know how a persona is spelled to switch to it."""
-    def fail_if_called(*args, **kwargs):
-        raise AssertionError("orchestrator should not be built for /persona")
-
-    monkeypatch.setattr(wiring, "build_orchestrator", fail_if_called)
-
-    app = _make_app()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        await _submit(pilot, app, "/persona")
-        await _until(pilot, lambda: isinstance(app.screen, PersonaPickerModal))
-
-        options = app.screen.query_one("#model-options", OptionList)
-        listed = [options.get_option_at_index(i).id for i in range(options.option_count)]
-        assert listed[0] == "none"  # the way back out of a persona comes first
-        for name in ("noah", "professional", "neighbor", "kawaii"):
-            assert name in listed
-
-
-async def test_persona_switch_updates_the_status_bar_and_later_turns(monkeypatch):
-    builds = []
-    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(record=builds))
-
-    app = _make_app()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        await _submit(pilot, app, "/persona professional")
-
-        assert app.query_one(StatusBar).persona_name == "Professional"
-        assert not builds  # a slash command never reaches the model
-
-        await _submit(pilot, app, "hello")
-        await _until(pilot, lambda: bool(builds))
-        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
-
-        # The switch has to change the system prompt too, not just the label.
-        assert builds[0]["persona"] == "Professional"
-        assert "Professional" in builds[0]["built"].calls[0]["system"]
 
 
 async def test_plan_status_reports_without_building_an_orchestrator(monkeypatch):
@@ -966,7 +919,7 @@ async def test_the_final_answer_falls_back_to_the_bridge_for_an_adapter_without_
 
 async def test_the_status_bar_shows_the_busy_label_alongside_its_usual_context():
     """The busy label is appended, not substituted: you should still be able
-    to see which persona and model you are waiting on."""
+    to see which model you are waiting on."""
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -1399,7 +1352,7 @@ async def test_resume_with_the_wrong_password_reports_an_error_and_changes_nothi
     sessions_dir = session.default_sessions_dir()
     os.makedirs(sessions_dir)
     path = os.path.join(sessions_dir, "s.json")
-    manager = session.SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path), "noah")
+    manager = session.SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path))
     manager.session.add_text("user", "hi")
     manager.save("right-password")
 
@@ -1424,7 +1377,7 @@ async def test_resume_with_the_right_password_switches_to_that_session(tmp_path,
     sessions_dir = session.default_sessions_dir()
     os.makedirs(sessions_dir)
     path = os.path.join(sessions_dir, "s.json")
-    manager = session.SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path), "professional")
+    manager = session.SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path))
     manager.session.add_text("user", "hi")
     manager.session.add_text("assistant", "hello")
     manager.save("right-password")
@@ -1442,9 +1395,6 @@ async def test_resume_with_the_right_password_switches_to_that_session(tmp_path,
 
         assert app.password == "right-password"
         assert app.orchestrator is None  # rebuilt fresh, bound to this session, on the next turn
-        assert app.persona.name == "Professional"  # matches what the session was created under
-        assert "Professional" in app.system
-        assert app.query_one(StatusBar).persona_name == "Professional"
         assert "2 turn(s)" in _sessions_status(app)
 
 
@@ -1458,7 +1408,7 @@ async def test_branch_forks_the_selected_session_and_switches_into_it(tmp_path, 
     sessions_dir = session.default_sessions_dir()
     os.makedirs(sessions_dir)
     path = os.path.join(sessions_dir, "s.json")
-    manager = session.SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path), "professional")
+    manager = session.SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path))
     manager.session.add_text("user", "hi")
     manager.session.add_text("assistant", "hello")
     manager.save("right-password")
@@ -1483,7 +1433,6 @@ async def test_branch_forks_the_selected_session_and_switches_into_it(tmp_path, 
 
         assert app.password == "right-password"
         assert app.orchestrator is None  # rebuilt fresh, bound to the branch, on the next turn
-        assert app.persona.name == "Professional"
         assert "Branched" in _sessions_status(app)
         assert "2 turn(s)" in _sessions_status(app)
 
@@ -1531,7 +1480,7 @@ async def test_resuming_discards_an_already_built_orchestrator(monkeypatch):
         await _submit(pilot, app, "hello")
         await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
         assert app.orchestrator is orchestrator
-        assert [(c["prompt"], c["persona"]) for c in orchestrator.calls] == [("hello", "CoBirb")]
+        assert [c["prompt"] for c in orchestrator.calls] == ["hello"]
 
         await _switch_tab(pilot, app, "sessions")
         await pilot.click("#sessions-new")
@@ -1544,7 +1493,7 @@ async def test_resuming_discards_an_already_built_orchestrator(monkeypatch):
         await _until(pilot, lambda: app.orchestrator is None)
 
         # Neither prompt was run as a chat turn against the active orchestrator.
-        assert [(c["prompt"], c["persona"]) for c in orchestrator.calls] == [("hello", "CoBirb")]
+        assert [c["prompt"] for c in orchestrator.calls] == ["hello"]
 
 
 async def test_new_session_prompts_for_a_name_then_a_password():
@@ -1958,119 +1907,6 @@ async def test_a_selected_span_is_highlighted_in_the_transcript():
 
 
 # --------------------------------------------------------------------------- #
-# /persona as a picker (the same shape as /model)
-# --------------------------------------------------------------------------- #
-async def test_choosing_a_persona_from_the_picker_applies_it(monkeypatch):
-    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build())
-
-    app = _make_app()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        await _submit(pilot, app, "/persona")
-        await _until(pilot, lambda: isinstance(app.screen, PersonaPickerModal))
-
-        options = app.screen.query_one("#model-options", OptionList)
-        options.focus()
-        options.highlighted = [
-            options.get_option_at_index(i).id for i in range(options.option_count)
-        ].index("noah")
-        await pilot.press("enter")
-        await _until(pilot, lambda: not isinstance(app.screen, PersonaPickerModal))
-
-        assert app.persona.name == "Noah"
-        assert "African Grey Parrot" in app.system
-        assert app.query_one(StatusBar).persona_name == "Noah"
-
-
-async def test_the_persona_picker_marks_none_as_current_by_default():
-    app = _make_app()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        await _submit(pilot, app, "/persona")
-        await _until(pilot, lambda: isinstance(app.screen, PersonaPickerModal))
-
-        options = app.screen.query_one("#model-options", OptionList)
-        marked = [
-            str(options.get_option_at_index(i).prompt)
-            for i in range(options.option_count)
-            if str(options.get_option_at_index(i).prompt).startswith("> ")
-        ]
-        assert marked == ["> none"]
-
-
-async def test_the_persona_picker_marks_the_active_persona_by_its_key():
-    """kawaii.json calls itself "Imouto" — the picker lists keys, so the
-    marker has to be resolved through the key, not the display name."""
-    app = _make_app(persona_name="kawaii")
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        await _submit(pilot, app, "/persona")
-        await _until(pilot, lambda: isinstance(app.screen, PersonaPickerModal))
-
-        options = app.screen.query_one("#model-options", OptionList)
-        marked = [
-            str(options.get_option_at_index(i).prompt)
-            for i in range(options.option_count)
-            if str(options.get_option_at_index(i).prompt).startswith("> ")
-        ]
-        assert marked == ["> kawaii"]
-
-
-async def test_cancelling_the_persona_picker_changes_nothing():
-    app = _make_app(persona_name="noah")
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        await _submit(pilot, app, "/persona")
-        await _until(pilot, lambda: isinstance(app.screen, PersonaPickerModal))
-
-        await pilot.press("escape")
-        await _until(pilot, lambda: not isinstance(app.screen, PersonaPickerModal))
-
-        assert app.persona.name == "Noah"
-
-
-async def test_persona_with_a_name_still_switches_directly_without_the_picker():
-    """History recall replays "/persona kawaii" verbatim, so the named form
-    has to keep working rather than always opening a menu."""
-    app = _make_app()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        await _submit(pilot, app, "/persona kawaii")
-        await pilot.pause()
-
-        assert not isinstance(app.screen, PersonaPickerModal)
-        assert app.persona.name == "Imouto"
-
-
-async def test_switching_to_none_strips_the_voice_from_the_system_prompt():
-    app = _make_app(persona_name="noah")
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        assert "African Grey Parrot" in app.system
-
-        await _submit(pilot, app, "/persona none")
-        await pilot.pause()
-
-        assert app.system == ""  # nothing left for CoBirb to send at all
-        assert "own voice" in _transcript_text(app)
-
-
-async def test_a_persona_switch_keeps_the_harness_choice_the_run_started_with():
-    """--system-prompt harness has to survive a mid-session /persona change;
-    rebuilding the prompt without it would silently drop the setting."""
-    app = _make_app(harness=True)
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        assert app.system == personas._HARNESS_PROMPT
-
-        await _submit(pilot, app, "/persona noah")
-        await pilot.pause()
-
-        assert app.system.startswith(personas._HARNESS_PROMPT)
-        assert "African Grey Parrot" in app.system
-
-
-# --------------------------------------------------------------------------- #
 # The transcript as one marked column
 # --------------------------------------------------------------------------- #
 def _marker_colour_name(style: str) -> str:
@@ -2166,7 +2002,7 @@ async def test_selected_text_keeps_its_own_colour_and_only_the_background_change
         assert selected.style.color != selected.style.bgcolor  # not a solid block
 
 
-async def test_a_streamed_reply_carries_no_persona_label(monkeypatch):
+async def test_a_streamed_reply_carries_no_reply_label(monkeypatch):
     """The bug this fixes: the orchestrator wrote "CoBirb: " into the stream
     itself, so the marked transcript read "> CoBirb: hello"."""
     class _StreamingOrchestrator(_StubOrchestrator):
@@ -2216,7 +2052,7 @@ async def test_the_tui_draws_nothing_for_begin_stream(monkeypatch):
 # model, so it knows what was said, while none of it is on screen.
 # --------------------------------------------------------------------------- #
 def _session_with_turns(*turns) -> SimpleNamespace:
-    return SimpleNamespace(session=SimpleNamespace(turns=list(turns), persona="none"))
+    return SimpleNamespace(session=SimpleNamespace(turns=list(turns)))
 
 
 def _turn(role, content, tool_use=None, phase=None) -> SimpleNamespace:

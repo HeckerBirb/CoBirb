@@ -21,7 +21,6 @@ from conftest import write_config
 from cobirb import cli
 from cobirb.mcp import tool_name_for
 from cobirb.runtime import wiring
-from cobirb.runtime.personas import NO_PERSONA
 from cobirb.typing.spi import ToolCall
 
 _MCP_SERVER = '''
@@ -208,7 +207,7 @@ def test_a_cobirb_json_in_the_project_changes_nothing_at_all(monkeypatch, tmp_pa
     assert cli.main(["-p", "hello", "--cwd", str(project)]) == 0
 
     assert not marker.exists()  # no hook ran
-    orchestrator = wiring.build_orchestrator(str(project), NO_PERSONA, {})
+    orchestrator = wiring.build_orchestrator(str(project), {})
     try:
         assert not orchestrator.policy.is_allowed("write_file", {"path": "x"})
         assert not orchestrator.policy.is_allowed("shell", {"command": "curl x"})

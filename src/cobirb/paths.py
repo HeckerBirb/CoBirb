@@ -1,7 +1,7 @@
 """Where CoBirb keeps things on disk.
 
 Every path under the user's CoBirb home is derived here, so ``COBIRB_HOME`` is
-read in exactly one place and config, sessions, personas, the audit log and
+read in exactly one place and config, sessions, the audit log and
 local plugins can never disagree about where the tree is. A module that spells
 the lookup out for itself is one typo away from writing into a directory
 nothing else ever looks in — a file silently absent rather than reported
@@ -53,16 +53,6 @@ def sessions_dir() -> str:
 def audit_path() -> str:
     """The opt-in audit log (see ``policy.AuditLog`` for why it is opt-in)."""
     return os.path.join(cobirb_dir(), "audit.jsonl")
-
-
-def user_personas_dir() -> str:
-    """Where a user's own persona files live.
-
-    ``~/.cobirb/personas/``. This was ``~/cobirb/`` — no dot, no subdirectory
-    — which matched nothing else CoBirb writes and meant a persona placed in
-    the obvious spot never resolved.
-    """
-    return os.path.join(cobirb_dir(), "personas")
 
 
 def user_plugins_dir() -> str:

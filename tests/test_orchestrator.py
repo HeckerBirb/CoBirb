@@ -300,7 +300,7 @@ def test_run_streams_live_through_io_when_supported():
         policy=Policy(),
         io=io,
     )
-    session = orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
+    session = orchestrator.run("hi", "sys", cwd="/tmp", label="noah")
 
     # Rendered as more than one call (proves genuine incremental streaming,
     # not the whole answer written in one go), and the fully assembled
@@ -308,7 +308,7 @@ def test_run_streams_live_through_io_when_supported():
     # boundaries or trailing-newline mechanics, which are incidental to
     # *that* streaming happened correctly.
     #
-    # Nothing but the model's own words goes through render(): the persona
+    # Nothing but the model's own words goes through render(): the reply
     # Writing the label into the stream here would make it part of the text
     # every renderer receives. How a reply is introduced is the I/O adapter's
     # business — see the begin_stream hook below.
@@ -576,7 +576,7 @@ def test_chat_wraps_a_non_streaming_call_in_the_spinner_when_io_has_one():
     io = _SpinningIO()
     orchestrator = Orchestrator(model=_DummyModel(reply="hi"), tools={}, policy=Policy(), io=io)
 
-    orchestrator.run("hello", "sys", cwd="/tmp", persona="noah")
+    orchestrator.run("hello", "sys", cwd="/tmp", label="noah")
 
     assert io.spinner_calls == [("enter", "noah is thinking…"), ("exit", "noah is thinking…")]
 
@@ -585,7 +585,7 @@ def test_chat_wraps_the_first_streamed_chunk_in_the_spinner():
     io = _SpinningIO()
     orchestrator = Orchestrator(model=_StreamingModel(["Hel", "lo"]), tools={}, policy=Policy(), io=io)
 
-    orchestrator.run("hello", "sys", cwd="/tmp", persona="noah")
+    orchestrator.run("hello", "sys", cwd="/tmp", label="noah")
 
     assert io.spinner_calls == [("enter", "noah is thinking…"), ("exit", "noah is thinking…")]
     # The spinner must not have swallowed any streamed content.
@@ -736,7 +736,7 @@ def test_plan_mode_runs_plan_then_act_then_validate_as_separate_phases(tmp_path)
         model=model, tools=registry.tools, policy=Policy()
     )
 
-    session = orchestrator.run("read the file", "sys", cwd=str(tmp_path), persona="noah", plan_mode=True)
+    session = orchestrator.run("read the file", "sys", cwd=str(tmp_path), label="noah", plan_mode=True)
 
     # The planning call got no tools at all; the act/validate calls got the
     # full registered set.
@@ -781,17 +781,17 @@ class _RecordingPhaseIO(_RecordingIO):
         self.validations = []
         self.events: list[tuple[str, str, str]] = []
 
-    def render_plan(self, persona_name, text):
-        self.plans.append((persona_name, text))
-        self.events.append(("plan", persona_name, text))
+    def render_plan(self, label, text):
+        self.plans.append((label, text))
+        self.events.append(("plan", label, text))
 
-    def render_answer(self, persona_name, text):
-        self.answers.append((persona_name, text))
-        self.events.append(("answer", persona_name, text))
+    def render_answer(self, label, text):
+        self.answers.append((label, text))
+        self.events.append(("answer", label, text))
 
-    def render_validation(self, persona_name, text):
-        self.validations.append((persona_name, text))
-        self.events.append(("validation", persona_name, text))
+    def render_validation(self, label, text):
+        self.validations.append((label, text))
+        self.events.append(("validation", label, text))
 
 
 def test_plan_mode_renders_the_plan_and_validation_via_the_io_hooks(tmp_path):
@@ -799,7 +799,7 @@ def test_plan_mode_renders_the_plan_and_validation_via_the_io_hooks(tmp_path):
     model = _RecordingToolCountModel(["The plan.", "Acted.", "Validated."])
     orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), io=io)
 
-    orchestrator.run("do it", "sys", cwd=str(tmp_path), persona="noah", plan_mode=True)
+    orchestrator.run("do it", "sys", cwd=str(tmp_path), label="noah", plan_mode=True)
 
     assert io.plans == [("noah", "The plan.")]
     assert io.validations == [("noah", "Validated.")]
@@ -810,7 +810,7 @@ def test_plan_mode_falls_back_to_plain_render_without_the_hooks(tmp_path):
     model = _RecordingToolCountModel(["The plan.", "Acted.", "Validated."])
     orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), io=io)
 
-    orchestrator.run("do it", "sys", cwd=str(tmp_path), persona="noah", plan_mode=True)
+    orchestrator.run("do it", "sys", cwd=str(tmp_path), label="noah", plan_mode=True)
 
     assert any("plan" in text and "The plan." in text for text in io.rendered)
     assert any("noah" in text and "Acted." in text for text in io.rendered)
@@ -829,7 +829,7 @@ def test_plan_mode_renders_the_act_answer_before_validation(tmp_path):
     model = _RecordingToolCountModel(["The plan.", "The answer.", "The validation."])
     orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), io=io)
 
-    orchestrator.run("do it", "sys", cwd=str(tmp_path), persona="noah", plan_mode=True)
+    orchestrator.run("do it", "sys", cwd=str(tmp_path), label="noah", plan_mode=True)
 
     assert [kind for kind, _, _ in io.events] == ["plan", "answer", "validation"]
     assert io.answers == [("noah", "The answer.")]
@@ -846,15 +846,15 @@ def test_plan_mode_session_round_trips_through_real_encrypted_storage(tmp_path):
     crypto, then SessionManager.create, then hand it to the Orchestrator."""
     session_path = str(tmp_path / "session.json")
     crypto = AesGcmScryptSessionCrypto()
-    manager = SessionManager.create(session_path, crypto, str(tmp_path), "noah", "pw")
+    manager = SessionManager.create(session_path, crypto, str(tmp_path), "pw")
 
     model = _RecordingToolCountModel(["1. Do X.", "Did X.", "Confirmed: X was done."])
     orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), session=manager)
 
-    orchestrator.run("do X", "sys", cwd=str(tmp_path), persona="noah", plan_mode=True)
+    orchestrator.run("do X", "sys", cwd=str(tmp_path), label="noah", plan_mode=True)
     manager.save("pw")
 
-    reloaded = SessionManager.load(session_path, AesGcmScryptSessionCrypto(), "pw", str(tmp_path), "noah")
+    reloaded = SessionManager.load(session_path, AesGcmScryptSessionCrypto(), "pw", str(tmp_path))
     phases = [t.phase for t in reloaded.session.turns if t.role == "assistant"]
     assert phases == ["plan", "act", "validate"]
     assert reloaded.session.validation == "Confirmed: X was done."
@@ -896,7 +896,7 @@ def test_plan_mode_does_not_double_render_a_streamed_phase():
     model = _AllStreamingModel([["plan text"], ["act text"], ["validate text"]])
     orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), io=io)
 
-    orchestrator.run("do it", "sys", cwd="/tmp", persona="noah", plan_mode=True)
+    orchestrator.run("do it", "sys", cwd="/tmp", label="noah", plan_mode=True)
 
     assert io.plans == []
     assert io.validations == []
@@ -909,8 +909,8 @@ def test_plan_mode_does_not_double_render_a_streamed_phase():
 # --------------------------------------------------------------------------- #
 # begin_stream: how a streamed reply is introduced.
 #
-# Writing f"{persona}: " straight into the stream via io.render() would make
-# the persona label part of the text every renderer receives. With replies
+# Writing f"{label}: " straight into the stream via io.render() would make
+# the reply label part of the text every renderer receives. With replies
 # marked "> ", a transcript would read "> CoBirb: hello" — the label baked
 # into the content, indistinguishable from what the model actually said.
 # --------------------------------------------------------------------------- #
@@ -919,8 +919,8 @@ class _StreamAwareIO(_RecordingIO):
         super().__init__()
         self.begin_calls = []
 
-    def begin_stream(self, persona_name):
-        self.begin_calls.append(persona_name)
+    def begin_stream(self, label):
+        self.begin_calls.append(label)
 
 
 def test_streaming_announces_the_reply_through_the_hook_not_the_content():
@@ -929,7 +929,7 @@ def test_streaming_announces_the_reply_through_the_hook_not_the_content():
         model=_StreamingModel(["Hel", "lo"]), tools={}, policy=Policy(), io=io
     )
 
-    orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
+    orchestrator.run("hi", "sys", cwd="/tmp", label="noah")
 
     assert io.begin_calls == ["noah"]
     assert "noah" not in "".join(io.rendered)
@@ -941,7 +941,7 @@ def test_the_hook_fires_once_per_reply_not_once_per_chunk():
         model=_StreamingModel(["a", "b", "c", "d"]), tools={}, policy=Policy(), io=io
     )
 
-    orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
+    orchestrator.run("hi", "sys", cwd="/tmp", label="noah")
 
     assert io.begin_calls == ["noah"]
 
@@ -950,7 +950,7 @@ def test_the_hook_never_fires_for_a_reply_with_no_content():
     io = _StreamAwareIO()
     orchestrator = Orchestrator(model=_StreamingModel([]), tools={}, policy=Policy(), io=io)
 
-    orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
+    orchestrator.run("hi", "sys", cwd="/tmp", label="noah")
 
     assert io.begin_calls == []
 
@@ -963,19 +963,19 @@ def test_streaming_still_works_for_an_adapter_without_the_hook():
         model=_StreamingModel(["Hel", "lo"]), tools={}, policy=Policy(), io=io
     )
 
-    session = orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
+    session = orchestrator.run("hi", "sys", cwd="/tmp", label="noah")
 
     assert "".join(io.rendered) == "Hello\n"
     assert session.summary == "Hello"
 
 
-def test_the_persona_label_still_reaches_the_spinner():
+def test_the_reply_label_still_reaches_the_spinner():
     """It was only ever wrong in the *content*; "noah is thinking…" is a
     status line and stays."""
     io = _SpinningIO()
     orchestrator = Orchestrator(model=_StreamingModel(["Hi"]), tools={}, policy=Policy(), io=io)
 
-    orchestrator.run("hi", "sys", cwd="/tmp", persona="noah")
+    orchestrator.run("hi", "sys", cwd="/tmp", label="noah")
 
     assert io.spinner_calls[0] == ("enter", "noah is thinking…")
 
@@ -1007,7 +1007,7 @@ class _WindowedModel(_DummyModel):
 
 def test_a_long_history_is_compacted_before_it_reaches_the_model():
     model = _WindowedModel(window=2048)
-    manager = SessionManager.create("x", None, ".", "none")
+    manager = SessionManager.create("x", None, ".")
     for n in range(40):
         manager.session.add(Turn(role="user", content=f"question {n}"))
         manager.session.add(Turn(role="tool", content="y" * 4000, tool_use=[{"name": "read_file"}]))
@@ -1047,7 +1047,7 @@ def test_a_provider_without_the_hook_falls_back_to_the_conservative_default():
     assert orchestrator._context_budget() == history_budget(DEFAULT_CONTEXT_TOKENS)
 
 
-def test_project_context_reach_the_model_even_with_no_persona():
+def test_project_context_reaches_the_model_with_no_system_prompt():
     """The empty-system-prompt rule is about not *inventing* a system message,
     not about withholding what the project explicitly asked to be told."""
     model = _WindowedModel(window=8192)
@@ -1060,7 +1060,7 @@ def test_project_context_reach_the_model_even_with_no_persona():
     assert "Always run pytest." in model.systems[0]
 
 
-def test_nothing_is_sent_when_there_are_no_instructions_and_no_persona():
+def test_nothing_is_sent_when_there_are_no_instructions_and_no_system_prompt():
     """The default must stay: no system message at all, so the model's own
     Modelfile SYSTEM applies untouched."""
     model = _WindowedModel(window=8192)
@@ -1610,7 +1610,7 @@ def test_an_image_survives_saving_and_resuming_the_session(tmp_path):
     and the model can still see it."""
     path = str(tmp_path / "s.json")
     crypto = AesGcmScryptSessionCrypto()
-    manager = SessionManager.create(path, crypto, ".", "none", "pw")
+    manager = SessionManager.create(path, crypto, ".", "pw")
     first = Orchestrator(model=_WindowedModel(window=8192), tools={}, policy=Policy(),
                          session=manager, crypto=crypto)
     first.run("what is this?", "sys", cwd="/tmp",
@@ -1619,7 +1619,7 @@ def test_an_image_survives_saving_and_resuming_the_session(tmp_path):
 
     resumed_model = _WindowedModel(window=8192)
     resumed = Orchestrator(model=resumed_model, tools={}, policy=Policy(),
-                           session=SessionManager.load(path, crypto, "pw", ".", "none"), crypto=crypto)
+                           session=SessionManager.load(path, crypto, "pw", "."), crypto=crypto)
     resumed.run("and now?", "sys", cwd="/tmp")
 
     sent = json.loads(resumed_model.contexts[0])
@@ -1642,7 +1642,7 @@ def test_an_image_whose_bytes_are_missing_degrades_to_a_marker():
     """A hand-edited session shouldn't fail a turn — it should say the image
     was there and carry on."""
     model = _WindowedModel(window=8192)
-    manager = SessionManager.create("x", None, ".", "none")
+    manager = SessionManager.create("x", None, ".")
     manager.session.add(Turn(role="user", content="look", images=[{"id": "gone", "filename": "x.png"}]))
     orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), session=manager)
 

@@ -60,19 +60,19 @@ def unified_diff(path: str, old_str: str, new_str: str) -> str:
     return "".join(diff)
 
 
-def build_plan_panel(persona_name: str, text: str) -> Panel:
+def build_plan_panel(label: str, text: str) -> Panel:
     """Plan mode's planning-phase reply — the plan the model is about to
     follow, shown before any tool runs."""
     return Panel(
-        Markdown(text), title=f"{persona_name} · plan", title_align="left", border_style="cyan"
+        Markdown(text), title=f"{label} · plan", title_align="left", border_style="cyan"
     )
 
 
-def build_validation_panel(persona_name: str, text: str) -> Panel:
+def build_validation_panel(label: str, text: str) -> Panel:
     """Plan mode's validate-phase report: whether/how the request was
     actually fulfilled, with references."""
     return Panel(
-        Markdown(text), title=f"{persona_name} · validation", title_align="left", border_style="yellow"
+        Markdown(text), title=f"{label} · validation", title_align="left", border_style="yellow"
     )
 
 
@@ -130,7 +130,7 @@ def build_preview_panel(tool_name: str, preview: str) -> Panel:
     return Panel(body, title=f"{tool_name} would change", title_align="left", border_style="yellow")
 
 
-def build_error_panel(persona_name: str, text: str) -> Panel:
+def build_error_panel(label: str, text: str) -> Panel:
     """An error notice (a blocked tool call, a provider that fell over, a
     failed command or connection) shown in the conversation flow rather than
     on stderr.
@@ -146,7 +146,7 @@ def build_error_panel(persona_name: str, text: str) -> Panel:
     """
     return Panel(
         Text(text, style=f"bold {TAIL_RED}"),
-        title=persona_name,
+        title=label,
         title_align="left",
         border_style=TAIL_RED,
         style=f"on {_ERROR_TINT}",
@@ -345,7 +345,7 @@ class ExchangeRule:
 
 
 def build_notice(text: str) -> Text:
-    """A plain one-line notice (``/persona`` and ``/plan`` confirmations,
+    """A plain one-line notice (``/plan`` confirmations,
     the greeting). Not a panel: these are chatter about the session, not
     content from the model."""
     return Text(text, style=FEATHER_GRAY)

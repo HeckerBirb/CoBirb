@@ -89,7 +89,7 @@ def test_render_answer_renders_markdown_content():
 
 def test_render_answer_marks_the_reply_and_does_not_label_it():
     """Replies carry the same ``>`` the prompt does, told apart by colour —
-    not by a persona name printed above every one of them."""
+    not by a label printed above every one of them."""
     term, buf = _make_terminal_io()
     term.render_answer("Noah", "Hello there.")
     out = buf.getvalue()
@@ -146,7 +146,7 @@ def test_spinner_is_a_usable_context_manager():
         pass  # must not raise; the spinner's own animation is cosmetic
 
 
-def test_render_plan_shows_the_persona_and_plan_text():
+def test_render_plan_shows_the_label_and_plan_text():
     term, buf = _make_terminal_io()
     term.render_plan("Noah", "1. Read the file.\n2. Report back.")
     out = buf.getvalue()
@@ -161,7 +161,7 @@ def test_render_plan_is_a_noop_for_empty_text():
     assert buf.getvalue() == ""
 
 
-def test_render_validation_shows_the_persona_and_validation_text():
+def test_render_validation_shows_the_label_and_validation_text():
     term, buf = _make_terminal_io()
     term.render_validation("Noah", "Confirmed: the file was edited as intended, see line 12.")
     out = buf.getvalue()
@@ -186,7 +186,7 @@ def test_begin_stream_writes_the_reply_marker():
     assert buf.getvalue() == "> Hello"
 
 
-def test_begin_stream_does_not_print_the_persona_name():
+def test_begin_stream_does_not_print_the_label():
     term, buf = _make_terminal_io()
     term.begin_stream("Noah")
 

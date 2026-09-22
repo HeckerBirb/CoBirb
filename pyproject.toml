@@ -54,8 +54,6 @@ cobirb = "cobirb.cli:main"
 
 # Plugin entry-point groups declared in the Plugin SPI.
 # Plugins declare implementations here under [project.entry-points."cobirb.plugins"].
-# Personas are pure data (see cobirb/personas/*.json), not a class-based SPI
-# interface, so there is no entry point for them here.
 [project.entry-points."cobirb.plugins"]
 # Core ships these built-in plugins (always available).
 core-tools = "cobirb.plugins.core.tools:ToolRegistry"
@@ -69,14 +67,14 @@ where = ["src"]
 [tool.setuptools.package-data]
 # py.typed (PEP 561) declares that this package ships inline type hints a
 # consuming project's type checker should read, rather than treating cobirb
-# as untyped. personas/*.json are the bundled persona data files.
+# as untyped.
 # tui/*.tcss is the Textual stylesheet the interactive app loads at runtime via
 # CSS_PATH — without it listed here, an installed (non-editable) CoBirb starts
 # interactive mode and immediately fails to find its own layout.
 # install.sh ships inside the package so a managed install carries the script
 # that manages it: `--upgrade` runs the copy belonging to the version it is
 # running, rather than fetching one and hoping the two agree.
-cobirb = ["py.typed", "personas/*.json", "tui/*.tcss", "install.sh"]
+cobirb = ["py.typed", "tui/*.tcss", "install.sh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

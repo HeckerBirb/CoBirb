@@ -130,9 +130,9 @@ def test_set_creates_intermediate_dicts_as_needed():
 
 def test_set_then_get_round_trips_a_top_level_value():
     config = Config(user_path="/no/such/file.json")
-    config.set("persona", value="professional")
+    config.set("system_prompt", value="harness")
 
-    assert config.get("persona") == "professional"
+    assert config.get("system_prompt") == "harness"
 
 
 def test_set_overwrites_a_non_dict_value_that_is_in_the_way():
@@ -187,7 +187,6 @@ def test_the_bundled_example_config_is_valid_and_loadable(tmp_path):
 
     assert config.get("default_model")
     assert config.get("models", "default", "name")
-    assert config.get("persona")
 
 
 # --------------------------------------------------------------------------- #
@@ -195,8 +194,8 @@ def test_the_bundled_example_config_is_valid_and_loadable(tmp_path):
 # --------------------------------------------------------------------------- #
 def test_every_cobirb_path_sits_under_one_home(tmp_path, monkeypatch):
     """One derivation, one tree. Modules resolving COBIRB_HOME independently
-    and joining their own subpath onto it is how personas end up in ~/cobirb/
-    while everything else uses ~/.cobirb/."""
+    and joining their own subpath onto it is how one kind of file ends up in
+    ~/cobirb/ while everything else uses ~/.cobirb/."""
     from cobirb import paths
 
     monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
@@ -207,20 +206,8 @@ def test_every_cobirb_path_sits_under_one_home(tmp_path, monkeypatch):
         paths.config_path(),
         paths.sessions_dir(),
         paths.audit_path(),
-        paths.user_personas_dir(),
         paths.user_plugins_dir(),
     ):
         assert path.startswith(root + os.sep), path
 
 
-def test_a_user_persona_resolves_from_the_cobirb_home_tree(tmp_path, monkeypatch):
-    """It was looked for in ~/cobirb/<name>.json — no dot, no subdirectory —
-    so a persona put where every other CoBirb file lives never resolved."""
-    from cobirb.runtime.personas import load_persona
-
-    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
-    personas_dir = tmp_path / ".cobirb" / "personas"
-    personas_dir.mkdir(parents=True)
-    (personas_dir / "pirate.json").write_text('{"name": "Redbeard", "tone": "salty"}')
-
-    assert load_persona("pirate").name == "Redbeard"

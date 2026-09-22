@@ -25,17 +25,16 @@ from ..plugins.core import render
 
 
 class StatusBar(Static):
-    """One persistent line: who's speaking, on what model, with plan mode on
-    or off, in which directory.
+    """One persistent line: which model, with plan mode on or off, in which
+    directory.
 
     This is the CoBirb equivalent of the status line other terminal coding
     assistants show, minus an "AI credits used" counter — CoBirb is local and free, so there
     is nothing to meter. It is kept *live* rather than printed once at
-    startup, so a ``/persona`` or ``/plan`` change is visible for the rest of
+    startup, so a ``/model`` or ``/plan`` change is visible for the rest of
     the session instead of scrolling away.
     """
 
-    persona_name: reactive[str] = reactive("")
     model_name: reactive[str] = reactive("")
     plan_mode: reactive[bool] = reactive(False)
     cwd: reactive[str] = reactive(".")
@@ -44,7 +43,6 @@ class StatusBar(Static):
 
     def render(self) -> Text:
         parts = [
-            self.persona_name or "cobirb",
             self.model_name or "(no model configured)",
             f"plan: {'on' if self.plan_mode else 'off'}",
             self.cwd,
@@ -57,7 +55,7 @@ class StatusBar(Static):
         line = Text(" · ".join(parts), style=render.FEATHER_GRAY)
         if self.busy:
             # The busy label replaces nothing; it is appended so the context
-            # (persona/model/cwd) stays readable while a turn is running.
+            # (model/cwd) stays readable while a turn is running.
             line.append("  ")
             line.append(self.busy, style="bold yellow")
         return line
@@ -67,7 +65,7 @@ class ActivityBar(Static):
     """What is running right now, on its own line, with a moving indicator.
 
     ``StatusBar`` already had a ``busy`` field, and it was not enough: a dim
-    suffix on a line that already carries persona, model, plan mode and cwd is
+    suffix on a line that already carries model, plan mode and cwd is
     easy to miss entirely. The report that prompted this was that Brainy Birb
     built a whole skeleton with no sign of life anywhere in CoBirb — the only
     evidence it was working was Ollama's own terminal scrolling in another

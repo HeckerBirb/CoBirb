@@ -82,7 +82,6 @@ If your endpoint serves one request at a time, the more direct fix is on its sid
 | Key | Default | Does |
 |---|---|---|
 | `models` | — | Per-role model and endpoint (above) |
-| `persona` | `"none"` | Persona to adopt |
 | `system_prompt` | `"off"` | `"harness"` adds CoBirb's own system block |
 | `plan_mode` | `false` | Start in plan mode |
 | `allow_tools` | `[]` | Pre-approved tools, e.g. `["read_file", "shell(git status)"]` |

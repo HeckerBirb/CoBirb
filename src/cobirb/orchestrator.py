@@ -61,6 +61,10 @@ _STEER_PREAMBLE = (
     "rather than wait. Take it into account immediately:] "
 )
 
+# What a reply is labelled with unless the caller names someone else — the
+# Flock labels Brainy Birb and each Worker Birb by their own names.
+REPLY_LABEL = "CoBirb"
+
 # System-prompt addenda for plan mode's three phases (Orchestrator.run,
 # plan_mode=True). Off by default — the model plans, acts and validates
 # implicitly within one continuous loop, the way someone working through a
@@ -278,8 +282,8 @@ class Orchestrator:
         # Whether the most recent run()'s final answer was already streamed
         # live to `io` (see run()'s docstring) — false until a run happens.
         self.last_turn_streamed = False
-        # Overwritten by run() with the active persona name for this call.
-        self._stream_label = "assistant"
+        # Overwritten by run() with the reply label for this call.
+        self._stream_label = REPLY_LABEL
         # Mid-turn steering (see steer()): messages queued from another
         # thread while run() is executing, applied at the next loop boundary
         # by _drain_steer. A plain queue.SimpleQueue rather than a list plus
@@ -302,7 +306,7 @@ class Orchestrator:
         system: str,
         *,
         cwd: str = ".",
-        persona: str = "noah",
+        label: str = REPLY_LABEL,
         max_turns: int = 8,
         session_path: str | None = None,
         plan_mode: bool = False,
@@ -348,7 +352,7 @@ class Orchestrator:
         the answer to it was. ``last_turn_streamed`` is set accordingly so
         that post-``run()`` print becomes a no-op rather than a duplicate.
         """
-        session = self._open_session(prompt, system, cwd, persona, session_path, images)
+        session = self._open_session(prompt, system, cwd, session_path, images)
         self.last_run_tool_calls = []
         if self.checkpoints is not None:
             self.checkpoints.begin_turn()
@@ -366,7 +370,7 @@ class Orchestrator:
                 prompt=prompt,
                 system=system,
                 cwd=cwd,
-                persona=persona,
+                label=label,
                 max_turns=max_turns,
                 plan_mode=plan_mode,
                 session=session,
@@ -380,7 +384,7 @@ class Orchestrator:
         prompt: str,
         system: str,
         cwd: str,
-        persona: str,
+        label: str,
         max_turns: int,
         plan_mode: bool,
         session: Session,
@@ -408,7 +412,7 @@ class Orchestrator:
         ) if (system or self.project_context) else ""
         logger.info("starting run; turns=%d plan_mode=%s", len(session.turns), plan_mode)
         self.last_turn_streamed = False
-        self._stream_label = persona
+        self._stream_label = label
         self._fire_and_report(EVENT_BEFORE_TURN, payload={"prompt": prompt})
 
         if plan_mode:
@@ -416,7 +420,7 @@ class Orchestrator:
                 _join_system(system_with_cwd, _PLAN_PHASE_INSTRUCTIONS), session
             )
             if not plan_streamed:
-                self._render_phase(PHASE_PLAN, persona, plan_text)
+                self._render_phase(PHASE_PLAN, label, plan_text)
 
         act_system = (
             _join_system(system_with_cwd, _ACT_PHASE_INSTRUCTIONS) if plan_mode else system_with_cwd
@@ -433,7 +437,7 @@ class Orchestrator:
             # leaving it to the caller's usual post-run() print, which
             # would land after the validate phase's own panel below and
             # read as "validated, then here's what was validated."
-            self.last_turn_streamed = streamed or self._render_answer(persona, content)
+            self.last_turn_streamed = streamed or self._render_answer(label, content)
 
             validation_text, validation_streamed = self._loop(
                 _join_system(system_with_cwd, _VALIDATE_PHASE_INSTRUCTIONS),
@@ -443,7 +447,7 @@ class Orchestrator:
             )
             session.validation = validation_text
             if not validation_streamed:
-                self._render_phase(PHASE_VALIDATE, persona, validation_text)
+                self._render_phase(PHASE_VALIDATE, label, validation_text)
 
         # Last thing before the session is handed back, so an after_turn hook
         # that reads the workspace sees it in its finished state — including
@@ -494,7 +498,7 @@ class Orchestrator:
             for call in self.last_run_tool_calls
         )
 
-    def _render_answer(self, persona_name: str, text: str) -> bool:
+    def _render_answer(self, label: str, text: str) -> bool:
         """Show a finished answer live, via ``io``'s ``render_answer`` hook
         if it has one (the same hook ``cli._render_final_answer`` uses for
         a normal, non-plan-mode run), else a plain fallback through
@@ -509,9 +513,9 @@ class Orchestrator:
         return render_through(
             self.io,
             "render_answer",
-            persona_name,
+            label,
             text,
-            fallback=lambda: self.io.render(f"\n{persona_name}: {text}\n"),
+            fallback=lambda: self.io.render(f"\n{label}: {text}\n"),
         )
 
     def _run_plan_phase(self, system: str, session: Session) -> tuple[str, bool]:
@@ -638,7 +642,7 @@ class Orchestrator:
         phase, which must not be able to act at all (see
         ``Orchestrator._run_plan_phase``).
 
-        A label (the active persona's name, set by ``run()``) is rendered
+        A label (``run()``'s ``label``) is rendered
         once, right before the first non-empty chunk of *this* turn — we
         can't know in advance whether a turn will end up being a tool call
         or the final answer, so any turn that produces visible content gets
@@ -678,7 +682,7 @@ class Orchestrator:
                 if not started:
                     # Tell the adapter a reply is starting and let *it* decide
                     # what to draw. Rendering f"{label}: " into the stream
-                    # here would make the persona name part of the text the
+                    # here would make the label part of the text the
                     # renderer receives, so a transcript that marks replies
                     # with "> " would read "> CoBirb: hello" instead of
                     # "> hello". Chrome is the adapter's business; the
@@ -712,7 +716,6 @@ class Orchestrator:
         prompt: str,
         system: str,
         cwd: str,
-        persona: str,
         session_path: str | None = None,
         images: "list[dict[str, str]] | None" = None,
     ) -> Session:
@@ -721,7 +724,7 @@ class Orchestrator:
         # are preserved. Either way, this prompt is always recorded as the
         # opening turn of *this* run.
         if self.session is None:
-            self.session = SessionManager.create(session_path or ".", self.crypto, cwd, persona)
+            self.session = SessionManager.create(session_path or ".", self.crypto, cwd)
         # The turn keeps a reference; the bytes go in the session's own image
         # table, keyed by content hash — so the same screenshot attached twice
         # is stored once, and everything rides inside the one encrypted blob
@@ -1065,7 +1068,7 @@ class Orchestrator:
             fallback=lambda: self.io.render(f"\n[{tool_name}: {status}] {result.content}\n"),
         )
 
-    def _render_phase(self, phase: str, persona_name: str, text: str) -> None:
+    def _render_phase(self, phase: str, label: str, text: str) -> None:
         """Show a plan-mode phase's result (plan or validation report) live,
         via ``io``'s ``render_plan``/``render_validation`` hook if it has
         one (see ``TerminalIO``), else a plain fallback through
@@ -1080,13 +1083,13 @@ class Orchestrator:
         # constant names a stage of the run, and this is prose shown to a
         # person. Keeping them separate is why the label is mapped rather
         # than interpolated straight from `phase`.
-        label = "validation" if phase == PHASE_VALIDATE else phase
+        heading = "validation" if phase == PHASE_VALIDATE else phase
         render_through(
             self.io,
             "render_plan" if phase == PHASE_PLAN else "render_validation",
-            persona_name,
+            label,
             text,
-            fallback=lambda: self.io.render(f"\n[{label}] {text}\n"),
+            fallback=lambda: self.io.render(f"\n[{heading}] {text}\n"),
         )
 
     # ------------------------------------------------------------------ #

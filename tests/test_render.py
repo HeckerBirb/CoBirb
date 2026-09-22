@@ -155,7 +155,7 @@ def test_tool_call_panel_accepts_a_result_that_is_not_a_ToolResult():
 # --------------------------------------------------------------------------- #
 # Notices and errors
 # --------------------------------------------------------------------------- #
-def test_error_panel_shows_the_persona_and_the_message():
+def test_error_panel_shows_the_label_and_the_message():
     panel = render.build_error_panel("Noah", "blocked — nope")
 
     assert panel.title == "Noah"
@@ -174,7 +174,7 @@ def test_error_panel_gets_a_tinted_background_not_just_coloured_text():
 
 
 def test_notice_is_plain_text_not_a_panel():
-    """Notices are chatter about the session (a /plan toggle, a persona
+    """Notices are chatter about the session (a /plan toggle, a model
     switch), not content from the model, so they deliberately don't get the
     framing a reply does."""
     notice = render.build_notice("Plan mode: on.")
@@ -262,7 +262,7 @@ def test_a_streamed_reply_is_marked_but_not_rerendered_as_markdown():
     assert out.startswith("> - literal **text**")
 
 
-def test_replies_do_not_carry_a_persona_label():
+def test_replies_do_not_carry_a_reply_label():
     out = _plain(render.build_assistant_message("Hello."))
 
     assert "Noah" not in out and "CoBirb" not in out

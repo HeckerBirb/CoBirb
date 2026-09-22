@@ -42,7 +42,6 @@ cobirb plugin remove my-plugin
 | `model` | The model provider |
 | `io` | How CoBirb renders and asks |
 | `crypto` | The session cipher |
-| `persona` | Voice data |
 
 Tool plugins are merged in. The other slots replace the core one only when you name it:
 

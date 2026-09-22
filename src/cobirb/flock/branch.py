@@ -102,7 +102,7 @@ def open_flock_session(
         return None
     path = flock_path(main.path, token)
     manager = SessionManager.create(
-        path, main.crypto, main.working_dir, main.session.persona, password
+        path, main.crypto, main.working_dir, password
     )
     manager.session.flock = token
     manager.session.add(

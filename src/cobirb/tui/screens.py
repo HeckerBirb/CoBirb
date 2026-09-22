@@ -135,10 +135,8 @@ class HelpModal(ModalScreen[None]):
 class PickerModal(ModalScreen[Optional[str]]):
     """Choose one name from a list, with the current one marked.
 
-    Shared by ``/model`` and ``/persona`` so the two feel like the same
-    command with a different noun — picking a persona by arrowing through a
-    list is the same job as picking a model, and there is no reason for one
-    to be a menu and the other a name you have to already know how to spell.
+    A base rather than folded into ``ModelPickerModal`` so any later "pick one
+    of these names" command is a subclass with a title, not a second dialog.
 
     Dismisses with the chosen name, or ``None`` on escape/cancel — a cancel
     changes nothing, it never clears what was already in use.
@@ -180,17 +178,6 @@ class ModelPickerModal(PickerModal):
     """
 
     TITLE_TEXT = "Select a model"
-
-
-class PersonaPickerModal(PickerModal):
-    """Choose a persona, including "none" — which is the default.
-
-    Personas are opt-in (see ``plugins.core.persona``), so this list always
-    offers the way back out of one as its first entry rather than only
-    offering costumes to swap between.
-    """
-
-    TITLE_TEXT = "Select a persona"
 
 
 class TextPromptModal(ModalScreen[Optional[str]]):

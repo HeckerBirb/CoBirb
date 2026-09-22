@@ -30,12 +30,11 @@ No linter, formatter or type checker is configured — match the surrounding sty
 - The three runtime dependencies (`rich`, `cryptography`, `textual`) are each a deliberate
   decision — prefer stdlib for anything new. A new dependency is a conversation, not a PR.
 
-## Plugins and personas
+## Plugins
 
 If your contribution is a new capability rather than a core fix, check whether it belongs as a
 plugin instead — CoBirb has a plugin interface specifically so most extensions don't need to touch
-the core at all. A persona is just data (`cobirb/personas/*.json`); adding one doesn't need a code
-change.
+the core at all.
 
 ## Sending a pull request
 

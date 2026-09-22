@@ -40,7 +40,7 @@ FAIL = "fail"
 # lookup with no validation, so `redact_secret` for `redact_secrets` reads as
 # "off" while redaction stays on).
 KNOWN_KEYS = frozenset({
-    "models", "persona", "system_prompt", "plan_mode",
+    "models", "system_prompt", "plan_mode",
     "allow_tools", "allow_read_dirs", "allow_write_dirs",
     "checkpoints", "redact_secrets", "audit_log",
     "instructions", "instructions_max_chars",
@@ -63,7 +63,14 @@ _EXPECTED_TYPES: dict[str, tuple[type, ...]] = {
     # all this table can ask about.
     "max_num_ctx": (int, str),
     "verify_timeout": (int,), "verify_fix_attempts": (int,),
-    "persona": (str,), "system_prompt": (str,), "verify_command": (str,),
+    "system_prompt": (str,), "verify_command": (str,),
+}
+
+# Settings CoBirb used to read and no longer does, with what happened to each.
+# Reported apart from unknown keys: "not a setting CoBirb reads" invites
+# someone to hunt for the typo in a key that was spelled correctly.
+RETIRED_KEYS = {
+    "persona": "personas were removed in 0.22.0; delete this key",
 }
 
 _TOOL_NAMES = READ_TOOLS | WRITE_TOOLS | {"shell"}
@@ -125,7 +132,14 @@ def _check_config(report: Report, config: Config, raw: "dict[str, Any] | None") 
         return
     report.add("config file", OK, path)
 
-    unknown = sorted(set(raw) - KNOWN_KEYS)
+    retired = sorted(set(raw) & set(RETIRED_KEYS))
+    if retired:
+        report.add(
+            "retired config keys",
+            WARN,
+            "; ".join(f"{key}: {RETIRED_KEYS[key]}" for key in retired),
+        )
+    unknown = sorted(set(raw) - KNOWN_KEYS - set(RETIRED_KEYS))
     if unknown:
         report.add(
             "config keys",
