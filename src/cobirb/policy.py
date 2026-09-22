@@ -36,7 +36,7 @@ import time
 import weakref
 from typing import Any
 
-from . import paths
+from . import paths, patches
 from .redaction import redact_arguments
 
 # Tokens made only of these characters are shell operators rather than words.
@@ -201,6 +201,24 @@ def _glob_base(pattern: str) -> str:
     return "/".join(base) or "."
 
 
+def patch_target(arguments: dict[str, Any]) -> str | None:
+    """The one file a ``*** Begin Patch`` call writes, or ``None`` (deny).
+
+    The file is named inside the patch. A ``path`` argument, if given, must
+    name the same file: two different answers to "where will this write" is
+    not something to pick between in a permission check. Several files, a move
+    or a delete are ``None`` too — see ``cobirb.patches``. The tool uses this
+    same function, so what is checked is what is written.
+    """
+    named = patches.single_target(str(arguments.get("patch", "")))
+    if named is None:
+        return None
+    given = arguments.get("path")
+    if isinstance(given, str) and given and os.path.normpath(given) != os.path.normpath(named):
+        return None
+    return given if isinstance(given, str) and given else named
+
+
 def _target_path(tool_name: str, arguments: dict[str, Any]) -> str | None:
     """The path a path-scoped tool call is about to touch, as written.
 
@@ -220,6 +238,8 @@ def _target_path(tool_name: str, arguments: dict[str, Any]) -> str | None:
     if tool_name == "glob":
         pattern = arguments.get("pattern")
         return _glob_base(pattern) if isinstance(pattern, str) and pattern else None
+    if tool_name == "apply_patch" and patches.is_begin_patch(arguments.get("patch")):
+        return patch_target(arguments)
     target = arguments.get("path")
     if target is None and tool_name in ("grep", "repo_map"):
         target = "."  # matching those tools' own defaults

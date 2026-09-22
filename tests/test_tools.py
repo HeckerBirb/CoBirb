@@ -996,3 +996,63 @@ def test_files_nothing_can_check_carry_no_warning(tmp_path):
     result = WriteFileTool(str(tmp_path)).execute({"path": "notes.md", "content": "{ not json"})
 
     assert "Warning" not in result.content
+
+
+# --------------------------------------------------------------------------- #
+# apply_patch: the *** Begin Patch format
+# --------------------------------------------------------------------------- #
+_HANDLERS = (
+    "def handle_create(request):\n    return {\"code\": 200}\n\n"
+    "def handle_delete(request):\n    return {\"code\": 200}\n"
+)
+
+
+def test_a_begin_patch_is_applied_where_its_anchor_says(tmp_path):
+    """The shape gpt-oss sends — no path argument, no line numbers."""
+    (tmp_path / "h.py").write_text(_HANDLERS)
+    patch = ("*** Begin Patch\n*** Update File: h.py\n@@ def handle_delete(request):\n"
+             "-    return {\"code\": 200}\n+    return {\"code\": 204}\n*** End Patch")
+
+    result = ApplyPatchTool(str(tmp_path)).execute({"patch": patch})
+
+    assert result.ok, result.content
+    assert (tmp_path / "h.py").read_text() == _HANDLERS.replace(
+        'delete(request):\n    return {"code": 200}', 'delete(request):\n    return {"code": 204}')
+
+
+def test_an_unanchored_hunk_that_matches_twice_is_refused(tmp_path):
+    (tmp_path / "h.py").write_text(_HANDLERS)
+    patch = "*** Begin Patch\n*** Update File: h.py\n@@\n-    return {\"code\": 200}\n+    return {\"code\": 204}\n*** End Patch"
+
+    result = ApplyPatchTool(str(tmp_path)).execute({"patch": patch})
+
+    assert not result.ok and "2 places" in result.content
+    assert (tmp_path / "h.py").read_text() == _HANDLERS
+
+
+def test_a_begin_patch_can_add_a_file(tmp_path):
+    patch = "*** Begin Patch\n*** Add File: new.py\n+x = 1\n+y = 2\n*** End Patch"
+
+    result = ApplyPatchTool(str(tmp_path)).execute({"patch": patch})
+
+    assert result.ok and (tmp_path / "new.py").read_text() == "x = 1\ny = 2\n"
+
+
+def test_a_patch_touching_two_files_is_refused_whole(tmp_path):
+    (tmp_path / "a.py").write_text("a = 1\n")
+    (tmp_path / "b.py").write_text("b = 1\n")
+    patch = ("*** Begin Patch\n*** Update File: a.py\n@@\n-a = 1\n+a = 2\n"
+             "*** Update File: b.py\n@@\n-b = 1\n+b = 2\n*** End Patch")
+
+    result = ApplyPatchTool(str(tmp_path)).execute({"patch": patch})
+
+    assert not result.ok and "one" in result.content.lower()
+    assert (tmp_path / "a.py").read_text() == "a = 1\n"
+
+
+def test_a_unified_diff_without_line_numbers_is_placed_by_context(tmp_path):
+    (tmp_path / "a.py").write_text("x = 1\ny = 2\n")
+
+    result = ApplyPatchTool(str(tmp_path)).execute({"path": "a.py", "patch": "@@\n x = 1\n-y = 2\n+y = 3\n"})
+
+    assert result.ok and (tmp_path / "a.py").read_text() == "x = 1\ny = 3\n"

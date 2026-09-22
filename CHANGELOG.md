@@ -4,6 +4,15 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **`apply_patch` understands the `*** Begin Patch` format** that gpt-oss and other OpenAI-trained
+  models write, and diffs whose `@@` lines carry no line numbers. Both used to fail as "no valid
+  hunks", so the edit never landed. Hunks are placed by their surrounding lines; one that matches in
+  two places is refused rather than guessed. A patch names its own file, and that is the file the
+  permission check looks at; one that touches several files, or moves or deletes one, is refused —
+  send one file per call.
+
 ## [0.31.0]
 
 - **`cobirb setup`** gets you from install to a working model without editing JSON: it asks where

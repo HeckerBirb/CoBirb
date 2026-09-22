@@ -282,6 +282,15 @@ opts in); a miss tries a unique whitespace-tolerant whole-line match (trailing s
 indent *missing* uniformly from `old_str`, which is re-added to `new_str`); a true miss quotes the
 closest region with line numbers. Success reports the edited lines, so the model sees what it did.
 
+**`apply_patch` reads the `*** Begin Patch` format too** (`cobirb/patches.py`), which gpt-oss writes
+in place of a unified diff — in the baseline every such patch failed as "no valid hunks". Hunks are
+placed by context (an `@@` anchor narrows the search; an unanchored block matching twice is refused,
+as in `edit_file`), and a unified diff with bare `@@` and no line numbers takes the same path. **The
+file is named inside the patch, so the policy reads it from there** (`policy.patch_target`, shared
+with the tool, so what is checked is what is written). Only single-file Update/Add sections are
+accepted; several files, a move, a delete, or a `path` disagreeing with the header resolve to no
+target and are denied — the one-path permission check cannot vouch for them.
+
 **A write that leaves a file unparseable says so in its result** (`_syntax_note`): Python via
 `compile`, JSON, TOML — in-process, nothing run. A note rather than a refusal, since a half-finished
 multi-step change is legitimate; the point is that the model hears about it now rather than from a

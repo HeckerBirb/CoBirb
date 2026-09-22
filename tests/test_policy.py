@@ -445,3 +445,29 @@ def test_a_finished_worker_does_not_keep_its_policy_alive():
     # Nothing to push to, and granting must not raise on the way to finding
     # that out.
     grants.grant("shell", {"command": "ls"})
+
+
+# --------------------------------------------------------------------------- #
+# A Begin-Patch names its own file — that is the file checked
+# --------------------------------------------------------------------------- #
+def _patch(*files):
+    body = "".join(f"*** Update File: {f}\n@@\n-a\n+b\n" for f in files)
+    return f"*** Begin Patch\n{body}*** End Patch"
+
+
+def test_a_begin_patch_is_checked_against_the_file_it_names(tmp_path):
+    inside, outside = tmp_path / "proj", tmp_path / "elsewhere"
+    inside.mkdir(); outside.mkdir()
+    policy = Policy(cwd=str(inside))
+    policy.allow_write_dir(str(inside))
+
+    assert policy.is_allowed("apply_patch", {"patch": _patch("a.py")})
+    assert not policy.is_allowed("apply_patch", {"patch": _patch(str(outside / "a.py"))})
+
+
+def test_a_begin_patch_that_cannot_be_pinned_to_one_file_is_denied(tmp_path):
+    policy = Policy(cwd=str(tmp_path))
+    policy.allow_write_dir(str(tmp_path))
+
+    assert not policy.is_allowed("apply_patch", {"patch": _patch("a.py", "b.py")})
+    assert not policy.is_allowed("apply_patch", {"patch": _patch("a.py"), "path": "b.py"})
