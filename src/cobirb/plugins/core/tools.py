@@ -361,7 +361,11 @@ class WriteFileTool(CobirbTool):
         return _unified(path, old, new) or f"no change to {path}"
 
     def description(self) -> str:
-        return "Create or overwrite a file at a path with the given content."
+        return (
+            "Create a file, or replace a file's entire content. Missing parent directories are "
+            "created. Use this for new files and for rewriting a short file completely; to "
+            "change part of an existing file, use edit_file."
+        )
 
     def parameters(self) -> dict[str, Any]:
         return {
@@ -675,7 +679,10 @@ class ApplyPatchTool(CobirbTool):
         return str(arguments.get("patch", ""))
 
     def description(self) -> str:
-        return "Apply a structured diff patch to a file (unified diff format)."
+        return (
+            "Apply a unified diff (with @@ hunk headers) to one file. Useful for several "
+            "separate changes to the same file at once; for a single change, edit_file is simpler."
+        )
 
     def parameters(self) -> dict[str, Any]:
         return {
@@ -730,7 +737,10 @@ class GlobTool(CobirbTool):
     NAME = "glob"
 
     def description(self) -> str:
-        return "Find files matching a glob pattern (searches from the working directory)."
+        return (
+            "Find files by name pattern, e.g. '**/*.py' or 'tests/test_*.py', relative to the "
+            "working directory. Returns matching paths. Use grep to search inside files."
+        )
 
     def parameters(self) -> dict[str, Any]:
         return {
@@ -779,7 +789,11 @@ class GrepTool(CobirbTool):
     NAME = "grep"
 
     def description(self) -> str:
-        return "Search file contents for a regex pattern."
+        return (
+            "Search inside files for a regular expression. Returns path:line: text for each "
+            "matching line. Use it to find where something is defined or used before reading "
+            "or editing — e.g. every caller of a function you are about to rename."
+        )
 
     def parameters(self) -> dict[str, Any]:
         return {
@@ -860,7 +874,10 @@ class ListDirTool(CobirbTool):
     NAME = "list_dir"
 
     def description(self) -> str:
-        return "List a directory's contents. Directories are marked with a trailing slash."
+        return (
+            "List what is in one directory (not recursive). Directories end with '/'. Use glob "
+            "to find files by pattern across the tree."
+        )
 
     def parameters(self) -> dict[str, Any]:
         return {
@@ -1043,9 +1060,11 @@ class ShellTool(CobirbTool):
 
     def description(self) -> str:
         return (
-            "Execute a shell command. Requires explicit approval. Each call runs in "
-            "its own process, so a directory change does not carry over to the next "
-            "one: chain it ('cd build && make') or pass 'cwd' instead."
+            "Run a shell command, e.g. the test suite or a build, and return its output and exit "
+            "code. Requires approval. To look at files, use read_file, list_dir, glob and grep "
+            "instead — they need no shell. Each call runs in its own process, so a directory "
+            "change does not carry over to the next one: chain it ('cd build && make') or pass "
+            "'cwd' instead."
         )
 
     def parameters(self) -> dict[str, Any]:

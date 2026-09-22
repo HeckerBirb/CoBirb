@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **The tools describe themselves properly.** Several descriptions were one line that said what a
+  tool is, not when to use it or what it gives back — and a small local model leans on exactly
+  that. Each now says when to reach for it and which neighbouring tool fits better (`edit_file`
+  for part of a file, `write_file` for the whole of one; `grep` inside files, `glob` for names;
+  the file tools rather than `shell` for looking around).
+
 ## [0.27.0]
 
 - **Fixed: `edit_file` could change the wrong place and say it had succeeded.** When the text to
