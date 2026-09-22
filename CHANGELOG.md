@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.24.0]
 
 - **Sampling options per model role.** `models.<role>.options` is sent to the server with every
   request — `temperature`, `top_p`, `seed` and the like — and a role's options are merged over the
