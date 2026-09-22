@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.30.0]
 
 - **llama.cpp, LM Studio and vLLM work.** Set `"api": "openai"` on a model role and CoBirb talks
   `/v1/chat/completions` to it — streaming, tool calls, images and cancellation included. These
