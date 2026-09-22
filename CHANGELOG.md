@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **`--system-prompt harness` now tells the model how to work,** not only how permissions work:
+  look before changing anything, change files with the right tool, check your work, keep going
+  until the task is done instead of describing the next step, and never claim success you have not
+  checked. It is still off by default and still goes after your model's own `SYSTEM`; whether it
+  becomes the default is being decided by measurement.
+
 ## [0.28.0]
 
 - **A write that breaks a file says so straight away.** When `write_file`, `edit_file` or

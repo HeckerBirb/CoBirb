@@ -642,10 +642,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Whether CoBirb sends a system prompt of its own (default: off, "
         "or the 'system_prompt' config key). Off means no system message is "
         "sent at all, so the SYSTEM directive your model was built with "
-        "applies exactly as it does in Ollama. 'harness' adds a short "
-        "description of the tool-permission model, which stops some models "
-        "retrying a denied tool call. It is added after your model's own "
-        "prompt, never instead of it.",
+        "applies exactly as it does in Ollama. 'harness' adds a short block "
+        "on how to work as a coding agent (look first, check your work, keep "
+        "going until done, don't retry a denied call). It is added after your "
+        "model's own prompt, never instead of it.",
     )
     opts.add_argument(
         "--export",

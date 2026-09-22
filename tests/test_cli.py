@@ -750,7 +750,8 @@ def test_the_harness_block_is_opt_in():
     prompt = build_system_prompt(harness=True)
 
     assert prompt == system_prompt._HARNESS_PROMPT
-    assert "denied call is the user's decision" in prompt
+    assert "A denied call is their decision" in prompt
+    assert "check it" in prompt
     assert "no outbound network by default" in prompt
 
 

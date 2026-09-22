@@ -254,9 +254,10 @@ CoBirb does not overwrite it:
     Yours is supplemented, never discarded.
 
   --system-prompt off       The default. Nothing of CoBirb's is sent.
-  --system-prompt harness   Add a short description of the tool-permission
-                            model. Worth trying if a model keeps retrying a
-                            tool call you denied; it has no other effect.
+  --system-prompt harness   Add a short block on how to work as a coding
+                            agent — look before changing, check your work,
+                            keep going until done, don't retry a denied
+                            call. Placed after your model's own SYSTEM.
   "system_prompt"           The same choice in config.
 
 Nothing about CoBirb's actual guarantees depends on any of this: permissions
