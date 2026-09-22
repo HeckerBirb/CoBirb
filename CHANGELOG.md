@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.22.0]
 
 - **Personas are gone.** `--persona`, `/persona` and its picker, the `persona` config key, the
   bundled `professional`, `neighbor` and `kawaii` files and `~/.cobirb/personas/` are all removed.

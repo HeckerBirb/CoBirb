@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cobirb"
-version = "0.21.1"
+version = "0.22.0"
 description = "A privacy-first, agentic coding CLI. Noah the African Grey parrot lives in your terminal."
 readme = "README.md"
 requires-python = ">=3.11"
