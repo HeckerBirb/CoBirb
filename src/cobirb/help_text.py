@@ -225,22 +225,19 @@ slower turns in exchange for the explicit checkpoints.
     "model": """\
 MODEL — choosing what CoBirb talks to
 
-CoBirb ships no model of its own; it talks to whatever OpenAI-compatible
-endpoint you point it at (a local Ollama server by default). No model is
-selected until you name one:
+CoBirb ships no model of its own; it talks to the model server you point it
+at — Ollama by default, or any OpenAI-compatible one (llama.cpp, LM Studio,
+vLLM) with "api": "openai". No model is selected until you name one:
 
-  --model NAME          For this run.
-  "default_model"       In config, as the default for every run — tried at
-                         interactive startup and silently ignored (not an
-                         error) if that model can't be found there.
-  /model                 Interactively: fetches the list of models the
-                         configured endpoint currently has and lets you
-                         pick one, for this session only.
+  cobirb setup           Choose the server and model; saved to your config.
+  --model NAME           For this run.
+  models.default.name    In config, the default for every run.
+  /model                 Interactively: lists what the server has and lets
+                         you pick one; offers to save it if none is set.
 
-If interactive mode starts with no working model — nothing configured, or
-"default_model" named one that isn't there — it fetches the list itself and
-opens the same picker /model would, so you're never left staring at a
-session with nothing to talk to.
+If interactive mode starts with no working model — nothing configured, or a
+configured one that isn't there — it fetches the list itself and opens the
+same picker /model would.
 
 YOUR MODEL'S OWN SYSTEM PROMPT
 
@@ -282,14 +279,11 @@ A role is a job, not a name. Configure them separately when the jobs differ:
     }
   }
 
-  default        Falls back to for everything else. The three older keys —
-                 "model", "default_model", models.default.name — all still
-                 name this one.
-  orchestrator   The agent you talk to: holds the objective, decides what
-                 happens next. This is what runs today.
-  worker         A subagent given one bounded piece of work. Reserved for
-                 the flock (v0.5.0) — nothing calls it yet. It resolves now
-                 so the config can be written and checked before then.
+  default        Falls back to for everything else. The older top-level
+                 "model" and "default_model" keys still name this one when
+                 models.default.name is unset; doctor calls them deprecated.
+  orchestrator   The agent you talk to, and Brainy Birb in a flock.
+  worker         What each Worker Birb runs on — see 'cobirb help flock'.
 
 Every role inherits field by field, so a role may name a model without
 repeating the endpoint it is served from. --model outranks all of them.
@@ -768,11 +762,8 @@ tool call they lead to still goes through the permission layer.
 
 See config.json.example for a starting point. Keys:
 
-  "default_model"                Model to use by default (or --model/
-                                 COBIRB_MODEL_NAME). Validated at
-                                 interactive startup — see 'cobirb help
-                                 model'.
-  "model"                        Older, equivalent name for the same thing.
+  "model", "default_model"       Deprecated names for models.default.name,
+                                 read only when that is unset.
   "models": {"default": {
       "name": "...", "base_url": "..."}}  Model name/endpoint (local Ollama
                                  by default; any OpenAI-compatible server

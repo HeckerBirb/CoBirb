@@ -371,3 +371,10 @@ def test_the_timeout_and_turn_settings_are_known_keys(tmp_path):
     report = _run(tmp_path, {"connect_timeout": 5, "request_timeout": 900, "max_turns": 60})
 
     assert report.ok
+
+
+def test_the_older_model_keys_are_deprecated_not_broken(tmp_path):
+    report = _run(tmp_path, {"default_model": "llama3.1"})
+
+    assert report.ok
+    assert "models.default.name" in _check(report, "deprecated config keys").detail

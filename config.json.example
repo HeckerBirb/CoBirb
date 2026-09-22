@@ -1,7 +1,5 @@
 {
-  "default_model": "llama3.1",
-
-  "//models": "One model per role. Every role inherits from 'default', so a role that names only a model still gets the default's endpoint. 'worker' is reserved for subagents (v0.5.0) and has no caller yet. Run 'cobirb models' to see how yours resolve.",
+  "//models": "One model per role. Every role inherits from 'default', so a role that names only a model still gets the default's endpoint. 'worker' is what the Flock's Worker Birbs run on. Run 'cobirb models' to see how yours resolve.",
   "models": {
     "default": {
       "name": "llama3.1",

@@ -276,3 +276,15 @@ def test_options_that_are_not_an_object_are_ignored(tmp_path):
     write_config(tmp_path, {"models": {"default": {"name": "m", "options": "hot"}}})
 
     assert model_options("default", Config()) == {}
+
+
+def test_models_default_name_wins_over_the_older_spellings(tmp_path):
+    write_config(tmp_path, {"model": "old", "default_model": "older", "models": {"default": {"name": "new"}}})
+
+    assert resolve_role("orchestrator", Config()).name == "new"
+
+
+def test_an_older_spelling_still_works_on_its_own(tmp_path):
+    write_config(tmp_path, {"default_model": "older"})
+
+    assert resolve_role("orchestrator", Config()).name == "older"

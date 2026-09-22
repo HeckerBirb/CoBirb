@@ -185,7 +185,6 @@ def test_the_bundled_example_config_is_valid_and_loadable(tmp_path):
     example_path = os.path.join(os.path.dirname(__file__), "..", "config.json.example")
     config = Config(user_path=example_path)
 
-    assert config.get("default_model")
     assert config.get("models", "default", "name")
 
 

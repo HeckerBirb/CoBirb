@@ -74,6 +74,12 @@ RETIRED_KEYS = {
     "persona": "personas were removed in 0.22.0; delete this key",
 }
 
+# Settings still read, under a name that is on its way out.
+DEPRECATED_KEYS = {
+    "model": "an older name for models.default.name — move it there",
+    "default_model": "an older name for models.default.name — move it there",
+}
+
 _TOOL_NAMES = READ_TOOLS | WRITE_TOOLS | {"shell"}
 
 
@@ -140,7 +146,14 @@ def _check_config(report: Report, config: Config, raw: "dict[str, Any] | None") 
             WARN,
             "; ".join(f"{key}: {RETIRED_KEYS[key]}" for key in retired),
         )
-    unknown = sorted(set(raw) - KNOWN_KEYS - set(RETIRED_KEYS))
+    deprecated = sorted(set(raw) & set(DEPRECATED_KEYS))
+    if deprecated:
+        report.add(
+            "deprecated config keys",
+            WARN,
+            "; ".join(f"{key}: {DEPRECATED_KEYS[key]}" for key in deprecated),
+        )
+    unknown = sorted(set(raw) - KNOWN_KEYS - set(RETIRED_KEYS) - set(DEPRECATED_KEYS))
     if unknown:
         report.add(
             "config keys",

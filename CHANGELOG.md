@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **One key names your default model: `models.default.name`.** The older top-level `model` and
+  `default_model` still work when it is unset, but no longer outrank it — "which setting is in
+  force" had three answers. `cobirb doctor` now calls them deprecated and says where to move them;
+  it used to call a config using them broken, including the bundled example, which now uses the
+  current key.
+
 ## [0.32.0]
 
 - **`apply_patch` understands the `*** Begin Patch` format** that gpt-oss and other OpenAI-trained

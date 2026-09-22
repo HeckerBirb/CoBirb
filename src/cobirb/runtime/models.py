@@ -113,15 +113,16 @@ class ModelSpec:
 def _default_name(config: Config) -> tuple[str, str]:
     """The model for the ``default`` role, and which key supplied it.
 
-    Three keys name the same thing and all three still work: ``"model"``,
-    ``models.default.name``, and ``"default_model"``. That is backward
-    compatibility rather than three behaviours — the order below is the one
-    ``build_model`` has always used, and changing it would silently move which
-    model somebody's existing config resolves to.
+    ``models.default.name`` is the key. ``"model"`` and ``"default_model"`` are
+    older spellings of the same setting, still read so an existing config keeps
+    working, but only when ``models.default.name`` is unset — ``cobirb doctor``
+    names them as deprecated. They used to outrank it, which made "which key is
+    in force" a question with three answers; ``cobirb setup`` writes the one
+    that now wins.
     """
     for keys, label in (
-        (("model",), "model"),
         (("models", "default", "name"), "models.default.name"),
+        (("model",), "model"),
         (("default_model",), "default_model"),
     ):
         value = config.get(*keys)
