@@ -796,6 +796,11 @@ pytest                                            # CI runs this on 3.11 and 3.1
 COBIRB_TEST_MODEL=llama3.1 pytest -m integration  # needs a real local Ollama
 ```
 
+- **No unit test reaches a model endpoint or the network.** `conftest._no_model_endpoint` (autouse)
+  refuses any connection to port 11434 or off loopback, and fails the test at teardown even when the
+  code under test swallowed the refusal. Loopback on other ports stays open for the tests' own tiny
+  HTTP servers; `integration`-marked tests are exempt. It exists because 26 tests once built a real
+  provider and talked to `localhost:11434` — passing while Ollama ran, hanging when it didn't.
 - One test file per module. `conftest.py` sets `COBIRB_HOME` to a tmp dir for **every** test
   (autouse), so nothing touches a real home directory; `write_config(home, data)` is the only
   sanctioned way to put a setting in force.

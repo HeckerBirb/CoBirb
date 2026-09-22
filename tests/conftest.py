@@ -6,8 +6,10 @@ backend (the vetted ``cryptography`` library) so the round-trip is genuine.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
+import socket
 
 import pytest
 
@@ -33,6 +35,62 @@ def _fast_key_derivation(monkeypatch):
     restores the shipped cost, because there the KDF itself is the subject.
     """
     monkeypatch.setattr(crypto_module, "_SCRYPT_N", _TEST_SCRYPT_N)
+
+
+# Ollama's default port. Blocked on every host, loopback included, because a
+# local model server is exactly what a unit test must never reach.
+_MODEL_PORT = 11434
+
+
+@pytest.fixture(autouse=True)
+def _no_model_endpoint(request, monkeypatch):
+    """Fail any test that opens a socket to a model endpoint or off this machine.
+
+    A unit test that built a real provider used to reach ``localhost:11434``:
+    with Ollama running it passed while quietly generating requests, and with
+    Ollama stopped it hung until the connection gave up. Nothing in the suite
+    noticed, because both outcomes looked like a slow pass. Refusing the
+    connection turns that into an immediate failure that names the test.
+
+    Loopback on any other port stays open: several tests stand up their own
+    tiny HTTP server there, which is the sanctioned way to test the provider.
+    ``integration``-marked tests are exempt — reaching a real server is their
+    whole point.
+
+    Attempts are also recorded and failed at teardown, because several code
+    paths deliberately swallow exceptions (the flock's pre-flight check
+    returns "" when it cannot list models) and would hide the refusal.
+    """
+    if request.node.get_closest_marker("integration"):
+        yield
+        return
+    real_connect = socket.socket.connect
+    attempts: list[str] = []
+
+    def guarded_connect(sock, address):
+        if sock.family in (socket.AF_INET, socket.AF_INET6):
+            host, port = address[0], address[1]
+            try:
+                loopback = ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                loopback = host == "localhost"
+            if port == _MODEL_PORT or not loopback:
+                attempts.append(f"{host}:{port}")
+                raise AssertionError(
+                    f"test tried to connect to {host}:{port}. Unit tests must not reach a "
+                    "model endpoint or the network — script the model instead "
+                    "(see DummyModel), or mark the test `integration`."
+                )
+        return real_connect(sock, address)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    yield
+    if attempts:
+        pytest.fail(
+            f"tried to reach {', '.join(sorted(set(attempts)))} — unit tests must stay off "
+            "model endpoints and the network",
+            pytrace=False,
+        )
 
 
 @pytest.fixture(autouse=True)
