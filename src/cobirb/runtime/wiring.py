@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from typing import Callable
 
+from .. import sandbox
 from ..checkpoints import Checkpoints
 from ..config import Config
 from ..mcp import connect_servers
@@ -140,6 +141,15 @@ def _verify_settings(cwd: str, config: Config) -> VerifySettings | None:
     )
 
 
+def attach_sandbox(registry: ToolRegistry, config: Config) -> "sandbox.Sandbox":
+    """Give ``registry``'s shell tool the session's sandbox, and return it."""
+    box = sandbox.from_config(config.get("sandbox"), registry.cwd)
+    shell = registry.tools.get("shell")
+    if shell is not None and hasattr(shell, "sandbox"):
+        shell.sandbox = box
+    return box
+
+
 def _max_turns(config: Config) -> int:
     """The ``max_turns`` ceiling, or the default when unset or unreadable —
     a typo costs the setting, never the session."""
@@ -212,6 +222,9 @@ def build_orchestrator(
     for rules in (parse_allow_tools(config.get("allow_tools")), allow_overrides):
         for name, arg in rules.items():
             policy.allow(name, arg)
+    # Where shell commands run (cobirb.sandbox), and whether a contained one
+    # may run without asking.
+    policy.sandbox_auto = attach_sandbox(registry, config).auto_approve
     # Standing directory scopes, for a project the user has already decided
     # CoBirb may work in. Separate keys because reading and writing are
     # separate decisions.
@@ -316,6 +329,9 @@ def build_subagent(
     """
     config = config or Config()
     registry = ToolRegistry(cwd)
+    # Contained like every other agent's commands — but never auto-approved:
+    # a worker's shell is exactly what its charter grants, and no more.
+    attach_sandbox(registry, config)
     subagent = Orchestrator(
         model=build_for_role(ROLE_WORKER, config),
         tools=registry.tools,

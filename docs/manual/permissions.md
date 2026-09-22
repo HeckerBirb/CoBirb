@@ -20,6 +20,28 @@ Allow shell
 
 The prompt says what "Always" would actually grant before you press it.
 
+## The shell sandbox
+
+With [bubblewrap](https://github.com/containers/bubblewrap) installed, every shell command runs
+contained: **no network**, the filesystem read-only except your project and a private `/tmp`, and
+credential directories (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`, `~/.docker`, `~/.cobirb` and
+similar) hidden. `cobirb doctor` tells you whether it is active.
+
+```json
+"sandbox": "ask"
+```
+
+| Mode | Does |
+|---|---|
+| `"ask"` (default) | Contained, and you are still asked before each command |
+| `"auto"` | Contained, and runs **without asking** — nothing inside can reach past the project |
+| `"off"` | No sandbox; commands run with your full access, as before 0.34 |
+
+Hide more with `"sandbox": {"mode": "auto", "hide": ["~/secrets"]}`. A command that needs the
+network (installing packages, say) must be sent with `unsandboxed`, which is always asked about,
+whatever the mode. Worker Birbs are contained too, but their shell is only ever what the charter
+grants.
+
 ## Reading and writing are separate
 
 | Set | Tools |

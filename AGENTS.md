@@ -149,6 +149,19 @@ prompt → model call → tool calls (policy-gated) → results into history →
   main conversation reaches workers, and one made by a worker reaches the main conversation.
   Memory only, never written to config (a permission surviving a restart is the user's decision to
   make in their own file), and policies are held weakly so finished workers do not accumulate.
+- **Shell commands run in a sandbox** (`cobirb/sandbox.py`, bubblewrap): the filesystem read-only
+  except the project and a private `/tmp`, no network namespace, own PID/IPC/UTS namespaces, and
+  credential paths hidden (`DEFAULT_HIDDEN`, resolved to real paths because on WSL `~/.aws` is a
+  symlink into the Windows drive and bubblewrap resolves links inside the new root). Modes:
+  `"ask"` (default — contained and still asked), `"auto"` (contained and not asked:
+  `Policy.sandbox_auto`, set by `wiring.attach_sandbox` for the main agent only — a Worker Birb's
+  shell stays the charter's to grant) and `"off"`. In `auto` even a command the segment scan
+  cannot read is allowed, because containment rather than the scan is the guarantee; `unsandboxed:
+  true` runs outside and always goes through the normal policy. `find_bwrap` *probes* bubblewrap
+  once with the real isolation flags, since installed-but-no-user-namespaces would fail every
+  command. Without it everything behaves as before and `doctor` says so. This reverses §17's old
+  "no sandbox" entry: a network-less sandbox is what makes "an approved command cannot exfiltrate"
+  enforced rather than hoped for.
 - `AuditLog` is **off** unless `"audit_log": true`. It stores arguments verbatim (file contents,
   diffs, commands), so it is written 0600, credential-redacted, and never created until enabled.
 
@@ -772,7 +785,7 @@ focused by default.
 `allow_tools`, `allow_read_dirs`, `allow_write_dirs`, `verify_command`, `verify_timeout`,
 `verify_fix_attempts`, `redact_secrets`, `checkpoints`, `instructions`, `instructions_max_chars`,
 `repo_map`, `repo_map_max_chars`, `context_tokens`, `max_num_ctx`, `plan_mode`, `audit_log`, `hooks`,
-`mcp_servers`. `persona` is retired (0.22.0): `doctor.RETIRED_KEYS` names it as removed rather than
+`mcp_servers`, `max_turns`, `sandbox`, `connect_timeout`, `request_timeout`. `persona` is retired (0.22.0): `doctor.RETIRED_KEYS` names it as removed rather than
 as an unknown key, since "not a setting CoBirb reads" sends someone hunting for a typo.
 `runtime/bootstrap.ensure_home()` seeds a starter config on first run (not at install — wheels have
 no reliable post-install hook).
@@ -888,8 +901,7 @@ fresh decision to take with the user, not a gap to helpfully fill.
   `llama-cpp-python`, and a supervised `llama-server` child) was designed and cut: the trust problem
   belongs to the endpoint, and fixing it there fixes it for every client of the protocol. Users can
   point CoBirb at an endpoint they wrote themselves.
-- **No sandbox for `shell`.** Documented rather than built — the SPI allows replacing the `shell`
-  tool with a sandboxing one, which is where that work belongs.
+- ~~No sandbox for `shell`~~ — **reversed in 0.34.0** (decision D2): see §5's sandbox paragraph.
 - **No embedding-based RAG over the codebase.** A repo map plus grep beats it for code at a
   fraction of the machinery, with no index to keep warm.
 - **Omitted permanently:** cloud sessions, remote control, background agents, telemetry. (Subagents
@@ -933,9 +945,10 @@ manifest never got built and shouldn't be revisited without a fresh reason.
 
 - **CoBirb's guarantees end at the model socket.** The endpoint is a separate program; it may bind
   an unauthenticated port and make its own requests. CoBirb is a client and does not run weights.
-- **An approved `shell` command runs with full user privileges.** The policy decides *whether* a
-  command runs, never what it can reach. There is no sandbox; the SPI allows a third party to
-  replace `shell` with a sandboxing tool.
+- **Without bubblewrap, an approved `shell` command runs with full user privileges** — and so does
+  one sent with `unsandboxed: true`, or any command with `sandbox: "off"`. The sandbox (§5) covers
+  the rest. It hides a fixed list of credential paths, not every secret a machine might hold, and
+  the environment is passed through unchanged.
 - **`/undo` cannot cover what a shell command did** — `shell` cannot declare what it writes.
 - **Installing a plugin executes its code** (`pip` runs the package's build backend) before any
   permission layer exists to ask about it.

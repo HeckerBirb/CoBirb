@@ -1183,6 +1183,9 @@ class ShellTool(CobirbTool):
         # thread by cancel_running() (the TUI's Ctrl+C / quit-while-running
         # handling — see tui/app.py). Tool calls run one at a time on the
         # orchestrator's own thread, so there is never more than one to track.
+        # Set by the wiring (see cobirb.sandbox). None, or an inactive one,
+        # runs commands exactly as before.
+        self.sandbox: Any = None
         self._current_process: Any = None
         self._cancel_requested = False
 
@@ -1192,7 +1195,9 @@ class ShellTool(CobirbTool):
             "code. Requires approval. To look at files, use read_file, list_dir, glob and grep "
             "instead — they need no shell. Each call runs in its own process, so a directory "
             "change does not carry over to the next one: chain it ('cd build && make') or pass "
-            "'cwd' instead."
+            "'cwd' instead. Commands may run in a sandbox with no network and with writes "
+            "allowed only inside the project and /tmp; set unsandboxed only when a command "
+            "genuinely needs more, and expect to be asked."
         )
 
     def parameters(self) -> dict[str, Any]:
@@ -1216,9 +1221,28 @@ class ShellTool(CobirbTool):
                     ),
                     "default": _DEFAULT_SHELL_TIMEOUT,
                 },
+                "unsandboxed": {
+                    "type": "boolean",
+                    "description": (
+                        "Run outside the sandbox — only for a command that needs the network or "
+                        "to write outside the project. Always asks the user."
+                    ),
+                },
             },
             "required": ["command"],
         }
+
+    def _contained(self, arguments: dict[str, Any]) -> bool:
+        return bool(self.sandbox is not None and self.sandbox.active and not arguments.get("unsandboxed"))
+
+    def preview(self, arguments: dict[str, Any]) -> str:
+        """Where the command will run — the command itself is already in the
+        prompt. Nothing at all without a sandbox, as before."""
+        if self._contained(arguments):
+            return self.sandbox.note()
+        if self.sandbox is not None and self.sandbox.active:
+            return "(outside the sandbox: full network and filesystem access)"
+        return ""
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
         import subprocess
@@ -1237,9 +1261,10 @@ class ShellTool(CobirbTool):
 
         self._cancel_requested = False
         try:
+            contained = self._contained(arguments)
             process = subprocess.Popen(
-                command,
-                shell=True,
+                self.sandbox.argv(command, cwd or os.getcwd()) if contained else command,
+                shell=not contained,
                 cwd=cwd,
                 text=True,
                 stdout=subprocess.PIPE,
@@ -1268,7 +1293,8 @@ class ShellTool(CobirbTool):
             return ToolResult(ok=False, content="Command cancelled.", error="cancelled")
         if timed_out:
             return ToolResult(ok=False, content="Command timed out.", error="timeout")
-        content = f"exit={process.returncode}\n{_both_ends(f'{stdout}{stderr}', _MAX_SHELL_OUTPUT)}"
+        where = f" {self.sandbox.note()}" if contained else ""
+        content = f"exit={process.returncode}{where}\n{_both_ends(f'{stdout}{stderr}', _MAX_SHELL_OUTPUT)}"
         if process.returncode == 0 and _changes_directory_only(command):
             # Said out loud because the alternative is a bare, successful
             # `exit=0` that reads exactly like a directory change that stuck —

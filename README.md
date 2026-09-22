@@ -187,11 +187,11 @@ Being straight about the edges, since the rest of this page makes strong claims:
   you wrote. If the endpoint's trustworthiness matters to you, that is a property to fix in the
   endpoint, and it is fixable — `llama-server` will bind a Unix socket instead of a port
   (`--host /path/to.sock`), which removes the port any local process can reach.
-- **An approved shell command runs with your full user privileges.** CoBirb decides
-  *whether* a command runs, not what it can reach once it does. Approve `npm test` and
-  that command can read `~/.ssh` and open a socket like any other program you'd run.
-  There is no sandbox. Approve narrowly, and prefer `shell(git status)`-style rules over
-  trusting a bare binary.
+- **Without bubblewrap, an approved shell command runs with your full user privileges.**
+  With it (`bwrap` installed), every command runs in a sandbox: no network, the filesystem
+  read-only except your project and a private `/tmp`, and credential directories such as
+  `~/.ssh` and `~/.aws` hidden. A command the model explicitly asks to run *outside* the
+  sandbox is always put to you first. `cobirb doctor` says which applies on your machine.
 - **`/undo` does not cover what a shell command did.** CoBirb copies a file aside before
   `write_file`, `edit_file` or `apply_patch` changes it, so `/undo` puts those back. A
   shell command cannot say in advance what it will touch, so anything it does is outside

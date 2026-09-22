@@ -4,6 +4,18 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Shell commands run in a sandbox.** With bubblewrap installed, every command the agent runs is
+  contained: no network at all, the filesystem read-only except your project and a private `/tmp`,
+  its own process space, and credential directories — `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`,
+  `~/.docker`, CoBirb's own `~/.cobirb` and others — hidden. An approved `npm test` used to be able
+  to read your SSH keys and open a socket; now it cannot. `cobirb doctor` says whether it is active.
+- **`"sandbox": "auto"` runs contained commands without asking**, since nothing inside can reach past
+  the project; the default, `"ask"`, keeps asking. A command that genuinely needs the network is sent
+  with `unsandboxed` and is always put to you first. `"off"` restores the old behaviour.
+- Worker Birbs' commands are contained too; what they may run is still exactly what the charter grants.
+
 ## [0.33.0]
 
 - **One key names your default model: `models.default.name`.** The older top-level `model` and

@@ -292,6 +292,11 @@ class Policy:
         self._allowed_read_dirs: set[str] = set()
         self._allowed_write_dirs: set[str] = set()
         self._denied = set(denied or set())
+        # Whether a shell command that runs inside the sandbox may run without
+        # asking (``sandbox: "auto"``, see cobirb.sandbox). Set by the wiring for
+        # the agent the user talks to, never for a Worker Birb, whose shell is
+        # the charter's to grant.
+        self.sandbox_auto = False
         self.audit = audit or AuditLog()
 
     def is_denied(self, tool_name: str) -> bool:
@@ -312,6 +317,12 @@ class Policy:
             return False
 
         if tool_name == "shell" and arguments is not None:
+            if self.sandbox_auto and not arguments.get("unsandboxed"):
+                # Contained: no network, writes only inside the project. The
+                # command-by-command scan exists to decide what an approval
+                # covers; inside the sandbox the containment is the guarantee,
+                # so even a command the scan cannot read is safe to run.
+                return True
             return self._shell_allowed(arguments)
 
         if tool_name in self._allowed:

@@ -46,7 +46,7 @@ KNOWN_KEYS = frozenset({
     "instructions", "instructions_max_chars",
     "repo_map", "repo_map_max_chars", "context_tokens", "max_num_ctx",
     "verify_command", "verify_timeout", "verify_fix_attempts",
-    "hooks", "mcp_servers", "plugins", "max_turns",
+    "hooks", "mcp_servers", "plugins", "max_turns", "sandbox",
     "connect_timeout", "request_timeout",
 })
 
@@ -63,6 +63,7 @@ _EXPECTED_TYPES: dict[str, tuple[type, ...]] = {
     # Whether that string *says* anything is checked below, since a type is
     # all this table can ask about.
     "max_num_ctx": (int, str),
+    "sandbox": (str, dict),
     "verify_timeout": (int,), "verify_fix_attempts": (int,), "max_turns": (int,),
     "system_prompt": (str,), "verify_command": (str,),
 }
@@ -330,6 +331,20 @@ def _check_install(report: Report) -> None:
 
 
 # --------------------------------------------------------------------------- #
+def _check_sandbox(report: Report, config: Config) -> None:
+    """Whether shell commands are contained, and how."""
+    from .. import sandbox
+
+    box = sandbox.from_config(config.get("sandbox"), os.getcwd())
+    if box.mode == sandbox.MODE_OFF:
+        report.add("sandbox", WARN, "off — approved shell commands run with your full access")
+    elif not box.active:
+        report.add("sandbox", WARN, "bubblewrap is not installed or cannot create namespaces here, so "
+                   "shell commands run unsandboxed (and are always asked about)")
+    else:
+        report.add("sandbox", OK, box.describe())
+
+
 def run(
     *,
     config: Config | None = None,
@@ -363,6 +378,7 @@ def run(
             def build_provider(role: str) -> Any:  # noqa: F811 - the default, resolved late
                 return model_roles.build_for_role(role, config)
         _check_models(report, config, build_provider)
+        _check_sandbox(report, config)
 
     if check_install:
         _check_install(report)
