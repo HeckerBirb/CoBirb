@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.31.0]
 
 - **`cobirb setup`** gets you from install to a working model without editing JSON: it asks where
   your model server is and which protocol it speaks, lists the models that server actually has,
