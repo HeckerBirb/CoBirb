@@ -228,3 +228,117 @@ def test_the_diff_works_without_git(tmp_path):
     target.write_text("after\n")
 
     assert "+after" in checkpoints.session_diff()
+
+
+# --------------------------------------------------------------------------- #
+# Whole-tree checkpoints: shell changes included, repository or not
+# --------------------------------------------------------------------------- #
+import shutil as _shutil
+import subprocess as _subprocess
+
+import pytest as _pytest
+
+from cobirb.checkpoints import TreeCheckpoints, for_workspace
+
+_needs_git = _pytest.mark.skipif(_shutil.which("git") is None, reason="git not installed")
+
+
+def _tree(tmp_path):
+    project = tmp_path / "proj"
+    project.mkdir(exist_ok=True)
+    return project, TreeCheckpoints(str(project), _shutil.which("git"), store=str(tmp_path / "store"))
+
+
+@_needs_git
+def test_a_file_a_command_deleted_comes_back(tmp_path):
+    """The old gap: shell could not declare what it wrote, so undo never saw it."""
+    project, cp = _tree(tmp_path)
+    (project / "keep.py").write_text("x = 1\n")
+    cp.begin_turn()
+    (project / "keep.py").unlink()          # what `rm keep.py` would do
+    (project / "made.txt").write_text("new")
+    cp.end_turn()
+
+    report = cp.undo_last()
+
+    assert (project / "keep.py").read_text() == "x = 1\n"
+    assert not (project / "made.txt").exists()
+    assert "keep.py" in report.restored and "made.txt" in report.deleted
+
+
+@_needs_git
+def test_undo_leaves_a_file_you_changed_since_alone(tmp_path):
+    project, cp = _tree(tmp_path)
+    (project / "a.py").write_text("v1\n")
+    cp.begin_turn()
+    (project / "a.py").write_text("v2 by the agent\n")
+    cp.end_turn()
+    (project / "a.py").write_text("v3 by you\n")
+
+    report = cp.undo_last()
+
+    assert (project / "a.py").read_text() == "v3 by you\n"
+    assert "a.py" in report.failed
+
+
+@_needs_git
+def test_a_repository_project_is_never_touched_and_its_ignores_hold(tmp_path):
+    project, cp = _tree(tmp_path)
+    git = ["git", "-C", str(project), "-c", "user.name=t", "-c", "user.email=t@t"]
+    _subprocess.run([*git, "init", "-q"], check=True)
+    (project / ".gitignore").write_text("secret.env\n")
+    (project / "app.py").write_text("print(1)\n")
+    _subprocess.run([*git, "add", "-A"], check=True)
+    _subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)
+    head = _subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True).stdout
+    (project / "secret.env").write_text("TOKEN=abc")
+
+    cp.begin_turn()
+    (project / "app.py").write_text("print(2)\n")
+    cp.end_turn()
+    diff = cp.session_diff()
+    cp.undo_last()
+
+    assert "print(2)" in diff and "TOKEN" not in diff
+    assert (project / "app.py").read_text() == "print(1)\n"
+    status = _subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True).stdout
+    assert status == ""  # the project's own index and HEAD are exactly as they were
+    assert _subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True).stdout == head
+
+
+@_needs_git
+def test_the_store_does_not_outlive_the_session(tmp_path):
+    project, cp = _tree(tmp_path)
+    cp.begin_turn()
+    cp.end_turn()
+
+    cp.close()
+
+    assert not (tmp_path / "store").exists()
+
+
+@_needs_git
+def test_a_turn_that_changed_nothing_is_not_an_undo(tmp_path):
+    project, cp = _tree(tmp_path)
+    (project / "a").write_text("1")
+    cp.begin_turn()
+    cp.end_turn()
+
+    assert cp.undo_last().nothing_to_undo
+
+
+def test_without_git_the_per_file_snapshots_are_used(tmp_path, monkeypatch):
+    monkeypatch.setattr("cobirb.checkpoints.shutil.which", lambda name: None)
+
+    assert not isinstance(for_workspace(str(tmp_path)), TreeCheckpoints)
+
+
+@_needs_git
+def test_a_store_left_by_a_dead_process_is_swept(tmp_path, monkeypatch):
+    from cobirb import paths
+
+    parent = os.path.join(paths.cobirb_dir(), "checkpoints")
+    os.makedirs(os.path.join(parent, "proj-abc-tree-999999"))
+    TreeCheckpoints(str(tmp_path), _shutil.which("git"))
+
+    assert not os.path.exists(os.path.join(parent, "proj-abc-tree-999999"))

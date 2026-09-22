@@ -4,6 +4,17 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **`/undo` and `/diff` cover what shell commands did.** Every turn is now snapshotted as a whole
+  tree, so a file a command deleted, created or rewrote comes back like any other. Before, undo only
+  knew about files changed through the file tools. It works whether or not your project is a git
+  repository, and if it is, your repository is never touched: the snapshots live in a separate,
+  private store (respecting your `.gitignore`) that is deleted when the session ends.
+- **Undo never takes back your own edits.** It restores only files the last turn changed and that
+  are still as that turn left them; anything you have changed since is left alone and listed.
+- Needs `git` installed; without it, CoBirb keeps the per-file snapshots it had.
+
 ## [0.34.0]
 
 - **Shell commands run in a sandbox.** With bubblewrap installed, every command the agent runs is

@@ -117,7 +117,7 @@ If your endpoint serves one request at a time, the more direct fix is on its sid
 | `allow_tools` | `[]` | Pre-approved tools, e.g. `["read_file", "shell(git status)"]` |
 | `allow_read_dirs` | `[]` | Directories readable without asking |
 | `allow_write_dirs` | `[]` | Directories writable without asking |
-| `checkpoints` | `true` | File snapshots behind `/undo` and `/diff` |
+| `checkpoints` | `true` | Snapshot every turn for `/undo` and `/diff` (the whole tree, in a private store deleted when the session ends, when git is installed) |
 | `redact_secrets` | `true` | Strip credentials from tool output |
 | `audit_log` | `false` | Append every tool call to `~/.cobirb/audit.jsonl`, **unencrypted** |
 | `instructions` | `true` | Read the project's `AGENTS.md` |

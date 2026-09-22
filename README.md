@@ -192,10 +192,12 @@ Being straight about the edges, since the rest of this page makes strong claims:
   read-only except your project and a private `/tmp`, and credential directories such as
   `~/.ssh` and `~/.aws` hidden. A command the model explicitly asks to run *outside* the
   sandbox is always put to you first. `cobirb doctor` says which applies on your machine.
-- **`/undo` does not cover what a shell command did.** CoBirb copies a file aside before
-  `write_file`, `edit_file` or `apply_patch` changes it, so `/undo` puts those back. A
-  shell command cannot say in advance what it will touch, so anything it does is outside
-  that. Keep your work in git as well.
+- **Without git installed, `/undo` does not cover what a shell command did.** With git (the
+  common case), every turn is snapshotted whole — in a private store CoBirb deletes when the
+  session ends, never in your repository — and `/undo` puts back anything the last turn
+  changed, shell included. Without git, only files changed through `write_file`, `edit_file`
+  or `apply_patch` can be put back. Either way, undo is for the last few turns, not a backup:
+  keep your work in version control as well.
 - **Context is finite.** Long sessions are compacted to fit the model's window (see
   `/context`); old tool results are summarised away first, and a large file is read a
   range at a time rather than whole. Nothing is lost from your session file, only from

@@ -64,7 +64,7 @@ not let it quietly pick a default, narrow a feature or rule an approach out. Rai
 | `session.py` | `Turn`/`Session`, encrypted `SessionManager`, schema migration, `fork_session`. |
 | `context.py` | Fitting history into the model's window. |
 | `memory.py` | Memory-catalogue *files*: read, write, encrypt, rename, delete. |
-| `checkpoints.py` | Pre-edit file snapshots behind `/undo` and `/diff`. |
+| `checkpoints.py` | Whole-tree snapshots per turn (`TreeCheckpoints`, git) behind `/undo` and `/diff`; per-file snapshots (`Checkpoints`) without git and for Worker Birbs. |
 | `redaction.py` | Credential stripping for tool output and audit args. |
 | `config.py` / `paths.py` | The single config file; every `~/.cobirb` path derived in one place. |
 | `typing/spi.py` | **The plugin contract.** All SPI interfaces + shared dataclasses. |
@@ -181,9 +181,18 @@ prompt → model call → tool calls (policy-gated) → results into history →
 - Session files and the audit log are created `0600` via `os.open` (no chmod window).
 - `fork_session()` only ever reads the source; a truncated branch drops `summary`/`validation`,
   keeps `flock`, and records `forked_from = "<path>@turn<N>"`.
-- `Checkpoints` copies aside only the paths a tool declares via `writes()`, once per turn, keeping
-  `DEFAULT_KEEP_TURNS = 20`. Snapshots are plaintext under `0700` (they duplicate files already in
-  the workspace). **`shell` is the honest gap** — undo cannot cover what a command did.
+- **`TreeCheckpoints` snapshots the whole tree before and after every turn** (decision D6), so `/undo`
+  and `/diff` cover what a *shell command* did — the old honest gap. The store is a separate git
+  directory with the project as work tree: the project need not be a repository, and if it is, its
+  `.git` is never read or written (a test checks `git status` and `HEAD` are unchanged) and its
+  `.gitignore` holds. `ALWAYS_IGNORED` plus `.git` go in the store's `info/exclude`. The user's git
+  configuration is kept out (`core.hooksPath=/dev/null`, no signing, fixed identity). The store is
+  `0700`, lives for the session (`Orchestrator.close` → `close()`), and a store whose process died
+  is swept (`_sweep_dead_stores`). **Undo restores only files the last turn changed and only if
+  still as that turn left them** — your own later edits are left and reported. `for_workspace` picks
+  it when `git` is installed. Worker Birbs keep the per-file `Checkpoints` (`writes()`-declared
+  paths, `DEFAULT_KEEP_TURNS = 20`): several run concurrently in one tree, and a whole-tree
+  snapshot by one would capture its colleagues' half-finished work.
 
 ## 6b. Memory catalogues (`memory.py`)
 
@@ -949,7 +958,8 @@ manifest never got built and shouldn't be revisited without a fresh reason.
   one sent with `unsandboxed: true`, or any command with `sandbox: "off"`. The sandbox (§5) covers
   the rest. It hides a fixed list of credential paths, not every secret a machine might hold, and
   the environment is passed through unchanged.
-- **`/undo` cannot cover what a shell command did** — `shell` cannot declare what it writes.
+- **Without `git` installed, `/undo` cannot cover what a shell command did** — the per-file
+  fallback only knows what a tool declared it would write. With git it can (§6).
 - **Installing a plugin executes its code** (`pip` runs the package's build backend) before any
   permission layer exists to ask about it.
 - **A configured MCP server can do whatever it likes with the arguments it receives.** Its env is

@@ -12,7 +12,7 @@ Type these in the app. Anything else starting with `/` is tried as one of your o
 | `/context` | How much of the model's window this session is using. |
 | `/clear` | Start over from here — clears the screen and the model's context, deletes nothing. |
 | `/diff` | Everything the agent changed this session, as one diff. |
-| `/undo` | Put back the files the last turn changed. |
+| `/undo` | Put back the files the last turn changed — shell changes included when git is installed. Files you edited since are left alone. |
 | `/export [PATH]` | Write the session out as markdown (plaintext). |
 | `/memories` | Load, create, rename or delete memory catalogues. |
 | `/remember <fact>` | Save a fact into a catalogue you pick. |

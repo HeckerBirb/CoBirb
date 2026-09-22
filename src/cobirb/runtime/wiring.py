@@ -11,6 +11,7 @@ from typing import Callable
 
 from .. import sandbox
 from ..checkpoints import Checkpoints
+from ..checkpoints import for_workspace as checkpoints_for
 from ..config import Config
 from ..mcp import connect_servers
 from ..orchestrator import DEFAULT_MAX_TURNS, Orchestrator, build_default_policy
@@ -264,7 +265,9 @@ def build_orchestrator(
         verify=_verify_settings(cwd, config),
         # On by default: an agent that edits real files without an undo is a
         # worse deal than one that spends a little disk.
-        checkpoints=None if config.get("checkpoints") is False else Checkpoints(cwd),
+        # The whole tree, shell changes included, when git is installed; the
+        # per-file snapshots otherwise (see checkpoints.for_workspace).
+        checkpoints=None if config.get("checkpoints") is False else checkpoints_for(cwd),
         # The user's own commands at the lifecycle points.
         hooks=HookRunner.from_config(config, cwd),
         mcp_clients=mcp_clients,

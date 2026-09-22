@@ -444,6 +444,14 @@ class Orchestrator:
             )
         finally:
             self._turn_active = False
+            # Whole-tree checkpoints close the turn's snapshot here, so /undo
+            # knows exactly what this turn changed (see TreeCheckpoints).
+            end_turn = getattr(self.checkpoints, "end_turn", None)
+            if callable(end_turn):
+                try:
+                    end_turn()
+                except Exception:  # noqa: BLE001 - undo is a convenience; never cost a turn
+                    logger.debug("could not close the turn's checkpoint", exc_info=True)
 
     def _run_body(
         self,
@@ -1349,6 +1357,13 @@ class Orchestrator:
             except Exception:  # noqa: BLE001 - nothing to do about it at this point
                 logger.debug("an MCP server did not shut down cleanly", exc_info=True)
         self.mcp_clients = []
+        # Whole-tree checkpoints live as long as the session (TreeCheckpoints).
+        close = getattr(self.checkpoints, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:  # noqa: BLE001
+                logger.debug("could not remove the checkpoint store", exc_info=True)
 
 
 def build_default_policy(
