@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.25.0]
 
 - **A task is no longer cut off after 8 turns.** That cap ended an ordinary task — read a few files,
   edit, run the tests, fix — before it was half done, and it was the commonest way a real task
