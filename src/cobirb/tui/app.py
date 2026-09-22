@@ -772,10 +772,11 @@ class CoBirbApp(App[None]):
                 models = wiring.build_model(None, self.cwd).list_models()
             except Exception as exc:  # noqa: BLE001 - report, never crash the app over this
                 if not auto or not self.model_name:
+                    hint = "" if self.model_name else " Run 'cobirb setup' in a terminal to choose a server and model."
                     self.call_from_thread(
                         self.io_bridge.write_error,
                         REPLY_LABEL,
-                        f"could not list models — {exc}",
+                        f"could not list models — {exc}.{hint}",
                     )
                 return
 
@@ -834,6 +835,33 @@ class CoBirbApp(App[None]):
             # None means "ask the new provider", unless config states one.
             self.orchestrator.context_tokens = Config().get("context_tokens")
         self.write_transcript(render.build_notice(f"Model set to {name}."))
+        from ..runtime.models import ROLE_ORCHESTRATOR, resolve_role
+
+        if not resolve_role(ROLE_ORCHESTRATOR, Config()).configured:
+            self._offer_to_save_default(name)
+
+    def _offer_to_save_default(self, name: str) -> None:
+        """Nothing is configured, so this pick would be asked for again next
+        session. Offer to remember it — asked, because it writes the user's
+        own config file."""
+        from ..runtime import setup
+
+        def answered(save: bool | None) -> None:
+            if not save:
+                return
+            try:
+                path = setup.save_default_model(name)
+            except setup.ConfigUnreadable as exc:
+                self.io_bridge.write_error(REPLY_LABEL, f"not saved — {exc}")
+                return
+            self.write_transcript(render.build_notice(f"Saved {name} as your default model in {path}."))
+
+        self.push_screen(
+            ConfirmModal(f"Use {name} by default from now on?",
+                         "No model is set in your config, so CoBirb would ask again next time.",
+                         confirm_label="Save"),
+            answered,
+        )
 
     # ------------------------------------------------------------------ #
     # Plugins tab

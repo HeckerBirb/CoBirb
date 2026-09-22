@@ -39,6 +39,7 @@ cobirb help config                       # help on one topic
 ```bash
 cobirb help [topic]      # commands, config, flock, hooks, mcp, model,
                          # plan, plugin, plugins, session, tools
+cobirb setup             # choose your model server and model, saved to your config
 cobirb doctor            # is everything ready to go?
 cobirb models            # how each role resolves
 cobirb commands          # your custom commands here

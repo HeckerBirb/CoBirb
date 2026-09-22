@@ -713,7 +713,10 @@ scopes, are reviewed, and Brainy Birb reports.
 
 ## 14. Surfaces
 
-**CLI** — subcommands `help [topic]`, `models`, `commands`, `flock -p "..."`,
+**CLI** — subcommands `setup` (`runtime/setup.py`: asks for the server address and protocol, lists
+that server's models, saves the pick — atomically, 0600, every other key kept, an unparseable
+config refused rather than replaced — then runs doctor; it **asks and never probes**, D7),
+`help [topic]`, `models`, `commands`, `flock -p "..."`,
 `plugin install <path> [--replace] | list | remove <name>`. Flags: `-p/--prompt`, `--session`,
 `-w/--password`, `--model`, `--allow-tool` (repeatable, `name` or `name(arg)`),
 `--plan-mode on|off`, `--system-prompt off|harness`, `--export PATH`, `--branch PATH`,

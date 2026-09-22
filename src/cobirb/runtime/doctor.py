@@ -244,7 +244,7 @@ def _check_models(report: Report, config: Config, build_provider: Callable[[str]
             continue
         name = spec.name or ""
         if not name:
-            report.add(f"model ({role})", WARN, "none configured")
+            report.add(f"model ({role})", WARN, "none configured — run 'cobirb setup' to choose one")
             continue
         if available and canonical_model(name) not in {canonical_model(m) for m in available}:
             report.add(

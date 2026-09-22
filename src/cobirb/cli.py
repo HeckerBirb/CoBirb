@@ -533,8 +533,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "subcommand",
         nargs="?",
-        choices=["help", "models", "commands", "flock", "plugin", "doctor"],
-        help="'help' for the overview, 'models' for how each role resolves, "
+        choices=["help", "models", "commands", "flock", "plugin", "doctor", "setup"],
+        help="'setup' to choose your model server and model, "
+        "'help' for the overview, 'models' for how each role resolves, "
         "'commands' for the custom commands available here, 'doctor' to check "
         "a piece of work between several agents, 'plugin' to install/list/remove "
         "a local plugin (see 'cobirb help flock'/'cobirb help plugin').",
@@ -716,6 +717,10 @@ def main(argv: list[str] | None = None) -> int:
         return _run_upgrade(args.upgrade or None, force=args.force)
     if args.doctor or args.subcommand == "doctor":
         return _run_doctor()
+    if args.subcommand == "setup":
+        from .runtime import setup
+
+        return setup.run()
     if args.force:
         # Said rather than ignored — see --branch-at's own check below for
         # why a flag that would otherwise silently do nothing gets a line.

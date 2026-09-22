@@ -3691,3 +3691,41 @@ async def test_a_worker_may_still_ask_for_a_file_nobody_owns():
         assert adapter._blocked_owner(
             ApprovalRequest(tool_name="write_file", arguments={"path": "new_helper.py"})
         ) == ""
+
+
+async def test_picking_a_model_with_none_configured_offers_to_remember_it(monkeypatch, tmp_path):
+    import json as _json
+
+    from cobirb import paths
+    from cobirb.tui.screens import ConfirmModal
+
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    _stub_list_models(monkeypatch, models=["llama3.1"])
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await _until(pilot, lambda: isinstance(app.screen, ModelPickerModal))
+        app.screen.query_one("#model-options", OptionList).focus()
+        await pilot.press("enter")
+        await _until(pilot, lambda: isinstance(app.screen, ConfirmModal))
+        await pilot.press("y")
+        await _until(pilot, lambda: "Saved llama3.1" in _transcript_text(app))
+
+    assert _json.load(open(paths.config_path()))["models"]["default"]["name"] == "llama3.1"
+
+
+async def test_a_configured_model_is_never_offered_for_saving(monkeypatch):
+    from cobirb.tui.screens import ConfirmModal
+
+    _stub_list_models(monkeypatch, models=["llama3.1", "gemma4"])
+    monkeypatch.setattr("cobirb.runtime.models.resolve_role",
+                        lambda *a, **k: type("S", (), {"configured": True})())
+    app = _make_app(model_name="gemma4")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "/model")
+        await _until(pilot, lambda: isinstance(app.screen, ModelPickerModal))
+        app.screen.query_one("#model-options", OptionList).focus()
+        await pilot.press("enter")
+        await _until(pilot, lambda: app.model_name == "llama3.1")
+        await pilot.pause()
+        assert not isinstance(app.screen, ConfirmModal)

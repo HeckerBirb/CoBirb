@@ -51,7 +51,7 @@ class OpenAICompatibleProvider(LocalModelProvider):
         self._props: dict[str, Any] | None = None
 
     def name(self) -> str:
-        return "openai-compatible"
+        return f"openai/{self._model}" if self._model else "(unconfigured)"
 
     # ------------------------------------------------------------------ #
     # What the server says about itself

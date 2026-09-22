@@ -33,6 +33,9 @@ ollama pull qwen2.5-coder:14b     # or any other model you want to use, CoBirb d
 
 curl -fsSL https://github.com/HeckerBirb/CoBirb/releases/latest/download/install.sh | bash
 
+# Point it at your model server and pick a model (Ollama, llama.cpp, LM Studio, vLLM).
+cobirb setup
+
 # Interactive: the full-screen app.
 cobirb
 ```

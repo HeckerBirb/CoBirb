@@ -3,17 +3,15 @@
 ## 1. Tell CoBirb which model
 
 ```bash
-mkdir -p ~/.cobirb
-cat > ~/.cobirb/config.json <<'JSON'
-{
-  "models": {
-    "default": { "name": "qwen2.5-coder:14b", "base_url": "http://localhost:11434" }
-  }
-}
-JSON
+cobirb setup
 ```
 
-Or skip the file and pass it per run: `cobirb --model qwen2.5-coder:14b`.
+It asks where your model server is (Ollama's `http://localhost:11434` is suggested), whether it
+speaks Ollama's API or the OpenAI one (llama.cpp, LM Studio, vLLM), lists the models that server has,
+and saves your choice to `~/.cobirb/config.json`. Only the address you give is contacted.
+
+Or pass a model per run: `cobirb --model qwen2.5-coder:14b`. The interactive app also offers the
+model list at startup when none is configured, and asks whether to remember your pick.
 
 ## 2. Start it
 

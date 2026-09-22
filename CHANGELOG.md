@@ -4,6 +4,16 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **`cobirb setup`** gets you from install to a working model without editing JSON: it asks where
+  your model server is and which protocol it speaks, lists the models that server actually has,
+  and saves your pick — keeping everything else in your config, and refusing to touch one that
+  doesn't parse. It contacts only the address you give it.
+- **The interactive app remembers a model you pick** when none is configured, if you say so,
+  instead of asking again every session. When no server answers and no model is set, it points you
+  at `cobirb setup`, and so does `cobirb doctor`.
+
 ## [0.30.0]
 
 - **llama.cpp, LM Studio and vLLM work.** Set `"api": "openai"` on a model role and CoBirb talks

@@ -8,6 +8,10 @@ from __future__ import annotations
 HELP_TEXT = """\
 CoBirb — a privacy-first, local agentic CLI.
 
+FIRST RUN
+  cobirb setup           Choose your model server and model; saved to your
+                         config. Only the address you give is contacted.
+
 MODES
   Interactive (default): a full-screen terminal app — tabs, a live status
                          line, a boxed input, tool approval as a dialog, and
