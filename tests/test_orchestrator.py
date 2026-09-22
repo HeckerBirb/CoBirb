@@ -106,7 +106,53 @@ def test_run_stops_after_max_turns_when_model_never_finishes():
     assert len(session.turns) == 7
     roles = [t.role for t in session.turns]
     assert roles == ["user", "assistant", "tool", "assistant", "tool", "assistant", "tool"]
-    assert session.summary == "Stopped after 3 turns without a final answer."
+    # No answer is invented for the model; the stop is reported as a fact.
+    assert not session.summary
+    assert orchestrator.last_stop.reason == "turn_limit"
+    assert orchestrator.last_stop.turns == 3
+
+
+def test_running_out_of_turns_is_said_as_a_notice_not_as_the_models_answer():
+    class AlwaysCallingModel(_DummyModel):
+        def supports_tool_calling(self):
+            return True
+
+        def parse_tool_calls(self, reply):
+            return [ToolCall(name="list_dir", arguments={})]
+
+    class _NoticeIO:
+        def __init__(self):
+            self.notices, self.rendered = [], []
+
+        def render(self, text):
+            self.rendered.append(text)
+
+        def render_notice(self, text):
+            self.notices.append(text)
+
+        def confirm(self, tool_name, arguments):
+            return False
+
+        def listen(self):
+            return None
+
+        def view(self, data, mime=None):
+            pass
+
+    io = _NoticeIO()
+    orchestrator = Orchestrator(model=AlwaysCallingModel(), tools={}, policy=Policy(), io=io)
+    orchestrator.run("loop", "sys", cwd="/tmp", max_turns=2)
+
+    assert any("2 model turn(s)" in notice for notice in io.notices)
+    assert not any("Stopped after" in text for text in io.rendered)
+
+
+def test_a_finished_run_says_it_answered():
+    orchestrator = Orchestrator(model=_DummyModel(reply="done"), tools={}, policy=Policy())
+    orchestrator.run("hi", "sys", cwd="/tmp")
+
+    assert orchestrator.last_stop.finished
+    assert orchestrator.last_stop.describe() == ""
 
 
 def test_run_tool_dispatch(tmp_path):
@@ -391,7 +437,8 @@ def test_last_turn_streamed_flag_false_when_max_turns_exhausted():
         io=io,
     )
     session = orchestrator.run("loop", "sys", cwd="/tmp", max_turns=2)
-    assert session.summary == "Stopped after 2 turns without a final answer."
+    assert not session.summary
+    assert not orchestrator.last_stop.finished
     assert orchestrator.last_turn_streamed is False
 
 

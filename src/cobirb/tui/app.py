@@ -705,7 +705,10 @@ class CoBirbApp(App[None]):
             )
             # A streamed final answer is already in the transcript; rendering
             # the summary too would just show it twice.
-            if not self.orchestrator.last_turn_streamed:
+            # A run that stopped short has already said so through the
+            # orchestrator's notice; "Completed." under it would contradict it.
+            stop = getattr(self.orchestrator, "last_stop", None)
+            if not self.orchestrator.last_turn_streamed and (stop is None or stop.finished):
                 self._render_final_answer(turn_result.summary)
             if self.session_path is not None and self.orchestrator.session is not None:
                 self.orchestrator.session.save(self.password)

@@ -97,6 +97,28 @@ def test_a_failure_is_reported_as_json_rather_than_a_traceback(tmp_path, monkeyp
     assert code == EXIT_ERROR
 
 
+def test_running_out_of_turns_is_a_failure_with_its_reason(tmp_path, monkeypatch, capsys):
+    """It used to exit 0 with "Stopped after N turns" as the summary, so a
+    pipeline read an unfinished task as a finished one."""
+    code = _run(
+        monkeypatch, tmp_path,
+        ["-p", "loop", "--headless", "--output", "json"],
+        [ToolCall("list_dir", {}) for _ in range(50)],
+    )
+
+    report = json.loads(capsys.readouterr().out)
+    assert not report["ok"]
+    assert report["stop_reason"] == "turn_limit"
+    assert not report["summary"]
+    assert code == EXIT_ERROR
+
+
+def test_a_finished_run_reports_that_it_answered(tmp_path, monkeypatch, capsys):
+    _run(monkeypatch, tmp_path, ["-p", "say hi", "--headless", "--output", "json"], [])
+
+    assert json.loads(capsys.readouterr().out)["stop_reason"] == "answered"
+
+
 def test_the_context_budget_is_in_the_report(tmp_path, monkeypatch, capsys):
     """A headless run that quietly compacted half its history away is
     something whoever reads the log needs to be able to see."""

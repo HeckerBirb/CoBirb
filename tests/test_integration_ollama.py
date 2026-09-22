@@ -107,7 +107,7 @@ def test_live_tool_call_round_trip(tmp_path):
     )
 
     assert any(turn.role == "tool" for turn in session.turns), "model never called a tool"
-    assert not session.summary.startswith("Stopped after"), "tool-calling loop did not converge"
+    assert orchestrator.last_stop.finished, "tool-calling loop did not converge"
     assert "banana" in session.summary.lower()
 
 
@@ -143,11 +143,10 @@ def test_live_plan_mode_converges_through_all_three_phases(tmp_path):
     assert plan_turns[0].tool_use is None, "the planning phase must never call tools"
 
     assert any(t.role == "tool" for t in session.turns), "act phase never called a tool"
-    assert not session.summary.startswith("Stopped after"), "act phase did not converge"
+    assert orchestrator.last_stop.finished, "act phase did not converge"
     assert "banana" in session.summary.lower()
 
     assert session.validation, "validate phase produced no report"
-    assert not session.validation.startswith("Stopped after"), "validate phase did not converge"
 
 
 def test_live_multi_step_tool_calls_converge(tmp_path):
@@ -175,7 +174,7 @@ def test_live_multi_step_tool_calls_converge(tmp_path):
 
     tool_turns = [t for t in session.turns if t.role == "tool"]
     assert len(tool_turns) >= 2, "expected at least two separate tool calls"
-    assert not session.summary.startswith("Stopped after"), "tool-calling loop did not converge"
+    assert orchestrator.last_stop.finished, "tool-calling loop did not converge"
     assert "alpha" in session.summary.lower()
     assert "beta" in session.summary.lower()
 

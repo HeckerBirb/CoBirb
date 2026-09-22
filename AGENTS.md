@@ -87,8 +87,13 @@ prompt → model call → tool calls (policy-gated) → results into history →
        → plain reply with no tool calls == final answer (becomes session.summary)
 ```
 
-- Bounded by `max_turns` (default 8; validate phase 4). Exhaustion returns a synthetic
-  "Stopped after N turns" answer.
+- Bounded by `max_turns` (default 8; validate phase 4). **How a run ended is `Orchestrator.last_stop`**
+  (`RunStop`: `STOP_ANSWERED` or `STOP_TURN_LIMIT`), never text in the summary. Running out of turns
+  used to return a made-up reply — "Stopped after N turns without a final answer." — which was
+  stored as the model's answer and read by every consumer as a conclusion (headless exited 0 on it).
+  Now the summary stays empty, the orchestrator reports the stop through the I/O adapter's
+  `render_notice`, neither front-end prints "Completed." under it, and headless reports
+  `stop_reason` and exits 1.
 - Each iteration: drain steering queue → build context → model call → either record tool calls and
   execute, or return the final answer.
 - **Plan mode** (`--plan-mode on`, `/plan on`, `plan_mode` config; off by default) splits the run
@@ -471,8 +476,8 @@ run tells the user. **`BRAINY_RULES` also states the mechanism** — that a char
 proposes nothing — because the instruction to call the tool never said what *not* calling it costs.
 
 **Running out of planning turns is a distinct outcome** (`Orchestrator.turns_exhausted` →
-`PlanResult.exhausted_turns` → `stopped_at="turns"`). `_loop`'s synthetic "Stopped after N turns"
-string is indistinguishable from a considered answer, and a skeleton costs one turn per file
+`PlanResult.exhausted_turns` → `stopped_at="turns"`). A reply alone cannot say the budget ran out
+(see §4's `RunStop`), and a skeleton costs one turn per file
 written, so a large partition reaches the budget before it proposes anything.
 
 **An overlapping partition is a second loop, and it needed its own brake**

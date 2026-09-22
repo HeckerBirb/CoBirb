@@ -25,7 +25,7 @@ from typing import Any
 
 from .config import Config
 from .help_text import HELP_TEXT, HELP_TOPICS
-from .orchestrator import REPLY_LABEL, render_through
+from .orchestrator import REPLY_LABEL, RunStop, render_through
 from .policy import PermissionError
 from .plugins.core import render
 from .runtime import plugins, sessions, wiring
@@ -203,8 +203,14 @@ def _drive_one_shot(
         orchestrator.session.save(password)
 
     calls = orchestrator.last_run_tool_calls
+    stop = getattr(orchestrator, "last_stop", None) or RunStop()
     report = HeadlessResult(
-        ok=True,
+        # A run that stopped short did not do what it was asked. Exit 0 would
+        # tell a pipeline it had, which is what the made-up "Stopped after N
+        # turns" answer used to do.
+        ok=stop.finished,
+        error=None if stop.finished else stop.describe(),
+        stop_reason=stop.reason,
         summary=session.summary or "",
         validation=session.validation,
         turns=len(session.turns),
@@ -219,7 +225,9 @@ def _drive_one_shot(
 
     # If the final answer already streamed live via the I/O adapter, printing
     # session.summary again here would just show it a second time.
-    if not orchestrator.last_turn_streamed:
+    # A stop short of an answer has already been reported by the orchestrator;
+    # "Completed." underneath it would contradict it.
+    if not orchestrator.last_turn_streamed and stop.finished:
         _render_final_answer(orchestrator, REPLY_LABEL, session.summary)
     return report.exit_code(unattended=headless)
 

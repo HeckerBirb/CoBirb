@@ -57,6 +57,8 @@ cobirb -p "run the tests and report" \
 ```
 
 Exit codes: `0` clean, `1` failed, `2` completed but something was refused (`--headless` only).
+A run that ran out of turns before answering is a failure: `"ok": false`, `"stop_reason": "turn_limit"`.
+A finished run reports `"stop_reason": "answered"`.
 
 ## Environment
 

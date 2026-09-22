@@ -4,6 +4,15 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §12 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Running out of turns is reported as what it is.** CoBirb used to make up a reply for the model —
+  "Stopped after 8 turns without a final answer." — and store it as the answer. It was shown as
+  though the model had said it, sat in the session as the conclusion, and a headless run exited 0 on
+  it, so a pipeline read an unfinished task as a finished one. Now nothing is invented: CoBirb says
+  it stopped, as a note of its own, without a "Completed." underneath, and `--output json` carries
+  `"stop_reason"` (`"answered"` or `"turn_limit"`) and exits 1 when the run did not finish.
+
 ## [0.22.0]
 
 - **Personas are gone.** `--persona`, `/persona` and its picker, the `persona` config key, the

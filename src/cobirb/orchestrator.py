@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
+from dataclasses import dataclass
 from difflib import get_close_matches
 from typing import Any, Callable, Iterable
 
@@ -60,6 +61,38 @@ _STEER_PREAMBLE = (
     "[The user sent this while you were still replying, to redirect you now "
     "rather than wait. Take it into account immediately:] "
 )
+
+# Why a run() stopped. A run that ran out of turns used to return a made-up
+# reply — "Stopped after N turns without a final answer." — which was then
+# stored as the model's answer, shown as though the model had said it, and
+# read by every consumer as a conclusion. A stop is a fact about the run, not
+# something the model said, so it is reported as one (see RunStop).
+STOP_ANSWERED = "answered"
+STOP_TURN_LIMIT = "turn_limit"
+
+
+@dataclass(frozen=True)
+class RunStop:
+    """How the last ``run()`` ended. ``reason`` is one of the ``STOP_*``
+    constants; ``turns`` is the budget that applied when it matters."""
+
+    reason: str = STOP_ANSWERED
+    turns: int = 0
+
+    @property
+    def finished(self) -> bool:
+        """Whether the model reached a final answer on its own."""
+        return self.reason == STOP_ANSWERED
+
+    def describe(self) -> str:
+        """A sentence for a person, or ``""`` when there is nothing to say."""
+        if self.reason == STOP_TURN_LIMIT:
+            return (
+                f"Stopped after {self.turns} model turn(s) without a final answer. "
+                "Send another message to let it carry on."
+            )
+        return ""
+
 
 # What a reply is labelled with unless the caller names someone else — the
 # Flock labels Brainy Birb and each Worker Birb by their own names.
@@ -271,14 +304,12 @@ class Orchestrator:
         self.last_verification = None
         # What the last _build_context had to throw away, for /context.
         self.last_compaction: CompactionReport | None = None
-        # Whether the last _loop ran out of turns rather than reaching a final
-        # answer. The synthetic "Stopped after N turns" string it returns is
-        # indistinguishable from a real reply to a caller reading the summary,
-        # and the flock needs to tell them apart: a planning turn that spent
-        # its whole budget writing a skeleton has not decided anything, and
-        # reporting it as though the model had reached a conclusion is how a
-        # run that simply needed more room reads as one that refused.
-        self.turns_exhausted = False
+        # How the last run() ended — see RunStop. The flock needs this as much
+        # as a person does: a planning turn that spent its whole budget writing
+        # a skeleton has not decided anything, and reporting it as though the
+        # model had reached a conclusion is how a run that simply needed more
+        # room reads as one that refused.
+        self.last_stop = RunStop()
         # Whether the most recent run()'s final answer was already streamed
         # live to `io` (see run()'s docstring) — false until a run happens.
         self.last_turn_streamed = False
@@ -431,6 +462,9 @@ class Orchestrator:
         )
         session.summary = content
         self.last_turn_streamed = streamed
+        # The act phase decides how the run ended. Plan mode's validate loop
+        # runs after it and would otherwise overwrite the answer.
+        stop = self.last_stop
 
         if plan_mode:
             # Show the answer now — before validating it — rather than
@@ -448,6 +482,10 @@ class Orchestrator:
             session.validation = validation_text
             if not validation_streamed:
                 self._render_phase(PHASE_VALIDATE, label, validation_text)
+            self.last_stop = stop
+
+        if not stop.finished:
+            render_through(self.io, "render_notice", stop.describe())
 
         # Last thing before the session is handed back, so an after_turn hook
         # that reads the workspace sees it in its finished state — including
@@ -560,7 +598,7 @@ class Orchestrator:
         back around to pick up the message that interrupted it, rather than
         parsing tool calls out of a reply that never finished.
         """
-        self.turns_exhausted = False
+        self.last_stop = RunStop()
         for _ in range(max_turns):
             # One place builds the context, once per model call, from
             # whatever the session holds right now — so every path that adds
@@ -614,8 +652,10 @@ class Orchestrator:
             session.add(Turn(role="assistant", content=content, phase=phase))
             return content, streamed and bool(content)
 
-        self.turns_exhausted = True
-        return f"Stopped after {max_turns} turns without a final answer.", False
+        # No reply is invented to stand in for the missing answer: the summary
+        # stays empty, and the stop is reported as a fact about the run.
+        self.last_stop = RunStop(STOP_TURN_LIMIT, max_turns)
+        return "", False
 
     def _spun(self, label: str, fn: Callable[[], Any]) -> Any:
         """Run ``fn()``, showing ``io``'s spinner (if it has one) around the
@@ -1095,6 +1135,12 @@ class Orchestrator:
     # ------------------------------------------------------------------ #
     # Convenience: register a fresh session path
     # ------------------------------------------------------------------ #
+    @property
+    def turns_exhausted(self) -> bool:
+        """Whether the last run ran out of turns (kept for the flock, which
+        asks exactly this question)."""
+        return self.last_stop.reason == STOP_TURN_LIMIT
+
     @property
     def session_path(self) -> str | None:
         return self.session.path if self.session else None

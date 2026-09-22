@@ -81,6 +81,8 @@ class HeadlessResult:
     error: str | None = None
     session_path: str | None = None
     context: dict[str, Any] | None = None
+    # Why the run ended: "answered", or a STOP_* reason from the orchestrator.
+    stop_reason: str | None = None
 
     def exit_code(self, *, unattended: bool = True) -> int:
         """The process exit code for this run.
@@ -110,6 +112,7 @@ class HeadlessResult:
                 "error": self.error,
                 "session": self.session_path,
                 "context": self.context,
+                "stop_reason": self.stop_reason,
             },
             indent=2,
             ensure_ascii=False,
