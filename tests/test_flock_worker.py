@@ -277,6 +277,9 @@ def test_a_worker_that_blows_up_is_a_report_not_an_exception(monkeypatch, tmp_pa
             raise RuntimeError("the endpoint went away")
 
     _scripted(monkeypatch, _Exploding([]))
+    # A fault before any work is retried; the pause between attempts is real
+    # time and not what this test is about.
+    monkeypatch.setattr("cobirb.flock.worker.START_RETRY_SECONDS", 0)
     worker = _brief("""
         objective = "x"
         [[workers]]
@@ -296,15 +299,15 @@ def test_a_worker_that_blows_up_is_a_report_not_an_exception(monkeypatch, tmp_pa
 def test_a_worker_uses_the_worker_model_role(monkeypatch, tmp_path):
     """Per-role models shipped in 0.4 precisely so the flock had somewhere to
     resolve from. This is the test that they are actually wired together."""
-    write_config(tmp_path, {"models": {"default": {"name": "big"}, "worker": {"name": "small"}}})
     chosen = []
 
     from cobirb.runtime import wiring
 
-    real = wiring.build_for_role
+    # Record the role and hand back a scripted model: building the real
+    # provider for it sent this test's requests to a live endpoint.
     monkeypatch.setattr(
         wiring, "build_for_role",
-        lambda role, *a, **k: (chosen.append(role), real(role, *a, **k))[1],
+        lambda role, *a, **k: (chosen.append(role), _ScriptedWorker([]))[1],
     )
     worker = _brief("""
         objective = "x"

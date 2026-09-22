@@ -9,12 +9,27 @@ from __future__ import annotations
 import sys
 import textwrap
 
+import pytest
 
 from cobirb import cli
 from cobirb.flock.brainy import PROPOSE_CHARTER
 from cobirb.flock.run import Asker, run_flock_session
 from cobirb.flock.worker import WorkerReport
 from cobirb.typing.spi import ToolCall
+
+
+@pytest.fixture(autouse=True)
+def _no_preflight(monkeypatch):
+    """Keep the pre-flight model check off the network.
+
+    ``run_flock_session`` asks the endpoint which models it has before
+    planning, through a real provider — so every test here reached
+    ``localhost:11434``, and hung for as long as the connection did when
+    nothing answered. None of these tests is about that check, and "" is what
+    it returns when it cannot list models, so this is the unreachable case
+    without the wait.
+    """
+    monkeypatch.setattr("cobirb.flock.run.missing_models", lambda *a, **k: "")
 
 
 def _charter_toml(tmp_path, workers=2):
