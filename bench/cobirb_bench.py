@@ -191,7 +191,7 @@ def _check(task: Task, work: Path, scratch: Path, summary: str) -> tuple[bool, s
 
 
 def run_one(task: Task, model: str, rep: int, seed: int, *, base_url: str, src: Path,
-            max_num_ctx: str, extra: dict[str, Any]) -> Result:
+            max_num_ctx: str, extra: dict[str, Any], flock: bool = False) -> Result:
     scratch = Path(tempfile.mkdtemp(prefix=f"bench-{task.id}-"))
     try:
         work = scratch / "work"
@@ -202,8 +202,11 @@ def run_one(task: Task, model: str, rep: int, seed: int, *, base_url: str, src: 
             json.dumps(_config(task, work, model, base_url, seed, max_num_ctx, extra), indent=2),
             encoding="utf-8",
         )
-        command = [sys.executable, "-m", "cobirb.cli", "-p", task.prompt,
-                   "--headless", "--output", "json", "--cwd", str(work)]
+        command = (
+            [sys.executable, str(HERE / "flock_driver.py"), str(work), task.prompt] if flock
+            else [sys.executable, "-m", "cobirb.cli", "-p", task.prompt,
+                  "--headless", "--output", "json", "--cwd", str(work)]
+        )
         started = time.monotonic()
         report: dict[str, Any] | None = None
         error = ""
@@ -314,6 +317,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="context ceiling for the run (default 32k; the fixtures are small)")
     parser.add_argument("--config", default="{}", help="extra config JSON merged over the run's own")
     parser.add_argument("--label", default="run")
+    parser.add_argument("--flock", action="store_true",
+                        help="run each task as a flock session (charter auto-approved) instead of one agent")
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args(argv)
 
@@ -329,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
 
     tree = Path(tempfile.mkdtemp(prefix="bench-src-")) / "tree"
     src, sha = freeze_source(args.revision, tree)
-    meta = {"label": args.label, "sha": sha, "tasks": len(tasks), "reps": args.reps,
+    meta = {"label": args.label, "sha": sha, "tasks": len(tasks), "reps": args.reps, "flock": args.flock,
             "models": models, "max_num_ctx": args.max_num_ctx, "extra": extra}
     (out / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     results: list[Result] = []
@@ -339,7 +344,8 @@ def main(argv: list[str] | None = None) -> int:
                 for rep in range(1, args.reps + 1):
                     for task in tasks:
                         result = run_one(task, model, rep, args.seed + rep - 1, base_url=args.base_url,
-                                         src=src, max_num_ctx=args.max_num_ctx, extra=extra)
+                                         src=src, max_num_ctx=args.max_num_ctx, extra=extra,
+                                         flock=args.flock)
                         results.append(result)
                         sink.write(json.dumps(asdict(result)) + "\n")
                         sink.flush()

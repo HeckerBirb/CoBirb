@@ -1,0 +1,10 @@
+category = "flock"
+timeout = 3000
+shell = ["python -m pytest"]
+prompt = """
+Build a tiny key-value store: store.py (class Store with set(key, value), get(key, default=None),
+delete(key) returning whether it existed, and keys() sorted) and cli.py (a function
+run(store, line) that executes one command — "set k v", "get k", "del k", "keys" — and returns the
+output line: "OK", the value or "(nil)", "1"/"0", or the keys joined by spaces). The CLI must only
+use Store's public methods. Write tests for both in tests/.
+"""

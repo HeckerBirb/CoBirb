@@ -1,0 +1,8 @@
+category = "flock"
+timeout = 3000
+shell = ["python -m pytest"]
+prompt = """
+Implement the three stub modules — units.py, roman.py and wordfreq.py — each according to its
+docstrings. They are independent of each other. The finished modules must pass tests you write
+for them in tests/.
+"""
