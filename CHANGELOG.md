@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.40.0]
 
 - **A `delete_file` tool.** Removing a file used to need a shell command, and "…and delete the old
   module" was the step models most often reported done without doing. It is a write like the others:
