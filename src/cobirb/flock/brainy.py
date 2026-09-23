@@ -904,6 +904,121 @@ def plan_prompt(objective: str) -> str:
     )
 
 
+# --------------------------------------------------------------------------- #
+# Staged planning: one step at a time, the work re-stated every time
+# --------------------------------------------------------------------------- #
+# The single planning prompt asks for everything at once — divide the work,
+# design the seams, write every stub, every test and every brief, then build
+# the charter — under two thousand tokens of rules for all of it. A strong
+# model holds that; a weak one drops pieces of it, and in the flock benchmark
+# the weakest planner ended half its rounds without a charter. So the same work
+# is asked for as three steps, each with only its own instructions, each
+# opening with the work itself so nothing depends on remembering it: divide
+# (the tickets, recorded with `add_worker` before a file exists), then the
+# skeleton one ticket at a time, then seal.
+STAGED_INTRO = """\
+You are Brainy Birb, the lead engineer of a Flock. You divide a piece of work \
+between Worker Birbs who never speak to each other and see nothing but the \
+ticket you write them. You will plan in three short steps."""
+
+
+def _work(objective: str) -> str:
+    return f"--- The work ---\n\n{objective.strip()}"
+
+
+def partition_prompt(objective: str) -> str:
+    """Step 1 of staged planning: the tickets, before any file is written."""
+    return f"""{STAGED_INTRO}
+
+{_work(objective)}
+
+--- Step 1 of 3: divide it ---
+
+Read the project with the read tools. Then decide how the work splits into \
+tickets that can be built AT THE SAME TIME:
+
+  - Each ticket owns its own files — its implementation and its tests — and no \
+file belongs to two tickets. Every file a ticket must create or change goes in \
+its `writes`.
+  - Where two tickets' code meets — a class one builds and the other calls — \
+the meeting point is a SIGNATURE you will write into the skeleton in step 2. \
+The ticket that implements it owns that file; the other builds against the \
+signature at the same time.
+  - A ticket's tests must pass using its own code and the skeleton alone. If \
+they would need another ticket's unfinished code, plan a small fake in the \
+tests instead, or give the ticket `needs` — the last resort, since it makes \
+that ticket wait.
+  - If the work does not divide, say so in one sentence and call nothing. \
+That is a correct answer.
+
+Record each ticket now with `add_worker`: its id; its brief (what to \
+implement and what done looks like — only its own part, never the whole \
+feature or the other tickets); `writes`; `tests` (which of `writes` hold its \
+tests); and `accept`, the command that proves it is done, e.g. \
+`python -m pytest tests/test_x.py -q`. DO NOT write any files yet — the \
+skeleton is step 2.
+
+{NEED_TO_KNOW_DIRECTIVE}"""
+
+
+def skeleton_prompt(objective: str, draft: PlanDraft, worker_id: str, first: bool) -> str:
+    """Step 2 of staged planning, for one ticket."""
+    worker = draft.worker(worker_id)
+    implementation = [path for path in worker.writes if path not in worker.tests] or list(
+        worker.writes
+    )
+    tests = list(worker.tests)
+    plan = "\n".join(
+        f"  - {w.id}: writes {', '.join(w.writes)}" + (f"; needs {', '.join(w.needs)}" if w.needs else "")
+        for w in draft.workers
+    )
+    shared = (
+        "\nFirst, if the tickets meet at shared types or constants that no ticket owns, "
+        "write those files now, finished — not as stubs.\n"
+        if first else ""
+    )
+    test_line = (
+        f"  - In {', '.join(tests)}: failing tests that pin EVERY behaviour the docstrings "
+        "promise, using only this ticket's code and the skeleton — a small fake where they "
+        "would otherwise need another ticket's code.\n"
+        if tests else
+        "  - This ticket names no test files. Add them: `drop_worker` it and `add_worker` it "
+        "back with `tests`, then write failing tests that pin every behaviour the "
+        "docstrings promise.\n"
+    )
+    return f"""{_work(objective)}
+
+--- The tickets ---
+
+{plan}
+
+--- Step 2 of 3: the skeleton for ticket '{worker_id}' ---
+{shared}
+Write this ticket's skeleton now, and only this ticket's:
+
+  - In {', '.join(implementation)}: every class and function the ticket \
+implements, fully typed, with a docstring that states SEMANTICS ("returns None \
+for a missing key", not "handles keys"), and a body that raises \
+NotImplementedError — never one that returns a plausible value.
+{test_line}
+Write it in the project's own style: the worker imitates it. If the ticket \
+turns out to need a file its `writes` does not list, `drop_worker` it and \
+`add_worker` it back with that file. When this ticket's files are written, \
+stop — each ticket is its own step."""
+
+
+def seal_prompt(objective: str, draft: PlanDraft) -> str:
+    """Step 3 of staged planning."""
+    return f"""{_work(objective)}
+
+--- Step 3 of 3: seal ---
+
+Every ticket has its skeleton: {draft.describe()}. Read each brief against the \
+skeleton you wrote. If one no longer matches, `drop_worker` it and \
+`add_worker` it back corrected. Then call `seal_charter` with the objective. \
+Do not describe the charter in your reply — only `seal_charter` creates one."""
+
+
 def charter_retry_prompt(last_error: str) -> str:
     """One more attempt, with the rejection quoted back.
 

@@ -48,7 +48,7 @@ KNOWN_KEYS = frozenset({
     "repo_map", "repo_map_max_chars", "context_tokens", "max_num_ctx",
     "verify_command", "verify_timeout", "verify_fix_attempts",
     "hooks", "mcp_servers", "plugins", "max_turns", "sandbox",
-    "connect_timeout", "request_timeout",
+    "connect_timeout", "request_timeout", "flock_planning",
 })
 
 # What each key should look like, for the shape check. Only the keys whose
@@ -65,6 +65,7 @@ _EXPECTED_TYPES: dict[str, tuple[type, ...]] = {
     # all this table can ask about.
     "max_num_ctx": (int, str),
     "sandbox": (str, dict),
+    "flock_planning": (str,),
     "verify_timeout": (int,), "verify_fix_attempts": (int,), "max_turns": (int,),
     "system_prompt": (str,), "verify_command": (str,),
 }

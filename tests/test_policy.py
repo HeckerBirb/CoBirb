@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from cobirb.plugins.core.tools import WriteFileTool
 from cobirb.policy import AuditLog, Policy, SessionGrants, _segments
 
@@ -488,3 +490,32 @@ def test_a_begin_patch_that_cannot_be_pinned_to_one_file_is_denied(tmp_path):
 
     assert not policy.is_allowed("apply_patch", {"patch": _patch("a.py", "b.py")})
     assert not policy.is_allowed("apply_patch", {"patch": _patch("a.py"), "path": "b.py"})
+
+
+def test_list_dir_with_no_path_is_the_working_directory(tmp_path):
+    """The tool lists the working directory when given no path; the policy
+    has to judge that call as the same directory, not refuse it as unknown."""
+    policy = Policy(cwd=str(tmp_path))
+    policy.allow_read_dir(str(tmp_path))
+
+    assert policy.is_allowed("list_dir", {})
+    assert policy.is_allowed("list_dir", {"path": ""})
+
+
+def test_a_cd_inside_the_project_does_not_block_a_granted_command(tmp_path):
+    """`cd <project> && pytest` is how agents run a check, since a `cd` does not
+    persist between calls."""
+    (tmp_path / "tests").mkdir()
+    policy = Policy(cwd=str(tmp_path))
+    policy.allow("shell", "pytest")
+
+    assert policy.is_allowed("shell", {"command": f"cd {tmp_path} && pytest -q"})
+    assert policy.is_allowed("shell", {"command": "cd tests && pytest -q"})
+
+
+@pytest.mark.parametrize("cd", ["cd /", "cd ..", "cd", "cd ~", "cd $HOME", "cd -", "cd *"])
+def test_a_cd_that_leaves_the_project_or_cannot_be_read_is_not_waved_through(tmp_path, cd):
+    policy = Policy(cwd=str(tmp_path))
+    policy.allow("shell", "pytest")
+
+    assert not policy.is_allowed("shell", {"command": f"{cd} && pytest -q"})

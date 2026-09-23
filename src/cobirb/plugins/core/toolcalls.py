@@ -43,8 +43,12 @@ _MARKUP = re.compile(r"<tool_call>.*?(?:</tool_call>|\Z)|<function=.*?(?:</funct
 
 # What a server's own tool-call parser failure looks like when it comes back
 # as the reply or an error body (ollama/ollama#18563 returns it with HTTP 200).
+# "invalid tool call arguments" arrives from llama-server-backed endpoints as a
+# streamed error line; unmatched, it killed a Worker Birb mid-ticket instead of
+# being handed back to the model to correct.
 _SERVER_PARSE_ERROR = re.compile(
-    r"pars\w* tool[ _-]?call|tool[ _-]?call\W.{0,60}(?:pars|invalid|malformed)|XML syntax error",
+    r"pars\w* tool[ _-]?call|(?:invalid|malformed) tool[ _-]?call"
+    r"|tool[ _-]?call\W.{0,60}(?:pars|invalid|malformed)|XML syntax error",
     re.I | re.S,
 )
 

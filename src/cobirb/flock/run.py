@@ -38,8 +38,11 @@ from .brainy import (
     ProposeCharterTool,
     SealCharterTool,
     next_move_prompt,
+    partition_prompt,
     plan_prompt,
     round_summary,
+    seal_prompt,
+    skeleton_prompt,
 )
 from .charter import Charter, recover_charter
 from .preflight import missing_models
@@ -242,7 +245,61 @@ def _without_project_verification(orchestrator: Orchestrator):
         orchestrator.verify = original
 
 
-def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> PlanResult:
+PLANNING_STAGED = "staged"
+PLANNING_SINGLE = "single"
+
+
+def _stopped(orchestrator: Orchestrator, tool: ProposeCharterTool) -> bool:
+    """Whether planning has hit a limit that another pass would not fix."""
+    stop = getattr(orchestrator, "last_stop", None)
+    return (
+        tool.exhausted
+        or bool(getattr(orchestrator, "turns_exhausted", False))
+        or getattr(stop, "reason", None) == STOP_NO_PROGRESS
+    )
+
+
+def _staged(orchestrator: Orchestrator, tool: ProposeCharterTool, objective: str, cwd: str,
+            turns: int) -> tuple[str, bool, bool]:
+    """Divide, then one skeleton step per ticket, then seal — see ``brainy.partition_prompt``.
+
+    Returns the last narration, whether any tool was called, and whether a
+    limit stopped it. Each step is its own ``run`` on the same session, so the
+    model keeps what it read; each prompt also re-states the work, so nothing
+    depends on it having kept it. Anything left incomplete falls through to
+    ``_plan``'s driven loop, which asks for exactly the missing move.
+    """
+    desk = tool.desk
+
+    def step(prompt: str) -> tuple[str, bool]:
+        session = orchestrator.run(prompt, system="", cwd=cwd, label="Brainy Birb", max_turns=turns)
+        return session.summary or "", bool(getattr(orchestrator, "last_run_tool_calls", None))
+
+    narration, touched = step(partition_prompt(objective))
+    if tool.charter is not None or not desk.draft.workers or _stopped(orchestrator, tool):
+        return narration, touched, _stopped(orchestrator, tool)
+
+    done: set[str] = set()
+    # Bounded by twice the tickets there were, since a skeleton step may drop
+    # a ticket and add it back corrected, which puts it in the queue again.
+    for _ in range(2 * len(desk.draft.workers)):
+        pending = [w.id for w in desk.draft.workers if w.id not in done]
+        if not pending or tool.charter is not None:
+            break
+        text, called = step(skeleton_prompt(objective, desk.draft, pending[0], first=not done))
+        narration, touched = text or narration, touched or called
+        done.add(pending[0])
+        if _stopped(orchestrator, tool):
+            return narration, touched, True
+
+    if tool.charter is None and desk.draft.workers:
+        text, called = step(seal_prompt(objective, desk.draft))
+        narration, touched = text or narration, touched or called
+    return narration, touched, _stopped(orchestrator, tool)
+
+
+def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int,
+          staged: bool = True) -> PlanResult:
     """Let Brainy Birb plan and scaffold, and take the charter it proposes.
 
     **A driven loop with a completion predicate, rather than one turn plus a
@@ -283,7 +340,16 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> P
     touched = False
     with _without_project_verification(orchestrator):
         prompt = plan_prompt(objective)
-        for _ in range(MAX_PLAN_STEPS):
+        steps = MAX_PLAN_STEPS
+        if staged:
+            narration, touched, limited = _staged(orchestrator, tool, objective, cwd, turns)
+            # What is left is the driven loop's job: seal a plan that was built
+            # and not sealed, or quote the refusal that stopped one. Nothing to
+            # do when the plan is done, a limit was hit, or the model declined.
+            declined = not touched and tool.desk.draft.empty and not tool.attempts
+            steps = 0 if (tool.charter is not None or limited or declined) else MAX_PLAN_STEPS
+            prompt = next_move_prompt(tool.desk)
+        for _ in range(steps):
             session = orchestrator.run(
                 prompt, system="", cwd=cwd, label="Brainy Birb", max_turns=turns
             )
@@ -321,7 +387,9 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> P
             # Out of moves with the plan still incomplete. Bounded by design:
             # the point of the loop is to hold the state while the model makes
             # one move at a time, not to keep asking forever.
-            stalled = tool.charter is None
+            # Only when the loop ran: staged planning that finished, hit a
+            # limit, or declined skips it with nothing left to stall on.
+            stalled = steps > 0 and tool.charter is None
 
     charter, recovered = tool.charter, False
     if charter is None:
@@ -428,7 +496,12 @@ def _drive(
         plan = PlanResult(charter=charter, narration="")
     else:
         ask.show("Brainy Birb is planning and building the skeleton…")
-        plan = _plan(orchestrator, objective, cwd, plan_turns)
+        plan = _plan(
+            orchestrator, objective, cwd, plan_turns,
+            # `"single"` is the one-prompt planner the staged one replaced,
+            # kept so the two can be measured against each other.
+            staged=config.get("flock_planning", default=PLANNING_STAGED) != PLANNING_SINGLE,
+        )
     if plan.charter is not None and plan.recovered:
         # Say so. A charter that arrived this way is one the model got right
         # apart from how it delivered it, and the user approving it should

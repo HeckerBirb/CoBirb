@@ -18,6 +18,16 @@ and its §17 decisions record for the ones that were designed and then deliberat
   change is.
 - **Flock: review says "PASS" plainly.** "Stub reversion: caught" was being read as the worker
   having reverted its work.
+- **Flock: Brainy Birb plans in steps** — divide into tickets, then the skeleton one ticket at a
+  time, then seal — each step re-stating the work and carrying only its own instructions.
+  `"flock_planning": "single"` restores the one-prompt planner.
+- **A `cd` inside the project no longer gets a command refused**: with `pytest` allowed,
+  `cd tests && pytest` runs. This was the commonest refusal a Worker Birb hit.
+- **`list_dir` with no path lists the working directory** instead of being refused as unverifiable.
+- **A model request the server resets before replying is sent once more**, instead of ending the
+  turn — or a Worker Birb's whole ticket.
+- "Invalid tool call arguments" from a llama-server-backed endpoint is handed back to the model to
+  correct, like other tool-call parse failures, instead of ending the run.
 - cobirb-bench records what each refused call was aimed at, the charter's file assignment, and
   classifies failed flock rounds by what the workers actually wrote.
 

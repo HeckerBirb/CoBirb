@@ -173,6 +173,22 @@ starts generating. Two things keep that from costing you tickets:
 If your endpoint serves one request at a time, the real fix is on its side — `OLLAMA_NUM_PARALLEL` for
 Ollama. `/flock` offers to measure it before fanning out, and you can drop `concurrency` to 1.
 
+### Planning in steps
+
+Brainy Birb plans in three steps rather than one long prompt, each opening with the work itself so
+nothing depends on remembering it, and each carrying only its own instructions:
+
+1. **Divide.** Read the project and record the tickets with `add_worker` — before any file exists.
+   Declining to divide is still a correct answer.
+2. **The skeleton, one ticket at a time.** Typed stubs with semantic docstrings in that ticket's
+   files, and failing tests in its test files. The first step also writes any finished shared files.
+3. **Seal**, after reading each brief against the skeleton.
+
+Asking for everything at once — divide, design, every stub, every test, every brief, then the
+charter — was more than a weaker planner could hold, and in CoBirb's benchmark the weakest ended half
+its rounds without a charter. `"flock_planning": "single"` in your config puts the one-prompt planner
+back.
+
 ### Planning runs until the plan is finished
 
 A model's turn ends when it stops calling tools. That's the right rule for a conversation and the

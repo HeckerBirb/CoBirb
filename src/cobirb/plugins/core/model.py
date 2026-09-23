@@ -20,9 +20,11 @@ from __future__ import annotations
 import http.client
 import io
 import json
+import logging
 import os
 import socket
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -30,6 +32,8 @@ from typing import Any, Iterable, Optional
 
 from . import toolcalls
 from ...typing.spi import ModelProvider, SteeringInterrupted, Tool, ToolCall
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "http://localhost:11434"
 
@@ -119,6 +123,12 @@ def _advertised_context(model_info: Any) -> int | None:
 # Bounds on the reasoning kept for replay: a thinking trace can be long, and a
 # long session makes many calls.
 _MAX_REMEMBERED_THINKING = 200
+
+# A request the server reset before replying is sent once more (see
+# `_stream_lines`). `RemoteDisconnected` is a `ConnectionResetError`.
+_RESETS = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
+_RESET_ATTEMPTS = 2
+_RESET_RETRY_SECONDS = 1.0
 _MAX_THINKING_CHARS = 8000
 
 
@@ -766,23 +776,39 @@ class LocalModelProvider(ModelProvider):
         # genuine failure (an unreachable server, say) would then be reported
         # as a steer instead of as what it was.
         self._steer_signal.clear()
+        body = json.dumps(payload).encode("utf-8")
         conn, prefix = self._connect()
         try:
-            try:
-                self._open(conn)
-                conn.request(
-                    "POST",
-                    f"{prefix}{path}",
-                    body=json.dumps(payload).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                )
-                response = conn.getresponse()
-            except OSError as exc:
-                if self._cancelled or self._steer_signal.is_set():
-                    raise self._as_control_exception(exc) from exc
-                raise _unreachable(
-                    self._base_url, urllib.error.URLError(exc), self._model, self._server
-                ) from exc
+            for attempt in range(1, _RESET_ATTEMPTS + 1):
+                try:
+                    self._open(conn)
+                    conn.request(
+                        "POST", f"{prefix}{path}", body=body,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    response = conn.getresponse()
+                    break
+                except OSError as exc:
+                    if self._cancelled or self._steer_signal.is_set():
+                        raise self._as_control_exception(exc) from exc
+                    if isinstance(exc, _RESETS) and attempt < _RESET_ATTEMPTS:
+                        # **A reset before the first byte of the reply is sent
+                        # again, once.** Nothing has been yielded, so the
+                        # caller cannot tell — and the alternative is what the
+                        # flock benchmark saw: three Worker Birbs mid-ticket,
+                        # each killed by one "connection reset by peer" from a
+                        # busy server, and the round lost with them. Only a
+                        # reset: a refused connection or a timeout says
+                        # something about the server that sending again
+                        # straight away would not change.
+                        logger.warning("model request reset by the server; sending it again")
+                        self._release(conn)
+                        time.sleep(_RESET_RETRY_SECONDS)
+                        conn, prefix = self._connect()
+                        continue
+                    raise _unreachable(
+                        self._base_url, urllib.error.URLError(exc), self._model, self._server
+                    ) from exc
             if response.status >= 400:
                 body = response.read()
                 text = body.decode("utf-8", "replace")

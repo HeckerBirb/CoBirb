@@ -121,6 +121,7 @@ prompt → model call → tool calls (policy-gated) → results into history →
 - Paths resolve with `realpath` against the policy's `cwd`; `_within` requires a separator
   (`/x/project-secrets` never matches `/x/project`). **`Policy._resolve` and `CobirbTool._resolve`
   mirror each other step for step**, `~` included — a difference is a check on a path the tool won't use.
+  A missing or empty `path` is the working directory for `list_dir`, `grep` and `repo_map`, in both.
 - `shell` is checked **per segment** (`git status; rm -rf /` is two commands). Rules are a bare binary
   (any arguments) or an exact multi-word prefix. Refused as unverifiable: backticks, `$(...)`,
   subshells, unbalanced quotes, `find -exec/-execdir/-ok/-okdir`.
@@ -263,6 +264,9 @@ when to use a tool and which neighbour fits better — small models lean on them
 - Streaming is NDJSON; `_last_tool_calls` is valid once the generator is exhausted. `cancel()` latches
   the provider closed; `interrupt_current_reply()` cuts one reply; `_steer_signal` is cleared before
   every request. `_stream_lines` is the protocol-independent half, shared by both providers.
+- **A request reset before the first byte of its reply is sent once more** (`_stream_lines`,
+  `_RESET_ATTEMPTS = 2`): nothing was yielded, and one reset from a busy server used to cost a Worker
+  Birb its ticket. Only a reset — a refusal or a timeout is not retried.
 - **Two timeouts** (`connect_timeout` 10 s, `request_timeout` 600 s): a socket timeout measures silence,
   not work, and a queued request is silent. Split in the streaming path (`_connect` short, `_open`
   long); `_post` takes the long one; `list_models` catches a dead endpoint on the short one.
@@ -334,6 +338,12 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
 - **All five tools are moves on one `CharterDesk`** (owner of the draft, the charter and every counter),
   registered and permitted together for the whole session by `install_charter_tool` — the planning
   rules stay in context, so a missing tool is an `Unknown tool` the model cannot argue past.
+- **Staged by default** (`run._staged`, `flock_planning` = `"staged"` | `"single"`): divide
+  (`brainy.partition_prompt`, tickets via `add_worker` before any file exists), then one
+  `skeleton_prompt` per ticket, then `seal_prompt` — each a separate `run` on the same session, each
+  re-stating the objective and carrying only its own instructions, because the one-prompt planner asked
+  for everything at once and the weakest model ended half its rounds with no charter. What is left
+  incomplete falls through to the driven loop below; a decline in step 1 ends planning.
 - **A driven loop with a completion predicate** (`run._plan`, `MAX_PLAN_STEPS = 5`): after each pass, no
   sealed charter → `brainy.next_move_prompt` asks for exactly the missing move. Exits: a charter; no
   tool called and nothing built (a legitimate "do not divide"); `tool.exhausted`, the turn budget, or
@@ -367,7 +377,8 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
   the sandbox never auto-approves a worker's shell.
 - `policy_for()`: **writes file-strict, reads open across `cwd`** (read isolation was tried and left
   workers unable to orient), **shell = the programs the worker's own `accept` names, any arguments**
-  (`allow_command` covers every segment). Nothing the check never names — a pipe to `head` is a second
+  (`allow_command` covers every segment); a `cd` inside `cwd` is never what refuses a command
+  (`Policy._harmless_cd`). Nothing the check never names — a pipe to `head` is a second
   program, and shell grants carry no path scoping. An unreadable `accept` grants nothing.
 - A write into a file another worker owns is refused without asking (`writes_owner`): exclusive
   ownership is what makes concurrency safe.
@@ -430,7 +441,7 @@ prompt stays enabled during a turn — submitting steers. Approval is a modal (`
 `allow_read_dirs`, `allow_write_dirs`, `sandbox`, `max_turns`, `verify_command`, `verify_timeout`,
 `verify_fix_attempts`, `redact_secrets`, `checkpoints`, `instructions`, `instructions_max_chars`,
 `repo_map`, `repo_map_max_chars`, `context_tokens`, `max_num_ctx`, `connect_timeout`, `request_timeout`,
-`plan_mode`, `audit_log`, `hooks`, `mcp_servers`. Deprecated: `model`, `default_model`. Retired:
+`plan_mode`, `audit_log`, `hooks`, `mcp_servers`, `flock_planning`. Deprecated: `model`, `default_model`. Retired:
 `persona`. `ensure_home()` seeds a starter config on first run.
 
 **Help** — `cobirb help` prints the overview (`help_text._OVERVIEW` plus the page list);

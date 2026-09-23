@@ -92,3 +92,12 @@ def test_a_server_parse_failure_is_recognised_only_at_the_start_of_a_reply():
     assert not toolcalls.reply_is_server_parse_error(
         "I fixed the bug where CoBirb reported 'error parsing tool call' as an answer."
     )
+
+
+def test_an_invalid_tool_call_error_from_the_server_is_a_parse_failure():
+    """Streamed by llama-server-backed endpoints; unrecognised, it ended a
+    Worker Birb's ticket instead of going back to the model to correct."""
+    assert toolcalls.looks_like_server_parse_error(
+        'llama-server returned invalid tool call arguments for "write_file": '
+        "unexpected end of JSON input"
+    )

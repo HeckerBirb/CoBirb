@@ -218,6 +218,13 @@ def test_list_dir(tmp_path):
     assert "sub" in result.content
 
 
+def test_list_dir_with_no_path_lists_the_working_directory(tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    tool = ListDirTool(str(tmp_path))
+
+    assert "a.txt" in tool.execute({}).content
+
+
 def test_shell_executes(tmp_path):
     result = _mk_tool(ShellTool).execute({"command": "echo hi"})
     assert result.ok

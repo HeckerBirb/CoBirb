@@ -1011,7 +1011,10 @@ class ListDirTool(CobirbTool):
         return {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Directory path."},
+                "path": {
+                    "type": "string",
+                    "description": "Directory path. Defaults to the working directory.",
+                },
                 "offset": {
                     "type": "number",
                     "description": "First entry to return, 1-indexed, for continuing a long listing.",
@@ -1019,11 +1022,10 @@ class ListDirTool(CobirbTool):
                 },
                 "limit": {"type": "number", "description": "Maximum entries to return."},
             },
-            "required": ["path"],
         }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        path = self._resolve(arguments["path"])
+        path = self._resolve(str(arguments.get("path") or "."))
         try:
             # scandir rather than listdir: it reports whether each entry is a
             # directory without a stat() per name, which on a directory of a

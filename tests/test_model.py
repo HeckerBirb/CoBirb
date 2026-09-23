@@ -1072,3 +1072,64 @@ def test_a_thinking_models_reasoning_comes_back_with_the_calls_it_led_to(monkeyp
     replayed = responses.chat_messages
     assert replayed[1]["thinking"] == "I should read a.py first."
     assert "thinking" not in replayed[3]  # only calls carry it, never a final answer
+
+
+def _resetting_server(resets):
+    """Drops the first ``resets`` chat requests without replying, then streams."""
+    import http.server
+    import threading
+
+    state = {"left": resets, "chats": 0}
+
+    class _Flaky(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            if self.path.endswith("/api/show"):
+                body = json.dumps({"parameters": "", "model_info": {}}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            state["chats"] += 1
+            if state["left"] > 0:
+                state["left"] -= 1
+                self.close_connection = True
+                return  # hang up with no reply at all
+            line = (json.dumps({"message": {"content": "ok"}, "done": True}) + "\n").encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(line)))
+            self.end_headers()
+            self.wfile.write(line)
+
+        def log_message(self, *args):
+            return None
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Flaky)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{server.server_address[1]}", state
+
+
+def test_a_request_the_server_hung_up_on_is_sent_again_once(monkeypatch):
+    """A busy server resetting one request cost a Worker Birb its whole ticket."""
+    from cobirb.plugins.core import model
+
+    monkeypatch.setattr(model, "_RESET_RETRY_SECONDS", 0)
+    url, state = _resetting_server(1)
+    provider = LocalModelProvider(model="llama3.1", base_url=url)
+
+    assert list(provider.chat("system", "context", stream=True)) == ["ok"]
+    assert state["chats"] == 2
+
+
+def test_a_server_that_keeps_hanging_up_is_reported_as_unreachable(monkeypatch):
+    from cobirb.plugins.core import model
+
+    monkeypatch.setattr(model, "_RESET_RETRY_SECONDS", 0)
+    url, _ = _resetting_server(5)
+    provider = LocalModelProvider(model="llama3.1", base_url=url)
+
+    with pytest.raises(RuntimeError, match="Could not reach the model provider"):
+        list(provider.chat("system", "context", stream=True))

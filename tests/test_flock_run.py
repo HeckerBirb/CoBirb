@@ -10,6 +10,7 @@ import sys
 import textwrap
 
 import pytest
+from conftest import write_config
 
 from cobirb import cli
 from cobirb.flock.brainy import PROPOSE_CHARTER
@@ -822,6 +823,9 @@ def test_an_unsealed_plan_gets_one_nudge_to_seal_it(monkeypatch, tmp_path):
     the only thing between it and a running flock is one more call."""
     from cobirb.flock.brainy import ADD_WORKER, SEAL_CHARTER
 
+    # The one-prompt planner; staged planning asks for the seal as a step of
+    # its own, so it never reaches this nudge.
+    write_config(tmp_path, {"flock_planning": "single"})
     _skeleton(tmp_path)
     _honest_workers(monkeypatch, tmp_path)
     # Stops after adding the tickets; the nudge turn then seals.
@@ -1123,3 +1127,54 @@ def test_giving_the_file_to_a_ticket_answers_the_question(tmp_path):
     result = tool.execute({"objective": "kv store"})
 
     assert result.ok and desk.charter.worker("store").writes == ("store.py",)
+
+
+# --------------------------------------------------------------------------- #
+# Staged planning: divide, one skeleton step per ticket, seal
+# --------------------------------------------------------------------------- #
+def test_staged_planning_asks_for_one_step_at_a_time(monkeypatch, tmp_path):
+    """The whole plan in one prompt was too much to hold for a weak planner.
+    Each step carries only its own instructions, and the work itself."""
+    from cobirb.flock.brainy import ADD_WORKER, SEAL_CHARTER
+
+    _skeleton(tmp_path)
+    _honest_workers(monkeypatch, tmp_path)
+    calls = [
+        (ADD_WORKER, {"id": "a", "brief": "go", "writes": ["a.py"]}),
+        (ADD_WORKER, {"id": "b", "brief": "go", "writes": ["b.py"]}),
+        None,  # step 1 done
+        None,  # a's skeleton
+        None,  # b's skeleton
+        (SEAL_CHARTER, {"objective": "two things"}),
+    ]
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(calls))
+    prompts = []
+    original = orchestrator.run
+    monkeypatch.setattr(
+        orchestrator, "run",
+        lambda prompt, *a, **k: (prompts.append(prompt), original(prompt, *a, **k))[1],
+    )
+
+    run = run_flock_session(
+        orchestrator, "double two numbers", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert run.charter is not None
+    planning = prompts[:4]
+    assert "Step 1 of 3" in planning[0]
+    assert "skeleton for ticket 'a'" in planning[1] and "skeleton for ticket 'b'" in planning[2]
+    assert "Step 3 of 3" in planning[3]
+    assert all("double two numbers" in p for p in planning)
+
+
+def test_staged_planning_still_takes_no_for_an_answer(monkeypatch, tmp_path):
+    """Declining to divide in step 1 ends planning; it is not nudged."""
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy([None]))
+
+    run = run_flock_session(
+        orchestrator, "rename one variable", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert run.charter is None and run.stopped_at == "planning"

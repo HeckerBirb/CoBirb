@@ -93,6 +93,10 @@ A `cd` does not carry over to the next `shell` call — the shell it moved has a
 it in the same command (`cd build && make`), or pass `cwd` to run one call somewhere else. A
 command that is *only* a `cd` says so in its result rather than reporting a bare success.
 
+A `cd` into a directory inside the working directory is never what gets a command asked about:
+with `pytest` allowed, `cd tests && pytest -q` runs. A `cd` anywhere else, or one CoBirb would have
+to guess at (`cd $HOME`, a bare `cd`, `cd -`), is checked like any other command.
+
 ## Paths and `~`
 
 A path a tool is given is resolved the same way whether it is being checked or used: `~` expands

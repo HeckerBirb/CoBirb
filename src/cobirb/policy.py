@@ -241,8 +241,13 @@ def _target_path(tool_name: str, arguments: dict[str, Any]) -> str | None:
     if tool_name == "apply_patch" and patches.is_begin_patch(arguments.get("patch")):
         return patch_target(arguments)
     target = arguments.get("path")
-    if target is None and tool_name in ("grep", "repo_map"):
-        target = "."  # matching those tools' own defaults
+    if tool_name in ("grep", "repo_map", "list_dir") and target in (None, ""):
+        # Matching those tools' own defaults: each lists or searches the
+        # working directory when given no path, or an empty one. `list_dir`
+        # was missing here, so a worker's `list_dir` with no path — whose
+        # read scope is the whole working directory — was refused as
+        # unverifiable while the tool would have listed exactly that.
+        target = "."
     return target if isinstance(target, str) and target else None
 
 
@@ -453,10 +458,36 @@ class Policy:
 
     def _segment_allowed(self, words: list[str]) -> bool:
         """Whether one command segment is permitted: its binary is trusted
-        outright, or the segment matches an allowed narrow prefix."""
+        outright, the segment matches an allowed narrow prefix, or it is a
+        ``cd`` that stays inside the working directory."""
         if words[0] in self._allowed:
             return True
+        if self._harmless_cd(words):
+            return True
         return any(words[: len(prefix)] == list(prefix) for prefix in self._allowed_prefixes)
+
+    def _harmless_cd(self, words: list[str]) -> bool:
+        """``cd <dir>`` where ``dir`` is inside this policy's working directory.
+
+        **Agents write ``cd <project> && pytest …`` constantly**, because each
+        shell call is its own process and the directory does not persist. Every
+        segment has to be permitted, and ``cd`` never was, so a check the user
+        had granted — a Worker Birb's own acceptance command, above all — was
+        refused for the ``cd`` in front of it. In the first flock benchmark
+        with refusals recorded, that was the commonest refusal of all.
+
+        A ``cd`` changes nothing and reaches nothing by itself; the commands
+        after it are checked on their own. It is still kept inside the working
+        directory, and anything the scan would have to guess at — a variable,
+        a glob, an escape, an option, a bare ``cd`` (home) or ``cd -`` — is not
+        treated as harmless, so it goes to the ordinary check and fails closed.
+        """
+        if len(words) != 2 or words[0] != "cd":
+            return False
+        target = words[1]
+        if not target or target.startswith("-") or any(c in target for c in "$*?[]\\`"):
+            return False
+        return _within(self._resolve(target), os.path.realpath(self.cwd))
 
     def allow(self, tool_name: str, command: str | None = None) -> None:
         """Allow a tool.
