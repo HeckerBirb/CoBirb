@@ -1,10 +1,15 @@
 # Config
 
-One file: `~/.cobirb/config.json`. CoBirb reads no config from your project — a repository
-can describe itself, never grant permissions.
+One file: `~/.cobirb/config.json`. CoBirb reads no config from your project, does not merge one
+in, and does not look for one.
 
-Start from [`config.json.example`](../config.json.example). `cobirb help config` has the long
-version.
+That is deliberate. Config here decides what is pre-approved, which directories may be read or
+written, what runs at lifecycle points and which subprocesses start — a repository able to contribute
+any of that would let its author influence the permission model just by being cloned. A project may
+still *describe* itself: its `AGENTS.md`, the repo map, and prompt files in `.cobirb/commands/` are
+read, as content for the model rather than capability granted to it.
+
+Start from [`config.json.example`](../../config.json.example), or run `cobirb setup`.
 
 ## Models
 
@@ -18,8 +23,18 @@ version.
 }
 ```
 
-Every role inherits from `default`, field by field. Name only `default` and everything uses it.
-Check with `cobirb models`.
+Every role inherits from `default`, field by field, so a role may name a model without repeating its
+endpoint. Name only `default` and everything uses it. `--model` outranks all of them.
+
+| Role | Is |
+|---|---|
+| `default` | The fallback for everything else |
+| `orchestrator` | The agent you talk to, and Brainy Birb in a flock |
+| `worker` | What each Worker Birb runs on |
+
+`cobirb models` prints how each role resolves and where each answer came from; a role you mistyped
+is listed too. The older top-level `model` and `default_model` keys still name the default when
+`models.default.name` is unset — `cobirb doctor` calls them deprecated.
 
 `options` are sent to the server with every request — sampling settings such as `temperature`,
 `top_p` or `seed`. A role's options are merged over the default's, key by key:
@@ -48,6 +63,23 @@ start, so CoBirb reads it from what the server reports (llama.cpp's `/props`, vL
 `max_model_len`) instead of asking for one; `max_num_ctx` still caps it. `options` are sent as
 request fields, so use the server's own names (`temperature`, `top_p`, `seed`, …). Images are sent
 when llama.cpp reports vision support, or when you set `"vision": true` on the role.
+
+## Your model's own system prompt
+
+Sending a system message *replaces* the `SYSTEM` directive a model was built with, and a model you made
+with `ollama create` around a custom `SYSTEM` is a configuration you chose. So by default CoBirb sends
+**no system message at all**: your model behaves exactly as it does in `ollama run`.
+
+When CoBirb has something to add — project instructions, plan mode, or `"system_prompt": "harness"` — it
+reads your model's own `SYSTEM` back and puts it first, then its own part. Yours is supplemented, never
+discarded.
+
+- `"system_prompt": "off"` — the default.
+- `"system_prompt": "harness"` (or `--system-prompt harness`) — adds a short block on how to work as a
+  coding agent. It is opt-in because on CoBirb's benchmark it made no measurable difference.
+
+None of CoBirb's guarantees depend on the model cooperating: permissions and encryption are enforced in
+code.
 
 ## Capping the context window
 
@@ -112,14 +144,14 @@ If your endpoint serves one request at a time, the more direct fix is on its sid
 | `models` | — | Per-role model and endpoint (above) |
 | `system_prompt` | `"off"` | `"harness"` adds a short block on how to work as a coding agent, after the model's own `SYSTEM` |
 | `plan_mode` | `false` | Start in plan mode |
-| `sandbox` | `"ask"` | Contain shell commands: `"ask"`, `"auto"` (no prompt) or `"off"` — see [Permissions](permissions.md) |
+| `sandbox` | `"auto"` | Contain shell commands: `"auto"` (no prompt, where git can undo them), `"ask"` or `"off"` — see [Permissions](permissions.md) |
 | `max_turns` | `40` | Ceiling on model turns per message. A backstop: a run that repeats the same call or keeps failing is stopped long before it |
 | `allow_tools` | `[]` | Pre-approved tools, e.g. `["read_file", "shell(git status)"]` |
 | `allow_read_dirs` | `[]` | Directories readable without asking |
 | `allow_write_dirs` | `[]` | Directories writable without asking |
 | `checkpoints` | `true` | Snapshot every turn for `/undo` and `/diff` (the whole tree, in a private store deleted when the session ends, when git is installed) |
 | `redact_secrets` | `true` | Strip credentials from tool output |
-| `audit_log` | `false` | Append every tool call to `~/.cobirb/audit.jsonl`, **unencrypted** |
+| `audit_log` | `false` | Append every tool call to `~/.cobirb/audit.jsonl` — full arguments (file contents, diffs, commands), **unencrypted** |
 | `instructions` | `true` | Read the project's `AGENTS.md` |
 | `instructions_max_chars` | `32000` | Cap on that |
 | `repo_map` | `true` | Send a codebase outline |
@@ -128,11 +160,11 @@ If your endpoint serves one request at a time, the more direct fix is on its sid
 | `max_num_ctx` | — | Ceiling on the `num_ctx` CoBirb asks the server for — `65536` or `"64k"` |
 | `connect_timeout` | `10` | Seconds to wait for the endpoint to accept a connection |
 | `request_timeout` | `600` | Seconds to wait for it to respond once connected (above) |
-| `verify_command` | — | Run after a turn that changed files, e.g. `"pytest -q"` |
+| `verify_command` | — | Run after a turn that changed files, e.g. `"pytest -q"`; on failure the model is told and gets a bounded fix attempt. Never guessed |
 | `verify_timeout` | `120` | Seconds |
 | `verify_fix_attempts` | `1` | Bounded retries when it fails |
-| `hooks` | `{}` | Commands at lifecycle points |
-| `mcp_servers` | `{}` | See [Plugins & MCP](plugins-and-mcp.md) |
+| `hooks` | `{}` | Your own commands at lifecycle points — see [Hooks](hooks.md) |
+| `mcp_servers` | `{}` | Local MCP servers — see [MCP](mcp.md) |
 | `plugins` | core | Which implementation fills each slot |
 
 ## Example

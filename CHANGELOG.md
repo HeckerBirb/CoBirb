@@ -4,6 +4,18 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **`cobirb help <topic>` is the manual.** Each topic is now a page of the user manual, rendered in
+  the terminal, instead of a second copy of the same material that had drifted — the old help still
+  said `/undo` could not reverse shell commands. Old topic names (`session`, `plan`, `model`,
+  `plugin`) still work. `cobirb help` on its own is a short overview listing the pages.
+- **New manual pages** for tools, hooks and MCP (with the worked example of writing your own offline
+  server), and fuller pages for sessions, commands, config and plugins — everything the old help said
+  that the manual did not.
+- AGENTS.md is now a reference of rules and reasons, half its former length; the stories behind them
+  stay in this changelog and in the code.
+
 ## [0.40.2]
 
 - **A models page.** `docs/manual/models.md` lists the models CoBirb has been measured with on its

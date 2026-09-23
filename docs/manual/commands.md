@@ -51,15 +51,41 @@ Matching is fuzzy: letters must appear in order but needn't be adjacent, so `gba
 `global.py`, `general_batch.py` and `gba.py` — with the exact name first. Ignored files
 (`.gitignore`, dotfiles) never appear.
 
+## Plan mode
+
+`/plan on` makes each message start with a planning pass: the model can read, search and outline the
+project, and keep a checklist, but cannot change anything — a call that tries is refused. It ends with a
+short numbered plan, shown to you at once, and then does the work. It costs a few extra model calls per
+message. `--plan-mode on|off` and `"plan_mode"` in config set the starting state.
+
 ## Your own commands
 
-Put a markdown or text file in `<project>/.cobirb/commands/`:
+A prompt you have written down, invoked by name. Its filename is the command:
+
+| File | Available |
+|---|---|
+| `~/.cobirb/commands/review.md` | everywhere |
+| `<project>/.cobirb/commands/review.md` | in that project |
 
 ```bash
 mkdir -p .cobirb/commands
-echo "Review the staged diff for bugs. Be terse." > .cobirb/commands/review.md
+echo 'Review $1 for bugs. Be terse.' > .cobirb/commands/review.md
 ```
 
-Now `/review` in the app sends that text. `/commands` lists what's available.
+`/review src/parser.py` in the app sends that text — and so does `cobirb -p "/review src/parser.py"`.
+`/commands` (or `cobirb commands`) lists what's available.
 
-A built-in name always wins, so you can't shadow `/undo`.
+- `$ARGUMENTS` is everything after the command; `$1` … `$9` are single words. A placeholder with nothing
+  to fill it is empty. With no placeholder at all, what you typed is appended.
+- An optional frontmatter block describes it in the listing, and is not sent:
+
+  ```
+  ---
+  description: Review a diff the way this team does
+  ---
+  Read the staged diff and check it against $ARGUMENTS.
+  ```
+
+A project command is data, not code: it expands to a prompt and nothing else, which is why commands are
+read from a project when hooks and MCP servers are not. Every tool call it leads to is still gated, and a
+built-in name always wins, so a custom `/undo` cannot change what `/undo` does.

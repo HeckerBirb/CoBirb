@@ -16,7 +16,10 @@ Short pages. Start at the top.
 | [Memory](manual/memory.md) | Facts CoBirb remembers between conversations |
 | [Images](manual/images.md) | Showing the model a screenshot |
 | [The Flock](manual/flock.md) | Splitting work across several agents |
-| [Plugins & MCP](manual/plugins-and-mcp.md) | Adding tools |
+| [Tools](manual/tools.md) | What the agent can do, and what `/undo` covers |
+| [Hooks](manual/hooks.md) | Your own commands at CoBirb's decision points |
+| [MCP](manual/mcp.md) | Tools from MCP servers, and writing your own |
+| [Plugins & MCP](manual/plugins-and-mcp.md) | Plugins, and adding tools |
 
-Deeper reference: [`AGENTS.md`](../AGENTS.md) for architecture and design,
-`cobirb help <topic>` in the terminal.
+Every page is also `cobirb help <page>` in the terminal (`cobirb help` lists them). Deeper reference:
+[`AGENTS.md`](../AGENTS.md) for architecture and design.

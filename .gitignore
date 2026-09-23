@@ -10,3 +10,4 @@ __pycache__/
 *.session.json
 .claude/settings.local.json
 bench/results/
+build/

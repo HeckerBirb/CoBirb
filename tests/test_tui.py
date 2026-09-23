@@ -692,7 +692,7 @@ async def test_help_with_a_topic_shows_that_topic():
     async with app.run_test() as pilot:
         await pilot.pause()
         await _submit(pilot, app, "/help plan")
-        assert "PLAN MODE" in _static_text(app, "#help-body")
+        assert "Plan mode" in _static_text(app, "#help-body")  # the manual's commands page
 
 
 async def test_help_with_an_unknown_topic_says_so_and_falls_back():

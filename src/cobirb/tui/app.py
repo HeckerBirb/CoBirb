@@ -1302,7 +1302,7 @@ class CoBirbApp(App[None]):
         text = HELP_TOPICS.get(topic, HELP_TEXT) if topic else HELP_TEXT
         if topic and topic not in HELP_TOPICS:
             text = (
-                f"No help topic '{topic}'. Available: {', '.join(sorted(HELP_TOPICS))}\n\n"
+                f"No help topic '{topic}'. Available: {', '.join(HELP_TOPICS.pages())}\n\n"
                 + HELP_TEXT
             )
         self.push_screen(HelpModal(text))

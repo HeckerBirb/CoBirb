@@ -559,7 +559,7 @@ def _build_parser() -> argparse.ArgumentParser:
         # slot holds the verb (install/list/remove) instead of a help topic,
         # since argparse's `choices` can't depend on another argument's value.
         # main() validates it against the right set once it knows which.
-        help=f"With 'help': a specific topic ({', '.join(sorted(HELP_TOPICS))}). "
+        help=f"With 'help': a manual page ({', '.join(HELP_TOPICS.pages())}). "
         "With 'plugin': install, list, or remove.",
     )
     parser.add_argument(
@@ -725,11 +725,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand == "help":
         if args.topic and args.topic not in HELP_TOPICS:
             print(
-                f"cobirb: no help topic {args.topic!r}. Topics: {', '.join(sorted(HELP_TOPICS))}.",
+                f"cobirb: no help topic {args.topic!r}. Topics: {', '.join(HELP_TOPICS.pages())}.",
                 file=sys.stderr,
             )
             return EXIT_ERROR
-        print(HELP_TOPICS[args.topic] if args.topic else HELP_TEXT)
+        if not args.topic:
+            print(HELP_TEXT)
+        elif sys.stdout.isatty():
+            # A manual page is markdown; on a terminal it reads better rendered.
+            # Piped, it stays plain, so it greps and pages like any text.
+            from rich.console import Console
+            from rich.markdown import Markdown
+
+            Console().print(Markdown(HELP_TOPICS[args.topic]))
+        else:
+            print(HELP_TOPICS[args.topic])
         return 0
 
     if args.upgrade is not None:

@@ -1694,3 +1694,26 @@ def test_continue_reaches_the_orchestrator_with_that_session(tmp_path, monkeypat
 
     assert captured["session_path"] == newest
     assert captured["password"] == "pw"
+
+
+# --------------------------------------------------------------------------- #
+# Help is the manual
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("topic", ["session", "plan", "model", "flock", "hooks", "plugin", "commands",
+                                   "mcp", "plugins", "tools", "config"])
+def test_every_topic_the_old_help_had_still_answers(topic):
+    """Topic names people have typed or written down must keep working."""
+    assert help_text.HELP_TOPICS[topic].startswith("# ")
+
+
+def test_each_help_topic_is_the_manual_page_itself():
+    from pathlib import Path
+
+    page = Path(help_text.manual_dir()) / "permissions.md"
+    assert help_text.HELP_TOPICS["permissions"] == page.read_text(encoding="utf-8")
+
+
+def test_an_unknown_topic_lists_pages_not_aliases(capsys):
+    assert cli.main(["help", "nope"]) != 0
+    err = capsys.readouterr().err
+    assert "permissions" in err and "plugin," not in err

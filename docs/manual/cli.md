@@ -38,8 +38,8 @@ cobirb help config                       # help on one topic
 ## Subcommands
 
 ```bash
-cobirb help [topic]      # commands, config, flock, hooks, mcp, model,
-                         # plan, plugin, plugins, session, tools
+cobirb help [topic]      # any page of this manual, e.g. commands, config,
+                         # flock, hooks, mcp, permissions, tools
 cobirb setup             # choose your model server and model, saved to your config
 cobirb doctor            # is everything ready to go?
 cobirb models            # how each role resolves
