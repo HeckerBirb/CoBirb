@@ -1,0 +1,16 @@
+{
+  "label": "flock-v5-staged-locked",
+  "sha": "b4c65816f9cc512c3ed41e50071255bccafb1623",
+  "tasks": 2,
+  "reps": 3,
+  "flock": true,
+  "models": [
+    "ornith-1.5:9b",
+    "qwen3-coder:30b",
+    "gemma4:latest"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {
+    "flock_planning": "staged"
+  }
+}
