@@ -309,6 +309,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--models", required=True, help="comma-separated model names")
     parser.add_argument("--tasks", default="*", help="glob over task ids (default: all)")
+    parser.add_argument("--skip", default="", help="comma-separated globs of task ids to leave out")
     parser.add_argument("--reps", type=int, default=1)
     parser.add_argument("--seed", type=int, default=1000, help="seed of rep 1; rep n uses seed+n-1")
     parser.add_argument("--revision", default="HEAD", help="commit to measure (default: HEAD)")
@@ -322,7 +323,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args(argv)
 
-    tasks = sorted((Task.load(p) for p in TASKS_DIR.glob(args.tasks) if (p / "task.toml").is_file()),
+    import fnmatch
+
+    skipped = [g for g in args.skip.split(",") if g]
+    tasks = sorted((Task.load(p) for p in TASKS_DIR.glob(args.tasks)
+                    if (p / "task.toml").is_file() and not any(fnmatch.fnmatch(p.name, g) for g in skipped)),
                    key=lambda t: t.id)
     if not tasks:
         print(f"no tasks match {args.tasks!r}", file=sys.stderr)
