@@ -1,0 +1,16 @@
+{
+  "label": "flock-v4-staged-briefs-after",
+  "sha": "16f57f36fbbc798486408703abcfce20229c7fe9",
+  "tasks": 2,
+  "reps": 3,
+  "flock": true,
+  "models": [
+    "ornith-1.5:9b",
+    "qwen3-coder:30b",
+    "gemma4:latest"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {
+    "flock_planning": "staged"
+  }
+}
