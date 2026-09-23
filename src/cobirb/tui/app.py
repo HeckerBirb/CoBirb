@@ -527,6 +527,14 @@ class CoBirbApp(App[None]):
         if self.orchestrator is not None:
             self.orchestrator.close()
         self.orchestrator = None
+        # Auto-pilot and the checklist belonged to that orchestrator; the next
+        # one starts without either, so the status bar must not claim them.
+        try:
+            status = self.query_one(StatusBar)
+            status.autopilot = False
+            status.checklist = ""
+        except Exception:  # noqa: BLE001 - on the way out the widgets may already be gone
+            pass
 
     def on_unmount(self) -> None:
         """Shut down cleanly when the app closes."""
