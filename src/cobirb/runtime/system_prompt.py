@@ -13,6 +13,11 @@ reads the model's own prompt back and places it first (see
 """
 from __future__ import annotations
 
+# Measured, and off by default because of it: on cobirb-bench's harder tasks
+# (five models, two runs each) it scored 49/60 with and 49/60 without — no
+# difference the noise could not explain. The rule was that it ships on only
+# if it measurably helps. Re-measure before changing that.
+#
 # How to work, for a model that otherwise knows only what its Modelfile says —
 # usually "a helpful assistant", which is a chat partner, not an agent. Kept
 # short: every line is paid for on every request, and each one answers a

@@ -935,6 +935,10 @@ COBIRB_TEST_MODEL=llama3.1 pytest -m integration  # needs a real local Ollama
 Absences in the source are not omissions. Each of these was costed and rejected; reopening one is a
 fresh decision to take with the user, not a gap to helpfully fill.
 
+- **The working-method prompt stays opt-in** (`--system-prompt harness`). Measured in 0.37–0.40 on
+  the harder benchmark tasks: 49/60 with it, 49/60 without. It was to ship on by default only if it
+  measurably helped (decision D3); it did not, and the model's own `SYSTEM` stays untouched by
+  default. Re-measure rather than re-argue.
 - **Local models only, forever.** No shipped or blessed remote provider, ever. The SPI lets a third
   party write one; that is their choice to make.
 - **CoBirb is a client, never a model runtime.** An embedded GGUF runtime (in-process
