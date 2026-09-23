@@ -21,7 +21,7 @@ and its §17 decisions record for the ones that were designed and then deliberat
 - **Flock: staged planning, opt-in** (`"flock_planning": "staged"`) — divide into tickets, then the
   skeleton and brief one ticket at a time, then seal, each step re-stating the work. It gave the
   weakest planning model a charter every time, but cost the strongest one a spec detail, so the
-  one-prompt planner stays the default.
+  one-prompt planner stays the default. Sealing waits until every ticket's skeleton step has run.
 - **Tests run in parallel** (`pytest-xdist`): the suite takes about 15 seconds instead of two
   minutes.
 - **A `cd` inside the project no longer gets a command refused**: with `pytest` allowed,

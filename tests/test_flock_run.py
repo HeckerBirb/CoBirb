@@ -1198,3 +1198,50 @@ def test_the_one_prompt_planner_is_the_default(monkeypatch, tmp_path):
     )
 
     assert "Step 1 of 3" not in prompts[0]
+
+
+def test_a_seal_in_step_one_waits_for_the_skeleton(monkeypatch, tmp_path):
+    """The strongest model measured sealed in step 1 on every seed, and the
+    skeleton steps never ran. Refused there, they do — and it seals at step 3."""
+    from cobirb.flock.brainy import ADD_WORKER, PROPOSE_CHARTER, SEAL_CHARTER
+
+    write_config(tmp_path, {"flock_planning": "staged"})
+    _skeleton(tmp_path)
+    _honest_workers(monkeypatch, tmp_path)
+    calls = [
+        (ADD_WORKER, {"id": "a", "brief": "go", "writes": ["a.py"]}),
+        (ADD_WORKER, {"id": "b", "brief": "go", "writes": ["b.py"]}),
+        (SEAL_CHARTER, {"objective": "too early"}),
+        (PROPOSE_CHARTER, {"toml": _charter_toml(tmp_path)}),
+        None,  # step 1 ends
+        None,  # a's skeleton
+        None,  # b's skeleton
+        (SEAL_CHARTER, {"objective": "two things"}),
+    ]
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(calls))
+    prompts = []
+    original = orchestrator.run
+    monkeypatch.setattr(
+        orchestrator, "run",
+        lambda prompt, *a, **k: (prompts.append(prompt), original(prompt, *a, **k))[1],
+    )
+
+    run = run_flock_session(
+        orchestrator, "double two numbers", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+    )
+
+    assert run.charter is not None and run.charter.objective == "two things"
+    assert sum("skeleton for ticket" in p for p in prompts) == 2
+
+
+def test_the_seal_lock_is_staged_planning_only(monkeypatch, tmp_path):
+    """The one-prompt planner seals whenever it is ready, as it always has."""
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_charter_toml(tmp_path)))
+
+    run = run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": False), probe=False,
+    )
+
+    assert run.charter is not None

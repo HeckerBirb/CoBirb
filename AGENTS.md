@@ -343,7 +343,9 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
   `skeleton_prompt` per ticket, then `seal_prompt` — each a separate `run` on the same session, each
   re-stating the objective and carrying only its own instructions, because the one-prompt planner asked
   for everything at once and the weakest model ended half its rounds with no charter. Each ticket's
-  brief is rewritten after its skeleton. Measured: charters every time for ornith 9B (2/6 → 5/6), but
+  brief is rewritten after its skeleton, and `seal_charter`/`propose_charter` are refused
+  (`CharterDesk.seal_locked`, not counted as attempts) until every ticket has had its skeleton step:
+  qwen3-coder sealed in step 1 on every seed traced, so no skeleton step ever ran. Measured: charters every time for ornith 9B (2/6 → 5/6), but
   qwen3-coder lost a spec detail in every rep (6/6 → 2/6) — so not the default until a run shows it
   costs nothing. The bench keeps the planned skeleton and briefs for a failed round to find where.
   What is left incomplete falls through to the driven loop below; a decline in step 1 ends planning.

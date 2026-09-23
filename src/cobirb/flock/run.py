@@ -270,6 +270,17 @@ def _staged(orchestrator: Orchestrator, tool: ProposeCharterTool, objective: str
     ``_plan``'s driven loop, which asks for exactly the missing move.
     """
     desk = tool.desk
+    # Sealing waits for the skeleton; see `CharterDesk.locked_notice`.
+    desk.seal_locked = True
+    try:
+        return _staged_steps(orchestrator, tool, objective, cwd, turns)
+    finally:
+        desk.seal_locked = False
+
+
+def _staged_steps(orchestrator: Orchestrator, tool: ProposeCharterTool, objective: str, cwd: str,
+                  turns: int) -> tuple[str, bool, bool]:
+    desk = tool.desk
 
     def step(prompt: str) -> tuple[str, bool]:
         session = orchestrator.run(prompt, system="", cwd=cwd, label="Brainy Birb", max_turns=turns)
@@ -293,6 +304,7 @@ def _staged(orchestrator: Orchestrator, tool: ProposeCharterTool, objective: str
             return narration, touched, True
 
     if tool.charter is None and desk.draft.workers:
+        desk.seal_locked = False
         text, called = step(seal_prompt(objective, desk.draft))
         narration, touched = text or narration, touched or called
     return narration, touched, _stopped(orchestrator, tool)

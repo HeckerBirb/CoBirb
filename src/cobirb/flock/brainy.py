@@ -316,6 +316,8 @@ class CharterDesk:
         # last ownership question named (see `ownership_question`).
         self._before: "dict[str, tuple[int, int]] | None" = None
         self._asked_unowned: tuple[str, ...] = ()
+        # Set by staged planning until every ticket has had its skeleton step.
+        self.seal_locked = False
 
     def reset(self) -> None:
         """Forget everything, before a fresh planning turn.
@@ -336,6 +338,24 @@ class CharterDesk:
         self._repeats = 0
         self._before = None
         self._asked_unowned = ()
+        self.seal_locked = False
+
+    def locked_notice(self) -> str:
+        """What a seal attempted before the skeleton exists is told.
+
+        **Staged planning is only staged if the steps happen.** Step 1 used to
+        offer `seal_charter` and `propose_charter` like any other step, and the
+        strongest model measured sealed right there on every seed — so no
+        skeleton step ever ran, the workers got step 1's one-line briefs and no
+        stubs or tests, and built from a sentence. Not an attempt, and not a
+        rejection: nothing about the plan is wrong, it is only early.
+        """
+        return (
+            "Not yet — the charter is sealed in step 3. The tickets are recorded "
+            f"({self.draft.describe()}) and stay as they are; each ticket's skeleton is "
+            "written in step 2, one ticket per step. Stop calling tools for this step now; "
+            "the next step will say what to do."
+        )
 
     def watch_skeleton(self, cwd: str) -> None:
         """Remember the project as it is now, before the skeleton is written."""
@@ -743,6 +763,8 @@ class SealCharterTool(_DeskTool):
         }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        if self.desk.seal_locked:
+            return ToolResult(ok=False, content=self.desk.locked_notice(), error="not_yet")
         self.desk.attempts += 1
         concurrency = arguments.get("concurrency")
         try:
@@ -864,6 +886,8 @@ class ProposeCharterTool(_DeskTool):
         a file, and telling the model that now saves a round trip and a user's
         attention later.
         """
+        if self.desk.seal_locked:
+            return ToolResult(ok=False, content=self.desk.locked_notice(), error="not_yet")
         text = str(arguments.get("toml") or "")
         self.desk.attempts += 1
         try:
@@ -962,7 +986,8 @@ Record each ticket now with `add_worker`: its id; `writes`; `tests` (which \
 of `writes` hold its tests); `accept`, the command that proves it is done, \
 e.g. `python -m pytest tests/test_x.py -q`; and a ONE-LINE brief for now — \
 you will write the real brief in step 2, from the skeleton, once it exists. \
-DO NOT write any files yet — the skeleton is step 2.
+DO NOT write any files yet — the skeleton is step 2 — and do not seal: \
+`seal_charter` and `propose_charter` are step 3, and are refused until then.
 
 {NEED_TO_KNOW_DIRECTIVE}"""
 

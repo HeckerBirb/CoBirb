@@ -184,7 +184,9 @@ carrying only its own instructions:
 2. **The skeleton, one ticket at a time.** Typed stubs with semantic docstrings in that ticket's
    files, and failing tests in its test files — then the ticket's real brief, written from that
    skeleton. The first step also writes any finished shared files.
-3. **Seal**, after reading each brief against the skeleton.
+3. **Seal**, after reading each brief against the skeleton. Sealing is refused until every ticket
+   has had its skeleton step — otherwise a model that finishes eagerly seals in step 1, and the
+   workers start from one-line briefs and no stubs.
 
 Asking for everything at once was more than a weaker planner could hold: in CoBirb's benchmark the
 weakest ended half its rounds without a charter, and staged planning gave it one every time. It
