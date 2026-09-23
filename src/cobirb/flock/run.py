@@ -299,7 +299,7 @@ def _staged(orchestrator: Orchestrator, tool: ProposeCharterTool, objective: str
 
 
 def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int,
-          staged: bool = True) -> PlanResult:
+          staged: bool = False) -> PlanResult:
     """Let Brainy Birb plan and scaffold, and take the charter it proposes.
 
     **A driven loop with a completion predicate, rather than one turn plus a
@@ -498,9 +498,11 @@ def _drive(
         ask.show("Brainy Birb is planning and building the skeleton…")
         plan = _plan(
             orchestrator, objective, cwd, plan_turns,
-            # `"single"` is the one-prompt planner the staged one replaced,
-            # kept so the two can be measured against each other.
-            staged=config.get("flock_planning", default=PLANNING_STAGED) != PLANNING_SINGLE,
+            # The one-prompt planner by default. Staged planning gave the
+            # weakest planner a charter every time and cost the strongest one
+            # a detail of the spec in every rep, so it stays available but is
+            # not the default until a run shows it costs nothing.
+            staged=config.get("flock_planning", default=PLANNING_SINGLE) == PLANNING_STAGED,
         )
     if plan.charter is not None and plan.recovered:
         # Say so. A charter that arrived this way is one the model got right

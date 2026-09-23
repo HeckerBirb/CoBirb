@@ -823,9 +823,6 @@ def test_an_unsealed_plan_gets_one_nudge_to_seal_it(monkeypatch, tmp_path):
     the only thing between it and a running flock is one more call."""
     from cobirb.flock.brainy import ADD_WORKER, SEAL_CHARTER
 
-    # The one-prompt planner; staged planning asks for the seal as a step of
-    # its own, so it never reaches this nudge.
-    write_config(tmp_path, {"flock_planning": "single"})
     _skeleton(tmp_path)
     _honest_workers(monkeypatch, tmp_path)
     # Stops after adding the tickets; the nudge turn then seals.
@@ -1137,6 +1134,7 @@ def test_staged_planning_asks_for_one_step_at_a_time(monkeypatch, tmp_path):
     Each step carries only its own instructions, and the work itself."""
     from cobirb.flock.brainy import ADD_WORKER, SEAL_CHARTER
 
+    write_config(tmp_path, {"flock_planning": "staged"})
     _skeleton(tmp_path)
     _honest_workers(monkeypatch, tmp_path)
     calls = [
@@ -1166,10 +1164,13 @@ def test_staged_planning_asks_for_one_step_at_a_time(monkeypatch, tmp_path):
     assert "skeleton for ticket 'a'" in planning[1] and "skeleton for ticket 'b'" in planning[2]
     assert "Step 3 of 3" in planning[3]
     assert all("double two numbers" in p for p in planning)
+    # The real brief is asked for after the skeleton, not before it.
+    assert "FROM THE SKELETON" in planning[1] and "FROM THE SKELETON" not in planning[0]
 
 
 def test_staged_planning_still_takes_no_for_an_answer(monkeypatch, tmp_path):
     """Declining to divide in step 1 ends planning; it is not nudged."""
+    write_config(tmp_path, {"flock_planning": "staged"})
     orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy([None]))
 
     run = run_flock_session(
@@ -1178,3 +1179,22 @@ def test_staged_planning_still_takes_no_for_an_answer(monkeypatch, tmp_path):
     )
 
     assert run.charter is None and run.stopped_at == "planning"
+
+
+def test_the_one_prompt_planner_is_the_default(monkeypatch, tmp_path):
+    """Staged planning cost the strongest model a spec detail in every rep, so
+    it is opt-in until measured otherwise."""
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_charter_toml(tmp_path)))
+    prompts = []
+    original = orchestrator.run
+    monkeypatch.setattr(
+        orchestrator, "run",
+        lambda prompt, *a, **k: (prompts.append(prompt), original(prompt, *a, **k))[1],
+    )
+
+    run_flock_session(
+        orchestrator, "do the thing", str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": False), probe=False,
+    )
+
+    assert "Step 1 of 3" not in prompts[0]

@@ -111,6 +111,7 @@ class Result:
     check_output: str = ""
     workers: list = field(default_factory=list)  # flock mode: each worker's own report
     charter: dict | None = None  # flock mode: who was given which files
+    skeleton: dict | None = None  # flock mode, failed rounds only: files and briefs as planned
 
 
 # --------------------------------------------------------------------------- #
@@ -243,6 +244,9 @@ def run_one(task: Task, model: str, rep: int, seed: int, *, base_url: str, src: 
             check_output=check_output,
             workers=(report or {}).get("worker_reports", []),
             charter=(report or {}).get("charter"),
+            # Kept only when the round failed: it is the evidence for where a
+            # spec detail went missing, and a passing round needs none.
+            skeleton=None if passed else (report or {}).get("skeleton"),
         )
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

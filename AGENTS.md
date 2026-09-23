@@ -338,12 +338,15 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
 - **All five tools are moves on one `CharterDesk`** (owner of the draft, the charter and every counter),
   registered and permitted together for the whole session by `install_charter_tool` — the planning
   rules stay in context, so a missing tool is an `Unknown tool` the model cannot argue past.
-- **Staged by default** (`run._staged`, `flock_planning` = `"staged"` | `"single"`): divide
+- **Staged planning, opt-in** (`run._staged`, `flock_planning` = `"single"` (default) | `"staged"`): divide
   (`brainy.partition_prompt`, tickets via `add_worker` before any file exists), then one
   `skeleton_prompt` per ticket, then `seal_prompt` — each a separate `run` on the same session, each
   re-stating the objective and carrying only its own instructions, because the one-prompt planner asked
-  for everything at once and the weakest model ended half its rounds with no charter. What is left
-  incomplete falls through to the driven loop below; a decline in step 1 ends planning.
+  for everything at once and the weakest model ended half its rounds with no charter. Each ticket's
+  brief is rewritten after its skeleton. Measured: charters every time for ornith 9B (2/6 → 5/6), but
+  qwen3-coder lost a spec detail in every rep (6/6 → 2/6) — so not the default until a run shows it
+  costs nothing. The bench keeps the planned skeleton and briefs for a failed round to find where.
+  What is left incomplete falls through to the driven loop below; a decline in step 1 ends planning.
 - **A driven loop with a completion predicate** (`run._plan`, `MAX_PLAN_STEPS = 5`): after each pass, no
   sealed charter → `brainy.next_move_prompt` asks for exactly the missing move. Exits: a charter; no
   tool called and nothing built (a legitimate "do not divide"); `tool.exhausted`, the turn budget, or

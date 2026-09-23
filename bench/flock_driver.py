@@ -12,7 +12,10 @@ Invoked by cobirb_bench.py with the frozen source on PYTHONPATH:
 from __future__ import annotations
 
 import json
+import os
 import sys
+
+_SKELETON_FILE_CHARS = 8000
 
 _WRITES = {"write_file", "edit_file", "apply_patch", "delete_file"}
 
@@ -24,10 +27,25 @@ def main() -> int:
     from cobirb.runtime.headless import HeadlessIO
 
     orchestrator = wiring.build_orchestrator(cwd, {}, io_factory=HeadlessIO)
+    skeleton: dict = {}
+
+    def keep_skeleton(charter) -> None:
+        """What the workers were handed: the files as planning left them, and
+        each brief. Fired after planning and before any worker runs, so a
+        failed round can be read back to where the spec was lost."""
+        for path in sorted({p for w in charter.workers for p in (*w.writes, *w.reads)}):
+            try:
+                with open(os.path.join(cwd, path), encoding="utf-8") as fh:
+                    skeleton[path] = fh.read()[:_SKELETON_FILE_CHARS]
+            except OSError:
+                skeleton[path] = None  # not written by planning
+        skeleton["__briefs__"] = {w.id: w.brief for w in charter.workers}
+
     try:
         run = run_flock_session(
             orchestrator, objective, cwd,
             ask=Asker(confirm=lambda prompt, detail="": True), probe=False,
+            on_charter=keep_skeleton,
         )
     finally:
         orchestrator.close()
@@ -65,6 +83,7 @@ def main() -> int:
              "workers": {w.id: list(w.writes) for w in run.charter.workers}}
             if getattr(run, "charter", None) else None
         ),
+        "skeleton": skeleton,
         "turns": sum(r.turns for r in reports),
         "tool_calls": calls,
         "denied": [c.get("target") or c["name"] for c in calls if c.get("denied")],

@@ -916,6 +916,13 @@ def plan_prompt(objective: str) -> str:
 # opening with the work itself so nothing depends on remembering it: divide
 # (the tickets, recorded with `add_worker` before a file exists), then the
 # skeleton one ticket at a time, then seal.
+#
+# **Each ticket's brief is written after its skeleton, not in step 1.** The
+# first staged measurement lost a spec detail in every rep with the strongest
+# model — `run(store, "set k v")` returned "" where the work said "OK", with
+# the workers' own checks passing — and step 1 was writing the briefs before a
+# single docstring or test existed. A brief written from the skeleton can only
+# repeat what the skeleton pins.
 STAGED_INTRO = """\
 You are Brainy Birb, the lead engineer of a Flock. You divide a piece of work \
 between Worker Birbs who never speak to each other and see nothing but the \
@@ -951,12 +958,11 @@ that ticket wait.
   - If the work does not divide, say so in one sentence and call nothing. \
 That is a correct answer.
 
-Record each ticket now with `add_worker`: its id; its brief (what to \
-implement and what done looks like — only its own part, never the whole \
-feature or the other tickets); `writes`; `tests` (which of `writes` hold its \
-tests); and `accept`, the command that proves it is done, e.g. \
-`python -m pytest tests/test_x.py -q`. DO NOT write any files yet — the \
-skeleton is step 2.
+Record each ticket now with `add_worker`: its id; `writes`; `tests` (which \
+of `writes` hold its tests); `accept`, the command that proves it is done, \
+e.g. `python -m pytest tests/test_x.py -q`; and a ONE-LINE brief for now — \
+you will write the real brief in step 2, from the skeleton, once it exists. \
+DO NOT write any files yet — the skeleton is step 2.
 
 {NEED_TO_KNOW_DIRECTIVE}"""
 
@@ -1001,10 +1007,15 @@ implements, fully typed, with a docstring that states SEMANTICS ("returns None \
 for a missing key", not "handles keys"), and a body that raises \
 NotImplementedError — never one that returns a plausible value.
 {test_line}
-Write it in the project's own style: the worker imitates it. If the ticket \
-turns out to need a file its `writes` does not list, `drop_worker` it and \
-`add_worker` it back with that file. When this ticket's files are written, \
-stop — each ticket is its own step."""
+Write it in the project's own style: the worker imitates it.
+
+Then write this ticket's real brief, FROM THE SKELETON YOU JUST WROTE: call \
+`drop_worker` with '{worker_id}', then `add_worker` again with the same id, \
+`writes`, `tests` and `accept` (adding any file it turned out to need), and a \
+brief that names what to implement and every exact value the work requires of \
+it — return values, output text, formats, errors — as the docstrings and \
+tests state them. The brief and the skeleton are all the worker will see; \
+never the work above. Then stop — each ticket is its own step."""
 
 
 def seal_prompt(objective: str, draft: PlanDraft) -> str:
