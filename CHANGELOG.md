@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **The installer finishes by checking your setup.** Every install and upgrade now ends with
+  `cobirb doctor`, a line explaining what its marks mean, and — if bubblewrap or git is missing — why
+  they are worth installing, with the command for your package manager. The installer still never
+  uses `sudo`; installing them stays your decision.
+- The install page now recommends bubblewrap and git up front, and says what you lose without them.
+
 ## [0.41.0]
 
 - **`cobirb help <topic>` is the manual.** Each topic is now a page of the user manual, rendered in

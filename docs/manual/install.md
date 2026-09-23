@@ -2,6 +2,15 @@
 
 You need Python 3.11+ and a running model server. [Ollama](https://ollama.com) is the default.
 
+Strongly recommended, from your system's package manager: **bubblewrap** (the shell sandbox, Linux)
+and **git** (undo for everything a turn changed). CoBirb runs without them, but then every shell
+command it runs has your full access, has to be asked about, and cannot be undone — and auto-pilot
+will not start.
+
+```bash
+sudo apt install bubblewrap git      # Debian/Ubuntu; dnf, pacman, zypper and apk have the same names
+```
+
 ## 1. Get a model
 
 ```bash
@@ -26,6 +35,10 @@ home directory:
 
 If `~/.local/bin` isn't on your `PATH`, the installer says so and prints the line to add. It
 never edits your shell's rc file for you.
+
+It finishes by running [`cobirb doctor`](doctor.md) and explaining its marks. If bubblewrap or git is
+missing it says why they are worth installing and prints the command for your package manager — it
+never runs `sudo` itself.
 
 Prefer to read it first — it is [`install.sh`](../../src/cobirb/install.sh) in this repository:
 

@@ -571,3 +571,52 @@ def test_the_installer_leaves_a_cobirb_home_alone_when_uninstalling(tmp_path):
     assert result.returncode == 0
     assert not install_dir.exists()
     assert (home / "config.json").exists()
+
+
+# --------------------------------------------------------------------------- #
+# The end of an install: doctor, and the system dependencies worth having
+# --------------------------------------------------------------------------- #
+def _post_install_report(tmp_path, *, have):
+    """Run install.sh's closing report against a fake `cobirb` and a PATH that
+    holds only the commands named in ``have`` (plus what the report needs)."""
+    import shutil
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool in ("uname", "cat"):
+        os.symlink(shutil.which(tool), bin_dir / tool)
+    for tool in have:
+        (bin_dir / tool).write_text("#!/bin/sh\nexit 0\n")
+        (bin_dir / tool).chmod(0o755)
+    (bin_dir / "apt-get").write_text("#!/bin/sh\nexit 0\n")
+    (bin_dir / "apt-get").chmod(0o755)
+    fake = tmp_path / "cobirb"
+    fake.write_text("#!/bin/sh\necho '  ✗ model endpoint — not reachable'\nexit 1\n")
+    fake.chmod(0o755)
+    script = upgrade_module._bundled_install_script()
+    return subprocess.run(
+        ["/bin/sh", "-c", f'. "{script}"; post_install_report "{fake}"; echo "exit=$?"'],
+        capture_output=True, text=True, timeout=30,
+        env={"PATH": str(bin_dir), "COBIRB_INSTALL_SOURCED": "1", "HOME": str(tmp_path)},
+    )
+
+
+def test_an_install_ends_with_doctor_and_what_its_marks_mean(tmp_path):
+    result = _post_install_report(tmp_path, have=["bwrap", "git"])
+
+    assert "✗ model endpoint" in result.stdout  # doctor's own output, shown
+    assert "✓ is ready" in result.stdout
+    assert "exit=0" in result.stdout  # a failing check never fails the install
+    assert "system-level dependencies" not in result.stdout  # nothing missing, nothing said
+
+
+def test_missing_system_dependencies_are_named_with_reasons_and_a_command(tmp_path):
+    result = _post_install_report(tmp_path, have=[])
+
+    out = result.stdout
+    assert "should strongly consider installing the missing system-level dependencies because" in out
+    assert "  1. " in out and "  2. " in out
+    if os.uname().sysname == "Linux":
+        assert "sudo apt install bubblewrap git" in out
+    else:
+        assert "sudo apt install git" in out

@@ -175,6 +175,58 @@ do_uninstall() {
     say "Your ~/.cobirb/ (config, sessions, memory) was not touched."
 }
 
+# The system packages CoBirb uses but cannot install itself (this script never
+# uses sudo): bubblewrap for the shell sandbox — Linux only, there is no macOS
+# build — and git for whole-tree undo. Prints the missing ones, space-separated.
+missing_system_dependencies() {
+    _missing=""
+    if [ "$(uname -s 2>/dev/null)" = "Linux" ] && ! command -v bwrap >/dev/null 2>&1; then
+        _missing="bubblewrap"
+    fi
+    command -v git >/dev/null 2>&1 || _missing="${_missing:+$_missing }git"
+    printf '%s' "$_missing"
+}
+
+# The install command for this system's package manager, for packages "$1".
+package_install_hint() {
+    if command -v apt-get >/dev/null 2>&1; then printf 'sudo apt install %s' "$1"
+    elif command -v dnf >/dev/null 2>&1; then printf 'sudo dnf install %s' "$1"
+    elif command -v pacman >/dev/null 2>&1; then printf 'sudo pacman -S %s' "$1"
+    elif command -v zypper >/dev/null 2>&1; then printf 'sudo zypper install %s' "$1"
+    elif command -v apk >/dev/null 2>&1; then printf 'sudo apk add %s' "$1"
+    elif command -v brew >/dev/null 2>&1; then printf 'brew install %s' "$1"
+    else printf "install '%s' with your system's package manager" "$1"
+    fi
+}
+
+# The last thing an install does: show `cobirb doctor`, say in a line what it
+# means, and — when a system dependency is missing — say plainly why it is
+# worth installing. Never fails the install: doctor's own exit code reports on
+# the configuration, not on whether installing worked.
+post_install_report() {
+    _cobirb="$1"
+    say ""
+    say "Checking your setup ('cobirb doctor'):"
+    say ""
+    "$_cobirb" doctor || true
+    say ""
+    say "Above: ✓ is ready, ! is worth knowing, ✗ needs fixing before CoBirb can work."
+    say "Run 'cobirb doctor' again any time; 'cobirb setup' points CoBirb at your model server."
+    _missing=$(missing_system_dependencies)
+    [ -n "$_missing" ] || return 0
+    say ""
+    say "Missing system-level dependencies: $_missing"
+    say "You should strongly consider installing the missing system-level dependencies because:"
+    say "  1. Without bubblewrap, a shell command the agent runs has your full access: the network,"
+    say "     every file you can read, your SSH and cloud keys. With it, commands run sandboxed:"
+    say "     no network, nothing writable outside your project, credentials hidden."
+    say "  2. Without bubblewrap and git, CoBirb must ask before every shell command, cannot undo"
+    say "     what a command changed, and auto-pilot will not start. With both, contained"
+    say "     commands run on their own and /undo takes back anything a turn did."
+    say ""
+    say "Install them with:  $(package_install_hint "$_missing")"
+}
+
 main() {
     version_arg=""
     force=0
@@ -271,6 +323,10 @@ EOF
            warn ""
            warn "Until then, run it as $SHIM." ;;
     esac
+
+    post_install_report "$VENV/bin/cobirb"
 }
 
-main "$@"
+# Sourcing with COBIRB_INSTALL_SOURCED=1 defines the functions without
+# installing anything — how the tests reach the parts after the download.
+[ "${COBIRB_INSTALL_SOURCED:-}" = "1" ] || main "$@"

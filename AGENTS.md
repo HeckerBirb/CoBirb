@@ -435,6 +435,10 @@ with it — there is no second copy to update.
 under `## [Unreleased]` first; the script renames the heading, bumps `pyproject.toml`, commits and tags,
 and pushes only with `--push`. It deliberately does not re-run tests, poll CI or install the artifact.
 `release.yml` builds wheel and sdist on the tag and attaches them with `SHA256SUMS` and `install.sh`.
+`install.sh` ends every install and upgrade with `post_install_report`: `cobirb doctor` (its exit code
+ignored — it reports on configuration, not on the install), one line explaining the marks, and, when
+`bubblewrap` (Linux) or `git` is missing, why to install them and the package-manager command. It never
+runs `sudo`. `COBIRB_INSTALL_SOURCED=1` sources the script without installing, for tests.
 `--upgrade` then: **managed** runs the `install.sh` shipped in the running wheel (the one implementation
 of "move to version X"; copied to a tempfile first); **checkout** fetches tags, refuses a downgrade
 without `--force` and a dirty tree outright, **fast-forwards the current branch** onto the tag (a
