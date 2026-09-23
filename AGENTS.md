@@ -383,6 +383,11 @@ persistent was not done: see §17's note on `ShellTool`'s per-call process state
   line, or as a 500 body; ollama/ollama#18563) — is reported through the optional
   `malformed_tool_call()` hook, and `_loop` feeds it back as a user turn and counts it toward the
   failure brake. Assistant turns replay with the markup stripped, so a call is not sent twice.
+- **A thinking model's reasoning is replayed with the tool calls it led to** (`_thinking_by_call`,
+  keyed by `_call_signature`, bounded, memory only). gpt-oss's format expects its earlier reasoning
+  within a task back with its calls; without it the benchmark showed it re-reading the same file
+  until the repeat brake stopped it. Never attached to a final answer, and a resumed session starts
+  without it (no session-format change).
 - Streaming is NDJSON; `_last_tool_calls` is only accurate once the generator is exhausted. An
   `error` line mid-stream is raised, unless it is a tool-call parse failure (above).
   `cancel()` latches the provider closed; `interrupt_current_reply()` cuts one reply and leaves the

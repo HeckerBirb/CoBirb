@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Reasoning models keep their train of thought between tool calls.** A model like gpt-oss thinks
+  before each call, and its format expects that reasoning back alongside the call on the next step.
+  CoBirb dropped it, so the model lost track of what it had already done — in testing, reading the
+  same file over and over until CoBirb stopped it. The reasoning is now kept for the length of the
+  session and sent back with the calls it led to.
+
 ## [0.38.0]
 
 - **Long sessions keep their thread.** When a conversation outgrows the model's window and the

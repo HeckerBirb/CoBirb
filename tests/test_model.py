@@ -1048,3 +1048,27 @@ def test_replayed_history_carries_a_text_call_once_not_twice():
     messages = _build_messages("", context)
     assert messages[-1]["content"] == "Reading."
     assert messages[-1]["tool_calls"][0]["function"]["name"] == "read_file"
+
+
+def test_a_thinking_models_reasoning_comes_back_with_the_calls_it_led_to(monkeypatch):
+    """gpt-oss expects its earlier reasoning within a task to be replayed with
+    its tool calls; without it the model lost its own working between steps."""
+    responses = _RoutingResponses(chat_payload={"message": {
+        "role": "assistant", "content": "", "thinking": "I should read a.py first.",
+        "tool_calls": [{"function": {"name": "read_file", "arguments": {"path": "a.py"}}}]}})
+    monkeypatch.setattr("urllib.request.urlopen", responses)
+    provider = LocalModelProvider(model="m")
+
+    reply = provider.chat("", '[{"role": "user", "content": "go"}]', [_Tool()])
+    provider.parse_tool_calls(reply)
+    history = json.dumps([
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": "", "tool_use": [{"name": "read_file", "arguments": {"path": "a.py"}}]},
+        {"role": "tool", "content": "x = 1", "tool_use": [{"name": "read_file"}]},
+        {"role": "assistant", "content": "Final answer."},
+    ])
+    provider.chat("", history, [_Tool()])
+
+    replayed = responses.chat_messages
+    assert replayed[1]["thinking"] == "I should read a.py first."
+    assert "thinking" not in replayed[3]  # only calls carry it, never a final answer

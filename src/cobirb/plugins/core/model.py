@@ -116,7 +116,28 @@ def _advertised_context(model_info: Any) -> int | None:
     return None
 
 
-def _build_messages(system: str, context: str, *, include_images: bool = False) -> list[dict[str, Any]]:
+# Bounds on the reasoning kept for replay: a thinking trace can be long, and a
+# long session makes many calls.
+_MAX_REMEMBERED_THINKING = 200
+_MAX_THINKING_CHARS = 8000
+
+
+def _call_signature(calls: Any) -> str:
+    """A key for a set of tool calls, the same whether they come from the
+    server's reply or from a turn replayed out of history."""
+    return json.dumps(
+        [[c["name"], c.get("arguments", {})] if isinstance(c, dict) else [c.name, c.arguments] for c in calls],
+        sort_keys=True, default=str,
+    )
+
+
+def _build_messages(
+    system: str,
+    context: str,
+    *,
+    include_images: bool = False,
+    thinking: "dict[str, str] | None" = None,
+) -> list[dict[str, Any]]:
     """Turn the orchestrator's JSON-encoded turn history into a proper
     multi-turn Ollama ``messages`` array, instead of flattening the whole
     conversation into a single opaque "user" message.
@@ -155,18 +176,20 @@ Flattening is what stops a tool-calling loop converging: a "tool" result
         content = turn.get("content", "")
         tool_use = turn.get("tool_use")
         if role == "assistant" and tool_use:
-            messages.append(
-                {
-                    "role": "assistant",
-                    # A call the model wrote as text is replayed as the call it
-                    # was, not twice over — once as markup, once as tool_calls.
-                    "content": toolcalls.strip_markup(content),
-                    "tool_calls": [
-                        {"function": {"name": tu["name"], "arguments": tu.get("arguments", {})}}
-                        for tu in tool_use
-                    ],
-                }
-            )
+            message = {
+                "role": "assistant",
+                # A call the model wrote as text is replayed as the call it
+                # was, not twice over — once as markup, once as tool_calls.
+                "content": toolcalls.strip_markup(content),
+                "tool_calls": [
+                    {"function": {"name": tu["name"], "arguments": tu.get("arguments", {})}}
+                    for tu in tool_use
+                ],
+            }
+            reasoning = (thinking or {}).get(_call_signature(tool_use))
+            if reasoning:
+                message["thinking"] = reasoning
+            messages.append(message)
         elif role == "tool":
             message: dict[str, Any] = {"role": "tool", "content": content}
             if tool_use:
@@ -338,6 +361,15 @@ class LocalModelProvider(ModelProvider):
         # A tool call that was clearly attempted but could not be read — see
         # malformed_tool_call().
         self._malformed = ""
+        # The reasoning a thinking model gave alongside each set of tool calls,
+        # keyed by those calls (_call_signature), so it can be replayed with
+        # them. gpt-oss's format expects its earlier reasoning within a task to
+        # come back with the calls it led to; dropping it, the model lost its
+        # own working between steps and re-read the same file until the loop
+        # stopped it. In memory only — the session format does not change, and
+        # a resumed session simply starts without it.
+        self._last_thinking = ""
+        self._thinking_by_call: dict[str, str] = {}
         # Modelfile SYSTEM directives, keyed by model name. A model's own
         # prompt doesn't change between requests, so this is fetched once per
         # model rather than on every turn. Only successes are cached: a
@@ -618,7 +650,8 @@ class LocalModelProvider(ModelProvider):
         payload: dict[str, Any] = {
             "model": self._model,
             "messages": _build_messages(
-                self.compose_system(system), context, include_images=self.supports_vision()
+                self.compose_system(system), context, include_images=self.supports_vision(),
+                thinking=self._thinking_by_call,
             ),
             "stream": stream,
         }
@@ -637,6 +670,7 @@ class LocalModelProvider(ModelProvider):
         self._offered = {t.name(): t.parameters() for t in (tools or [])}
         self._malformed = ""
         self._last_tool_calls = []
+        self._last_thinking = ""
 
         if stream:
             return self._stream_chat(payload)
@@ -650,6 +684,7 @@ class LocalModelProvider(ModelProvider):
             raise
         message = response.get("message", {})
         self._last_tool_calls = _extract_tool_calls(message)
+        self._last_thinking = str(message.get("thinking") or "")
         content = message.get("content", "")
         if self._offered and not self._last_tool_calls and toolcalls.reply_is_server_parse_error(content):
             self._malformed = _server_parse_problem(content)
@@ -676,6 +711,7 @@ class LocalModelProvider(ModelProvider):
         # as a steer instead of as what it was. That is exactly the class of
         # mistake the 0.5.1 field note about 404s existed to stamp out.
         tool_calls: list[ToolCall] = []
+        thinking: list[str] = []
         for raw_line in self._stream_lines("/api/chat", payload):
             line = raw_line.strip()
             if not line:
@@ -689,6 +725,8 @@ class LocalModelProvider(ModelProvider):
                 if self._stream_error(str(chunk["error"])):
                     break
             message = chunk.get("message", {})
+            if message.get("thinking"):
+                thinking.append(str(message["thinking"]))
             content = message.get("content", "")
             if content:
                 yield content
@@ -700,6 +738,7 @@ class LocalModelProvider(ModelProvider):
             if chunk.get("done"):
                 break
         self._last_tool_calls = tool_calls
+        self._last_thinking = "".join(thinking)
 
     def _stream_error(self, error: str) -> bool:
         """Handle an error reported inside a stream: ``True`` when it was the
@@ -822,6 +861,14 @@ class LocalModelProvider(ModelProvider):
     def parse_tool_calls(self, raw: str) -> list[ToolCall]:
         """The calls from the server's structured field, or — failing that —
         calls the model wrote into its reply as text (see ``toolcalls``)."""
+        calls = self._read_tool_calls(raw)
+        if calls and self._last_thinking:
+            if len(self._thinking_by_call) >= _MAX_REMEMBERED_THINKING:
+                self._thinking_by_call.pop(next(iter(self._thinking_by_call)))
+            self._thinking_by_call[_call_signature(calls)] = self._last_thinking[:_MAX_THINKING_CHARS]
+        return calls
+
+    def _read_tool_calls(self, raw: str) -> list[ToolCall]:
         if self._last_tool_calls or not self._offered:
             return self._last_tool_calls
         if self._offered and not self._malformed and toolcalls.reply_is_server_parse_error(raw or ""):
