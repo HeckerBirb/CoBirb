@@ -17,15 +17,17 @@ lose increasing amounts:
 2. **Drop the oldest turns.** Only if eliding wasn't enough, and always
    leaving the opening request (the objective) and a recent working window.
 
-Deliberately no model call. Summarising the dropped turns would preserve more,
-but it costs a round trip on every compaction and can itself fail. A
-deterministic, testable rule that never makes things worse is what belongs
-underneath; summarisation can sit on top of it.
+No model call *here*. The passes are a deterministic, testable rule that never
+makes things worse; summarisation sits on top of them: ``compact`` accepts an
+optional ``summarise`` callback for the turns pass 2 drops, and the
+orchestrator supplies one (``Orchestrator._summarise_dropped``) that asks the
+model — cached, so it is one call when the dropped prefix grows rather than one
+per turn, and falling back to the plain note if it fails.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 # Used only when the provider cannot say what window it has. Not Ollama's own
 # 4096 default: CoBirb *states* `num_ctx` on every request (see
@@ -54,6 +56,10 @@ _CHARS_PER_TOKEN = 4
 # Turns at the end of the history that are never touched: the immediate
 # working set, where the model is actually operating.
 _KEEP_RECENT = 6
+
+# A summary of dropped turns is capped: it is a reminder, and an unbounded one
+# would itself need compacting.
+_SUMMARY_MAX_CHARS = 4000
 
 # Below this, eliding a tool result saves less than the note replacing it.
 _ELIDE_MIN_CHARS = 400
@@ -86,6 +92,7 @@ class CompactionReport:
     kept_turns: int
     elided_results: int
     dropped_turns: int
+    summarised: bool = False
 
     @property
     def changed(self) -> bool:
@@ -100,7 +107,8 @@ class CompactionReport:
         if self.elided_results:
             parts.append(f"{self.elided_results} tool result(s) elided")
         if self.dropped_turns:
-            parts.append(f"{self.dropped_turns} early turn(s) dropped")
+            parts.append(f"{self.dropped_turns} early turn(s) "
+                         + ("summarised" if self.summarised else "dropped"))
         return f"{used}; {self.kept_turns} of {self.total_turns} turns kept, " + ", ".join(parts) + "."
 
 
@@ -181,7 +189,9 @@ def _truncate(turn: dict[str, Any], keep_chars: int) -> dict[str, Any]:
 
 
 def compact(
-    turns: list[dict[str, Any]], budget_tokens: int
+    turns: list[dict[str, Any]],
+    budget_tokens: int,
+    summarise: "Callable[[list[dict[str, Any]]], str] | None" = None,
 ) -> tuple[list[dict[str, Any]], CompactionReport]:
     """Return ``turns`` trimmed to fit ``budget_tokens``, and what that cost.
 
@@ -239,6 +249,7 @@ def compact(
     # have to survive together: a result with nothing requesting it is the
     # very confusion the JSON turn history was introduced to prevent.
     dropped = 0
+    summarised = False
     if not fits():
         drop_to = 1
         while drop_to < protected_tail and _size([working[0], *working[drop_to:]]) > budget_tokens:
@@ -248,14 +259,21 @@ def compact(
             drop_to += 1
         dropped = drop_to - 1
         if dropped > 0:
-            note = {
-                "role": "user",
-                "content": (
-                    f"[{dropped} earlier turn(s) from this session were dropped to fit the "
-                    "context window. The original request above still stands.]"
-                ),
-                "tool_use": None,
-            }
+            summary = ""
+            if summarise is not None:
+                try:
+                    summary = str(summarise(working[1:drop_to]) or "").strip()[:_SUMMARY_MAX_CHARS]
+                except Exception:  # noqa: BLE001 - a summary is a bonus; the note is the floor
+                    summary = ""
+            summarised = bool(summary)
+            text = (
+                f"[{dropped} earlier turn(s) from this session were dropped to fit the context "
+                f"window. A summary of them:]\n{summary}\n[The original request above still stands.]"
+                if summary else
+                f"[{dropped} earlier turn(s) from this session were dropped to fit the "
+                "context window. The original request above still stands.]"
+            )
+            note = {"role": "user", "content": text, "tool_use": None}
             working = [working[0], note, *working[drop_to:]]
 
     # Pass 3 — the working set is itself over budget. One large file read is
@@ -284,5 +302,5 @@ def compact(
 
     kept_turns = len(working) - (1 if dropped else 0)
     return working, CompactionReport(
-        _size(working), budget_tokens, total, kept_turns, elided, dropped
+        _size(working), budget_tokens, total, kept_turns, elided, dropped, summarised
     )

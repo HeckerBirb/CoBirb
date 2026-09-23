@@ -122,6 +122,15 @@ class RunStop:
 # Flock labels Brainy Birb and each Worker Birb by their own names.
 REPLY_LABEL = "CoBirb"
 
+# What compaction asks for when it has to drop turns (see _summarise_dropped).
+_SUMMARY_REQUEST = (
+    "The conversation above is about to be removed from your context to make room. Write a "
+    "summary of it for your own later reference: what was asked, which files and facts turned "
+    "out to matter, what was changed, what failed, and what is still to do. Bullet points, under "
+    "250 words, nothing that is not in the conversation."
+)
+_SUMMARY_TURN_CHARS = 1500
+
 # Plan mode (Orchestrator.run(plan_mode=True)): a planning pass, then the work.
 # The planning pass can *look* — the read-only tools and the checklist — but not
 # change anything. It used to be a single reply with no tools at all, which
@@ -368,6 +377,8 @@ class Orchestrator:
         # a message with no turn to redirect instead of queuing it for some
         # future, unrelated run.
         self._turn_active = False
+        # (how many dropped turns it covers, the summary) — see _summarise_dropped.
+        self._summary_cache: tuple[int, str] = (0, "")
         # Set by _chat() when a stream was cut off by a steer rather than
         # finishing on its own — see SteeringInterrupted and _loop().
         self._last_chat_was_steered = False
@@ -891,11 +902,45 @@ class Orchestrator:
                     marker = " ".join(f"[image: {img.get('filename') or 'attachment'}]" for img in missing)
                     entry["content"] = f"{entry['content']}\n{marker}".strip() if entry["content"] else marker
             turns.append(entry)
-        turns, report = compact(turns, self._context_budget())
+        turns, report = compact(turns, self._context_budget(), summarise=self._summarise_dropped)
         self.last_compaction = report
         if report.changed:
             logger.info("compacted context: %s", report.describe())
         return json.dumps(turns)
+
+    def _summarise_dropped(self, dropped: list[dict[str, Any]]) -> str:
+        """A model-written summary of turns compaction is about to drop.
+
+        Cached against how many turns it covered: the dropped prefix only grows
+        as a session does, so a later compaction summarises the previous summary
+        plus the newly dropped turns, rather than everything again — one call
+        each time the prefix grows. The material is trimmed before it is sent,
+        since what is being dropped is by definition too large to send whole.
+        No tools are offered, so this call cannot act.
+        """
+        cached_count, cached_text = self._summary_cache
+        if cached_text and cached_count == len(dropped):
+            return cached_text
+        material: list[dict[str, Any]] = []
+        new = dropped
+        if cached_text and cached_count < len(dropped):
+            material.append({"role": "user", "content": f"Summary so far:\n{cached_text}", "tool_use": None})
+            new = dropped[cached_count:]
+        for turn in new:
+            content = str(turn.get("content") or "")
+            if len(content) > _SUMMARY_TURN_CHARS:
+                content = content[:_SUMMARY_TURN_CHARS] + " …[cut]"
+            material.append({"role": turn.get("role", "user"), "content": content,
+                             "tool_use": turn.get("tool_use")})
+        limit = max(4000, self._context_budget() * 2)  # characters, well inside the window
+        while len(json.dumps(material)) > limit and len(material) > 1:
+            material.pop(1 if material[0]["content"].startswith("Summary so far") else 0)
+        material.append({"role": "user", "content": _SUMMARY_REQUEST, "tool_use": None})
+        reply = self.model.chat("", json.dumps(material), [])
+        text = _materialize(reply).strip()
+        if text:
+            self._summary_cache = (len(dropped), text)
+        return text
 
     # ------------------------------------------------------------------ #
     # Tool dispatch (policy-gated)

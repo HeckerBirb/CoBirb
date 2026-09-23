@@ -1889,3 +1889,26 @@ def test_turning_autopilot_off_restores_asking(tmp_path):
 
     assert not orchestrator.policy.is_allowed("write_file", {"path": "x.txt"})
     assert not orchestrator.policy.sandbox_auto
+
+
+def test_the_summary_of_dropped_turns_is_asked_for_once_per_growth(tmp_path):
+    class _Counting(_DummyModel):
+        def __init__(self):
+            super().__init__(reply="summary")
+            self.calls = 0
+
+        def chat(self, *args, **kwargs):
+            self.calls += 1
+            return "- a summary"
+
+    model = _Counting()
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
+    dropped = [{"role": "assistant", "content": f"turn {i}", "tool_use": None} for i in range(5)]
+
+    first = orchestrator._summarise_dropped(dropped)
+    again = orchestrator._summarise_dropped(dropped)
+
+    assert first == again == "- a summary"
+    assert model.calls == 1
+    orchestrator._summarise_dropped(dropped + [{"role": "user", "content": "more", "tool_use": None}])
+    assert model.calls == 2

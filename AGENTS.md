@@ -307,7 +307,7 @@ Everything before the marker stays in the file, so the session remains a complet
 
 `compact()` runs four passes, in increasing order of loss, and short sessions return unchanged:
 1. Elide old tool results outside the last `_KEEP_RECENT = 6` turns (≥400 chars; keeps the call, drops the body).
-2. Drop a contiguous run of oldest turns after turn 0, never starting the remainder on an orphaned tool result, leaving a note.
+2. Drop a contiguous run of oldest turns after turn 0, never starting the remainder on an orphaned tool result, leaving a note — **with a model-written summary of what was dropped** when the caller offers a `summarise` callback (`Orchestrator._summarise_dropped`: no tools offered, material trimmed to fit, cached by how many turns it covers so a later compaction summarises "summary so far + the newly dropped turns" — one call per growth of the prefix — and the plain note if it fails or returns nothing; capped at `_SUMMARY_MAX_CHARS`).
 3. Elide inside the working set if it is itself over budget.
 4. Trim the largest bodies repeatedly (bounded at 64 iterations) — the pass that guarantees it fits.
 

@@ -234,3 +234,38 @@ def test_a_recent_image_is_never_elided():
 
     recent = [t for t in compacted if "recent" in str(t.get("content"))]
     assert recent and recent[0].get("images")
+
+
+# --------------------------------------------------------------------------- #
+# Summarising what is dropped
+# --------------------------------------------------------------------------- #
+def _long_session(n=40, size=800):
+    turns = [{"role": "user", "content": "the objective", "tool_use": None}]
+    for i in range(n):
+        turns.append({"role": "assistant", "content": f"step {i} " + "x" * size, "tool_use": None})
+    return turns
+
+
+def test_dropped_turns_are_replaced_by_a_summary_when_one_is_offered():
+    seen = []
+
+    def summarise(dropped):
+        seen.append(len(dropped))
+        return "- read config.py\n- port is 8081"
+
+    kept, report = compact(_long_session(), 2000, summarise=summarise)
+
+    assert report.dropped_turns and report.summarised
+    assert "port is 8081" in kept[1]["content"]
+    assert kept[0]["content"] == "the objective"
+    assert seen == [report.dropped_turns]
+
+
+def test_a_summariser_that_fails_leaves_the_plain_note():
+    def summarise(dropped):
+        raise RuntimeError("model went away")
+
+    kept, report = compact(_long_session(), 2000, summarise=summarise)
+
+    assert report.dropped_turns and not report.summarised
+    assert "were dropped to fit" in kept[1]["content"]

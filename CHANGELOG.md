@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Long sessions keep their thread.** When a conversation outgrows the model's window and the
+  oldest turns have to go, the model now writes a short summary of them first — what was asked,
+  what mattered, what changed, what is left — instead of leaving only a note that something was
+  dropped. It is asked once each time more has to be dropped, not on every message, and if it
+  fails the plain note is used as before. `/context` says when turns were summarised.
+
 ## [0.37.0]
 
 - **Plan mode looks before it plans.** The planning step used to be a single reply with no tools, so
