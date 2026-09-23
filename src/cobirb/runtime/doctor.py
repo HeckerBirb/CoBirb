@@ -340,8 +340,12 @@ def _check_sandbox(report: Report, config: Config) -> None:
     if box.mode == sandbox.MODE_OFF:
         report.add("sandbox", WARN, "off — approved shell commands run with your full access")
     elif not box.active:
-        report.add("sandbox", WARN, "bubblewrap is not installed or cannot create namespaces here, so "
-                   "shell commands run unsandboxed (and are always asked about)")
+        installed = shutil.which("bwrap")
+        why = ("bubblewrap is installed but cannot create namespaces here (unprivileged user "
+               "namespaces may be disabled)" if installed else
+               "bubblewrap is not installed — e.g. 'sudo apt install bubblewrap', "
+               "'sudo dnf install bubblewrap' or 'sudo pacman -S bubblewrap'")
+        report.add("sandbox", WARN, f"{why}; shell commands run unsandboxed and are always asked about")
     elif box.mode == sandbox.MODE_AUTO and not box.explicit and not shutil.which("git"):
         report.add("sandbox", OK, "bubblewrap, asks first — commands would run without asking, "
                    "but git is missing so their changes could not be undone")
