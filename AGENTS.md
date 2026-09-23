@@ -318,7 +318,9 @@ docstrings, failing tests) and builds a **charter**. The user approves it — th
 **Measured, and not yet the headline** (`bench --flock`, 0.40): on two divisible tasks and three models
 it passed 1 of 6 against a single agent's 4 of 6, and took 2–6× longer; tickets were left unimplemented
 while the round report called the round a success. **The round report is not evidence — the checker
-is.** The bench records each worker's own report (`worker_reports`); start there.
+is.** The bench records each worker's own report (`worker_reports`, with what each refused call was
+aimed at) and the charter's file assignment; start there. The whole gap was one task: `Store` was
+frozen as a seam and never implemented — see *Seams* below.
 
 **Charter.** `objective`, `concurrency` (default 2, max 16), `[[seams]]` (`kind` ∈ `formal|loose`),
 `[[workers]]` with `writes`/`reads`/`tests`/`accept`/`brief`/`needs`. Held in the session, never written
@@ -327,8 +329,7 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
 **Planning.**
 - **Built a validated move at a time** (`plan.PlanDraft`; `declare_seam`, `add_worker`, `drop_worker`,
   `seal_charter`): an overlapping partition is unbuildable rather than reported, a refusal names one
-  path and costs one move, and order does not matter (both directions of every check run on every
-  move; `needs` is settled at seal). `drop_worker` refuses to drop a ticket others `need`.
+  path and costs one move, and order does not matter (`needs` is settled at seal). `drop_worker` refuses to drop a ticket others `need`.
   `propose_charter` stays for small plans and because `recover_charter` reads TOML out of a reply.
 - **All five tools are moves on one `CharterDesk`** (owner of the draft, the charter and every counter),
   registered and permitted together for the whole session by `install_charter_tool` — the planning
@@ -339,8 +340,15 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
   `STOP_NO_PROGRESS`; `MAX_SILENT_STEPS = 2` unanswered nudges → `stopped_at="stalled"`.
 - **A refusal ends with the call to make** (`CharterDesk.refuse(retry=...)`), dropped at
   `MAX_REPEATED_REFUSALS`. `tests ⊄ writes` is adopted, not refused, on the move route.
-- Formal seams are writable by no worker (`_check_seams_are_frozen`; loose and `::` seams exempt).
-  Conflicts are reported once per file. An overlapping held charter gets `MAX_OVERLAP_ATTEMPTS = 2`
+- **Seams.** A seam is the signature, not the file, and it locks nothing: the stub file belongs to the
+  ticket that implements it, others build against the signature concurrently, and the owner keeping it
+  is the worker's rules plus review. The only partition conflict is **write/write**, reported once per
+  file. (Seams were once writable by no worker and a file another ticket read was refused; together
+  they made "one implements `Store`, one builds against it" illegal, and the refusal told Brainy Birb
+  to leave the stub out of every ticket.) A finished shared file simply has no owner.
+- **`seal` asks once about skeleton files nobody owns** (`CharterDesk.ownership_question`, a project
+  snapshot taken before planning, CoBirb's own directory excluded): a file nobody owns stays as the
+  skeleton left it. Sealing again unchanged means "finished"; not counted as an attempt. An overlapping held charter gets `MAX_OVERLAP_ATTEMPTS = 2`
   invitations; a failing one stops being asked for at `MAX_CHARTER_ATTEMPTS = 5` (template sent with
   the first rejection only; `_toml_hint` names the cause).
 - **Distinct outcomes, never conflated**: no charter (`planning`), rejected (`charter`, with the reason
@@ -370,13 +378,21 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
   `START_RETRY_SECONDS = 2`, no backoff (a retry queues behind the work that made the endpoint busy).
   `DEFAULT_MAX_TURNS = 30`. The brief states the working directory and names the read tools.
 - **`needs` is the last resort** (it serialises a fan-out). Unknown ids, self-reference and cycles are
-  refused at parse. A read of a file whose writer you `need` is not a conflict; write/write always is.
+  refused at parse. A ticket's tests should pass with its own code and the skeleton alone (a fake, or
+  `needs`) — `BRAINY_RULES` says so.
   `effective_concurrency` is the widest graph level. Workers wait **before** taking a slot; `record()`
   stores the report, then sets the event. A dependent is skipped only when its dependency did not run.
 
+**Re-check.** After the join, `supervisor.recheck` runs every finished ticket's `accept` again on the
+final tree (no model) and updates `accepted`, keeping `accepted_when_finished`: a worker's own verdict
+is from the moment it finished, often before a colleague's code landed. A ticket that passed only on
+the final tree is named in the round's account.
+
 **Review.** Workers run concurrently, join, **then** are reviewed one at a time (review reverts a stub
-temporarily). Two passes, no model, no tokens: (1) read the diff for suspicious changes, (2) restore
-the stub and require the acceptance check to **fail** — reporting "could not be checked" when the
+temporarily). Two passes, no model, no tokens: (1) read the diff for suspicious changes, including a
+changed declaration, (2) restore the stub and require the acceptance check to **fail** — worded
+"PASS — … it is this worker's code that makes them pass", because "stub reversion: caught" was read
+by two of three models as the worker having reverted — reporting "could not be checked" when the
 worker changed nothing, or when `tests` is undeclared, several files are owned and every changed file
 would be restored. Stopping is checked between workers and between reviews; a review under way finishes.
 

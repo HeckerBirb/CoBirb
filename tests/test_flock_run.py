@@ -451,7 +451,7 @@ def test_the_charter_tool_stops_asking_after_enough_rejections(tmp_path):
     assert "STOP calling propose_charter" in result.content
 
 
-_READS_A_WRITTEN_FILE = """
+_TWO_OWNERS = """
 objective = "x"
 [[workers]]
 id     = "a"
@@ -459,8 +459,7 @@ writes = ["pkg/types.py", "pkg/a.py"]
 brief  = "go"
 [[workers]]
 id     = "b"
-writes = ["pkg/b.py"]
-reads  = ["pkg/types.py"]
+writes = ["pkg/types.py", "pkg/b.py"]
 brief  = "go"
 """
 
@@ -471,7 +470,7 @@ def test_an_overlapping_charter_is_held_rather_than_called_accepted(tmp_path):
     from cobirb.flock.brainy import ProposeCharterTool
 
     tool = ProposeCharterTool(str(tmp_path))
-    result = tool.execute({"toml": _READS_A_WRITTEN_FILE})
+    result = tool.execute({"toml": _TWO_OWNERS})
 
     assert result.ok and tool.charter is not None  # kept: the user may still approve it
     assert "accepted" not in result.content.lower()
@@ -486,7 +485,7 @@ def test_an_overlapping_charter_stops_being_asked_for(tmp_path):
 
     tool = ProposeCharterTool(str(tmp_path))
     for _ in range(MAX_OVERLAP_ATTEMPTS):
-        result = tool.execute({"toml": _READS_A_WRITTEN_FILE})
+        result = tool.execute({"toml": _TWO_OWNERS})
 
     assert "STOP calling propose_charter" in result.content
 
@@ -497,8 +496,8 @@ def test_a_resubmitted_overlap_is_told_that_nothing_changed(tmp_path):
     from cobirb.flock.brainy import ProposeCharterTool
 
     tool = ProposeCharterTool(str(tmp_path))
-    first = tool.execute({"toml": _READS_A_WRITTEN_FILE})
-    second = tool.execute({"toml": _READS_A_WRITTEN_FILE})
+    first = tool.execute({"toml": _TWO_OWNERS})
+    second = tool.execute({"toml": _TWO_OWNERS})
 
     assert "same overlap" not in first.content
     assert "same overlap" in second.content
@@ -963,8 +962,8 @@ def test_a_plan_that_stopped_to_narrate_its_next_move_is_driven_to_a_charter(
     _honest_workers(monkeypatch, tmp_path)
     calls = [
         (DECLARE_SEAM, {"at": "types.py", "kind": "formal", "what": "the vocabulary"}),
-        # Refused: a formal seam is nobody's to write.
-        (ADD_WORKER, {"id": "a", "brief": "go", "writes": ["a.py", "types.py"]}),
+        # Refused: a ticket that writes nothing has no work to do.
+        (ADD_WORKER, {"id": "a", "brief": "go", "writes": []}),
         None,  # "I will proceed by correcting the first worker's ticket." — and stop.
         (ADD_WORKER, {"id": "a", "brief": "go", "writes": ["a.py"]}),
         (ADD_WORKER, {"id": "b", "brief": "go", "writes": ["b.py"]}),
@@ -990,7 +989,7 @@ def test_the_nudge_quotes_the_refusal_that_stopped_the_plan(monkeypatch, tmp_pat
     _skeleton(tmp_path)
     calls = [
         (DECLARE_SEAM, {"at": "types.py", "kind": "formal", "what": "the vocabulary"}),
-        (ADD_WORKER, {"id": "a", "brief": "go", "writes": ["types.py"]}),
+        (ADD_WORKER, {"id": "a", "brief": "go", "writes": []}),
         None,
         None,
         None,
@@ -1009,7 +1008,7 @@ def test_the_nudge_quotes_the_refusal_that_stopped_the_plan(monkeypatch, tmp_pat
     )
 
     nudge = next(p for p in prompts if "was refused" in p)
-    assert "formal seam" in nudge
+    assert "writes nothing" in nudge
     assert "add_worker" in nudge
 
 
@@ -1049,7 +1048,7 @@ def test_a_refused_move_names_the_call_to_make_again(monkeypatch, tmp_path):
     from cobirb.flock.brainy import ADD_WORKER, AddWorkerTool, CharterDesk
 
     desk = CharterDesk()
-    desk.draft.declare_seam("types.py", "formal", "the vocabulary")
+    desk.draft.add_worker("owner", brief="go", writes=["types.py"])
 
     result = AddWorkerTool(desk).execute({"id": "a", "brief": "go", "writes": ["types.py"]})
 
@@ -1063,10 +1062,64 @@ def test_a_refusal_that_keeps_repeating_stops_asking_for_the_same_call():
     from cobirb.flock.brainy import MAX_REPEATED_REFUSALS, AddWorkerTool, CharterDesk
 
     desk = CharterDesk()
-    desk.draft.declare_seam("types.py", "formal", "the vocabulary")
+    desk.draft.add_worker("owner", brief="go", writes=["types.py"])
     tool = AddWorkerTool(desk)
     for _ in range(MAX_REPEATED_REFUSALS):
         result = tool.execute({"id": "a", "brief": "go", "writes": ["types.py"]})
 
     assert "again now" not in result.content
     assert "Do something different" in result.content
+
+
+# --------------------------------------------------------------------------- #
+# A skeleton file nobody owns is asked about once
+# --------------------------------------------------------------------------- #
+def _desk_after_planning(tmp_path):
+    from cobirb.flock.brainy import CharterDesk
+
+    desk = CharterDesk(str(tmp_path))
+    desk.watch_skeleton(str(tmp_path))
+    # What planning wrote: two stubs, only one of which a ticket will own.
+    (tmp_path / "store.py").write_text("class Store:\n    def get(self, key): raise NotImplementedError\n")
+    (tmp_path / "cli.py").write_text("def run(store, line): raise NotImplementedError\n")
+    desk.draft.add_worker("cli", brief="go", writes=["cli.py"], reads=["store.py"])
+    return desk
+
+
+def test_sealing_asks_about_a_skeleton_file_no_ticket_owns(tmp_path):
+    """The first flock benchmark: `store.py` in no ticket, the charter sealed,
+    and `Store` never implemented by anyone."""
+    from cobirb.flock.brainy import SealCharterTool
+
+    desk = _desk_after_planning(tmp_path)
+
+    result = SealCharterTool(desk).execute({"objective": "kv store"})
+
+    assert not result.ok and desk.charter is None
+    assert "store.py" in result.content
+    assert "cli.py" not in result.content.split("no ticket writes them")[1].split(".")[0]
+
+
+def test_sealing_again_unchanged_means_the_file_is_finished(tmp_path):
+    from cobirb.flock.brainy import SealCharterTool
+
+    desk = _desk_after_planning(tmp_path)
+    tool = SealCharterTool(desk)
+    tool.execute({"objective": "kv store"})
+
+    result = tool.execute({"objective": "kv store"})
+
+    assert result.ok and desk.charter is not None
+
+
+def test_giving_the_file_to_a_ticket_answers_the_question(tmp_path):
+    from cobirb.flock.brainy import SealCharterTool
+
+    desk = _desk_after_planning(tmp_path)
+    tool = SealCharterTool(desk)
+    tool.execute({"objective": "kv store"})
+    desk.draft.add_worker("store", brief="go", writes=["store.py"])
+
+    result = tool.execute({"objective": "kv store"})
+
+    assert result.ok and desk.charter.worker("store").writes == ("store.py",)

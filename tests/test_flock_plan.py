@@ -42,21 +42,19 @@ def test_claiming_a_file_another_ticket_owns_is_refused_with_the_owner_named():
     assert draft.worker("b") is None  # nothing partially applied
 
 
-def test_reading_a_file_another_ticket_writes_is_refused():
-    draft = _draft_with(("a", ["types.py"]))
+def test_one_ticket_may_build_against_a_stub_another_implements():
+    """The ordinary plan: `store` fills in Store's bodies while `cli` builds
+    against its signatures. In either order."""
+    for first, second in ((("store", ["store.py"], []), ("cli", ["cli.py"], ["store.py"])),
+                          (("cli", ["cli.py"], ["store.py"]), ("store", ["store.py"], []))):
+        draft = PlanDraft()
+        for ticket, writes, reads in (first, second):
+            draft.add_worker(ticket, brief="go", writes=writes, reads=reads)
 
-    with pytest.raises(CharterError, match="moving target"):
-        draft.add_worker("b", brief="go", writes=["b.py"], reads=["types.py"])
+        charter = draft.seal("x")
 
-
-def test_claiming_a_file_an_existing_ticket_reads_is_refused_too():
-    """The same overlap found from the other side. Nothing says tickets arrive
-    in an order that puts writers before readers."""
-    draft = PlanDraft()
-    draft.add_worker("b", brief="go", writes=["b.py"], reads=["types.py"])
-
-    with pytest.raises(CharterError, match="is read by ticket"):
-        draft.add_worker("a", brief="go", writes=["types.py"])
+        assert charter.worker("store").writes == ("store.py",)
+        assert find_conflicts(charter) == []
 
 
 def test_a_declared_dependency_answers_the_read_of_a_written_file():
@@ -80,20 +78,16 @@ def test_a_ticket_reading_what_it_writes_itself_is_fine():
 # --------------------------------------------------------------------------- #
 # Seams
 # --------------------------------------------------------------------------- #
-def test_a_formal_seam_cannot_be_claimed_by_a_later_ticket():
+def test_a_formal_seam_locks_nothing():
+    """A seam describes where tickets meet; the stub file it lives in is still
+    the implementing ticket's to write, before or after it is declared."""
     draft = PlanDraft()
-    draft.declare_seam("types.py", "formal", "the shared vocabulary")
+    draft.declare_seam("store.py", "formal", "Store's public methods")
+    draft.add_worker("store", brief="go", writes=["store.py"])
+    draft.declare_seam("cli.py::run", "formal", "the command entry point")
+    draft.add_worker("cli", brief="go", writes=["cli.py"], reads=["store.py"])
 
-    with pytest.raises(CharterError, match="formal seam"):
-        draft.add_worker("a", brief="go", writes=["types.py"])
-
-
-def test_a_formal_seam_cannot_be_declared_over_a_file_a_ticket_owns():
-    """The same contradiction reached by declaring seams after tickets."""
-    draft = _draft_with(("a", ["types.py"]))
-
-    with pytest.raises(CharterError, match="already writes types.py"):
-        draft.declare_seam("types.py", "formal", "the shared vocabulary")
+    assert len(draft.seal("x").seams) == 2
 
 
 def test_a_loose_seam_may_sit_in_a_file_a_ticket_writes():

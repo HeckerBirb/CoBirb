@@ -10,9 +10,8 @@ variance step in a flock was also its wall.
 This is the other way round: the plan is **accumulated**, and each move is
 checked against what is already there the moment it is made.
 
-    declare_seam("export/types.py", "formal", "the shared vocabulary")
-    add_worker("writer", writes=["export/csv.py"], reads=["export/types.py"], …)
-    add_worker("cli",    writes=["cli.py"],        reads=["export/types.py"], …)
+    add_worker("store", writes=["store.py", "tests/test_store.py"], …)
+    add_worker("cli",   writes=["cli.py", "tests/test_cli.py"], reads=["store.py"], …)
     seal("Add CSV export", concurrency=2)   ->  Charter
 
 Three things follow from that, and they are the whole reason for the module.
@@ -29,12 +28,12 @@ caused it, with one path to change. The document-shaped version of the same
 mistake was "4 overlap(s) in the partition" after every ticket had been
 written, and the correction was to send all of them again.
 
-**Order does not matter.** Both directions of every check run on every move: a
-ticket that claims a file an existing ticket reads is refused, and so is a
-ticket that reads a file an existing ticket claims. So the model can add
-tickets in whatever order it thought of them without a rule about which comes
-first — the one thing deferred to ``seal`` is ``needs``, which may legitimately
-name a ticket that has not been added yet.
+**Order does not matter.** The ownership check is symmetric, so the model can
+add tickets in whatever order it thought of them — the one thing deferred to
+``seal`` is ``needs``, which may legitimately name a ticket that has not been
+added yet. Reading a file another ticket writes is not refused: the reader
+builds against the skeleton's signatures, and those are the owner's to keep
+(see ``charter.Seam``).
 
 Nothing here writes to the repository or reads a plan from it. A draft lives in
 memory for exactly as long as the session's planning does, the same as the
@@ -52,7 +51,6 @@ from .charter import (
     WorkerBrief,
     check_dependencies,
     find_conflicts,
-    frozen_seam_paths,
 )
 
 # Normalised the same way ``charter._paths`` normalises, so a draft compares
@@ -146,20 +144,6 @@ class PlanDraft:
         if any(existing.at == at for existing in self.seams):
             raise CharterError(f"a seam at {at} is already declared")
 
-        # The other direction of the frozen-seam rule. Declaring a formal seam
-        # over a file some ticket already owns is the same contradiction as
-        # giving a ticket a seam to write, and it is reachable simply by
-        # declaring seams after tickets.
-        if frozen_seam_paths([seam]):
-            owner = self.owner_of(at)
-            if owner:
-                raise CharterError(
-                    f"ticket {owner!r} already writes {at}, so it cannot also be a formal "
-                    "seam — a seam is frozen while the workers build against it. Either "
-                    f"drop {at} from {owner!r} (drop_worker, then add it back without that "
-                    "path), or declare this seam `loose` if it is an agreement about "
-                    "behaviour rather than a file you own."
-                )
         self.seams.append(seam)
         return f"Seam recorded at {at} ({kind}). Plan so far: {self.describe()}."
 
@@ -216,12 +200,11 @@ class PlanDraft:
         # lists, and a model that narrates the correction instead of sending it
         # loses the round. Nothing is given away by adopting: the adopted paths
         # go through `_check_writes_are_free` with the rest, so a genuine
-        # collision with another ticket or a formal seam is still refused below.
+        # collision with another ticket is still refused below.
         adopted = tuple(path for path in test_paths if path not in write_paths)
         write_paths = write_paths + adopted
 
         self._check_writes_are_free(worker_id, write_paths)
-        self._check_reads_are_still(worker_id, read_paths, need_ids)
 
         self.workers.append(
             WorkerBrief(
@@ -361,15 +344,12 @@ class PlanDraft:
         worker broke this" unanswerable, and it was previously discovered after
         the whole charter existed.
 
-        **This ticket's own ``needs`` deliberately does not excuse a reader
-        below.** "I write what an earlier ticket reads, and I wait for it" is in
-        fact safe — the read happens before the write — but ``find_conflicts``
-        only excuses the mirror case, reader-waits-for-writer, and it is what
-        ``check_partition`` shows the user and what ``seal`` re-checks. Allowing
-        a shape here that ``seal`` then refuses would be a worse bargain than
-        turning away one arrangement that would have worked.
+        **It is the only check on a path.** Claiming a declared seam, or a file
+        another ticket reads, used to be refused too, and the refusal told the
+        model to "leave it to the skeleton and drop it from this ticket's
+        writes" — which, for a stub file, is an instruction to leave it
+        unimplemented. See ``charter.Seam``.
         """
-        frozen = frozen_seam_paths(self.seams)
         for path in writes:
             owner = self.owner_of(path)
             if owner:
@@ -379,44 +359,59 @@ class PlanDraft:
                     f"different file, or — if {owner!r} should not have claimed it — call "
                     f"drop_worker({owner!r}) and add it back without that path."
                 )
-            seam = frozen.get(path)
-            if seam is not None:
-                raise CharterError(
-                    f"{path} is a formal seam ({seam.what}), so no ticket may write it: you "
-                    "wrote it into the skeleton and everyone is building against it. This "
-                    "ticket may read it instead."
-                )
-            # A reader that came first. Same overlap as the case below, found
-            # from the other side, because nothing says tickets arrive in an
-            # order that puts writers before readers.
-            readers = [
-                other.id for other in self.workers
-                if path in other.reads and worker_id not in other.needs
-            ]
-            if readers:
-                raise CharterError(
-                    f"{path} is read by ticket(s) {', '.join(sorted(readers))}, so this "
-                    "ticket cannot change it underneath them. If it is the shared seam, "
-                    f"leave it to the skeleton and drop it from this ticket's writes. If "
-                    f"{sorted(readers)[0]!r} really must run after this ticket, drop it and "
-                    f"add it back with needs = [{worker_id!r}]."
-                )
 
-    def _check_reads_are_still(
-        self, worker_id: str, reads: tuple[str, ...], needs: tuple[str, ...]
-    ) -> None:
-        """A ticket may only read files that are not moving while it works.
 
-        A declared ``needs`` answers this rather than excusing it: the writer
-        has finished before this ticket starts, so the file has stopped
-        changing — which is the condition the check exists to catch.
-        """
-        for path in reads:
-            owner = self.owner_of(path)
-            if owner and owner != worker_id and owner not in needs:
-                raise CharterError(
-                    f"this ticket reads {path}, which ticket {owner!r} writes — it would be "
-                    "working against a moving target. Either leave that file to the "
-                    f"skeleton so neither ticket writes it, or add needs = [{owner!r}] so "
-                    f"this one starts after {owner!r} has finished."
-                )
+# --------------------------------------------------------------------------- #
+# What the skeleton wrote
+# --------------------------------------------------------------------------- #
+# Past this many files the snapshot is skipped rather than taken. It feeds a
+# question, never a refusal, so a project too large to walk quickly loses the
+# question and nothing else.
+SNAPSHOT_MAX_FILES = 20000
+
+
+def snapshot_project(cwd: str) -> "dict[str, tuple[int, int]] | None":
+    """Every file under ``cwd`` with its modification time and size, or None.
+
+    Taken before Brainy Birb plans, so the files it wrote into the skeleton can
+    be told apart from the ones that were already there — ``orchestrator``
+    records which tools were called, not which paths they touched. Honours
+    ``.gitignore`` and the built-in ignore list, like ``glob`` and ``grep``.
+    """
+    from .. import paths
+    from ..plugins.core.ignores import IgnoreRules
+
+    rules = IgnoreRules.for_directory(cwd)
+    # CoBirb's own tree is skipped too: run from the home directory, the
+    # project contains ~/.cobirb, and the session and checkpoint files planning
+    # writes there are not the skeleton.
+    own = os.path.realpath(paths.cobirb_dir())
+    files: dict[str, tuple[int, int]] = {}
+    for root, dirs, names in os.walk(cwd):
+        dirs[:] = [
+            d for d in dirs
+            if not rules.is_ignored(os.path.join(root, d), is_dir=True)
+            and os.path.realpath(os.path.join(root, d)) != own
+        ]
+        for name in names:
+            path = os.path.join(root, name)
+            if rules.is_ignored(path, is_dir=False):
+                continue
+            try:
+                stat = os.stat(path)
+            except OSError:
+                continue
+            files[_norm(os.path.relpath(path, cwd))] = (stat.st_mtime_ns, stat.st_size)
+            if len(files) > SNAPSHOT_MAX_FILES:
+                return None
+    return files
+
+
+def written_since(before: "dict[str, tuple[int, int]] | None", cwd: str) -> list[str]:
+    """Files created or changed under ``cwd`` since ``before`` was taken."""
+    if before is None:
+        return []
+    after = snapshot_project(cwd)
+    if after is None:
+        return []
+    return sorted(path for path, stamp in after.items() if before.get(path) != stamp)

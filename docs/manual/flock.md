@@ -23,9 +23,13 @@ cobirb flock -p "add CSV export to the reporting tool"
    Nothing runs until you say yes, and it is the only place capability is granted up front — a
    worker can still ask for something later (see below), which pauses only itself.
 3. **Workers run**, concurrently, unattended, each inside its own scope.
-4. **Review**, one worker at a time: read the diff for weakened assertions, then restore the stub
-   and check the tests actually go red. No model is involved, so it can't be argued with.
-5. **Brainy Birb reports.**
+4. **Every check is run again** on the tree the round leaves. A worker's own verdict is from the
+   moment it finished, often before a colleague's work landed; the round's account is about the
+   finished tree. A ticket that passed only once everyone was done is named as such.
+5. **Review**, one worker at a time: read the diff for weakened assertions and changed signatures,
+   then put the stubs back and check the tests fail — "PASS" means they do, so it's the worker's
+   code that makes them pass. No model is involved, so it can't be argued with.
+6. **Brainy Birb reports.**
 
 The **Flock** tab shows one column per worker while it happens.
 
@@ -48,30 +52,33 @@ orient can't work.
 
 The charter lives in the session. It is never written into your repository.
 
-### Seams belong to nobody
+### A seam is a signature, not a locked file
 
-A `[[seams]]` entry marked `kind = "formal"` is a declared artifact — an interface, an abstract
-base class, a trait — that Brainy Birb wrote into the skeleton and everyone builds against. No
-worker may list one in its `writes`, and a charter that does is refused when it's read, naming
-the file and the worker.
+A seam is where two workers' code meets — a class one builds and another calls. Brainy Birb
+designs it by writing the signature into the skeleton, typed and documented. That stub file
+belongs to the worker who fills in the bodies; everyone else builds against the signature at the
+same time. The owner may not change it: the worker's rules say so, and review flags a changed
+declaration.
 
-That's the commonest way a partition falls apart. One worker claims the shared types file, every
-other worker reads it, and you get one overlap reported per reader — four of them for five
-workers, none really about the readers. The fix was always one line: that worker didn't have to
-write the file at all.
+So a worker may read a file another worker writes — the CLI reading `store.py` while `store` is
+implemented — and that isn't an overlap. A file that's finished as written, like shared types,
+simply belongs to no ticket, and since a worker changes only its own files, nobody can change it.
 
-A `kind = "loose"` seam is exempt, and so is one naming a symbol (`module.py::load`). A loose
-seam is an agreement about behaviour with only a test behind it, and that behaviour is usually
-somebody's to implement.
+`[[seams]]` entries (`kind = "formal"` when the type system holds the agreement up, `"loose"` when
+only a test does) are there for you to judge the design by. They lock nothing.
+
+Seams used to be writable by no worker. That made the most ordinary plan illegal — in most
+languages the stub *is* the interface — and in CoBirb's own benchmark two of three models froze
+`store.py` as a seam and nobody ever implemented it.
 
 ### How Brainy Birb builds it
 
 A piece at a time, with each piece checked as it lands:
 
 ```
-declare_seam   export/types.py, formal, "ExportSpec and Column"
+declare_seam   export/csv.py::write_csv, formal, "what the CLI calls"
 add_worker     writer  writes export/csv.py, tests/test_csv.py   reads export/types.py
-add_worker     cli     writes cli.py, tests/test_cli.py          reads export/types.py
+add_worker     cli     writes cli.py, tests/test_cli.py          reads export/csv.py
 seal_charter   "Add CSV export"
 ```
 
@@ -88,9 +95,13 @@ while Brainy Birb is still writing the ticket that caused it, naming one path an
 it, and nothing is partially applied. `drop_worker` backs a ticket out when the file it claimed
 turns out to belong to another one.
 
-Tickets can be added in any order — both directions of every check run on every call, so nothing
-depends on writers coming before readers. A `needs` may name a ticket that doesn't exist yet; those
-and any circular waits are settled at `seal_charter`.
+Tickets can be added in any order. A `needs` may name a ticket that doesn't exist yet; those and
+any circular waits are settled at `seal_charter`.
+
+**`seal_charter` asks once about files nobody owns.** If Brainy Birb wrote a file while planning
+and no ticket writes it, sealing stops with a question naming it: a file nobody owns stays exactly
+as the skeleton left it, which is right for finished shared types and fatal for a stub. Sealing
+again unchanged means "those are finished"; giving the file to a ticket answers it the other way.
 
 `propose_charter` still takes a whole charter as TOML in one call, which is less work for a small
 plan. It's checked after the fact, so it *can* come back overlapping — which is what the next
@@ -98,7 +109,7 @@ section is about.
 
 ### When the partition overlaps
 
-It's reported, not refused — merging two workers, hoisting the shared file into a seam, or
+Two workers writing one file is reported, not refused — merging them, splitting the file, or
 letting git reconcile them are all reasonable, and which one is right depends on things CoBirb
 can't see. You're asked whether to run anyway, one worker at a time.
 
@@ -109,8 +120,10 @@ If it re-proposes the same overlap, it's told so and told to stop.
 
 ### When one worker has to go first
 
-Usually none of them do — that's what the skeleton is for. Brainy Birb builds the seam the
-workers meet at, so their tickets are independent and all start at once.
+Usually none of them do — that's what the skeleton is for. Brainy Birb writes the signatures the
+workers meet at, so their tickets are independent and all start at once. A ticket's tests should
+pass with its own code and the skeleton alone — against a small fake where they'd otherwise need
+another ticket's unfinished code.
 
 For the case it can't hoist into the skeleton, a worker can name what it waits for:
 
@@ -121,10 +134,6 @@ writes = ["src/report.py"]
 reads  = ["src/export/csv.py"]
 needs  = ["exporter"]     # runs only once `exporter` has finished
 ```
-
-`needs` also settles the partition check: reading a file a worker you depend on writes isn't an
-overlap, because it has stopped changing by the time you start. Reading one you *don't* depend
-on still is.
 
 Two things it costs, both shown before you approve:
 
@@ -176,7 +185,7 @@ exactly the move that's missing:
 
 | What the draft holds | What it's asked for |
 |---|---|
-| nothing | declare the seams, then add the tickets |
+| nothing | add the tickets (declaring seams is optional) |
 | seams, no tickets | `add_worker`, once per ticket — with the last refusal quoted back |
 | tickets, no charter | `seal_charter` |
 | a rejected charter | the rejection quoted, and a corrected one |

@@ -269,12 +269,12 @@ def test_the_report_leads_with_what_is_not_done(monkeypatch, tmp_path):
     honest = _honest_worker()
 
     def run(worker, cwd, **kwargs):
-        # Both implement their stub, as a real worker does — a worker that
-        # changed nothing is not reviewable, and 'b' has to reach `complete`
-        # for this test to be about the ordering of the report.
-        honest(worker, cwd, **kwargs)
+        # 'b' implements its stub, as a real worker does, so it reaches
+        # `complete`; 'a' leaves its stub, so its check still fails when the
+        # round re-runs it.
         if worker.id == "a":
             return WorkerReport(worker_id="a", ok=True, accepted=False, summary="could not finish")
+        honest(worker, cwd, **kwargs)
         return WorkerReport(worker_id="b", ok=True, accepted=True)
 
     _fake_workers(monkeypatch, run)
@@ -283,6 +283,37 @@ def test_the_report_leads_with_what_is_not_done(monkeypatch, tmp_path):
 
     assert "Still outstanding" in text
     assert text.index("Still outstanding") < text.index("Complete:")
+
+
+def test_a_check_is_judged_on_the_tree_the_round_leaves(monkeypatch, tmp_path):
+    """A worker whose check ran before a colleague's work landed reports a
+    failure about a round that passes. The round re-runs it at the end."""
+    honest = _honest_worker()
+
+    def run(worker, cwd, **kwargs):
+        honest(worker, cwd, **kwargs)
+        # 'a' saw its check fail when it finished, as if still waiting on 'b'.
+        return WorkerReport(worker_id=worker.id, ok=True, accepted=worker.id != "a")
+
+    _fake_workers(monkeypatch, run)
+
+    outcome = run_flock(_charter(_two_ticket_project(tmp_path)), str(tmp_path))
+
+    assert outcome.all_done
+    assert "once every worker had finished" in outcome.describe()
+
+
+def test_a_check_broken_after_its_worker_finished_is_reported(monkeypatch, tmp_path):
+    def run(worker, cwd, **kwargs):
+        # Claims success and leaves the stub: the re-run is what says so.
+        return WorkerReport(worker_id=worker.id, ok=True, accepted=True)
+
+    _fake_workers(monkeypatch, run)
+
+    outcome = run_flock(_charter(_two_ticket_project(tmp_path)), str(tmp_path))
+
+    assert not outcome.all_done
+    assert "FAILED" in outcome.describe()
 
 
 def test_a_fully_finished_round_says_so(monkeypatch, tmp_path):

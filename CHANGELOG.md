@@ -4,6 +4,23 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Flock: a stub file belongs to the worker who implements it.** Seams no longer lock files, and a
+  worker reading a file another worker writes is no longer an overlap — only two workers writing one
+  file is. Together those rules made "one worker implements `Store`, another builds the CLI against
+  it" impossible, and in the benchmark `Store` was never implemented.
+- **Flock: sealing asks once about files nobody owns.** A file Brainy Birb wrote while planning that
+  no ticket writes is named before the charter goes to you — fine for finished shared types, fatal
+  for a stub.
+- **Flock: every check is run again once the round finishes**, so a worker that finished before the
+  code its tests needed had landed is no longer reported as failed, and one broken by a later
+  change is.
+- **Flock: review says "PASS" plainly.** "Stub reversion: caught" was being read as the worker
+  having reverted its work.
+- cobirb-bench records what each refused call was aimed at, the charter's file assignment, and
+  classifies failed flock rounds by what the workers actually wrote.
+
 ## [0.42.0]
 
 - **The installer finishes by checking your setup.** Every install and upgrade now ends with

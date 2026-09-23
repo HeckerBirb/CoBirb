@@ -65,7 +65,8 @@ tests, and split the work. Your part is below.
 How this works:
 
 1. The signatures, types and docstrings you were given are a contract other \
-people are building against right now. DO NOT CHANGE THEM. If the contract \
+people are building against right now. Your files may already hold them as \
+stubs: fill in the bodies, and DO NOT CHANGE THE SIGNATURES. If the contract \
 cannot express what you need, implement everything it does allow, leave the \
 rest explicitly unimplemented, and say so in your final answer — changing it \
 yourself would silently break work you cannot see.
@@ -123,6 +124,11 @@ class WorkerReport:
     error: str = ""
     turns: int = 0
     tool_calls: list[dict] = field(default_factory=list)
+    # Set by `supervisor.recheck`, which runs the check again once every worker
+    # has finished; `accepted` is then that later verdict, and this the one the
+    # worker saw at its own end.
+    accepted_when_finished: bool | None = None
+    rechecked: bool = False
 
     @property
     def complete(self) -> bool:
@@ -144,6 +150,17 @@ class WorkerReport:
             verdict = "acceptance check passed"
         else:
             verdict = "acceptance check FAILED"
+        if self.rechecked and self.accepted_when_finished is not self.accepted:
+            if self.accepted:
+                verdict += (
+                    " once every worker had finished (it failed when this one finished — "
+                    "it was waiting on another worker's code)"
+                )
+            else:
+                verdict += (
+                    " once every worker had finished (it passed when this one finished — "
+                    "a later change broke it)"
+                )
         lines = [f"[{self.worker_id}] {verdict}, {self.turns} turn(s)"]
         if self.denied:
             lines.append(

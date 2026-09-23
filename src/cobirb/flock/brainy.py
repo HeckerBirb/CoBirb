@@ -41,7 +41,7 @@ from .charter import (
     find_conflicts,
     parse_charter,
 )
-from .plan import PlanDraft
+from .plan import PlanDraft, snapshot_project, written_since
 from .supervisor import FlockOutcome, check_partition
 
 logger = logging.getLogger("cobirb")
@@ -100,30 +100,31 @@ job, do not fan it out" is a correct and useful answer — say so rather than \
 inventing a partition that will not hold.
 
 2. DESIGN THE SEAMS. THIS IS THE PART THAT DECIDES WHETHER THE RUN WORKS.
-Apply S.O.L.I.D., and DEPENDENCY INVERSION above all else. Here it is not a \
-style preference; it is what makes parallel work possible:
+A seam is where two workers' code meets: a function, a class, a type that one \
+of them builds and another uses. You design it by writing its SIGNATURE into \
+the skeleton — fully typed, with a docstring that says what it does. That \
+signature is the contract. The worker who owns the file fills in the bodies \
+and must not change the signature; everyone else builds against it at the \
+same time.
 
-  - If Worker A calls something Worker B builds, and the abstraction lives in \
-B's file, then A depends on B's concrete implementation. A cannot be written \
-until B exists. The work is SERIAL no matter how many workers you create.
-  - Hoist that abstraction into a file YOU own and neither of them writes. Now \
-both depend on the abstraction and neither depends on the other. One \
-dependency edge has become two independent ones, and the work is PARALLEL.
-  - Run this check over your own partition before you propose it: for every \
-pair of workers, is there an edge where one needs the other's concrete \
-implementation? If yes, hoist the abstraction. If you cannot hoist it, those \
-two are not parallelisable and your partition is wrong — merge them into one \
-ticket or re-cut the work.
+So a stub file IS a seam, and it belongs to the worker who implements it. \
+Give every file that still has a stub in it to exactly one ticket. A file that \
+is finished as you wrote it — shared types, constants — belongs to no ticket, \
+and since a worker can change only its own files, nobody can change it.
 
-A seam does not have to be a declared artifact. An abstract base class, a Java \
-interface or a Rust trait is a FORMAL seam and the type system holds it up. \
-"Returns None for a missing key", "never raises on a partial record" is a \
-LOOSE seam — just as real an interface, with nothing whatsoever enforcing it, \
-so it MUST be pinned by a test instead. Say which kind each seam is; that is \
-what tells you whether anything is actually holding it.
+Apply DEPENDENCY INVERSION wherever it keeps the work parallel: code that \
+calls another worker's code depends on the signature you wrote, never on how \
+that worker will implement it. The same goes for tests. A ticket's acceptance \
+tests must pass using its own code and the skeleton alone. If they need \
+another ticket's unfinished code to run, give them a small fake to test \
+against instead, or give the ticket `needs` — otherwise that worker spends \
+its whole run looking at somebody else's NotImplementedError.
 
-Seam files belong to you and are writable by no worker. That is what keeps \
-them still while everyone builds against them.
+A seam may be FORMAL — an abstract base class, an interface, a typed \
+signature, something the type system holds up — or LOOSE: "returns None for a \
+missing key", "never raises on a partial record", with nothing holding it up \
+but a test, so it MUST have one. `declare_seam` records each for the person \
+approving the plan to read; it does not lock anything.
 
 3. BUILD THE SKELETON. IT IS THE ONLY THING THE WORKERS SHARE.
 Write the interfaces, the typed stubs, and the failing tests into the project \
@@ -184,19 +185,19 @@ WHEN YOU ARE READY
 Build the skeleton with your file tools first. Then build the charter up a \
 piece at a time:
 
-  - `declare_seam` once per seam, with its kind.
+  - `declare_seam` once per seam worth describing, with its kind.
   - `add_worker` once per ticket: its id, its brief, and every file it may \
 write. Each call is CHECKED AGAINST THE PLAN SO FAR and answers immediately — \
-a file another ticket already writes, or a file that is a formal seam, is \
-refused right there and named. So you find out while you are still writing \
-that one ticket, with one path to change.
+a file another ticket already writes is refused right there and named. So you \
+find out while you are still writing that one ticket, with one path to change.
   - `drop_worker` if a ticket claimed something that turns out to belong to \
 another one. Drop it, add it back corrected.
-  - `seal_charter` once, with the objective, when every ticket is in.
+  - `seal_charter` once, with the objective, when every ticket is in. If a \
+file you wrote while planning belongs to no ticket, it asks you once whether \
+that file is finished.
 
-Add the tickets in whatever order you thought of them; both directions of \
-every check run on every call, so nothing depends on writers coming before \
-readers. A charter built this way CANNOT come out with an overlapping \
+Add the tickets in whatever order you thought of them; nothing depends on \
+writers coming before readers. A charter built this way CANNOT come out with an overlapping \
 partition, which is the commonest way a round fails before it starts.
 
 `propose_charter` still takes a whole charter as TOML in one call, and for a \
@@ -229,7 +230,7 @@ One paragraph: what this round of work is for.
 concurrency = 2
 
 [[seams]]
-at   = "path/to/shared_types.py"
+at   = "path/to/module.py::ClassName"
 kind = "formal"                  # "formal" = the type system holds it up
 what = "What this seam is and who meets at it."
 
@@ -242,7 +243,7 @@ what = "The agreement in words, e.g. returns None for a missing key."
 id     = "a"
 writes = ["path/to/module.py", "tests/test_module.py"]
 tests  = ["tests/test_module.py"]   # which of `writes` are the tests
-reads  = ["path/to/shared_types.py"]
+reads  = ["path/to/shared_types.py"]   # finished files it builds against
 accept = "the command that proves this ticket is done"
 brief  = """
 This worker's ticket. Only its own part.
@@ -311,6 +312,10 @@ class CharterDesk:
         # rejected move forever, and nothing else here would notice.
         self._last_refusal: str = ""
         self._repeats: int = 0
+        # The project as it stood before planning, and the unowned files the
+        # last ownership question named (see `ownership_question`).
+        self._before: "dict[str, tuple[int, int]] | None" = None
+        self._asked_unowned: tuple[str, ...] = ()
 
     def reset(self) -> None:
         """Forget everything, before a fresh planning turn.
@@ -329,6 +334,44 @@ class CharterDesk:
         self._last_overlaps = ()
         self._last_refusal = ""
         self._repeats = 0
+        self._before = None
+        self._asked_unowned = ()
+
+    def watch_skeleton(self, cwd: str) -> None:
+        """Remember the project as it is now, before the skeleton is written."""
+        self._before = snapshot_project(cwd)
+
+    def ownership_question(self, charter: Charter, retry: str) -> str:
+        """Ask once about skeleton files no ticket writes, or return "".
+
+        **A file nobody owns stays exactly as the skeleton left it.** That is
+        right for a finished shared-types file and fatal for a stub: in the
+        first flock benchmark ``store.py`` was left out of every ticket, the
+        charter sealed, the workers built the CLI against it, and ``Store`` was
+        never implemented by anyone. Nothing in the partition checks could see
+        it, because a file with no owner overlaps with nothing.
+
+        A question rather than a refusal, because only the model knows which
+        of the two a file is. Asked once per set of files: sealing again with
+        the same set is the answer "they are finished", and it seals.
+        """
+        if self._before is None or not self.cwd:
+            return ""
+        owned = {path for worker in charter.workers for path in worker.writes}
+        unowned = tuple(path for path in written_since(self._before, self.cwd) if path not in owned)
+        if not unowned or unowned == self._asked_unowned:
+            return ""
+        self._asked_unowned = unowned
+        return (
+            "Not sealed yet — one question first. These files were written while you planned "
+            f"and no ticket writes them: {', '.join(unowned)}.\n\n"
+            "A file nobody owns stays exactly as the skeleton left it: no worker can implement "
+            "a stub in it, and no worker can make its tests pass. If every one of them is "
+            f"finished as it is (shared types, fixtures, an `__init__`), call `{retry}` again "
+            "unchanged and it will seal. If one still has work in it, give it to the ticket "
+            "that does that work — `drop_worker` and `add_worker` it back with that file in "
+            "`writes` — and then seal."
+        )
 
     @property
     def exhausted(self) -> bool:
@@ -450,9 +493,8 @@ class CharterDesk:
                 "find an owner for and why."
             )
         return held + (
-            "If a worker claimed a file it does not actually have to change — a shared "
-            "types or interface file you already wrote into the skeleton is the usual one "
-            "— drop that path from its `writes` and call propose_charter ONCE more. Or "
+            "Give each of those files to the one worker that implements it, drop it from the "
+            "others' `writes` (they may still read it), and call propose_charter ONCE more. Or "
             "build the plan with add_worker instead, which refuses an overlap at the move "
             "that causes it. If the overlap is deliberate, do not call this again: say so "
             "in your reply and stop, and the user will be asked whether to run one worker "
@@ -528,9 +570,9 @@ class DeclareSeamTool(_DeskTool):
 
     def description(self) -> str:
         return (
-            "Declare one seam: a file, or file::symbol, that several Worker Birbs meet at. "
-            "Call it once per seam, before or after adding tickets. A 'formal' seam is a "
-            "declared artifact the type system holds up, and no ticket may write it."
+            "Record one seam — a file, or file::symbol, where two Worker Birbs' code meets — "
+            "for the person approving the plan. It locks nothing: the stub file a seam lives "
+            "in still belongs to the ticket that implements it."
         )
 
     def parameters(self) -> dict[str, Any]:
@@ -576,8 +618,8 @@ class AddWorkerTool(_DeskTool):
     def description(self) -> str:
         return (
             "Add one Worker Birb's ticket to the plan. Checked against the plan so far as "
-            "soon as you call it: a file another ticket already writes, or that is a formal "
-            "seam, is refused here and named — so the partition cannot come out overlapping. "
+            "soon as you call it: a file another ticket already writes is refused here and "
+            "named — so the partition cannot come out overlapping. "
             "Call it once per worker, then seal_charter."
         )
 
@@ -653,7 +695,7 @@ class DropWorkerTool(_DeskTool):
     def description(self) -> str:
         return (
             "Remove a ticket from the plan. Use it when a ticket claimed a file that "
-            "belongs to another one, or to a seam — drop it and add it back corrected."
+            "belongs to another one — drop it and add it back corrected."
         )
 
     def parameters(self) -> dict[str, Any]:
@@ -715,6 +757,11 @@ class SealCharterTool(_DeskTool):
                 content=self.desk.refuse(str(exc), retry=SEAL_CHARTER),
                 error="bad_charter",
             )
+        question = self.desk.ownership_question(charter, retry=SEAL_CHARTER)
+        if question:
+            # Not an attempt: nothing was wrong with the plan, it was asked about.
+            self.desk.attempts -= 1
+            return ToolResult(ok=False, content=question, error="unowned_skeleton")
         content, disjoint = self.desk.accept(charter)
         return ToolResult(ok=True, content=content, meta={"disjoint": disjoint})
 
@@ -827,6 +874,10 @@ class ProposeCharterTool(_DeskTool):
                 ok=False, content=self.desk.rejection(exc), error="bad_charter"
             )
 
+        question = self.desk.ownership_question(charter, retry=PROPOSE_CHARTER)
+        if question:
+            self.desk.attempts -= 1
+            return ToolResult(ok=False, content=question, error="unowned_skeleton")
         content, disjoint = self.desk.accept(charter, text)
         return ToolResult(ok=True, content=content, meta={"disjoint": disjoint})
 
@@ -934,8 +985,9 @@ def no_tickets_prompt(desk: "CharterDesk") -> str:
     else:
         state = "The plan is empty: no seams and no tickets."
         move = (
-            "Call `declare_seam` once for each agreement the workers meet at, then "
-            "`add_worker` once for each ticket, then `seal_charter`."
+            "Call `add_worker` once for each ticket — every file that still has a stub in it "
+            "goes to exactly one — then `seal_charter`. `declare_seam` is optional, to "
+            "describe where the tickets meet."
         )
     lines = [
         "You have NOT proposed a charter, and no Flock has been created. " + state,
@@ -1031,7 +1083,7 @@ def round_summary(outcome: FlockOutcome) -> str:
         "want the round you describe, they will ask for it and you can propose it "
         "then. What you write here is read by a person, not executed.",
         "",
-        "A stub reversion that was not caught usually means a behaviour you specified "
+        "A check that SURVIVED having the stubs put back usually means a behaviour you specified "
         "has no test behind it. That is your omission to fix in the next skeleton, not "
         "the worker's. One reported as 'could not be checked' is a charter problem "
         "instead — most often a ticket that never named its test files in `tests`.",

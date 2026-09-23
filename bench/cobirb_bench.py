@@ -110,6 +110,7 @@ class Result:
     error: str = ""
     check_output: str = ""
     workers: list = field(default_factory=list)  # flock mode: each worker's own report
+    charter: dict | None = None  # flock mode: who was given which files
 
 
 # --------------------------------------------------------------------------- #
@@ -241,6 +242,7 @@ def run_one(task: Task, model: str, rep: int, seed: int, *, base_url: str, src: 
             error=error or ((report or {}).get("error") or ""),
             check_output=check_output,
             workers=(report or {}).get("worker_reports", []),
+            charter=(report or {}).get("charter"),
         )
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

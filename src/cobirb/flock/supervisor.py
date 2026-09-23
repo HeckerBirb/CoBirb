@@ -41,6 +41,7 @@ import time
 from dataclasses import dataclass, field
 
 from ..config import Config
+from ..runtime.verify import DEFAULT_TIMEOUT_SECONDS, run_verification
 from .charter import Charter, WorkerBrief, describe_conflicts, find_conflicts
 from .review import Baseline, Review, review_worker
 from .worker import WorkerReport, run_worker
@@ -116,6 +117,18 @@ class FlockOutcome:
         if self.complete:
             lines.append("")
             lines.append("Complete: " + ", ".join(r.worker_id for r in self.complete))
+            # Complete, but not on their own: their check failed when they
+            # finished and passed on the final tree. Worth saying, because it
+            # means those tickets were not as independent as the charter said.
+            late = [
+                r.worker_id for r in self.complete
+                if r.rechecked and r.accepted_when_finished is not True
+            ]
+            if late:
+                lines.append(
+                    f"Passed only once every worker had finished: {', '.join(late)} — "
+                    "each one's check depended on another ticket's work."
+                )
         return "\n".join(lines)
 
 
@@ -376,6 +389,8 @@ def run_flock(
         outcome.reports = list(pool.map(record, workers))
 
     outcome.stopped = stop.is_set()
+    if not outcome.stopped:
+        recheck(charter, outcome.reports, cwd, stop=stop, config=config)
 
     # After the join, never during it. Review puts an implementation back to
     # its stub for a moment, and a colleague still running could import it.
@@ -407,6 +422,48 @@ def run_flock(
 
     outcome.elapsed = time.monotonic() - started_at
     return outcome
+
+
+def recheck(
+    charter: Charter,
+    reports: "list[WorkerReport]",
+    cwd: str,
+    *,
+    stop: threading.Event | None = None,
+    config: Config | None = None,
+) -> None:
+    """Run every finished worker's acceptance check again, now that all are done.
+
+    **A worker's own verdict is from the moment it finished**, and in a flock
+    that is often the wrong moment. A CLI worker whose tests construct a real
+    ``Store`` finishes while the store worker is still writing it, runs its
+    check against stubs that raise, and reports "acceptance check FAILED" —
+    about a round whose final tree passes. The reverse happens too: a check
+    that passed can be broken by a colleague who finished later. The round's
+    account is about the tree the user is left with, so it is checked here, on
+    that tree, with no model involved.
+
+    Updates each report in place and keeps the earlier verdict in
+    ``accepted_when_finished``, because a disagreement between the two is
+    itself worth reading: it says which tickets were not as independent as the
+    charter claimed.
+    """
+    timeout = int((config or Config()).get("verify_timeout", default=DEFAULT_TIMEOUT_SECONDS))
+    for report in reports:
+        if stop is not None and stop.is_set():
+            return
+        worker = charter.worker(report.worker_id)
+        if worker is None or not report.ok or not worker.accept.strip():
+            continue
+        result = run_verification(worker.accept, cwd, timeout)
+        if result.error:
+            # The check could not run at all; the worker's own verdict is the
+            # better evidence than none.
+            continue
+        report.accepted_when_finished = report.accepted
+        report.accepted = result.ok
+        report.accept_output = result.output
+        report.rechecked = True
 
 
 def check_partition(charter: Charter) -> tuple[bool, str]:

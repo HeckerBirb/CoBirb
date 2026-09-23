@@ -274,6 +274,9 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int) -> P
     """
     tool = install_charter_tool(orchestrator, cwd)
     tool.reset()
+    # Before a single skeleton file exists, so that at seal the desk can tell
+    # what planning wrote from what was already there.
+    tool.desk.watch_skeleton(cwd)
     narration = ""
     stalled = False
     silent = 0

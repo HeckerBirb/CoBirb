@@ -12,7 +12,6 @@ import textwrap
 import pytest
 
 from cobirb.flock.charter import (
-    CONFLICT_READ_WRITE,
     CONFLICT_WRITE_WRITE,
     DEFAULT_CONCURRENCY,
     CharterError,
@@ -250,9 +249,9 @@ def test_two_workers_writing_one_file_is_a_conflict():
     assert "shared.py" in describe_conflicts(conflicts)
 
 
-def test_reading_a_file_another_worker_writes_is_a_conflict():
-    """The frozen-seam rule: a worker reading what another writes is working
-    against a moving target."""
+def test_reading_a_file_another_worker_writes_is_not_a_conflict():
+    """A reader builds against the skeleton's signatures, which the owner keeps.
+    Refusing this made "one implements Store, one builds against it" illegal."""
     charter = _charter("""
         objective = "x"
         [[workers]]
@@ -266,10 +265,7 @@ def test_reading_a_file_another_worker_writes_is_a_conflict():
         brief = "go"
     """)
 
-    conflicts = find_conflicts(charter)
-
-    assert [c.kind for c in conflicts] == [CONFLICT_READ_WRITE]
-    assert "moving target" in conflicts[0].describe()
+    assert find_conflicts(charter) == []
 
 
 def test_reading_a_file_nobody_writes_is_exactly_what_a_seam_is():
@@ -543,13 +539,6 @@ def test_reading_what_a_declared_dependency_writes_is_not_a_conflict():
     assert find_conflicts(parse_charter(_WITH_NEEDS)) == []
 
 
-def test_reading_what_an_undeclared_writer_writes_is_still_a_conflict():
-    """Nobody decided the ordering, so the reader really is racing."""
-    charter = parse_charter(_WITH_NEEDS.replace('needs  = ["seam"]', ""))
-
-    assert [c.kind for c in find_conflicts(charter)] == [CONFLICT_READ_WRITE]
-
-
 def test_two_workers_writing_one_file_is_a_conflict_whatever_the_ordering():
     """Ordering does not rescue shared ownership: "which worker broke this"
     still has no answer."""
@@ -644,26 +633,30 @@ def test_a_dependency_is_shown_to_whoever_approves_the_charter():
 
 
 # --------------------------------------------------------------------------- #
-# A seam is writable by nobody — the structural cause of a partition in ruins
+# A seam is the signature, not the file — it freezes nothing
 # --------------------------------------------------------------------------- #
-def test_a_worker_cannot_be_given_a_formal_seam_to_write():
-    """One worker claiming the shared interface file is what produced one
-    read/write overlap per reader. Named here, it is one line of the charter."""
-    with pytest.raises(CharterError, match="formal seam") as raised:
-        _charter("""
-            objective = "x"
-            [[seams]]
-            at   = "pkg/types.py"
-            kind = "formal"
-            what = "the shared vocabulary"
-            [[workers]]
-            id     = "a"
-            writes = ["pkg/types.py", "pkg/a.py"]
-            brief  = "go"
-        """)
+def test_a_worker_may_implement_the_file_a_formal_seam_lives_in():
+    """In most languages the stub is the interface. Freezing the file left
+    `Store` with nowhere to be implemented, in the first flock benchmark."""
+    charter = _charter("""
+        objective = "x"
+        [[seams]]
+        at   = "store.py"
+        kind = "formal"
+        what = "Store's public methods, which the CLI calls"
+        [[workers]]
+        id     = "store"
+        writes = ["store.py"]
+        brief  = "go"
+        [[workers]]
+        id     = "cli"
+        writes = ["cli.py"]
+        reads  = ["store.py"]
+        brief  = "go"
+    """)
 
-    assert "pkg/types.py" in str(raised.value)
-    assert "'a'" in str(raised.value)
+    assert charter.worker("store").writes == ("store.py",)
+    assert find_conflicts(charter) == []
 
 
 def test_a_loose_seam_may_live_in_a_file_a_worker_writes():
@@ -698,34 +691,6 @@ def test_a_seam_naming_a_symbol_does_not_freeze_the_whole_file():
     """)
 
     assert charter.worker("a").writes == ("pkg/reader.py",)
-
-
-def test_several_readers_of_one_written_file_are_one_overlap():
-    """Four readers of one file is one mistake about one line, and reporting
-    it four times describes a partition in ruins instead."""
-    body = """
-        objective = "x"
-        [[workers]]
-        id     = "a"
-        writes = ["pkg/types.py", "pkg/a.py"]
-        brief  = "go"
-    """
-    for worker_id in ("b", "c", "d", "e"):
-        body += f"""
-        [[workers]]
-        id     = "{worker_id}"
-        writes = ["pkg/{worker_id}.py"]
-        reads  = ["pkg/types.py"]
-        brief  = "go"
-        """
-
-    conflicts = find_conflicts(_charter(body))
-
-    assert [c.kind for c in conflicts] == [CONFLICT_READ_WRITE]
-    assert conflicts[0].workers == ("b", "c", "d", "e")
-    assert conflicts[0].writer == "a"
-    assert "1 overlap" in describe_conflicts(conflicts)
-    assert "b, c, d and e read what a writes" in conflicts[0].describe()
 
 
 def test_an_unreadable_acceptance_check_grants_no_shell(tmp_path):

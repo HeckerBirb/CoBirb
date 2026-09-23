@@ -227,9 +227,26 @@ class RedCheck:
     error: str = ""
 
     def describe(self) -> str:
+        """The verdict in words that cannot be read backwards.
+
+        This said "stub reversion: caught", and two of three models reading it
+        in the first flock benchmark took it to mean the *worker* had reverted
+        to the stubs and been caught — the opposite of a pass, in a round where
+        every hidden test passed. So the sentence now says what happened and
+        which way round is good.
+        """
         if self.error:
             return f"{self.label}: could not be checked — {self.error}"
-        verdict = "caught" if self.caught else "SURVIVED — nothing tests this"
+        if self.caught:
+            verdict = (
+                "PASS — with the skeleton's stubs put back the tests fail, so it is "
+                "this worker's code that makes them pass"
+            )
+        else:
+            verdict = (
+                "SURVIVED — the tests still pass with the skeleton's stubs put back, "
+                "so nothing tests this work"
+            )
         return f"{self.label}: {verdict}"
 
 
@@ -313,7 +330,7 @@ def put_the_stub_back(worker: WorkerBrief, baseline: Baseline, cwd: str, **kwarg
     Reported as "could not be checked", so ``Review.clean`` is False: we did not
     check, and that must never read the same as checking and finding it fine.
     """
-    label = f"[{worker.id}] stub reversion"
+    label = f"[{worker.id}] stubs put back"
     implementation = worker.implementation
     if not implementation:
         return RedCheck(

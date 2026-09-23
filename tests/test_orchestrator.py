@@ -238,6 +238,22 @@ def test_run_tool_dispatch_denied(tmp_path):
     assert any(turn.role == "tool" for turn in session.turns)
 
 
+def test_a_refused_call_records_what_it_was_aimed_at(tmp_path):
+    """"shell was denied" cannot say whether the agent needed `ls` or the
+    network; the flock benchmark reads this to tell which."""
+    policy = Policy()
+    policy.deny("shell")
+    orchestrator = Orchestrator(
+        model=_ToolCallModel("shell", {"command": "rm file"}),
+        tools=ToolRegistry(str(tmp_path)).tools,
+        policy=policy,
+    )
+    orchestrator.run("rm file", "sys", cwd=str(tmp_path))
+
+    refused = [c for c in orchestrator.last_run_tool_calls if c["denied"]]
+    assert refused and refused[0]["target"] == "rm file"
+
+
 def test_run_without_permission(tmp_path):
     policy = Policy()
     policy.deny("shell")

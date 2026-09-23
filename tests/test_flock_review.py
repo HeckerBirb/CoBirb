@@ -161,7 +161,7 @@ def test_real_tests_go_red_when_the_implementation_is_removed(tmp_path):
     check = put_the_stub_back(charter.workers[0], baseline, str(tmp_path))
 
     assert check.caught
-    assert "caught" in check.describe()
+    assert "PASS" in check.describe()
 
 
 def test_vacuous_tests_survive_the_stub_going_back(tmp_path):

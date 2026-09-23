@@ -82,7 +82,7 @@ def test_the_brief_carries_the_one_rule_the_design_rests_on():
         brief = "Implement parse()."
     """))
 
-    assert "DO NOT CHANGE THEM" in text
+    assert "DO NOT CHANGE THE SIGNATURES" in text
     assert "Implement parse()." in text
 
 

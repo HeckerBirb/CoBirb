@@ -960,7 +960,7 @@ class Orchestrator:
         """
         for call in tool_calls:
             if offered is not None and call.name not in offered and call.name in self.tools:
-                self._record_call(call.name, ok=False, denied=True)
+                self._record_call(call.name, ok=False, denied=True, arguments=call.arguments)
                 message = (f"'{call.name}' is not available in this phase — only "
                            f"{', '.join(sorted(offered)) or 'no tools'}. Nothing was changed.")
                 tool_use = [{"name": call.name, "arguments": call.arguments}]
@@ -1084,7 +1084,7 @@ class Orchestrator:
         # answer has already been overruled.
         gate = self.hooks.fire(EVENT_BEFORE_TOOL, tool_name=tool_name, arguments=arguments)
         if gate.blocked:
-            self._record_call(tool_name, ok=False, denied=True)
+            self._record_call(tool_name, ok=False, denied=True, arguments=arguments)
             result = cobirb_typing.ToolResult(
                 ok=False,
                 content=f"Blocked by a before_tool hook: {gate.reason}",
@@ -1104,7 +1104,7 @@ class Orchestrator:
             else:
                 decision, instruction = self._request_approval(tool_name, arguments)
             if decision == cobirb_typing.DECISION_DENY:
-                self._record_call(tool_name, ok=False, denied=True)
+                self._record_call(tool_name, ok=False, denied=True, arguments=arguments)
                 result = cobirb_typing.ToolResult(
                     ok=False,
                     content=_autopilot_refusal(tool_name) if self.autopilot
@@ -1189,8 +1189,26 @@ class Orchestrator:
                 fallback=lambda: self.io.render(f"\n[hook] {message}\n"),
             )
 
-    def _record_call(self, tool_name: str, *, ok: bool, denied: bool) -> None:
-        self.last_run_tool_calls.append({"name": tool_name, "ok": ok, "denied": denied})
+    def _record_call(
+        self, tool_name: str, *, ok: bool, denied: bool, arguments: dict[str, Any] | None = None
+    ) -> None:
+        """Note one call for ``last_run_tool_calls``.
+
+        A refused call also records what it was aimed at — the command, or the
+        path. "shell was denied" cannot tell a worker that needed ``ls`` from
+        one that needed the network, and which of those it was is the question
+        a refusal is evidence for.
+        """
+        record: dict[str, Any] = {"name": tool_name, "ok": ok, "denied": denied}
+        if denied and arguments:
+            target = next(
+                (arguments[key] for key in ("command", "path", "pattern")
+                 if isinstance(arguments.get(key), str)),
+                "",
+            )
+            if target:
+                record["target"] = target[:200]
+        self.last_run_tool_calls.append(record)
 
     def _snapshot_before(self, tool: Any, arguments: dict[str, Any]) -> None:
         """Save whatever this call is about to change, so it can be undone.
