@@ -1,0 +1,18 @@
+{
+  "label": "prompt-on-hard",
+  "sha": "603c292020496d636618a81f7740bbb400b5786c",
+  "tasks": 6,
+  "reps": 2,
+  "flock": false,
+  "models": [
+    "gemma4:latest",
+    "ornith-1.5:9b",
+    "qwen3-coder:30b",
+    "gpt-oss:20b",
+    "ornith-1.5:35b"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {
+    "system_prompt": "harness"
+  }
+}

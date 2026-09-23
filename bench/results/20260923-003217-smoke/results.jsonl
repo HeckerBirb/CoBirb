@@ -1,0 +1,1 @@
+{"model": "gemma4:latest", "task": "answer-default-port", "category": "answer", "rep": 1, "seed": 1000, "outcome": "pass", "passed": true, "turns": 4, "tool_calls": 1, "failed_calls": 0, "writes": 0, "denied": [], "stop_reason": "answered", "elapsed": 15.4, "summary": "8081", "error": "", "check_output": ""}

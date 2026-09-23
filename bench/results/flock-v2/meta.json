@@ -1,0 +1,14 @@
+{
+  "label": "flock-v2",
+  "sha": "8f7377d191ba7f988d39c228a8601e883f378653",
+  "tasks": 2,
+  "reps": 3,
+  "flock": true,
+  "models": [
+    "ornith-1.5:9b",
+    "qwen3-coder:30b",
+    "gemma4:latest"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {}
+}

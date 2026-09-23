@@ -1,0 +1,15 @@
+{
+  "label": "baseline",
+  "sha": "2ee866abe7e4ff5d67931736b2fffa6c34697ab9",
+  "tasks": 18,
+  "reps": 2,
+  "models": [
+    "gemma4:latest",
+    "ornith-1.5:9b",
+    "qwen3-coder:30b",
+    "gpt-oss:20b",
+    "ornith-1.5:35b"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {}
+}

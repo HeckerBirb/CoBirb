@@ -9,5 +9,6 @@ __pycache__/
 .vscode/
 *.session.json
 .claude/settings.local.json
-bench/results/
+# Finished runs are kept (see bench/README.md); logs are not.
+bench/results/*.log
 build/

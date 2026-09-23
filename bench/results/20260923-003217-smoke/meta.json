@@ -1,0 +1,11 @@
+{
+  "label": "smoke",
+  "sha": "2ee866abe7e4ff5d67931736b2fffa6c34697ab9",
+  "tasks": 1,
+  "reps": 1,
+  "models": [
+    "gemma4:latest"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {}
+}

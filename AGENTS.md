@@ -515,6 +515,9 @@ python bench/cobirb_bench.py --models <m1,m2> --reps 2   # the offline benchmark
   reference `solution/`. `--flock` runs a flock session instead (the only place a charter is
   auto-approved — throwaway copies only). `compat_table.py` generates `docs/manual/models.md`.
   **A claim that something improves reliability is checked here**, beyond the noise between runs.
+  `bench/README.md` is the method: running it, adding a task, reading results. Finished runs are
+  committed under `bench/results/`; `bench/compare.py` compares runs and puts a Fisher exact p on
+  every change, because at 3 reps most differences are not yet evidence.
 
 ## 17. Decided — do not rebuild these
 

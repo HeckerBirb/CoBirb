@@ -1,0 +1,14 @@
+{
+  "label": "flock-vs-single-single",
+  "sha": "719e4948626310419643574d776f1ae1b0dae00b",
+  "tasks": 2,
+  "reps": 1,
+  "flock": false,
+  "models": [
+    "ornith-1.5:9b",
+    "qwen3-coder:30b",
+    "gemma4:latest"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {}
+}

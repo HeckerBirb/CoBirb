@@ -1,0 +1,15 @@
+{
+  "label": "v0.36-prompt-off",
+  "sha": "603c292020496d636618a81f7740bbb400b5786c",
+  "tasks": 24,
+  "reps": 2,
+  "models": [
+    "gemma4:latest",
+    "ornith-1.5:9b",
+    "qwen3-coder:30b",
+    "gpt-oss:20b",
+    "ornith-1.5:35b"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {}
+}
