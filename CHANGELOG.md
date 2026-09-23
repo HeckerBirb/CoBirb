@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.37.0]
 
 - **Plan mode looks before it plans.** The planning step used to be a single reply with no tools, so
   the model planned changes to code it had not been allowed to read. It is now a short read-only
