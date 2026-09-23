@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.41.0]
 
 - **`cobirb help <topic>` is the manual.** Each topic is now a page of the user manual, rendered in
   the terminal, instead of a second copy of the same material that had drifted — the old help still
