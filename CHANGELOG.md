@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.40.1]
 
 - **Your git history cannot be changed from inside the sandbox.** The project's `.git` is read-only
   there, so a command that runs without asking can still `git status`, `diff` and `log`, but cannot
