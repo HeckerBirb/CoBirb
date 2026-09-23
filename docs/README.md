@@ -6,6 +6,7 @@ Short pages. Start at the top.
 |---|---|
 | [Install](manual/install.md) | Get a `cobirb` binary on your PATH, and update or remove it later |
 | [First run](manual/first-run.md) | Point it at a model, ask it something |
+| [Models](manual/models.md) | Which models CoBirb has been measured with, and how they did |
 | [Commands](manual/commands.md) | Every `/command` in the app |
 | [CLI](manual/cli.md) | Flags, subcommands, one-shot and headless modes |
 | [Config](manual/config.md) | Every key in `~/.cobirb/config.json` |

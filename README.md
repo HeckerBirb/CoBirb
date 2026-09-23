@@ -228,6 +228,7 @@ Being straight about the edges, since the rest of this page makes strong claims:
 ## Documentation
 
 - [docs/](./docs/) — short how-to pages: [install](./docs/manual/install.md),
+  [models](./docs/manual/models.md),
   [first run](./docs/manual/first-run.md), [commands](./docs/manual/commands.md),
   [CLI](./docs/manual/cli.md), [config](./docs/manual/config.md),
   [permissions](./docs/manual/permissions.md), [sessions](./docs/manual/sessions.md),
