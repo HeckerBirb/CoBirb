@@ -776,126 +776,92 @@ def test_plan_mode_off_by_default_leaves_turns_untagged_and_no_validation():
     assert session.validation is None
 
 
-def test_plan_mode_runs_plan_then_act_then_validate_as_separate_phases(tmp_path):
+def test_plan_mode_plans_with_read_only_tools_then_acts_with_all(tmp_path):
     registry = ToolRegistry(str(tmp_path))
-    model = _RecordingToolCountModel(["1. Read the file. 2. Report back.", "Done reading.", "Confirmed: read it."])
-    orchestrator = Orchestrator(
-        model=model, tools=registry.tools, policy=Policy()
-    )
+    model = _RecordingToolCountModel(["1. Read the file. 2. Report back.", "Done reading."])
+    orchestrator = Orchestrator(model=model, tools=registry.tools, policy=Policy())
 
     session = orchestrator.run("read the file", "sys", cwd=str(tmp_path), label="noah", plan_mode=True)
 
-    # The planning call got no tools at all; the act/validate calls got the
-    # full registered set.
-    assert model.tool_counts[0] == 0
-    assert model.tool_counts[1] > 0
-    assert model.tool_counts[2] > 0
-
+    from cobirb.policy import READ_TOOLS
+    assert model.tool_counts[0] == len(READ_TOOLS | {"todo"})  # it may look, not touch
+    assert model.tool_counts[1] == len(registry.tools)
     assistant_turns = [t for t in session.turns if t.role == "assistant"]
-    assert [t.phase for t in assistant_turns] == ["plan", "act", "validate"]
+    assert [t.phase for t in assistant_turns] == ["plan", "act"]
     assert "Read the file" in assistant_turns[0].content
     assert session.summary == "Done reading."
-    assert session.validation == "Confirmed: read it."
+    assert session.validation is None  # there is no validation phase any more
 
 
-def test_plan_mode_still_executes_tool_calls_during_the_act_phase(tmp_path):
+def test_planning_can_read_but_a_write_it_asks_for_is_refused(tmp_path):
     (tmp_path / "a.txt").write_text("hello")
     policy = Policy()
     policy.allow("read_file")
+    policy.allow("write_file")
     registry = ToolRegistry(str(tmp_path))
-    orchestrator = Orchestrator(
-        model=_ToolCallModel("read_file", {"path": str(tmp_path / "a.txt")}, reply="done"),
-        tools=registry.tools,
-        policy=policy,
-    )
 
-    session = orchestrator.run("read file", "sys", cwd=str(tmp_path), plan_mode=True)
+    class _PlannerThatTriesToWrite(_RecordingToolCountModel):
+        def __init__(self):
+            super().__init__(["", "", "The plan.", "Done."])
+            self.step = 0
 
-    tool_turn = _tool_turn(session)
-    assert tool_turn.content == "hello"
-    assert tool_turn.phase == "act"
+        def chat(self, *args, **kwargs):
+            self.step += 1
+            return super().chat(*args, **kwargs)
+
+        def parse_tool_calls(self, reply):
+            if self.step == 1:
+                return [ToolCall("read_file", {"path": str(tmp_path / "a.txt")})]
+            if self.step == 2:
+                return [ToolCall("write_file", {"path": str(tmp_path / "b.txt"), "content": "x"})]
+            return []
+
+    orchestrator = Orchestrator(model=_PlannerThatTriesToWrite(), tools=registry.tools, policy=policy)
+    session = orchestrator.run("go", "sys", cwd=str(tmp_path), plan_mode=True)
+
+    plan_tools = [t for t in session.turns if t.role == "tool" and t.phase == "plan"]
+    assert plan_tools[0].content == "hello"
+    assert "not available in this phase" in plan_tools[1].content
+    assert not (tmp_path / "b.txt").exists()
 
 
 class _RecordingPhaseIO(_RecordingIO):
-    """A _RecordingIO that also records render_plan/render_answer/
-    render_validation calls, both individually and (via ``events``) in the
-    order they actually happened across all three."""
+    """A _RecordingIO that also records render_plan calls."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.plans = []
-        self.answers = []
-        self.validations = []
-        self.events: list[tuple[str, str, str]] = []
 
     def render_plan(self, label, text):
         self.plans.append((label, text))
-        self.events.append(("plan", label, text))
-
-    def render_answer(self, label, text):
-        self.answers.append((label, text))
-        self.events.append(("answer", label, text))
-
-    def render_validation(self, label, text):
-        self.validations.append((label, text))
-        self.events.append(("validation", label, text))
 
 
-def test_plan_mode_renders_the_plan_and_validation_via_the_io_hooks(tmp_path):
+def test_plan_mode_renders_the_plan_via_the_io_hook(tmp_path):
     io = _RecordingPhaseIO()
-    model = _RecordingToolCountModel(["The plan.", "Acted.", "Validated."])
+    model = _RecordingToolCountModel(["The plan.", "Acted."])
     orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), io=io)
 
     orchestrator.run("do it", "sys", cwd=str(tmp_path), label="noah", plan_mode=True)
 
     assert io.plans == [("noah", "The plan.")]
-    assert io.validations == [("noah", "Validated.")]
 
 
-def test_plan_mode_falls_back_to_plain_render_without_the_hooks(tmp_path):
+def test_plan_mode_falls_back_to_plain_render_without_the_hook(tmp_path):
     io = _RecordingIO()
-    model = _RecordingToolCountModel(["The plan.", "Acted.", "Validated."])
+    model = _RecordingToolCountModel(["The plan.", "Acted."])
     orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), io=io)
 
     orchestrator.run("do it", "sys", cwd=str(tmp_path), label="noah", plan_mode=True)
 
     assert any("plan" in text and "The plan." in text for text in io.rendered)
-    assert any("noah" in text and "Acted." in text for text in io.rendered)
-    assert any("validation" in text and "Validated." in text for text in io.rendered)
-
-
-def test_plan_mode_renders_the_act_answer_before_validation(tmp_path):
-    """The validate phase's panel must not appear before the answer it is
-    validating. Leaving the act phase's final answer to the CLI to print
-    after run() returns puts it after the validate phase, which renders
-    live from inside run() and by then has
-    already shown its own panel. The orchestrator must render the act
-    answer itself, in order, before running validate. See cli.py's
-    end-to-end test of the same regression against a real TerminalIO."""
-    io = _RecordingPhaseIO()
-    model = _RecordingToolCountModel(["The plan.", "The answer.", "The validation."])
-    orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), io=io)
-
-    orchestrator.run("do it", "sys", cwd=str(tmp_path), label="noah", plan_mode=True)
-
-    assert [kind for kind, _, _ in io.events] == ["plan", "answer", "validation"]
-    assert io.answers == [("noah", "The answer.")]
-    # The caller (e.g. the CLI) must not print the answer a second time.
-    assert orchestrator.last_turn_streamed is True
 
 
 def test_plan_mode_session_round_trips_through_real_encrypted_storage(tmp_path):
-    """Integration: a real encrypted SessionManager (not just Session.to_dict
-    /from_dict in isolation — see test_session.py) must actually preserve
-    phase-tagged turns and the validation report across a save/reload
-    cycle, the two pieces plan mode adds to the session schema. Mirrors
-    exactly how cli._build_orchestrator wires a session in: build the
-    crypto, then SessionManager.create, then hand it to the Orchestrator."""
     session_path = str(tmp_path / "session.json")
     crypto = AesGcmScryptSessionCrypto()
     manager = SessionManager.create(session_path, crypto, str(tmp_path), "pw")
 
-    model = _RecordingToolCountModel(["1. Do X.", "Did X.", "Confirmed: X was done."])
+    model = _RecordingToolCountModel(["1. Do X.", "Did X."])
     orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), session=manager)
 
     orchestrator.run("do X", "sys", cwd=str(tmp_path), label="noah", plan_mode=True)
@@ -903,8 +869,7 @@ def test_plan_mode_session_round_trips_through_real_encrypted_storage(tmp_path):
 
     reloaded = SessionManager.load(session_path, AesGcmScryptSessionCrypto(), "pw", str(tmp_path))
     phases = [t.phase for t in reloaded.session.turns if t.role == "assistant"]
-    assert phases == ["plan", "act", "validate"]
-    assert reloaded.session.validation == "Confirmed: X was done."
+    assert phases == ["plan", "act"]
     assert reloaded.session.summary == "Did X."
 
 
@@ -940,17 +905,15 @@ def test_plan_mode_does_not_double_render_a_streamed_phase():
     same content twice, same reasoning as last_turn_streamed for the act
     phase's own final answer."""
     io = _RecordingPhaseIO()
-    model = _AllStreamingModel([["plan text"], ["act text"], ["validate text"]])
+    model = _AllStreamingModel([["plan text"], ["act text"]])
     orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), io=io)
 
     orchestrator.run("do it", "sys", cwd="/tmp", label="noah", plan_mode=True)
 
     assert io.plans == []
-    assert io.validations == []
     joined = "".join(io.rendered)
     assert "plan text" in joined
     assert "act text" in joined
-    assert "validate text" in joined
 
 
 # --------------------------------------------------------------------------- #

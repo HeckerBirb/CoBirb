@@ -1056,3 +1056,40 @@ def test_a_unified_diff_without_line_numbers_is_placed_by_context(tmp_path):
     result = ApplyPatchTool(str(tmp_path)).execute({"path": "a.py", "patch": "@@\n x = 1\n-y = 2\n+y = 3\n"})
 
     assert result.ok and (tmp_path / "a.py").read_text() == "x = 1\ny = 3\n"
+
+
+# --------------------------------------------------------------------------- #
+# todo: the checklist
+# --------------------------------------------------------------------------- #
+def test_the_checklist_replaces_itself_and_reports_progress(tmp_path):
+    from cobirb.plugins.core.tools import TodoTool
+
+    tool = TodoTool(str(tmp_path))
+    tool.execute({"items": [{"text": "read", "status": "done"}, {"text": "edit", "status": "in_progress"},
+                            {"text": "test"}]})
+    result = tool.execute({"items": [{"text": "read", "status": "done"}, {"text": "edit", "status": "done"}]})
+
+    assert result.ok
+    assert result.content.splitlines() == ["Checklist (2/2 done):", "[x] read", "[x] edit"]
+    assert tool.progress() == (2, 2)
+
+
+def test_a_sloppy_checklist_is_still_read(tmp_path):
+    from cobirb.plugins.core.tools import TodoTool
+
+    result = TodoTool(str(tmp_path)).execute({"items": ["first", {"text": "second", "status": "In Progress"},
+                                                        {"text": ""}]})
+
+    assert "[ ] first" in result.content and "[>] second" in result.content
+    assert "(0/2 done)" in result.content
+
+
+def test_the_checklist_needs_no_approval():
+    from cobirb.runtime import wiring
+    import os
+
+    orchestrator = wiring.build_orchestrator(os.getcwd(), {})
+    try:
+        assert orchestrator.policy.is_allowed("todo", {"items": []})
+    finally:
+        orchestrator.close()

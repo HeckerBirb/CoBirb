@@ -650,8 +650,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--plan-mode",
         choices=["on", "off"],
         default=None,
-        help="Plan, then act, then validate with references, as 3 separate model "
-        "phases (default: off, or the 'plan_mode' config key). Toggle mid-session "
+        help="Look and plan first — read-only tools and a checklist, nothing changed — "
+        "then act (default: off, or the 'plan_mode' config key). Toggle mid-session "
         "with /plan on|off.",
     )
     opts.add_argument(

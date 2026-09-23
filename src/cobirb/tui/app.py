@@ -721,6 +721,10 @@ class CoBirbApp(App[None]):
             # no way to get it back.
             self.call_from_thread(self._on_turn_finished)
 
+    def set_checklist(self, progress: str) -> None:
+        """Show the agent's checklist progress ("2/5") on the status bar."""
+        self.query_one(StatusBar).checklist = progress
+
     def ensure_orchestrator(self) -> Orchestrator:
         """The session's orchestrator, built now if no turn has built it yet —
         for a command like /autopilot that has to act on it before the first

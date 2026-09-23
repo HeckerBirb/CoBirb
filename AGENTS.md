@@ -108,10 +108,15 @@ prompt → model call → tool calls (policy-gated) → results into history →
   `stop_reason` and exits 1.
 - Each iteration: drain steering queue → build context → model call → either record tool calls and
   execute, or return the final answer.
-- **Plan mode** (`--plan-mode on`, `/plan on`, `plan_mode` config; off by default) splits the run
-  into three model phases, each recorded with `Turn.phase` ∈ `plan|act|validate`. The plan phase is
-  called with `tools=[]` so it cannot act. `phase` is descriptive only — it never changes context
-  replay, but it *is* covered by the turn hash.
+- **Plan mode** (`--plan-mode on`, `/plan on`, `plan_mode` config; off by default) is a planning
+  pass, then the work (0.37.0, decision D9). The pass is a bounded `_loop` (`_PLAN_MAX_TURNS = 12`)
+  offered only `READ_TOOLS` and `todo`, so the plan is made *after looking at the code* — it was a
+  single reply with `tools=[]`, a plan for code the model had not been allowed to see — and a call
+  naming a tool the phase did not offer is refused (`_execute_tool_calls(offered=...)`), because a
+  native call can name anything. The third "validate" phase was removed: the working-method prompt
+  and `verify_command` cover it. `Turn.phase` is `plan|act` for new turns; `validate` turns and
+  `Session.validation` in old sessions still load. `phase` is descriptive only — it never changes
+  context replay, but it *is* covered by the turn hash.
 - **Verification** (`_verify_and_fix`) runs the user's `verify_command` after a turn that changed
   files, feeds a failure back as a user turn, and allows one bounded fix attempt.
 - **Mid-turn steering** (`steer()`, thread-safe): queues a message applied as a user turn at the
@@ -309,7 +314,9 @@ Everything before the marker stays in the file, so the session remains a complet
 ## 8. Tools (`plugins/core/tools.py`)
 
 Built-ins: `read_file`, `write_file`, `edit_file`, `apply_patch`, `glob`, `grep`, `list_dir`,
-`repo_map`, `shell`. Subclasses of `CobirbTool` declare `NAME: ClassVar[str]` and inherit `name()`
+`repo_map`, `shell`, `todo`. **`todo` is a checklist the model keeps** — the whole list each call
+(one shape, easy for small models), progress on the TUI status bar — reaching nothing, so permitted
+outright in both wirings like the charter tools. Subclasses of `CobirbTool` declare `NAME: ClassVar[str]` and inherit `name()`
 — the SPI declares `name` as a **method**, and `ToolRegistry.register` rejects anything else.
 
 **`edit_file` changes exactly one region or refuses** (`_plan_edit`). It used to replace the first

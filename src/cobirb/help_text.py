@@ -57,8 +57,8 @@ OPTIONS
                       with applies exactly as it does in Ollama. See
                       'cobirb help model'.
   --allow-tool SPEC   Override permission: 'name' or 'name(arg)'. Repeatable.
-  --plan-mode on|off  Plan, then act, then validate with references, as 3
-                      separate model phases (default: off, or "plan_mode"
+  --plan-mode on|off  Look and plan first (read-only), then act
+                      (default: off, or "plan_mode"
                       in config). See 'cobirb help plan'.
   --headless          Never prompt: refuse anything not already permitted
                       by --allow-tool or "allow_tools". For CI. There is
@@ -198,20 +198,16 @@ whole of the selected session and switches straight into it — the same way
 end is CLI-only for now.
 """,
     "plan": """\
-PLAN MODE — explicit plan → act → validate
+PLAN MODE — look, plan, then do
 
-Off by default: the model plans, acts, and checks its own work implicitly
-in one pass, which is how CoBirb behaves normally. Turned on, a run becomes
-three separate model phases instead, each recorded as its own turn:
+Off by default: the model plans and acts in one continuous pass. Turned on,
+each message first gets a planning pass, then the work:
 
-  1. plan      One reply, no tools available — a short, numbered plan for
-               how the request will be fulfilled. Shown to you immediately.
-  2. act       The normal tool-using loop, following that plan.
-  3. validate  A bounded follow-up loop (tools available) that checks the
-               work — re-reading files, re-running tests/commands — and
-               reports, with concrete references, whether and how the
-               request was actually fulfilled. Stored as the session's
-               "validation" field alongside its usual summary.
+  1. plan   The model may look — read_file, list_dir, glob, grep, repo_map
+            and the todo checklist — but cannot change anything. It ends
+            with a short numbered plan, shown to you immediately.
+  2. act    The normal tool-using loop, following that plan and keeping
+            the checklist current.
 
 Turn on/off:
   cobirb --plan-mode on|off     For this run (overrides config below).
@@ -220,9 +216,7 @@ Turn on/off:
   "plan_mode": true             In config, as the default when neither
                                  --plan-mode nor /plan has been used yet.
 
-Plan mode costs at least one extra model call per turn (the plan), and up
-to a few more (the validate phase, bounded like the act phase); expect
-slower turns in exchange for the explicit checkpoints.
+The planning pass costs a few extra model calls per message.
 """,
     "model": """\
 MODEL — choosing what CoBirb talks to

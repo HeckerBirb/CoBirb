@@ -22,7 +22,7 @@ cobirb help config                       # help on one topic
 |---|---|
 | `--model NAME` | Which model, this run |
 | `--allow-tool SPEC` | Pre-approve a tool. Repeatable. `read_file` or `shell(git status)` |
-| `--plan-mode on\|off` | Plan → act → validate as separate phases |
+| `--plan-mode on\|off` | Look and plan first (read-only), then act |
 | `--autopilot` | With `-p`: work unattended in the project and the sandbox; refuse anything else instead of asking |
 | `--system-prompt off\|harness` | Whether CoBirb adds its own system block |
 | `--cwd DIR` | Work somewhere other than here |

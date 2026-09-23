@@ -246,9 +246,9 @@ class _StubOrchestrator:
 # saved session) would show up here even if it slipped past the more
 # targeted tests above.
 # --------------------------------------------------------------------------- #
-class _ScriptedThreePhaseModel:
-    """Drives a real Orchestrator through plan -> act (one real tool call)
-    -> validate, without touching the network. Mirrors the shape of
+class _ScriptedPlanModel:
+    """Drives a real Orchestrator through plan -> act (one real tool call),
+    without touching the network. Mirrors the shape of
     test_integration_ollama.py's live tests, but deterministic."""
 
     def __init__(self, tool_name: str, tool_arguments: dict):
@@ -264,8 +264,7 @@ class _ScriptedThreePhaseModel:
         return {
             1: "1. Read note.txt. 2. Report the secret word.",
             2: "Let me check the file.",
-            3: "The secret word is banana.",
-        }.get(self._step, "Confirmed: note.txt was read and the secret word is banana.")
+        }.get(self._step, "The secret word is banana.")
 
     def parse_tool_calls(self, reply):
         if self._step == 2 and not self._tool_call_emitted:
@@ -282,7 +281,7 @@ class _ScriptedThreePhaseModel:
 
 def test_cli_one_shot_plan_mode_end_to_end_with_real_orchestrator_wiring(monkeypatch, tmp_path, capsys):
     (tmp_path / "note.txt").write_text("the secret word is banana")
-    model = _ScriptedThreePhaseModel("read_file", {"path": str(tmp_path / "note.txt")})
+    model = _ScriptedPlanModel("read_file", {"path": str(tmp_path / "note.txt")})
     monkeypatch.setattr(wiring, "build_model", lambda *a, **k: model)
 
     result = cli.main(
@@ -291,23 +290,21 @@ def test_cli_one_shot_plan_mode_end_to_end_with_real_orchestrator_wiring(monkeyp
 
     assert result == 0
     out = capsys.readouterr().out
-    # The real ToolRegistry actually read the real file (the default policy
-    # pre-approves read_file, so no approval prompt blocks it), and the
-    # real TerminalIO rendered all three phases plus the tool call.
+    # The real ToolRegistry read the real file and the real TerminalIO
+    # rendered the plan, the tool call and the answer.
     assert "Read note.txt" in out  # plan panel
     assert "note.txt" in out  # tool-call panel (path argument)
-    assert "the secret word is banana" in out  # tool result content
-    assert "Confirmed" in out  # validation panel
+    assert "The secret word is banana." in out
 
 
 def test_cli_one_shot_plan_mode_persists_phase_tags_to_a_real_encrypted_session(monkeypatch, tmp_path):
     """The same end-to-end wiring as above, but through --session — proving
-    plan mode's Turn.phase/Session.validation additions actually survive a
+    plan mode's Turn.phase tags actually survive a
     real save via the CLI, not just SessionManager called directly (see
     test_session.py) or Orchestrator wired up by hand (see
     test_orchestrator.py)."""
     (tmp_path / "note.txt").write_text("the secret word is banana")
-    model = _ScriptedThreePhaseModel("read_file", {"path": str(tmp_path / "note.txt")})
+    model = _ScriptedPlanModel("read_file", {"path": str(tmp_path / "note.txt")})
     monkeypatch.setattr(wiring, "build_model", lambda *a, **k: model)
     monkeypatch.setattr(sessions, "read_password", lambda: "pw")
     session_path = str(tmp_path / "s.json")
@@ -332,13 +329,11 @@ def test_cli_one_shot_plan_mode_persists_phase_tags_to_a_real_encrypted_session(
     assert result == 0
     reloaded = SessionManager.load(session_path, AesGcmScryptSessionCrypto(), "pw", str(tmp_path))
     assistant_phases = [t.phase for t in reloaded.session.turns if t.role == "assistant"]
-    # plan, then the act phase's tool-call-announcing turn, then its final
-    # answer turn (both "act"), then validate.
-    assert assistant_phases == ["plan", "act", "act", "validate"]
+    # plan, then the act phase's tool-call-announcing turn and its answer.
+    assert assistant_phases == ["plan", "act", "act"]
     tool_turn = next(t for t in reloaded.session.turns if t.role == "tool")
     assert tool_turn.phase == "act"
     assert tool_turn.content == "the secret word is banana"
-    assert reloaded.session.validation
     assert reloaded.session.summary == "The secret word is banana."
 
 

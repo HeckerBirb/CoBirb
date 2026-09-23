@@ -223,6 +223,8 @@ def build_orchestrator(
     for rules in (parse_allow_tools(config.get("allow_tools")), allow_overrides):
         for name, arg in rules.items():
             policy.allow(name, arg)
+    # The checklist reaches nothing (plugins.core.tools.TodoTool).
+    policy.allow("todo")
     # Where shell commands run (cobirb.sandbox), and whether a contained one
     # may run without asking: always when the user said "auto", and by default
     # only where whole-tree checkpoints can undo what a command changed.
@@ -338,6 +340,7 @@ def build_subagent(
     # Contained like every other agent's commands — but never auto-approved:
     # a worker's shell is exactly what its charter grants, and no more.
     attach_sandbox(registry, config)
+    policy.allow("todo")
     subagent = Orchestrator(
         model=build_for_role(ROLE_WORKER, config),
         tools=registry.tools,

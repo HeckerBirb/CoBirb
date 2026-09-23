@@ -18,6 +18,7 @@ to the scrolling output of one-shot mode.
 """
 from __future__ import annotations
 
+import re
 import threading
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Callable, Iterator
@@ -197,6 +198,13 @@ class TuiIO(I_OAdapter):
 
     def render_tool_call(self, tool_name: str, arguments: dict[str, Any], result: Any) -> None:
         self._write(render.build_tool_call_panel(tool_name, arguments, result))
+        if tool_name == "todo" and getattr(result, "ok", False):
+            # The checklist's progress rides on the status bar, so where the
+            # agent is in a long task is visible without scrolling back.
+            first = str(getattr(result, "content", "")).splitlines()[:1]
+            match = re.search(r"\((\d+)/(\d+) done\)", first[0]) if first else None
+            if match:
+                self._call(self._app.set_checklist, f"{match.group(1)}/{match.group(2)}")
         # Through `_call` like everything else here: this runs on the
         # orchestrator's thread and touches widgets.
         self._call(self._app.note_flock_planning_progress, tool_name)

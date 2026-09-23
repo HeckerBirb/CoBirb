@@ -20,7 +20,7 @@ from typing import Any, Callable, Iterable
 
 from .checkpoints import Checkpoints
 from .context import DEFAULT_CONTEXT_TOKENS, CompactionReport, compact, history_budget
-from .policy import AuditLog, Policy, SessionGrants
+from .policy import READ_TOOLS, AuditLog, Policy, SessionGrants
 from .redaction import redact
 from .runtime.hooks import (
     EVENT_AFTER_TOOL,
@@ -122,32 +122,26 @@ class RunStop:
 # Flock labels Brainy Birb and each Worker Birb by their own names.
 REPLY_LABEL = "CoBirb"
 
-# System-prompt addenda for plan mode's three phases (Orchestrator.run,
-# plan_mode=True). Off by default — the model plans, acts and validates
-# implicitly within one continuous loop, the way someone working through a
-# task does, with no hard stop between thinking and doing. On, each phase
-# gets its own model call(s) and its own labeled Turn(s) (see Turn.phase),
-# for anyone who wants those checkpoints made explicit.
+# Plan mode (Orchestrator.run(plan_mode=True)): a planning pass, then the work.
+# The planning pass can *look* — the read-only tools and the checklist — but not
+# change anything. It used to be a single reply with no tools at all, which
+# asked the model to plan work on code it had not been allowed to see; and a
+# third "validation" phase afterwards re-ran what the working-method prompt and
+# verify_command already cover. See _run_plan_phase.
 _PLAN_PHASE_INSTRUCTIONS = (
-    "PLANNING PHASE. Do not call any tools and do not attempt the task itself yet — "
-    "no tools are available to you for this reply. Write a short, numbered plan "
-    "describing the concrete steps you will take to fulfill the user's request above. "
-    "This plan will be shown to the user now and stays in the conversation history for "
-    "your own reference in the next phase."
+    "PLANNING PHASE. Look before you plan: use the read-only tools to find and read the code "
+    "this request is about. You cannot change anything in this phase. Then write a short, "
+    "numbered plan of the concrete steps you will take, and record it as a checklist with the "
+    "todo tool. The plan is shown to the user; you carry it out next."
 )
 _ACT_PHASE_INSTRUCTIONS = (
-    "ACT PHASE. A plan for this request was already produced in the assistant turn "
-    "above — follow it, adapting as needed if what you find while working contradicts "
-    "it. Use tools as needed to complete the user's request."
+    "ACT PHASE. Carry out the plan above, adapting it if what you find contradicts it. Keep the "
+    "todo checklist current as you finish each step, check your work, then answer briefly with "
+    "what you changed."
 )
-_VALIDATE_PHASE_INSTRUCTIONS = (
-    "VALIDATION PHASE. The task above is believed complete. Verify that it actually "
-    "was: re-read changed files, re-run any relevant tests or commands, or otherwise "
-    "check your own work using the available tools. Then report, with concrete "
-    "references (file paths, line numbers, command/test output), how and why the "
-    "user's request was successfully fulfilled. If it was not fully fulfilled, say so "
-    "plainly and explain what remains — do not claim success you can't back up."
-)
+# How many model turns the planning pass may spend looking around.
+_PLAN_MAX_TURNS = 12
+_PLAN_TOOLS = READ_TOOLS | {"todo"}
 
 
 def _join_system(*parts: str) -> str:
@@ -414,24 +408,12 @@ class Orchestrator:
         this way, so a caller (e.g. the CLI) knows whether it still needs to
         print ``session.summary`` itself or would just be duplicating output.
 
-        With ``plan_mode=True`` (config/``/plan`` — see cli.py), the single
-        act loop below is bracketed by two extra model calls instead of
-        being the whole run: a **plan** phase first (one reply, no tools,
-        recorded as a "plan"-phase turn and shown to the user immediately),
-        then the same act loop as always (now "act"-phase turns, following
-        the plan), then a **validate** phase (its own bounded tool-using
-        loop, "validate"-phase turns) that checks and reports on the result
-        in ``session.validation``. Off (the default), the model plans/acts/
-        validates implicitly in one pass, as before.
-
-        In plan mode specifically, the act phase's own answer is also shown
-        live here (via ``_render_answer``) rather than left to the caller's
-        usual post-``run()`` print (see ``cli._render_final_answer``): the
-        validate phase renders its own report *before* ``run()`` returns, so
-        if the act answer were left for the caller to print afterward, the
-        user would read the validation of a request before ever seeing what
-        the answer to it was. ``last_turn_streamed`` is set accordingly so
-        that post-``run()`` print becomes a no-op rather than a duplicate.
+        With ``plan_mode=True`` (config/``/plan`` — see cli.py), the act
+        loop is preceded by a **plan** phase: a bounded loop offered only the
+        read-only tools and the checklist (``_run_plan_phase``), so the plan
+        is made after looking at the code, and shown to the user at once.
+        The act loop then follows it, its turns tagged "act". Off (the
+        default), the model plans and acts in one continuous loop.
         """
         session = self._open_session(prompt, system, cwd, session_path, images)
         self.last_run_tool_calls = []
@@ -520,27 +502,7 @@ class Orchestrator:
         )
         session.summary = content
         self.last_turn_streamed = streamed
-        # The act phase decides how the run ended. Plan mode's validate loop
-        # runs after it and would otherwise overwrite the answer.
         stop = self.last_stop
-
-        if plan_mode:
-            # Show the answer now — before validating it — rather than
-            # leaving it to the caller's usual post-run() print, which
-            # would land after the validate phase's own panel below and
-            # read as "validated, then here's what was validated."
-            self.last_turn_streamed = streamed or self._render_answer(label, content)
-
-            validation_text, validation_streamed = self._loop(
-                _join_system(system_with_cwd, _VALIDATE_PHASE_INSTRUCTIONS),
-                session,
-                max_turns=4,
-                phase=PHASE_VALIDATE,
-            )
-            session.validation = validation_text
-            if not validation_streamed:
-                self._render_phase(PHASE_VALIDATE, label, validation_text)
-            self.last_stop = stop
 
         if not stop.finished:
             render_through(self.io, "render_notice", stop.describe())
@@ -594,43 +556,18 @@ class Orchestrator:
             for call in self.last_run_tool_calls
         )
 
-    def _render_answer(self, label: str, text: str) -> bool:
-        """Show a finished answer live, via ``io``'s ``render_answer`` hook
-        if it has one (the same hook ``cli._render_final_answer`` uses for
-        a normal, non-plan-mode run), else a plain fallback through
-        ``render()``. Only used directly by ``run()`` for plan mode's act
-        phase (see its docstring for why); a normal run leaves rendering
-        the final answer to the caller instead. Returns whether anything
-        was actually shown (``False`` with no ``io`` attached), so the
-        caller knows whether it still needs to show the text some other way.
-        """
-        if not text:
-            return False
-        return render_through(
-            self.io,
-            "render_answer",
-            label,
-            text,
-            fallback=lambda: self.io.render(f"\n{label}: {text}\n"),
-        )
-
     def _run_plan_phase(self, system: str, session: Session) -> tuple[str, bool]:
-        """One reply with no tools offered — the model can only think out
-        loud, never act. Recorded as its own "plan"-phase turn.
+        """Look, then plan: a bounded loop offered only the read-only tools
+        and the checklist, so it can see the code but cannot change it. Its
+        final reply is recorded as the "plan"-phase turn.
 
-        A steering message that lands mid-plan (see ``steer()``) cuts this
-        reply short like any other, and the partial plan is recorded as the
-        plan turn. It is deliberately not re-planned here: the message stays
-        queued and is drained by the act loop immediately after, which is
-        where the user's redirection actually wants to take effect. One
-        phase per ``run()`` stays true, and the truncated plan remains in
-        history as the honest record of what happened.
+        The stop reason is reset afterwards: how the *planning* ended says
+        nothing about the run, which the act phase decides.
         """
-        context = self._build_context(session)
-        reply, streamed = self._chat(system, context, tools=[])
-        content = _materialize(reply)
-        session.add(Turn(role="assistant", content=content, phase=PHASE_PLAN))
-        return content, streamed and bool(content)
+        tools = [tool for name, tool in self.tools.items() if name in _PLAN_TOOLS]
+        content, streamed = self._loop(system, session, _PLAN_MAX_TURNS, PHASE_PLAN, tools=tools)
+        self.last_stop = RunStop()
+        return content, streamed
 
     def _loop(
         self,
@@ -704,7 +641,8 @@ class Orchestrator:
                     )
                 )
                 before = len(self.last_run_tool_calls)
-                self._execute_tool_calls(tool_calls, phase=phase)
+                offered = None if tools is None else {t.name() for t in tools}
+                self._execute_tool_calls(tool_calls, phase=phase, offered=offered)
                 outcomes = self.last_run_tool_calls[before:]
 
                 signature = json.dumps(
@@ -962,8 +900,27 @@ class Orchestrator:
     # ------------------------------------------------------------------ #
     # Tool dispatch (policy-gated)
     # ------------------------------------------------------------------ #
-    def _execute_tool_calls(self, tool_calls: list[cobirb_typing.ToolCall], phase: str | None = None) -> None:
+    def _execute_tool_calls(
+        self,
+        tool_calls: list[cobirb_typing.ToolCall],
+        phase: str | None = None,
+        offered: "set[str] | None" = None,
+    ) -> None:
+        """Run each call — except one naming a tool this phase did not offer.
+
+        A model is offered a restricted set in plan mode's planning pass (the
+        read-only tools), but a native tool call can name anything; running a
+        ``write_file`` because it was asked for would make "planning cannot
+        change anything" a hope instead of a rule.
+        """
         for call in tool_calls:
+            if offered is not None and call.name not in offered and call.name in self.tools:
+                self._record_call(call.name, ok=False, denied=True)
+                message = (f"'{call.name}' is not available in this phase — only "
+                           f"{', '.join(sorted(offered)) or 'no tools'}. Nothing was changed.")
+                tool_use = [{"name": call.name, "arguments": call.arguments}]
+                self.session.session.add(Turn(role="tool", content=message, tool_use=tool_use, phase=phase))
+                continue
             self._execute_tool(call, phase)
 
     def enable_autopilot(self) -> str:

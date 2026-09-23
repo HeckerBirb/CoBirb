@@ -4,6 +4,17 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Plan mode looks before it plans.** The planning step used to be a single reply with no tools, so
+  the model planned changes to code it had not been allowed to read. It is now a short read-only
+  pass: the model can read, search and outline the project, but cannot change anything — a call
+  that tries to is refused — and then writes its plan. The separate validation phase after the work
+  is gone; checking your work is part of doing it.
+- **A checklist for long tasks.** The new `todo` tool lets the model keep a list of steps and tick
+  them off; its progress shows on the status bar (`checklist 2/5`). It changes nothing on disk, so it
+  never asks for permission.
+
 ## [0.36.0]
 
 - **Auto-pilot.** `/autopilot on` (or `--autopilot` with `-p`) lets the agent work unattended: it

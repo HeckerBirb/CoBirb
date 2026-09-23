@@ -38,6 +38,7 @@ class StatusBar(Static):
     model_name: reactive[str] = reactive("")
     plan_mode: reactive[bool] = reactive(False)
     autopilot: reactive[bool] = reactive(False)
+    checklist: reactive[str] = reactive("")
     cwd: reactive[str] = reactive(".")
     session_path: reactive[str | None] = reactive(None)
     busy: reactive[str] = reactive("")
@@ -50,6 +51,8 @@ class StatusBar(Static):
         ]
         if self.autopilot:
             parts.insert(0, "AUTOPILOT")
+        if self.checklist:
+            parts.insert(1 if self.autopilot else 0, f"checklist {self.checklist}")
         if self.session_path:
             # Just the file name: this is one line competing with a cwd
             # that is often long already, and the full path is in the

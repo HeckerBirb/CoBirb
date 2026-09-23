@@ -7,7 +7,7 @@ Type these in the app. Anything else starting with `/` is tried as one of your o
 |---|---|
 | `/help` | The help screen. `/help <topic>` for one topic. |
 | `/model` | Pick a model from what your endpoint offers. |
-| `/plan on` · `/plan off` | Plan → act → validate as three separate phases. |
+| `/plan on` · `/plan off` | Look and plan first — the model can read but not change anything — then act. |
 | `/plan` | Say whether plan mode is on. |
 | `/autopilot on` · `/autopilot off` | Work unattended: read and change files in the project and run commands in the sandbox without asking; refuse anything else. Needs the sandbox and git. |
 | `/context` | How much of the model's window this session is using. |
