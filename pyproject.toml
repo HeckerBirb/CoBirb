@@ -47,6 +47,9 @@ dev = [
     # Textual's App.run_test()/Pilot harness is async, so the TUI suite needs
     # an asyncio-aware runner.
     "pytest-asyncio>=0.24",
+    # Parallel runs: the suite goes from minutes to seconds, and every test
+    # already has its own COBIRB_HOME and no network, so they are independent.
+    "pytest-xdist>=3.5",
 ]
 
 [project.scripts]
@@ -78,7 +81,11 @@ cobirb = ["py.typed", "tui/*.tcss", "install.sh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# One worker per core ("auto" scales down on a small CI runner, where a fixed
+# count would oversubscribe it). `loadgroup` keeps tests marked with the same
+# `xdist_group` on one worker — see tests/test_plugin_install.py. `-p no:xdist`
+# runs serially, which is the quicker way to run a single test.
+addopts = "-q -n auto --dist loadgroup"
 # tests/test_tui.py drives the app through Textual's async Pilot harness;
 # "auto" lets those `async def test_...` functions run without each needing its
 # own @pytest.mark.asyncio decoration.

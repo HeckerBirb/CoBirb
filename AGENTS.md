@@ -487,7 +487,8 @@ detached `HEAD` swallows the next commit), and reinstalls.
 
 ```bash
 pip install -e ".[dev]"
-pytest                                            # CI: 3.11 and 3.12
+pytest                                            # parallel (-n auto), ~15 s; CI: 3.11 and 3.12
+pytest -p no:xdist tests/test_x.py -k name        # serial, for one test
 COBIRB_TEST_MODEL=llama3.1 pytest -m integration  # needs a real local Ollama
 python bench/cobirb_bench.py --models <m1,m2> --reps 2   # the offline benchmark
 ```
@@ -495,6 +496,10 @@ python bench/cobirb_bench.py --models <m1,m2> --reps 2   # the offline benchmark
 - **No unit test reaches a model endpoint or the network**: `conftest._no_model_endpoint` refuses port
   11434 and anything off loopback, and fails at teardown even if the refusal was swallowed.
   `integration` tests are exempt.
+- **Runs in parallel by default** (`pytest-xdist`, `-n auto --dist loadgroup`), which works because
+  every test is isolated. A test that touches something genuinely shared — the real `pip` runs in
+  `test_plugin_install.py` write into the one virtualenv — goes in an `xdist_group` so its file runs
+  on one worker.
 - One test file per module; `COBIRB_HOME` is a tmp dir for every test; `write_config(home, data)` is the
   only sanctioned way to set config. `asyncio_mode = "auto"` for the Textual Pilot tests. Crypto runs
   against the real backend. Subprocess boundaries are usually mocked, with at least one real test.

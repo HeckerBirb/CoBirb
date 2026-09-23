@@ -23,6 +23,12 @@ from cobirb.runtime.plugin_install import (
     remove_plugin,
 )
 
+# One xdist worker for the whole file. The real `pip install -e` runs write
+# into the shared virtualenv, and two at once read each other's half-written
+# package metadata — pip then fails inside itself with a NoneType version.
+# Serial runs never overlap; this keeps parallel ones the same.
+pytestmark = pytest.mark.xdist_group("real_pip")
+
 
 def _fixture_plugin(tmp_path, name="cobirb_plugins_greeter", entry_points=True):
     """A minimal, real, installable plugin source directory."""
