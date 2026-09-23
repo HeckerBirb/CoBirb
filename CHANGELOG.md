@@ -4,6 +4,16 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **A models page.** `docs/manual/models.md` lists the models CoBirb has been measured with on its
+  own offline benchmark and how each did, generated from the results rather than written by hand.
+- `cobirb doctor` says how to install bubblewrap when the sandbox is missing, or why an installed one
+  cannot run.
+- The working-method prompt (`--system-prompt harness`) was measured on the harder benchmark tasks
+  and made no difference (49/60 either way), so it stays opt-in and your model's own `SYSTEM` stays
+  untouched by default.
+
 ## [0.40.1]
 
 - **Your git history cannot be changed from inside the sandbox.** The project's `.git` is read-only

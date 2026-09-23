@@ -676,6 +676,14 @@ skips planning. `/charter`, and `/flock` with no objective, reach the same dialo
 that was dismissed or proposed while another flock was running.
 
 
+**Measured, and not yet the headline** (cobirb-bench `--flock`, 0.40). On two divisible tasks, three
+models, one run each: the Flock passed **1 of 6**, a single agent **4 of 6**, and the Flock took 2–6×
+longer. Planning usually produced a sound partition; the loss was downstream — tickets left
+unimplemented while Brainy Birb's round report called the round a success. So the round report is not
+evidence of anything: the checker is. The bench driver now records each worker's own report
+(`worker_reports`), which is where the next investigation starts. Until the Flock beats a single agent
+on something, it stays an option rather than the recommended way to work.
+
 One **Brainy Birb** plans, designs the seams, writes the skeleton (interfaces, typed stubs,
 semantic docstrings, failing tests), and proposes a TOML **charter**. The user approves it — the
 single decision point in the run. **Worker Birbs** then run unattended inside charter-derived

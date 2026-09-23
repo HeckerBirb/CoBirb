@@ -36,6 +36,14 @@ def main() -> int:
         "summary": run.report[:2000],
         "workers": len(reports),
         "worker_ok": sum(1 for r in reports if r.ok),
+        # Per worker, because the round report is Brainy Birb's account and in
+        # the first measurement it called rounds successes that left stubs
+        # unimplemented — the workers' own reports are what say which ticket failed.
+        "worker_reports": [
+            {"id": r.worker_id, "ok": r.ok, "accepted": getattr(r, "accepted", None),
+             "summary": (r.summary or "")[:600], "error": (getattr(r, "error", "") or "")[:400]}
+            for r in reports
+        ],
         "turns": 0,
         "tool_calls": [],
         "denied": [],
