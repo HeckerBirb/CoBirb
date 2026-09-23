@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.40.2]
 
 - **A models page.** `docs/manual/models.md` lists the models CoBirb has been measured with on its
   own offline benchmark and how each did, generated from the results rather than written by hand.
