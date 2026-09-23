@@ -4,6 +4,15 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **A `delete_file` tool.** Removing a file used to need a shell command, and "…and delete the old
+  module" was the step models most often reported done without doing. It is a write like the others:
+  asked about (or allowed by a write grant for that directory), previewed, and undone by `/undo`.
+  Directories are refused.
+- Switching session in the app clears the AUTOPILOT and checklist markers, which belonged to the
+  session being left.
+
 ## [0.39.0]
 
 - **Reasoning models keep their train of thought between tool calls.** A model like gpt-oss thinks

@@ -9,7 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from cobirb.policy import AuditLog
+from cobirb.policy import AuditLog, Policy
+from cobirb.typing.spi import ToolCall
 from cobirb.plugins.core.tools import (
     ApplyPatchTool,
     CobirbTool,
@@ -1093,3 +1094,50 @@ def test_the_checklist_needs_no_approval():
         assert orchestrator.policy.is_allowed("todo", {"items": []})
     finally:
         orchestrator.close()
+
+
+# --------------------------------------------------------------------------- #
+# delete_file
+# --------------------------------------------------------------------------- #
+def test_delete_file_removes_a_file_and_refuses_a_directory(tmp_path):
+    from cobirb.plugins.core.tools import DeleteFileTool
+
+    (tmp_path / "old.py").write_text("x = 1\n")
+    (tmp_path / "pkg").mkdir()
+    tool = DeleteFileTool(str(tmp_path))
+
+    assert tool.execute({"path": "old.py"}).ok and not (tmp_path / "old.py").exists()
+    assert not tool.execute({"path": "pkg"}).ok and (tmp_path / "pkg").is_dir()
+    assert "does not exist" in tool.execute({"path": "old.py"}).content
+
+
+def test_a_deleted_file_is_scoped_like_any_write_and_comes_back_on_undo(tmp_path):
+    from cobirb.checkpoints import Checkpoints
+    from cobirb.orchestrator import Orchestrator
+
+    (tmp_path / "old.py").write_text("x = 1\n")
+    policy = Policy(cwd=str(tmp_path))
+    assert not policy.is_allowed("delete_file", {"path": "old.py"})
+    policy.allow_write_dir(str(tmp_path))
+
+    class _Deleter:
+        def __init__(self):
+            self.calls = [ToolCall("delete_file", {"path": "old.py"})]
+
+        def chat(self, *a, **k):
+            return "" if self.calls else "done"
+
+        def parse_tool_calls(self, reply):
+            return [self.calls.pop()] if self.calls else []
+
+        def supports_tool_calling(self):
+            return True
+
+    checkpoints = Checkpoints(str(tmp_path), store=str(tmp_path / ".store"))
+    registry = ToolRegistry(str(tmp_path))
+    Orchestrator(model=_Deleter(), tools=registry.tools, policy=policy, checkpoints=checkpoints).run(
+        "delete it", "sys", cwd=str(tmp_path))
+
+    assert not (tmp_path / "old.py").exists()
+    checkpoints.undo_last()
+    assert (tmp_path / "old.py").read_text() == "x = 1\n"

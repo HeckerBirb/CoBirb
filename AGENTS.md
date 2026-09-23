@@ -132,7 +132,7 @@ prompt → model call → tool calls (policy-gated) → results into history →
 ## 5. Permissions (`policy.py`)
 
 - `READ_TOOLS = {read_file, list_dir, glob, grep, repo_map}` and
-  `WRITE_TOOLS = {write_file, edit_file, apply_patch}` are each scoped **by directory**, in two
+  `WRITE_TOOLS = {write_file, edit_file, apply_patch, delete_file}` are each scoped **by directory**, in two
   separate sets that never imply one another. `shell` is in neither: it cannot say what it touches.
 - Paths resolve with `realpath` against the policy's `cwd`, so `..`/symlinks cannot escape a grant;
   `_within` requires a separator so `/x/project-secrets` never matches a grant for `/x/project`.
@@ -314,7 +314,8 @@ Everything before the marker stays in the file, so the session remains a complet
 ## 8. Tools (`plugins/core/tools.py`)
 
 Built-ins: `read_file`, `write_file`, `edit_file`, `apply_patch`, `glob`, `grep`, `list_dir`,
-`repo_map`, `shell`, `todo`. **`todo` is a checklist the model keeps** — the whole list each call
+`repo_map`, `shell`, `todo`, `delete_file` (files only; added because "and delete the old module"
+was, in the benchmark, the step models most often claimed and had not done — shell was the only way). **`todo` is a checklist the model keeps** — the whole list each call
 (one shape, easy for small models), progress on the TUI status bar — reaching nothing, so permitted
 outright in both wirings like the charter tools. Subclasses of `CobirbTool` declare `NAME: ClassVar[str]` and inherit `name()`
 — the SPI declares `name` as a **method**, and `ToolRegistry.register` rejects anything else.

@@ -64,7 +64,7 @@ _EXEC_FLAGS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 # Tools that change files. A directory approval covers these the same way it
 # covers reads — but they are a separate set, and a read grant never implies a
 # write one. `shell` is in neither: it cannot say what it touches.
-WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch"})
+WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "delete_file"})
 
 # Tools that only ever read. These are the ones a *directory* approval
 # covers; everything else (write_file, edit_file, apply_patch, shell, and any

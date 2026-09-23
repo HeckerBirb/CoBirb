@@ -55,7 +55,7 @@ the sandbox and git-backed undo are both active. Review with `/diff`, take a tur
 | Set | Tools |
 |---|---|
 | Read | `read_file`, `list_dir`, `glob`, `grep`, `repo_map` |
-| Write | `write_file`, `edit_file`, `apply_patch` |
+| Write | `write_file`, `edit_file`, `apply_patch`, `delete_file` |
 
 Approving a read never grants a write. A grant covers the directory and everything under it.
 

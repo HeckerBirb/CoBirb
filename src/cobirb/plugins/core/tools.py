@@ -1341,6 +1341,57 @@ class ShellTool(CobirbTool):
 
 
 # Registry of built-in tools.
+class DeleteFileTool(CobirbTool):
+    """Delete one file.
+
+    There was no way to remove a file except ``shell`` — so a refactor that
+    ends with "and delete the old module" was, in the benchmark, the step
+    models most often reported done and had not done. A file tool is scoped,
+    previewed and undoable like the other writes; a directory is refused,
+    because removing a tree is not something to do by one call.
+    """
+
+    NAME = "delete_file"
+
+    def writes(self, arguments: dict[str, Any]) -> list[str]:
+        path = arguments.get("path")
+        return [self._resolve(str(path))] if path else []
+
+    def preview(self, arguments: dict[str, Any]) -> str:
+        path = self._resolve(str(arguments.get("path", "")))
+        if not os.path.isfile(path):
+            return f"{path} is not a file — this will fail"
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                lines = fh.read().count("\n")
+        except OSError:
+            lines = 0
+        return f"delete {path} ({lines} line(s))"
+
+    def description(self) -> str:
+        return "Delete one file (not a directory). Undoable with the other file changes."
+
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "File to delete."}},
+            "required": ["path"],
+        }
+
+    def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        path = self._resolve(arguments["path"])
+        if os.path.isdir(path):
+            return ToolResult(ok=False, error="is_directory",
+                              content=f"{path} is a directory; delete_file removes files only.")
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            return ToolResult(ok=False, error="not_found", content=f"{path} does not exist.")
+        except OSError as exc:
+            return ToolResult(ok=False, content=f"Could not delete {path}: {exc}", error=str(exc))
+        return ToolResult(ok=True, content=f"Deleted {path}")
+
+
 class TodoTool(CobirbTool):
     """A checklist the model keeps for a multi-step task.
 
@@ -1423,6 +1474,7 @@ BUILTIN_TOOLS: list[type[Tool]] = [
     RepoMapTool,
     ShellTool,
     TodoTool,
+    DeleteFileTool,
 ]
 
 

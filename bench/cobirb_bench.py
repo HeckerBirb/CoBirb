@@ -48,7 +48,7 @@ RESULTS_DIR = HERE / "results"
 # The file tools every task may use inside its own scratch directory — the
 # grant a user makes by trusting a project directory. Shell is per task.
 _READ_TOOLS = ("read_file", "list_dir", "glob", "grep", "repo_map")
-_WRITE_TOOLS = ("write_file", "edit_file", "apply_patch")
+_WRITE_TOOLS = ("write_file", "edit_file", "apply_patch", "delete_file")
 
 # What a tool call looks like when a model writes it as text instead of making
 # it: Hermes/Qwen <tool_call> JSON, Qwen3-coder's XML, gpt-oss channel markers,

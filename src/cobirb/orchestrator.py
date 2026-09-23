@@ -51,7 +51,7 @@ _STREAM_EMPTY = object()
 # that the project's own check is worth running. `shell` is included because
 # it very often is the thing that changed something, even though it cannot say
 # so in advance the way the file tools can.
-_CHANGING_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "shell"})
+_CHANGING_TOOLS = frozenset({"write_file", "edit_file", "apply_patch", "delete_file", "shell"})
 
 # Prefixed onto a steering message before it re-enters history as a user
 # turn, so a small local model — which has no other way to know its own
