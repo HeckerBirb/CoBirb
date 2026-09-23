@@ -105,3 +105,10 @@ def test_unsandboxed_runs_outside(tmp_path):
         assert target.exists()
     finally:
         target.unlink(missing_ok=True)
+
+
+def test_cobirbs_own_home_is_hidden_wherever_it_is(tmp_path, monkeypatch):
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path / "elsewhere"))
+    from cobirb import paths
+
+    assert paths.cobirb_dir() in sandbox.from_config("auto", str(tmp_path)).hidden

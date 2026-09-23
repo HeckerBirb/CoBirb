@@ -126,6 +126,11 @@ def from_config(value: object, project: str, extra_hidden: object = None) -> San
         mode = DEFAULT_MODE
     home = os.path.expanduser("~")
     hidden = [os.path.join(home, rel) for rel in DEFAULT_HIDDEN]
+    # CoBirb's own home wherever it actually is — COBIRB_HOME can move it
+    # away from ~/.cobirb, and sessions, memory and the audit log live there.
+    from . import paths
+
+    hidden.append(paths.cobirb_dir())
     for path in hide if isinstance(hide, list) else []:
         hidden.append(os.path.abspath(os.path.expanduser(str(path))))
     return Sandbox(mode=mode, project=project, hidden=hidden, bwrap=find_bwrap(), explicit=explicit)
