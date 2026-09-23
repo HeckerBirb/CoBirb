@@ -19,7 +19,15 @@ A privacy-first, agentic coding CLI for local LLMs and your eyes only.
 - 🔒 Sessions are encrypted at rest (AES-256-GCM, keyed via scrypt).
 - 🔒 Credentials are stripped from tool output before the model, the session or the
   audit log ever see them - private keys, `AKIA…`, `ghp_…`, `sk-…` and friends.
-- 🔒 No tool permission is pre-approved by default - but can be for convenience and control.
+- 🔒 Shell commands run in a sandbox (bubblewrap): no network, nothing writable outside your
+  project, and credential directories like `~/.ssh` hidden. Contained commands run without
+  asking; anything the sandbox cannot contain is put to you first.
+- 🔒 Nothing else is pre-approved by default - but can be, for convenience and control.
+- ↩️ Every turn is checkpointed whole: `/undo` takes back what the agent changed, shell commands
+  included, and `/diff` shows it - without touching your git history.
+- 🧭 Auto-pilot (`/autopilot`) for long jobs: works unattended inside the project and the
+  sandbox, refuses anything else instead of waiting on a dialog.
+- 🔌 Works with Ollama, llama.cpp, LM Studio and vLLM - `cobirb setup` points it at yours.
 - 🔒 Your model's own `SYSTEM` prompt is left alone, broken or not.
 - 🔒 Encrypted coding sessions on demand (sessions disabled by default).
 - 🦜 "Flock" mode lets you use one model to distribute isolated workloads to worker agents; "broken" Brainy Birbs tell expert Worker Birbs what to do on need-to-know basis.
