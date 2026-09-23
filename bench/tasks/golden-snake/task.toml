@@ -1,0 +1,47 @@
+# THE GOLDEN TEST — very long-running, and it costs the user real electricity.
+# Skipped unless the runner is given --golden. Run it only as the final
+# confidence check, when everything else passes, and only after asking the user
+# first, every time (see bench/README.md).
+category = "golden"
+timeout = 14400
+shell = ["python -m pytest"]
+prompt = """
+Build a modern-looking and engaging Snake game for the command-line terminal, as a Python package
+`snake` in this project. Standard library only; use `curses` for the terminal. Creative ASCII art is
+encouraged. The game loop runs continuously on its own clock: it must never wait for a key press to
+draw the next frame, and the screen must update fast enough to keep the player engaged.
+`python -m snake` starts the game. Write tests for it in tests/.
+
+The game must also be usable without a terminal, through this API, which is how it is checked:
+
+snake/engine.py
+- `Game(width, height, seed=0)`: a board of width x height cells; x runs 0..width-1 left to right,
+  y runs 0..height-1 top to bottom. The snake starts 3 cells long with its head at
+  (width // 2, height // 2) and its body extending to the left, moving right. Food is placed on a free
+  cell chosen with `random.Random(seed)`.
+- `game.width`, `game.height`; `game.snake`: a list of (x, y) tuples, head first; `game.food`: (x, y),
+  or None when the board is full; `game.score`: an int starting at 0; `game.over`: a bool.
+- `game.turn(direction)`: "up", "down", "left" or "right". Turns are queued, at most two. A turn equal
+  to, or opposite to, the last queued direction (or the current one if none is queued) is ignored.
+- `game.tick()`: moves the snake one cell, applying the oldest queued turn first. Moving onto the food
+  grows the snake by one and adds 10 to the score, and new food appears on a free cell. Moving off the
+  board, or into the snake's own body, ends the game, and after that ticks change nothing. Moving into
+  the cell the tail is leaving at the same time is allowed.
+
+snake/render.py
+- `render(game)`: the frame as a list of exactly `game.height + 2` strings, each exactly
+  `game.width + 2` characters long: a border around the board; the snake, with its head drawn with a
+  different character from its body; the food; and a space in every empty cell. Cell (x, y) is at
+  line y + 1, column x + 1.
+
+snake/controls.py
+- `key_to_direction(key)`: the arrow keys (`curses.KEY_UP`, `KEY_DOWN`, `KEY_LEFT`, `KEY_RIGHT`), and
+  w/a/s/d and k/h/j/l (given as one-character strings or as their integer codes) map to "up", "left",
+  "down" and "right". Anything else is None.
+
+snake/loop.py
+- `Loop(game, tick_seconds)`: the fixed-timestep game loop, without the terminal.
+- `loop.advance(elapsed, keys)`: turns the game for every key in `keys` (through `key_to_direction`),
+  then runs as many ticks as the time accumulated so far allows — unused time carries over to the
+  next call — and returns how many ticks ran. Keys never cause a tick on their own.
+"""

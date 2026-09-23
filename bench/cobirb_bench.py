@@ -62,7 +62,7 @@ _TEXT_TOOL_CALL = re.compile(
 
 FAILURE_CLASSES = (
     "pass", "turn_limit", "no_progress", "unparsed_tool_call", "edit_miss", "no_change",
-    "wrong_result", "error", "timeout", "crash",
+    "wrong_result", "no_flock", "error", "timeout", "crash",
 )
 
 
@@ -112,6 +112,9 @@ class Result:
     workers: list = field(default_factory=list)  # flock mode: each worker's own report
     charter: dict | None = None  # flock mode: who was given which files
     skeleton: dict | None = None  # flock mode, failed rounds only: files and briefs as planned
+    rounds: int = 0  # flock mode: how many rounds ran
+    trace: list | None = None  # flock mode, failed runs only: each planning step's tool calls
+    design: str | None = None  # flock mode, failed runs only: the staged planner's design
 
 
 # --------------------------------------------------------------------------- #
@@ -229,9 +232,17 @@ def run_one(task: Task, model: str, rep: int, seed: int, *, base_url: str, src: 
         summary = (report or {}).get("summary") or ""
         passed, check_output = _check(task, work, scratch, summary)
         calls = (report or {}).get("tool_calls") or []
+        # **A flock-mode pass with no worker behind it is not a flock pass.**
+        # The checker only sees the finished tree, so a planner that wrote the
+        # whole implementation itself and never sealed a charter passed — twice
+        # in one run, with no Worker Birb ever started.
+        no_flock = flock and report is not None and not any(
+            w.get("ok") for w in report.get("worker_reports") or [])
+        if no_flock:
+            passed = False
         return Result(
             model=model, task=task.id, category=task.category, rep=rep, seed=seed,
-            outcome=_classify(task, report, passed), passed=passed,
+            outcome="no_flock" if no_flock else _classify(task, report, passed), passed=passed,
             turns=(report or {}).get("turns", 0),
             tool_calls=len(calls),
             failed_calls=sum(1 for c in calls if not c.get("ok")),
@@ -247,6 +258,9 @@ def run_one(task: Task, model: str, rep: int, seed: int, *, base_url: str, src: 
             # Kept only when the round failed: it is the evidence for where a
             # spec detail went missing, and a passing round needs none.
             skeleton=None if passed else (report or {}).get("skeleton"),
+            rounds=(report or {}).get("rounds", 0),
+            trace=None if passed else (report or {}).get("trace"),
+            design=None if passed else ((report or {}).get("design") or None),
         )
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -329,6 +343,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--flock", action="store_true",
                         help="run each task as a flock session (charter auto-approved) instead of one agent")
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--golden", action="store_true",
+                        help="include the golden test (category \"golden\"): hours of GPU time, the "
+                             "final confidence check only, and never without asking the user first")
     args = parser.parse_args(argv)
 
     import fnmatch
@@ -337,6 +354,13 @@ def main(argv: list[str] | None = None) -> int:
     tasks = sorted((Task.load(p) for p in TASKS_DIR.glob(args.tasks)
                     if (p / "task.toml").is_file() and not any(fnmatch.fnmatch(p.name, g) for g in skipped)),
                    key=lambda t: t.id)
+    # The golden test only ever runs when asked for by name. It takes hours
+    # and costs the person whose machine this is real electricity; a glob that
+    # happens to match it must not start it.
+    golden = [t for t in tasks if t.category == "golden"]
+    if golden and not args.golden:
+        tasks = [t for t in tasks if t.category != "golden"]
+        print(f"leaving out the golden test ({', '.join(t.id for t in golden)}); pass --golden to include it")
     if not tasks:
         print(f"no tasks match {args.tasks!r}", file=sys.stderr)
         return 2

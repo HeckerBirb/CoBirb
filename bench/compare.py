@@ -33,6 +33,13 @@ _SETTINGS = ("tasks", "reps", "models", "max_num_ctx", "extra", "flock")
 def load(path: Path) -> tuple[dict, list[dict]]:
     meta = json.loads((path / "meta.json").read_text())
     rows = [json.loads(line) for line in (path / "results.jsonl").read_text().splitlines() if line]
+    if meta.get("flock"):
+        # Runs from before the runner knew this: a flock-mode "pass" that no
+        # worker produced is the planner's own work, not a flock result.
+        for row in rows:
+            if row.get("passed") and not any(w.get("ok") for w in row.get("workers") or []):
+                row["passed"], row["outcome"] = False, "no_flock"
+                row["reclassified"] = True
     return meta, rows
 
 
@@ -104,6 +111,10 @@ def compare(paths: list[Path]) -> str:
     ]
     if warnings:
         out += ["", "**Not like for like:**", ""] + [f"- {w}" for w in warnings]
+    reclassified = [(name, sum(1 for r in rows if r.get("reclassified"))) for name, _, rows in runs]
+    if any(n for _, n in reclassified):
+        out += ["", "**Reclassified as `no_flock`** (passed, but no Worker Birb ran): " + ", ".join(
+            f"`{name}` {n}" for name, n in reclassified if n)]
 
     models = sorted({r["model"] for _, _, rows in runs for r in rows})
     tasks = sorted({r["task"] for _, _, rows in runs for r in rows})
@@ -167,6 +178,8 @@ def compare(paths: list[Path]) -> str:
         row("workers whose own check failed",
             lambda rows: sum(1 for w in workers(rows) if w.get("ok") and w.get("accepted") is False))
         row("refused calls", lambda rows: sum(len(w.get("denied") or []) for w in workers(rows)))
+        row("rounds per run (mean)", lambda rows: f"{statistics.mean(r.get('rounds') or 1 for r in rows):.1f}"
+            if rows else "—")
 
         refusals = [Counter(_refused_program(d.get("target", ""), d.get("tool", ""))
                             for w in workers(rows) for d in w.get("denied") or [])

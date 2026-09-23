@@ -18,10 +18,25 @@ and its §17 decisions record for the ones that were designed and then deliberat
   change is.
 - **Flock: review says "PASS" plainly.** "Stub reversion: caught" was being read as the worker
   having reverted its work.
-- **Flock: staged planning, opt-in** (`"flock_planning": "staged"`) — divide into tickets, then the
-  skeleton and brief one ticket at a time, then seal, each step re-stating the work. It gave the
-  weakest planning model a charter every time, but cost the strongest one a spec detail, so the
-  one-prompt planner stays the default. Sealing waits until every ticket's skeleton step has run.
+- **Flock: staged planning, in rounds** (`"flock": {"planning": "staged"}`). Brainy Birb writes an
+  overview section by section — what is asked, the decisions, the architecture, the seams, the
+  tickets, the risks — then the skeleton, then **one fresh stage per ticket** that writes the
+  ticket's tests and a detailed ticket plan, which becomes the Worker Birb's brief. After each round
+  it reads the re-run checks, the review and each worker's report, and plans only what is still
+  open, until everything passes, a round changes nothing, or `max_rounds` (5). Each stage gets only
+  the tools it needs, a write outside its files is refused without asking, and CoBirb seals the
+  charter itself. The one-prompt planner stays the default until the benchmark says otherwise.
+- **Flock autonomy** (`"flock": {"autonomy": "ask"}`): in `ask` mode Brainy Birb's design decisions
+  are put to you after the overview, and every later round is approved by you, showing only what it
+  adds. `auto` decides and approves later rounds itself, and only runs inside the shell sandbox. You
+  approve the first charter either way.
+- **Worker Birbs report back** with a `report` tool: whether their tests pass, whether they kept the
+  contract, what is missing and why, and any test that contradicts the contract.
+- **A connection lost mid-reply is an ordinary error**, not a crash; a flock stopped by a failing
+  model server says so instead of taking the session down.
+- cobirb-bench: a flock-mode pass with no worker behind it is `no_flock`, not a pass; failed runs keep
+  the planning trace and design; and **the golden test** — a Snake game big enough to divide, run only
+  with `--golden` and only after asking.
 - **Tests run in parallel** (`pytest-xdist`): the suite takes about 15 seconds instead of two
   minutes.
 - **A `cd` inside the project no longer gets a command refused**: with `pytest` allowed,

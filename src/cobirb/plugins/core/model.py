@@ -827,7 +827,20 @@ class LocalModelProvider(ModelProvider):
             for raw_line in response:
                 yield raw_line
         except Exception as exc:  # noqa: BLE001 - see _as_control_exception
-            raise self._as_control_exception(exc) from exc
+            control = self._as_control_exception(exc)
+            if control is exc and isinstance(exc, OSError):
+                # **The server answered and then went away.** A reset while the
+                # reply was streaming used to escape as a raw
+                # `ConnectionResetError`, which nothing above expects, and took
+                # a whole flock down mid-plan. It is a failed request like any
+                # other, so it is reported as one — and not as "is it running?",
+                # because something clearly was: it had started to reply.
+                raise RuntimeError(
+                    f"The connection to the model provider at {self._base_url} was lost "
+                    f"part-way through the reply ({exc}). The server may have restarted or "
+                    "run out of memory; the request can be sent again."
+                ) from exc
+            raise control from exc
         finally:
             self._release(conn)
 

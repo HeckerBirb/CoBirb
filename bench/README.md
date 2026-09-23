@@ -20,7 +20,7 @@ Three rules make the numbers mean something:
 - **A seed, not temperature 0.** Rep *n* uses seed `--seed + n − 1`. Temperature 0 makes small
   models loop, which would measure the setting instead of CoBirb.
 - **Every failure has a cause.** `turn_limit`, `no_progress`, `unparsed_tool_call`, `edit_miss`,
-  `no_change`, `wrong_result`, `error`, `timeout` or `crash`. "Unparsed tool calls went from 9 to 0"
+  `no_change`, `wrong_result`, `no_flock`, `error`, `timeout` or `crash`. "Unparsed tool calls went from 9 to 0"
   is a fact about a fix, even when the pass rate barely moves.
 
 Only the endpoint given with `--base-url` (default the local Ollama) is contacted. Each run gets its
@@ -34,7 +34,7 @@ python bench/selftest.py                                # every checker is hones
 python bench/cobirb_bench.py --models qwen3-coder:30b,gemma4:latest --reps 3 --label my-change
 python bench/cobirb_bench.py --models … --tasks 'hard-*' --skip 'hard-api-*'
 python bench/cobirb_bench.py --models … --tasks 'flock-*' --flock --reps 3
-python bench/cobirb_bench.py --models … --config '{"flock_planning": "staged"}'
+python bench/cobirb_bench.py --models … --tasks 'flock-*' --flock --config '{"flock": {"planning": "staged"}}'
 ```
 
 | Flag | Meaning |
@@ -47,6 +47,7 @@ python bench/cobirb_bench.py --models … --config '{"flock_planning": "staged"}
 | `--config` | Extra config JSON merged over the run's own — how a setting is A/B-tested. |
 | `--flock` | Run each task as a flock session instead of one agent (below). |
 | `--label`, `--out` | Name and place the results directory. |
+| `--golden` | Include the golden test. **Ask the user first, every time** — see below. |
 
 ## Results
 
@@ -55,8 +56,10 @@ A run writes `bench/results/<timestamp>-<label>/` (or `--out`):
 - `meta.json` — commit, models, reps, window, extra config, flock or not.
 - `results.jsonl` — one line per model × task × rep: outcome, pass, turns, calls, refused calls,
   elapsed seconds, the agent's summary and the checker's output. Flock runs add each worker's report
-  (ran, check passed, turns, what each refused call was aimed at), the charter's file assignment,
-  and — for a failed round only — the skeleton and briefs as planning left them.
+  (round, ran, check passed, turns, the structured report, what each refused call was aimed at), the
+  number of rounds, the charter's file assignment and — for a failed run only — the skeleton and
+  briefs as planning left them, the staged planner's design, and the **trace**: which tools each
+  planning step called. The trace is how a failed round is read back to the step that went wrong.
 - `summary.md` — the pass-rate and failure-cause tables.
 
 **Finished runs are committed**, all three files. They are small (tens of KB), and a number in
@@ -99,7 +102,7 @@ bench/tasks/<id>/
 `task.toml`:
 
 ```toml
-category = "fix"            # fix, implement, refactor, tests, docs, config, answer, flock
+category = "fix"            # fix, implement, refactor, tests, docs, config, answer, flock, golden
 prompt = """What the agent is told, as a user would say it."""
 shell = ["python -m pytest"]  # commands the agent may run without asking
 changes_files = true        # false for a question: the answer is judged, not the tree
@@ -121,6 +124,30 @@ the charter is approved **automatically** — the only place anything approves a
 only because it happens in a throwaway copy — the Worker Birbs run, and the checker judges the tree
 they leave. The round report is Brainy Birb's account and is not evidence; the checker and the
 per-worker records are.
+
+**A pass with no Worker Birb behind it is `no_flock`, not a pass.** The checker sees only the tree,
+so a planner that writes the implementation itself and never seals a charter would otherwise count
+as a flock success — which happened twice in one run. `compare.py` applies the same rule to results
+recorded before the runner knew it, and says how many it reclassified.
+
+Both planners stay available so they can be measured against each other at the same commit:
+`--config '{"flock": {"planning": "staged"}}'` for staged planning in rounds, nothing for the
+one-prompt planner.
+
+## The golden test
+
+`bench/tasks/golden-snake` is a terminal Snake game — a task big enough to divide, with hidden tests
+per part (engine, rendering, controls, the loop) so each Worker Birb's piece is judged on its own as
+well as together. It answers the one question the small flock tasks cannot: whether the Flock, with
+staged planning, does each part well on work that genuinely divides. Run it through `--flock` and as a
+single agent, same model, for the reference.
+
+**It is the final confidence check, not a benchmark.** It takes hours per model and costs the person
+whose GPU it runs on real electricity. So:
+
+- it runs only with `--golden`, and a glob that happens to match it leaves it out;
+- only when everything else already passes — the unit tests, the ordinary tasks, the small flock tasks;
+- **only after asking the user, every time**, saying what it is for and roughly how long.
 
 ## The models page
 

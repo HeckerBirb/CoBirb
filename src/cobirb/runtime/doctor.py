@@ -48,7 +48,7 @@ KNOWN_KEYS = frozenset({
     "repo_map", "repo_map_max_chars", "context_tokens", "max_num_ctx",
     "verify_command", "verify_timeout", "verify_fix_attempts",
     "hooks", "mcp_servers", "plugins", "max_turns", "sandbox",
-    "connect_timeout", "request_timeout", "flock_planning",
+    "connect_timeout", "request_timeout", "flock",
 })
 
 # What each key should look like, for the shape check. Only the keys whose
@@ -65,7 +65,7 @@ _EXPECTED_TYPES: dict[str, tuple[type, ...]] = {
     # all this table can ask about.
     "max_num_ctx": (int, str),
     "sandbox": (str, dict),
-    "flock_planning": (str,),
+    "flock": (dict,),
     "verify_timeout": (int,), "verify_fix_attempts": (int,), "max_turns": (int,),
     "system_prompt": (str,), "verify_command": (str,),
 }
@@ -205,6 +205,24 @@ def _check_referenced_things(report: Report, raw: dict[str, Any]) -> None:
             f"max_num_ctx is '{raw['max_num_ctx']}', which is not a size — "
             "write 65536 or 64k. No cap is being applied"
         )
+
+    # The flock block falls back to its defaults on anything it cannot read
+    # (see flock.run.FlockSettings), so a misspelt value is otherwise silent.
+    flock = raw.get("flock")
+    if isinstance(flock, dict):
+        allowed = {"planning": ("single", "staged"), "autonomy": ("ask", "auto")}
+        for key, values in allowed.items():
+            if key in flock and flock[key] not in values:
+                problems.append(
+                    f"flock.{key} is '{flock[key]}', which is not one of {', '.join(values)} — "
+                    f"the default ({values[0]}) is being used"
+                )
+        rounds = flock.get("max_rounds")
+        if rounds is not None and (isinstance(rounds, bool) or not isinstance(rounds, int) or rounds < 1):
+            problems.append(f"flock.max_rounds is '{rounds}', not a positive number — the default is being used")
+        unknown_flock = sorted(set(flock) - {"planning", "autonomy", "max_rounds"})
+        if unknown_flock:
+            problems.append(f"flock has keys CoBirb does not read: {', '.join(unknown_flock)}")
 
     if problems:
         report.add("config references", WARN, "; ".join(problems))

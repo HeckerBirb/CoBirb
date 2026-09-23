@@ -145,7 +145,7 @@ If your endpoint serves one request at a time, the more direct fix is on its sid
 | `system_prompt` | `"off"` | `"harness"` adds a short block on how to work as a coding agent, after the model's own `SYSTEM` |
 | `plan_mode` | `false` | Start in plan mode |
 | `sandbox` | `"auto"` | Contain shell commands: `"auto"` (no prompt, where git can undo them), `"ask"` or `"off"` — see [Permissions](permissions.md) |
-| `flock_planning` | `"single"` | How Brainy Birb plans a flock: `"single"` (everything in one prompt) or `"staged"` (divide, then one skeleton step per ticket, then seal) — see [The Flock](flock.md) |
+| `flock` | `{}` | The Flock: `planning` (`"single"`, the default, or `"staged"`), `autonomy` (`"ask"`, the default, or `"auto"`, which needs the sandbox) and `max_rounds` (5) — see [The Flock](flock.md) |
 | `max_turns` | `40` | Ceiling on model turns per message. A backstop: a run that repeats the same call or keeps failing is stopped long before it |
 | `allow_tools` | `[]` | Pre-approved tools, e.g. `["read_file", "shell(git status)"]` |
 | `allow_read_dirs` | `[]` | Directories readable without asking |

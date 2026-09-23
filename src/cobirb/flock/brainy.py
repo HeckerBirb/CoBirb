@@ -316,8 +316,6 @@ class CharterDesk:
         # last ownership question named (see `ownership_question`).
         self._before: "dict[str, tuple[int, int]] | None" = None
         self._asked_unowned: tuple[str, ...] = ()
-        # Set by staged planning until every ticket has had its skeleton step.
-        self.seal_locked = False
 
     def reset(self) -> None:
         """Forget everything, before a fresh planning turn.
@@ -338,24 +336,6 @@ class CharterDesk:
         self._repeats = 0
         self._before = None
         self._asked_unowned = ()
-        self.seal_locked = False
-
-    def locked_notice(self) -> str:
-        """What a seal attempted before the skeleton exists is told.
-
-        **Staged planning is only staged if the steps happen.** Step 1 used to
-        offer `seal_charter` and `propose_charter` like any other step, and the
-        strongest model measured sealed right there on every seed — so no
-        skeleton step ever ran, the workers got step 1's one-line briefs and no
-        stubs or tests, and built from a sentence. Not an attempt, and not a
-        rejection: nothing about the plan is wrong, it is only early.
-        """
-        return (
-            "Not yet — the charter is sealed in step 3. The tickets are recorded "
-            f"({self.draft.describe()}) and stay as they are; each ticket's skeleton is "
-            "written in step 2, one ticket per step. Stop calling tools for this step now; "
-            "the next step will say what to do."
-        )
 
     def watch_skeleton(self, cwd: str) -> None:
         """Remember the project as it is now, before the skeleton is written."""
@@ -763,8 +743,6 @@ class SealCharterTool(_DeskTool):
         }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        if self.desk.seal_locked:
-            return ToolResult(ok=False, content=self.desk.locked_notice(), error="not_yet")
         self.desk.attempts += 1
         concurrency = arguments.get("concurrency")
         try:
@@ -886,8 +864,6 @@ class ProposeCharterTool(_DeskTool):
         a file, and telling the model that now saves a round trip and a user's
         attention later.
         """
-        if self.desk.seal_locked:
-            return ToolResult(ok=False, content=self.desk.locked_notice(), error="not_yet")
         text = str(arguments.get("toml") or "")
         self.desk.attempts += 1
         try:
@@ -926,133 +902,6 @@ def plan_prompt(objective: str) -> str:
         f"{BRAINY_RULES}\n\n--- The work ---\n\n{objective.strip()}"
         f"\n\n--- How to divide it ---\n\n{NEED_TO_KNOW_DIRECTIVE}"
     )
-
-
-# --------------------------------------------------------------------------- #
-# Staged planning: one step at a time, the work re-stated every time
-# --------------------------------------------------------------------------- #
-# The single planning prompt asks for everything at once — divide the work,
-# design the seams, write every stub, every test and every brief, then build
-# the charter — under two thousand tokens of rules for all of it. A strong
-# model holds that; a weak one drops pieces of it, and in the flock benchmark
-# the weakest planner ended half its rounds without a charter. So the same work
-# is asked for as three steps, each with only its own instructions, each
-# opening with the work itself so nothing depends on remembering it: divide
-# (the tickets, recorded with `add_worker` before a file exists), then the
-# skeleton one ticket at a time, then seal.
-#
-# **Each ticket's brief is written after its skeleton, not in step 1.** The
-# first staged measurement lost a spec detail in every rep with the strongest
-# model — `run(store, "set k v")` returned "" where the work said "OK", with
-# the workers' own checks passing — and step 1 was writing the briefs before a
-# single docstring or test existed. A brief written from the skeleton can only
-# repeat what the skeleton pins.
-STAGED_INTRO = """\
-You are Brainy Birb, the lead engineer of a Flock. You divide a piece of work \
-between Worker Birbs who never speak to each other and see nothing but the \
-ticket you write them. You will plan in three short steps."""
-
-
-def _work(objective: str) -> str:
-    return f"--- The work ---\n\n{objective.strip()}"
-
-
-def partition_prompt(objective: str) -> str:
-    """Step 1 of staged planning: the tickets, before any file is written."""
-    return f"""{STAGED_INTRO}
-
-{_work(objective)}
-
---- Step 1 of 3: divide it ---
-
-Read the project with the read tools. Then decide how the work splits into \
-tickets that can be built AT THE SAME TIME:
-
-  - Each ticket owns its own files — its implementation and its tests — and no \
-file belongs to two tickets. Every file a ticket must create or change goes in \
-its `writes`.
-  - Where two tickets' code meets — a class one builds and the other calls — \
-the meeting point is a SIGNATURE you will write into the skeleton in step 2. \
-The ticket that implements it owns that file; the other builds against the \
-signature at the same time.
-  - A ticket's tests must pass using its own code and the skeleton alone. If \
-they would need another ticket's unfinished code, plan a small fake in the \
-tests instead, or give the ticket `needs` — the last resort, since it makes \
-that ticket wait.
-  - If the work does not divide, say so in one sentence and call nothing. \
-That is a correct answer.
-
-Record each ticket now with `add_worker`: its id; `writes`; `tests` (which \
-of `writes` hold its tests); `accept`, the command that proves it is done, \
-e.g. `python -m pytest tests/test_x.py -q`; and a ONE-LINE brief for now — \
-you will write the real brief in step 2, from the skeleton, once it exists. \
-DO NOT write any files yet — the skeleton is step 2 — and do not seal: \
-`seal_charter` and `propose_charter` are step 3, and are refused until then.
-
-{NEED_TO_KNOW_DIRECTIVE}"""
-
-
-def skeleton_prompt(objective: str, draft: PlanDraft, worker_id: str, first: bool) -> str:
-    """Step 2 of staged planning, for one ticket."""
-    worker = draft.worker(worker_id)
-    implementation = [path for path in worker.writes if path not in worker.tests] or list(
-        worker.writes
-    )
-    tests = list(worker.tests)
-    plan = "\n".join(
-        f"  - {w.id}: writes {', '.join(w.writes)}" + (f"; needs {', '.join(w.needs)}" if w.needs else "")
-        for w in draft.workers
-    )
-    shared = (
-        "\nFirst, if the tickets meet at shared types or constants that no ticket owns, "
-        "write those files now, finished — not as stubs.\n"
-        if first else ""
-    )
-    test_line = (
-        f"  - In {', '.join(tests)}: failing tests that pin EVERY behaviour the docstrings "
-        "promise, using only this ticket's code and the skeleton — a small fake where they "
-        "would otherwise need another ticket's code.\n"
-        if tests else
-        "  - This ticket names no test files. Add them: `drop_worker` it and `add_worker` it "
-        "back with `tests`, then write failing tests that pin every behaviour the "
-        "docstrings promise.\n"
-    )
-    return f"""{_work(objective)}
-
---- The tickets ---
-
-{plan}
-
---- Step 2 of 3: the skeleton for ticket '{worker_id}' ---
-{shared}
-Write this ticket's skeleton now, and only this ticket's:
-
-  - In {', '.join(implementation)}: every class and function the ticket \
-implements, fully typed, with a docstring that states SEMANTICS ("returns None \
-for a missing key", not "handles keys"), and a body that raises \
-NotImplementedError — never one that returns a plausible value.
-{test_line}
-Write it in the project's own style: the worker imitates it.
-
-Then write this ticket's real brief, FROM THE SKELETON YOU JUST WROTE: call \
-`drop_worker` with '{worker_id}', then `add_worker` again with the same id, \
-`writes`, `tests` and `accept` (adding any file it turned out to need), and a \
-brief that names what to implement and every exact value the work requires of \
-it — return values, output text, formats, errors — as the docstrings and \
-tests state them. The brief and the skeleton are all the worker will see; \
-never the work above. Then stop — each ticket is its own step."""
-
-
-def seal_prompt(objective: str, draft: PlanDraft) -> str:
-    """Step 3 of staged planning."""
-    return f"""{_work(objective)}
-
---- Step 3 of 3: seal ---
-
-Every ticket has its skeleton: {draft.describe()}. Read each brief against the \
-skeleton you wrote. If one no longer matches, `drop_worker` it and \
-`add_worker` it back corrected. Then call `seal_charter` with the objective. \
-Do not describe the charter in your reply — only `seal_charter` creates one."""
 
 
 def charter_retry_prompt(last_error: str) -> str:

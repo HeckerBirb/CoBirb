@@ -19,8 +19,10 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from ..config import Config
+from ..typing.spi import Tool, ToolResult
 from ..runtime.wiring import build_subagent
 from .charter import WorkerBrief, policy_for
 
@@ -100,8 +102,11 @@ what you could not do, why, where it breaks, and either a proposed change to \
 the design or a question for Brainy Birb. Being stuck is a normal outcome and \
 an honest report is worth more than a guess.
 
-Finish with a short account of what you implemented, what you added tests \
-for, and anything you could not do."""
+Finish by calling `report` once, answering three questions: did your tests \
+pass, did you keep the contract, and what is missing or deliberately not done, \
+and why. If a test you were given contradicts the contract it tests, say which \
+and why in `test_contradicts` rather than bending your code to it. Then end \
+with a short account of what you implemented and what you added tests for."""
 
 
 @dataclass
@@ -124,6 +129,8 @@ class WorkerReport:
     error: str = ""
     turns: int = 0
     tool_calls: list[dict] = field(default_factory=list)
+    # What the worker said through the `report` tool, when it used it.
+    structured: dict | None = None
     # Set by `supervisor.recheck`, which runs the check again once every worker
     # has finished; `accepted` is then that later verdict, and this the one the
     # worker saw at its own end.
@@ -139,6 +146,26 @@ class WorkerReport:
         so this cannot claim the work is finished.
         """
         return self.ok and self.accepted is True
+
+    def report_text(self) -> str:
+        """The worker's own answer to the three questions, in one line or so.
+
+        Marked "unstructured" when it never called `report` and all there is
+        is its final answer — which is still worth reading, but is prose.
+        """
+        if self.structured:
+            data = self.structured
+            parts = [
+                f"tests pass: {'yes' if data.get('tests_pass') else 'no'}",
+                f"contract kept: {'yes' if data.get('contract_kept') else 'no'}",
+            ]
+            if data.get("missing"):
+                parts.append("missing: " + "; ".join(str(m) for m in data["missing"]))
+            if data.get("test_contradicts"):
+                parts.append("test contradicts the contract: "
+                             + "; ".join(str(m) for m in data["test_contradicts"]))
+            return ", ".join(parts)
+        return f"unstructured: {self.summary.strip()[:600]}" if self.summary.strip() else ""
 
     def describe(self) -> str:
         """One block a person, or Brainy Birb, can read."""
@@ -166,9 +193,61 @@ class WorkerReport:
             lines.append(
                 f"    tried to reach outside its scope: {', '.join(sorted(set(self.denied)))}"
             )
+        if self.structured:
+            lines.append(f"    reported — {self.report_text()}")
         if self.summary:
             lines.append(f"    {self.summary.strip()}")
         return "\n".join(lines)
+
+
+class ReportTool(Tool):
+    """How a Worker Birb answers "how did it go?" — once, in fields.
+
+    A tool rather than a paragraph because the answer is read by a stage that
+    re-plans the next round, and three explicit answers survive that where
+    prose gets summarised away. It reaches nothing — no file, no network, no
+    process — so it is permitted outright, the same considered exception as
+    the charter tools. What CoBirb can check itself (the check re-run, review)
+    it checks; this is the worker's side of it.
+    """
+
+    NAME = "report"
+
+    def __init__(self) -> None:
+        self.answer: dict | None = None
+
+    def name(self) -> str:
+        return self.NAME
+
+    def description(self) -> str:
+        return ("Report how your ticket went, once, when you have finished: whether your tests "
+                "pass, whether you kept the contract, what is missing and why, and any test that "
+                "contradicts the contract it tests.")
+
+    def parameters(self) -> dict[str, Any]:
+        items = {"type": "array", "items": {"type": "string"}}
+        return {
+            "type": "object",
+            "properties": {
+                "tests_pass": {"type": "boolean", "description": "Do all your tests pass now?"},
+                "contract_kept": {"type": "boolean",
+                                  "description": "Did you keep every signature and data shape unchanged?"},
+                "missing": {**items, "description": "Anything not done or deliberately left out, "
+                                                    "each as 'what — why'."},
+                "test_contradicts": {**items, "description": "Any given test that contradicts the "
+                                                             "contract, each as 'test — why'."},
+            },
+            "required": ["tests_pass", "contract_kept"],
+        }
+
+    def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        self.answer = {
+            "tests_pass": bool(arguments.get("tests_pass")),
+            "contract_kept": bool(arguments.get("contract_kept")),
+            "missing": [str(m) for m in arguments.get("missing") or []],
+            "test_contradicts": [str(m) for m in arguments.get("test_contradicts") or []],
+        }
+        return ToolResult(ok=True, content="Recorded. Finish with your short account.")
 
 
 def compose_brief(worker: WorkerBrief, cwd: str = "") -> str:
@@ -252,6 +331,9 @@ def run_worker(
     # thread is not checking anything.
     if canceller is not None:
         canceller.register(orchestrator)
+    report_tool = ReportTool()
+    orchestrator.tools[ReportTool.NAME] = report_tool
+    policy.allow(ReportTool.NAME)
 
     logger.info("worker %s starting; writes=%s", worker.id, ", ".join(worker.writes))
     brief = compose_brief(worker, cwd)
@@ -310,4 +392,5 @@ def run_worker(
         denied=tuple(call["name"] for call in calls if call.get("denied")),
         turns=len(session.turns),
         tool_calls=calls,
+        structured=report_tool.answer,
     )

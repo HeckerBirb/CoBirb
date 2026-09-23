@@ -1133,3 +1133,46 @@ def test_a_server_that_keeps_hanging_up_is_reported_as_unreachable(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Could not reach the model provider"):
         list(provider.chat("system", "context", stream=True))
+
+
+def test_a_connection_lost_mid_reply_is_an_ordinary_error():
+    """A reset while the reply streamed escaped as a raw ConnectionResetError
+    and took a whole flock down mid-plan. It is a failed request, reported as
+    one — and not as "is it running?", since something had started to reply."""
+    import http.server
+    import socket
+    import struct
+    import threading
+
+    class _Drops(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            if self.path.endswith("/api/show"):
+                body = json.dumps({"parameters": "", "model_info": {}}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self.send_response(200)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            line = (json.dumps({"message": {"content": "Hel"}, "done": False}) + "\n").encode()
+            self.wfile.write(b"%x\r\n%s\r\n" % (len(line), line))
+            self.wfile.flush()
+            # Reset, not close: SO_LINGER 0 makes the close send RST.
+            self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            self.connection.close()
+            self.close_connection = True
+
+        def log_message(self, *args):
+            return None
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Drops)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    provider = LocalModelProvider(model="llama3.1", base_url=f"http://127.0.0.1:{server.server_address[1]}")
+
+    with pytest.raises(RuntimeError, match="lost part-way through the reply"):
+        list(provider.chat("system", "context", stream=True))

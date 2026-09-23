@@ -32,7 +32,11 @@ def main() -> int:
     def keep_skeleton(charter) -> None:
         """What the workers were handed: the files as planning left them, and
         each brief. Fired after planning and before any worker runs, so a
-        failed round can be read back to where the spec was lost."""
+        failed round can be read back to where the spec was lost. The first
+        round's, since that is the skeleton planning produced; a later round
+        builds on what the workers left."""
+        if skeleton:
+            return
         for path in sorted({p for w in charter.workers for p in (*w.writes, *w.reads)}):
             try:
                 with open(os.path.join(cwd, path), encoding="utf-8") as fh:
@@ -49,14 +53,19 @@ def main() -> int:
         )
     finally:
         orchestrator.close()
-    reports = run.outcome.reports if run.outcome else []
+    outcomes = run.rounds or ([run.outcome] if run.outcome else [])
+    # Every round's workers. `ok` below is judged on the last round, since that
+    # is the tree the checker sees; the reports keep which round each was.
+    reports = [r for outcome in outcomes for r in outcome.reports]
+    last = outcomes[-1].reports if outcomes else []
     # Every worker's calls, pooled, so the runner classifies a failed round the
     # way it classifies a single agent: wrote nothing → no_change, wrote
     # something the checker rejected → wrong_result. This used to send an empty
     # list, which made every failed round that ran read as no_change.
     calls = [call for r in reports for call in (r.tool_calls or [])]
     print(json.dumps({
-        "ok": run.ran and all(r.ok for r in reports),
+        "ok": run.ran and all(r.ok for r in last),
+        "rounds": len(outcomes),
         "stop_reason": run.stopped_at or "answered",
         "summary": run.report[:2000],
         "workers": len(reports),
@@ -65,7 +74,8 @@ def main() -> int:
         # the first measurement it called rounds successes that left stubs
         # unimplemented — the workers' own reports are what say which ticket failed.
         "worker_reports": [
-            {"id": r.worker_id, "ok": r.ok, "accepted": r.accepted,
+            {"id": r.worker_id, "round": next(i for i, o in enumerate(outcomes, 1) if r in o.reports),
+             "ok": r.ok, "accepted": r.accepted, "structured": r.structured,
              "accepted_when_finished": getattr(r, "accepted_when_finished", r.accepted),
              "turns": r.turns,
              "wrote": any(c.get("ok") and c.get("name") in _WRITES for c in r.tool_calls),
@@ -84,6 +94,11 @@ def main() -> int:
             if getattr(run, "charter", None) else None
         ),
         "skeleton": skeleton,
+        # Which tools each planning step called: how a failed round is read
+        # back to the step that went wrong (a seal in the wrong step, a stage
+        # that wrote nothing).
+        "trace": run.trace,
+        "design": run.design[:20000],
         "turns": sum(r.turns for r in reports),
         "tool_calls": calls,
         "denied": [c.get("target") or c["name"] for c in calls if c.get("denied")],

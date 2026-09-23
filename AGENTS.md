@@ -69,7 +69,7 @@ sized for a 4096-token window, and that one assumption made four wrong calls.)
 | `plugins/core/` | Built-ins: `tools`, `model` (Ollama), `openai` (OpenAI-compatible), `toolcalls` (calls written as text), `io`, `crypto`, `render`, `repomap`, `ignores`. |
 | `runtime/` | Shared composition: `wiring`, `plugins`, `models`, `system_prompt`, `setup`, `commands`, `command_index`, `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues`, `mentions`, `doctor`. |
 | `mcp/` | stdio MCP client and its tool adapter. |
-| `flock/` | Multi-agent runs: `charter`, `plan`, `brainy`, `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. |
+| `flock/` | Multi-agent runs: `charter`, `plan`, `brainy`, `stages` (staged planning), `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. |
 | `tui/` | Textual app: `app`, `slash_commands` (handlers + `COMMANDS`), `transcript` (flush-before-write), `attachments`, `mention_picker`, `command_picker`, `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. |
 | `help_text.py` | `cobirb help` — the overview; `cobirb help <topic>` renders the manual (§14). |
 | `docs/manual/` | The user manual. Shipped in the package as `cobirb/manual/`. |
@@ -338,17 +338,8 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
 - **All five tools are moves on one `CharterDesk`** (owner of the draft, the charter and every counter),
   registered and permitted together for the whole session by `install_charter_tool` — the planning
   rules stay in context, so a missing tool is an `Unknown tool` the model cannot argue past.
-- **Staged planning, opt-in** (`run._staged`, `flock_planning` = `"single"` (default) | `"staged"`): divide
-  (`brainy.partition_prompt`, tickets via `add_worker` before any file exists), then one
-  `skeleton_prompt` per ticket, then `seal_prompt` — each a separate `run` on the same session, each
-  re-stating the objective and carrying only its own instructions, because the one-prompt planner asked
-  for everything at once and the weakest model ended half its rounds with no charter. Each ticket's
-  brief is rewritten after its skeleton, and `seal_charter`/`propose_charter` are refused
-  (`CharterDesk.seal_locked`, not counted as attempts) until every ticket has had its skeleton step:
-  qwen3-coder sealed in step 1 on every seed traced, so no skeleton step ever ran. Measured: charters every time for ornith 9B (2/6 → 5/6), but
-  qwen3-coder lost a spec detail in every rep (6/6 → 2/6) — so not the default until a run shows it
-  costs nothing. The bench keeps the planned skeleton and briefs for a failed round to find where.
-  What is left incomplete falls through to the driven loop below; a decline in step 1 ends planning.
+- **The one-prompt planner** is the default (`flock.planning = "single"`) and everything in this list
+  up to *Staged planning* describes it.
 - **A driven loop with a completion predicate** (`run._plan`, `MAX_PLAN_STEPS = 5`): after each pass, no
   sealed charter → `brainy.next_move_prompt` asks for exactly the missing move. Exits: a charter; no
   tool called and nothing built (a legitimate "do not divide"); `tool.exhausted`, the turn budget, or
@@ -375,6 +366,38 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
 - The Flock tab shows Brainy Birb's tool calls while it plans (`FlockPane.planning_note`, last
   `PLANNING_TAIL` lines); streamed tokens deliberately do not feed it.
 
+**Staged planning, in rounds** (`flock/stages.py`, `run._drive_staged`; `"flock": {"planning":
+"staged"}`). The design is the *Flock Flight Plan*; its rules, as built:
+- **Stages, each a fresh `Orchestrator`** built on the main one's model, policy, grants, front-end and
+  checkpoints, with only that stage's tools and a `_GatedHooks` gate that refuses a write outside the
+  stage's files through `before_tool` — **before** the policy, so it is refused without asking. The
+  design documents (`stages.Design`) are what a stage carries; nothing else survives between stages.
+  (0) **Overview**, section by section in one context, read-only: `SECTIONS`, fixed headings with a
+  checklist each; the Tickets section is fixed-form blocks (`### ticket: <id>` + `- key: value`), parsed
+  by `parse_tickets` and checked by `check_tickets` through a scratch `PlanDraft`, re-asked once on a
+  problem. `NO TICKETS` is a legitimate decline. (1) **Skeleton**, any file but the tickets' tests.
+  (2) **One stage per ticket**, writing only that ticket's tests; its reply is the ticket plan and
+  becomes the brief. Test rules (the user's): contracts only, `parametrize` over input → output,
+  K.I.S.S., no design knowledge, no nudging toward an implementation. **The harness seals**
+  (`Stager.charter`); no stage has a seal tool. (Staged planning as first built offered one, and
+  qwen3-coder sealed in step 1 on every seed traced, so no skeleton step ever ran.)
+- **Rounds.** After a round: `recheck`, review, and each worker's structured report (`ReportTool`: tests
+  pass, contract kept, what is missing and why, a test that contradicts the contract) go to an evaluation
+  stage, which returns ticket blocks for only what is open, each with a `why`. The next round re-runs the
+  skeleton for new files and a stage per ticket, carrying the last plan, the `why` and the report. Stops
+  on all green, `flock.max_rounds` (default 5), or a round whose failing set equals the last one's
+  (`stopped_at="no_progress"`).
+- **Autonomy** (`flock.autonomy`): the first charter is approved by the user in both modes. `ask` (default)
+  puts the Decisions section to the user (`Asker.decide`; empty leaves them to Brainy Birb, safe because a
+  design decision grants nothing) and asks before every later round, showing only what it adds
+  (`approval_changes`). `auto` decides itself and approves later rounds without asking, so **it refuses to
+  start unless the shell sandbox is active**. The benchmark's driver answers approvals itself; that is
+  its controlled exception.
+- The design and every round's reports go to the flock's encrypted session (`_close_branch`), never the
+  repo; `FlockRun.trace` records each planning step's tool calls, for either planner.
+- `FlockSettings.from_config` reads the `flock` block and falls back per value; `doctor` names a value it
+  could not read.
+
 **Workers.**
 - `build_subagent()` differs from a normal run in exactly four ways: policy handed in (config's
   `allow_*` keys do not apply), **no project context** (need-to-know), `HeadlessIO`, and verification
@@ -387,6 +410,9 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
   program, and shell grants carry no path scoping. An unreadable `accept` grants nothing.
 - A write into a file another worker owns is refused without asking (`writes_owner`): exclusive
   ownership is what makes concurrency safe.
+- A worker ends by calling `report` (`worker.ReportTool`, permitted outright: it reaches nothing):
+  tests pass, contract kept, what is missing and why, any test that contradicts the contract. Kept as
+  `WorkerReport.structured`; `report_text()` marks a worker that never called it "unstructured".
 - A worker may ask for what its scope lacks (`WorkerPaneIO.confirm_request`) — **in its own pane, never
   a modal** (distinct positions, nothing focused by default, fail closed with no pane) — and releases its
   concurrency slot while it waits. Answers: once / session / deny-with-instruction.
@@ -446,7 +472,7 @@ prompt stays enabled during a turn — submitting steers. Approval is a modal (`
 `allow_read_dirs`, `allow_write_dirs`, `sandbox`, `max_turns`, `verify_command`, `verify_timeout`,
 `verify_fix_attempts`, `redact_secrets`, `checkpoints`, `instructions`, `instructions_max_chars`,
 `repo_map`, `repo_map_max_chars`, `context_tokens`, `max_num_ctx`, `connect_timeout`, `request_timeout`,
-`plan_mode`, `audit_log`, `hooks`, `mcp_servers`, `flock_planning`. Deprecated: `model`, `default_model`. Retired:
+`plan_mode`, `audit_log`, `hooks`, `mcp_servers`, `flock` (`planning`, `autonomy`, `max_rounds`). Deprecated: `model`, `default_model`. Retired:
 `persona`. `ensure_home()` seeds a starter config on first run.
 
 **Help** — `cobirb help` prints the overview (`help_text._OVERVIEW` plus the page list);
@@ -493,7 +519,7 @@ detached `HEAD` swallows the next commit), and reinstalls.
 ```bash
 pip install -e ".[dev]"
 pytest                                            # parallel (-n auto), ~15 s; CI: 3.11 and 3.12
-pytest -p no:xdist tests/test_x.py -k name        # serial, for one test
+pytest -n 0 tests/test_x.py -k name               # serial, for one test
 COBIRB_TEST_MODEL=llama3.1 pytest -m integration  # needs a real local Ollama
 python bench/cobirb_bench.py --models <m1,m2> --reps 2   # the offline benchmark
 ```
@@ -504,7 +530,7 @@ python bench/cobirb_bench.py --models <m1,m2> --reps 2   # the offline benchmark
 - **Runs in parallel by default** (`pytest-xdist`, `-n auto --dist loadgroup`), which works because
   every test is isolated. A test that touches something genuinely shared — the real `pip` runs in
   `test_plugin_install.py` write into the one virtualenv — goes in an `xdist_group` so its file runs
-  on one worker.
+  on one worker. Run one test serially with `-n 0` (`-p no:xdist` fails: the config passes `-n`).
 - One test file per module; `COBIRB_HOME` is a tmp dir for every test; `write_config(home, data)` is the
   only sanctioned way to set config. `asyncio_mode = "auto"` for the Textual Pilot tests. Crypto runs
   against the real backend. Subprocess boundaries are usually mocked, with at least one real test.
@@ -519,7 +545,10 @@ python bench/cobirb_bench.py --models <m1,m2> --reps 2   # the offline benchmark
   **A claim that something improves reliability is checked here**, beyond the noise between runs.
   `bench/README.md` is the method: running it, adding a task, reading results. Finished runs are
   committed under `bench/results/`; `bench/compare.py` compares runs and puts a Fisher exact p on
-  every change, because at 3 reps most differences are not yet evidence.
+  every change, because at 3 reps most differences are not yet evidence. In `--flock` a pass with no
+  worker behind it is `no_flock`, not a pass. **The golden test** (`bench/tasks/golden-snake`, category
+  `golden`) runs only with `--golden`, only as the final confidence check once everything else passes,
+  and **only after asking the user, every time** — it takes hours and costs them real electricity.
 
 ## 17. Decided — do not rebuild these
 

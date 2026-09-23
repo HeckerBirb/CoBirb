@@ -418,10 +418,20 @@ def _run_flock(objective: str, cwd: str, model_name: str | None, *, headless: bo
             print()
             return False
 
+    def decide(decisions: str) -> str | None:
+        print(f"\nBrainy Birb's design decisions:\n{decisions}")
+        print("\nAnswer any by number (e.g. '2: use curses'), or press enter to let "
+              "Brainy Birb decide: ", end="", flush=True)
+        try:
+            return input().strip() or None
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+
     try:
         run = run_flock_session(
             orchestrator, objective, cwd,
-            ask=Asker(confirm=confirm, show=lambda text: print(f"\n{text}")),
+            ask=Asker(confirm=confirm, show=lambda text: print(f"\n{text}"), decide=decide),
         )
     except KeyboardInterrupt:
         print("\ncobirb: interrupted.", file=sys.stderr)

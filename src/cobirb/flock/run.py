@@ -24,7 +24,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ..config import Config
@@ -38,15 +38,20 @@ from .brainy import (
     ProposeCharterTool,
     SealCharterTool,
     next_move_prompt,
-    partition_prompt,
     plan_prompt,
     round_summary,
-    seal_prompt,
-    skeleton_prompt,
 )
 from .charter import Charter, recover_charter
 from .preflight import missing_models
 from .probe import ProbeResult, probe_concurrency
+from .stages import (
+    AUTONOMY_ASK,
+    AUTONOMY_AUTO,
+    DEFAULT_MAX_ROUNDS,
+    Stager,
+    approval_changes,
+    check_tickets,
+)
 from .supervisor import Canceller, FlockOutcome, check_partition, run_flock
 
 logger = logging.getLogger("cobirb")
@@ -87,6 +92,12 @@ class Asker:
     # the user approving something they cannot read.
     confirm: Callable[..., bool] = lambda prompt, detail="": False
     show: Callable[[str], None] = lambda text: None
+    # Staged planning in ``ask`` mode puts Brainy Birb's design decisions to
+    # the user: given the numbered list, returns the user's answers, or None
+    # to leave every decision to Brainy Birb. The default leaves them to it —
+    # a decision about the design is not a capability, so "nobody answered"
+    # safely means "use your judgement", unlike a charter approval.
+    decide: Callable[[str], "str | None"] = lambda decisions: None
 
 
 @dataclass
@@ -101,6 +112,12 @@ class FlockRun:
     # The token pairing this engagement's own session file with the point in
     # the main session where the conversation branched.
     token: str = ""
+    # Staged planning: every round's outcome (``outcome`` is the last), the
+    # design documents, and a trace of which tools each planning step called
+    # — the evidence for where a failed round went wrong.
+    rounds: list = field(default_factory=list)
+    design: str = ""
+    trace: list = field(default_factory=list)
 
     @property
     def ran(self) -> bool:
@@ -245,73 +262,43 @@ def _without_project_verification(orchestrator: Orchestrator):
         orchestrator.verify = original
 
 
-PLANNING_STAGED = "staged"
 PLANNING_SINGLE = "single"
+PLANNING_STAGED = "staged"
 
 
-def _stopped(orchestrator: Orchestrator, tool: ProposeCharterTool) -> bool:
-    """Whether planning has hit a limit that another pass would not fix."""
-    stop = getattr(orchestrator, "last_stop", None)
-    return (
-        tool.exhausted
-        or bool(getattr(orchestrator, "turns_exhausted", False))
-        or getattr(stop, "reason", None) == STOP_NO_PROGRESS
-    )
+@dataclass
+class FlockSettings:
+    """The ``flock`` config block, read once, with every value checked.
 
-
-def _staged(orchestrator: Orchestrator, tool: ProposeCharterTool, objective: str, cwd: str,
-            turns: int) -> tuple[str, bool, bool]:
-    """Divide, then one skeleton step per ticket, then seal — see ``brainy.partition_prompt``.
-
-    Returns the last narration, whether any tool was called, and whether a
-    limit stopped it. Each step is its own ``run`` on the same session, so the
-    model keeps what it read; each prompt also re-states the work, so nothing
-    depends on it having kept it. Anything left incomplete falls through to
-    ``_plan``'s driven loop, which asks for exactly the missing move.
+    A typo costs the setting, never the run: an unknown planner or autonomy
+    falls back to the default, and a round cap that is not a positive number
+    becomes the default cap.
     """
-    desk = tool.desk
-    # Sealing waits for the skeleton; see `CharterDesk.locked_notice`.
-    desk.seal_locked = True
-    try:
-        return _staged_steps(orchestrator, tool, objective, cwd, turns)
-    finally:
-        desk.seal_locked = False
 
+    planning: str = PLANNING_SINGLE
+    autonomy: str = AUTONOMY_ASK
+    max_rounds: int = DEFAULT_MAX_ROUNDS
 
-def _staged_steps(orchestrator: Orchestrator, tool: ProposeCharterTool, objective: str, cwd: str,
-                  turns: int) -> tuple[str, bool, bool]:
-    desk = tool.desk
-
-    def step(prompt: str) -> tuple[str, bool]:
-        session = orchestrator.run(prompt, system="", cwd=cwd, label="Brainy Birb", max_turns=turns)
-        return session.summary or "", bool(getattr(orchestrator, "last_run_tool_calls", None))
-
-    narration, touched = step(partition_prompt(objective))
-    if tool.charter is not None or not desk.draft.workers or _stopped(orchestrator, tool):
-        return narration, touched, _stopped(orchestrator, tool)
-
-    done: set[str] = set()
-    # Bounded by twice the tickets there were, since a skeleton step may drop
-    # a ticket and add it back corrected, which puts it in the queue again.
-    for _ in range(2 * len(desk.draft.workers)):
-        pending = [w.id for w in desk.draft.workers if w.id not in done]
-        if not pending or tool.charter is not None:
-            break
-        text, called = step(skeleton_prompt(objective, desk.draft, pending[0], first=not done))
-        narration, touched = text or narration, touched or called
-        done.add(pending[0])
-        if _stopped(orchestrator, tool):
-            return narration, touched, True
-
-    if tool.charter is None and desk.draft.workers:
-        desk.seal_locked = False
-        text, called = step(seal_prompt(objective, desk.draft))
-        narration, touched = text or narration, touched or called
-    return narration, touched, _stopped(orchestrator, tool)
+    @classmethod
+    def from_config(cls, config: Config) -> "FlockSettings":
+        block = config.get("flock") or {}
+        if not isinstance(block, dict):
+            block = {}
+        planning = block.get("planning", PLANNING_SINGLE)
+        autonomy = block.get("autonomy", AUTONOMY_ASK)
+        try:
+            rounds = int(block.get("max_rounds", DEFAULT_MAX_ROUNDS))
+        except (TypeError, ValueError):
+            rounds = DEFAULT_MAX_ROUNDS
+        return cls(
+            planning=planning if planning in (PLANNING_SINGLE, PLANNING_STAGED) else PLANNING_SINGLE,
+            autonomy=autonomy if autonomy in (AUTONOMY_ASK, AUTONOMY_AUTO) else AUTONOMY_ASK,
+            max_rounds=rounds if rounds >= 1 else DEFAULT_MAX_ROUNDS,
+        )
 
 
 def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int,
-          staged: bool = False) -> PlanResult:
+          trace: "list | None" = None) -> PlanResult:
     """Let Brainy Birb plan and scaffold, and take the charter it proposes.
 
     **A driven loop with a completion predicate, rather than one turn plus a
@@ -352,19 +339,13 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int,
     touched = False
     with _without_project_verification(orchestrator):
         prompt = plan_prompt(objective)
-        steps = MAX_PLAN_STEPS
-        if staged:
-            narration, touched, limited = _staged(orchestrator, tool, objective, cwd, turns)
-            # What is left is the driven loop's job: seal a plan that was built
-            # and not sealed, or quote the refusal that stopped one. Nothing to
-            # do when the plan is done, a limit was hit, or the model declined.
-            declined = not touched and tool.desk.draft.empty and not tool.attempts
-            steps = 0 if (tool.charter is not None or limited or declined) else MAX_PLAN_STEPS
-            prompt = next_move_prompt(tool.desk)
-        for _ in range(steps):
+        for _ in range(MAX_PLAN_STEPS):
             session = orchestrator.run(
                 prompt, system="", cwd=cwd, label="Brainy Birb", max_turns=turns
             )
+            if trace is not None:
+                trace.append({"step": f"plan pass {len(trace) + 1}", "calls": [
+                    c["name"] for c in getattr(orchestrator, "last_run_tool_calls", [])]})
             narration = session.summary or narration
             called = bool(getattr(orchestrator, "last_run_tool_calls", None))
             touched = touched or called
@@ -399,9 +380,7 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int,
             # Out of moves with the plan still incomplete. Bounded by design:
             # the point of the loop is to hold the state while the model makes
             # one move at a time, not to keep asking forever.
-            # Only when the loop ran: staged planning that finished, hit a
-            # limit, or declined skips it with nothing left to stall on.
-            stalled = steps > 0 and tool.charter is None
+            stalled = tool.charter is None
 
     charter, recovered = tool.charter, False
     if charter is None:
@@ -501,6 +480,11 @@ def _drive(
         run.report = warning
         return run
 
+    settings = FlockSettings.from_config(config)
+    if charter is None and settings.planning == PLANNING_STAGED:
+        return _drive_staged(run, orchestrator, objective, cwd, ask, config, stop, on_event,
+                             plan_turns, probe, io_for, on_charter, canceller, settings)
+
     # ---- 1. Plan and scaffold ------------------------------------------- #
     if charter is not None:
         # Already written, by a `propose_charter` call outside a planning turn.
@@ -508,14 +492,15 @@ def _drive(
         plan = PlanResult(charter=charter, narration="")
     else:
         ask.show("Brainy Birb is planning and building the skeleton…")
-        plan = _plan(
-            orchestrator, objective, cwd, plan_turns,
-            # The one-prompt planner by default. Staged planning gave the
-            # weakest planner a charter every time and cost the strongest one
-            # a detail of the spec in every rep, so it stays available but is
-            # not the default until a run shows it costs nothing.
-            staged=config.get("flock_planning", default=PLANNING_SINGLE) == PLANNING_STAGED,
-        )
+        try:
+            plan = _plan(orchestrator, objective, cwd, plan_turns, trace=run.trace)
+        except RuntimeError as exc:
+            # The model server failed mid-plan. A fault in something else is
+            # reported and the run ends, rather than escaping as a crash that
+            # takes the session with it (AGENTS.md invariant 6).
+            run.stopped_at = "error"
+            run.report = f"No flock ran: planning stopped because the model server failed.\n\n{exc}"
+            return run
     if plan.charter is not None and plan.recovered:
         # Say so. A charter that arrived this way is one the model got right
         # apart from how it delivered it, and the user approving it should
@@ -680,10 +665,215 @@ def _drive(
     ask.show(outcome.describe())
 
     ask.show("Brainy Birb is reviewing the round…")
-    verdict = orchestrator.run(
-        round_summary(outcome), system="", cwd=cwd, label="Brainy Birb", max_turns=6
+    try:
+        verdict = orchestrator.run(
+            round_summary(outcome), system="", cwd=cwd, label="Brainy Birb", max_turns=6
+        )
+        run.report = verdict.summary or outcome.describe()
+    except RuntimeError as exc:
+        # The round ran; only its account failed. The computed one stands.
+        run.report = f"{outcome.describe()}\n\n(Brainy Birb's account of the round failed: {exc})"
+    return run
+
+
+def _round_verdict(outcome: FlockOutcome) -> str:
+    """Everything the evaluation stage is given about a round: CoBirb's own
+    account first (the checks re-run on the finished tree), then review, then
+    each worker's report — structured where it gave one."""
+    lines = [outcome.describe(), "", "--- Review ---"]
+    lines += [review.describe() for review in outcome.reviews]
+    lines += ["", "--- What each Worker Birb reported ---"]
+    for report in outcome.reports:
+        lines.append(f"[{report.worker_id}] " + (report.report_text() or "(no report)"))
+        if report.accepted is False and report.accept_output:
+            lines.append("    check output (end): " + report.accept_output[-800:].replace("\n", "\n    "))
+    return "\n".join(lines)
+
+
+def _failing(outcome: FlockOutcome) -> tuple:
+    """What was still wrong after a round, for noticing a round that changed nothing."""
+    return tuple(sorted((r.worker_id, bool(r.ok), r.accepted) for r in outcome.outstanding))
+
+
+def _drive_staged(
+    run: FlockRun,
+    orchestrator: Orchestrator,
+    objective: str,
+    cwd: str,
+    ask: Asker,
+    config: Config,
+    stop: threading.Event | None,
+    on_event: Callable[[str, Any], None] | None,
+    plan_turns: int,
+    probe: bool,
+    io_for: Callable[[Any, Any], Any] | None,
+    on_charter: Callable[[Charter], None] | None,
+    canceller: Canceller | None,
+    settings: "FlockSettings",
+) -> FlockRun:
+    """Staged planning, in rounds — see ``flock.stages``.
+
+    **Approval.** The first charter is approved by the user in both modes. A
+    later round's charter is put to the user again in ``ask`` mode, showing
+    only what it adds; in ``auto`` mode it is approved without asking, which is
+    why ``auto`` refuses to start outside a working sandbox — a mode that runs
+    rounds unattended is only as safe as what contains it.
+    """
+    if settings.autonomy == AUTONOMY_AUTO:
+        box = getattr(orchestrator.tools.get("shell"), "sandbox", None)
+        if box is None or not box.active:
+            run.stopped_at = "autonomy"
+            run.report = (
+                "No flock ran. Auto mode approves later rounds without asking, so it only runs "
+                "inside the shell sandbox, and the sandbox is not active here (bubblewrap is "
+                "needed — see 'cobirb doctor'). Use \"autonomy\": \"ask\", or install bubblewrap."
+            )
+            return run
+
+    stager = Stager(
+        orchestrator, cwd, objective, turns=plan_turns, trace=run.trace,
+        decide=ask.decide if settings.autonomy == AUTONOMY_ASK else None, show=ask.show,
     )
-    run.report = verdict.summary or outcome.describe()
+    ask.show("Brainy Birb is writing the overview…")
+    try:
+        with _without_project_verification(orchestrator):
+            problem = stager.overview()
+    except RuntimeError as exc:
+        run.stopped_at = "error"
+        run.report = f"No flock ran: planning stopped because the model server failed.\n\n{exc}"
+        return run
+    run.design = stager.design.document()
+    if problem.startswith("declined:"):
+        run.stopped_at = "planning"
+        run.report = "Brainy Birb decided this work should not be divided: " + problem[len("declined:"):].strip()
+        return run
+    if problem:
+        run.stopped_at = "charter"
+        run.report = f"No flock ran: {problem}."
+        return run
+    ask.show(run.design)
+
+    tickets = list(stager.design.tickets)
+    previous: dict[str, str] = {}
+    approved: list[Charter] = []
+    last_failing: tuple | None = None
+    for round_number in range(1, settings.max_rounds + 1):
+        # ---- Skeleton, then one stage per ticket -------------------------- #
+        try:
+            with _without_project_verification(orchestrator):
+                known = {p for c in approved for w in c.workers for p in w.writes}
+                fresh = [t for t in tickets if any(p not in known for p in t.writes)]
+                if fresh:
+                    ask.show(f"Round {round_number}: Brainy Birb is writing the skeleton…")
+                    stager.skeleton(fresh)
+                briefs = {}
+                for ticket in tickets:
+                    ask.show(f"Round {round_number}: planning ticket '{ticket.id}'…")
+                    briefs[ticket.id] = stager.ticket_plan(ticket, previous.get(ticket.id, ""))
+            charter = stager.charter(tickets, briefs)
+        except RuntimeError as exc:
+            run.stopped_at = "error"
+            run.report = (f"Stopped in round {round_number}: planning failed because the model "
+                          f"server failed.\n\n{exc}")
+            return run
+        run.charter = charter
+        run.design = stager.design.document()
+        if on_charter is not None:
+            try:
+                on_charter(charter)
+            except Exception:  # noqa: BLE001 - a display is not worth the run
+                logger.debug("a charter handler raised", exc_info=True)
+
+        # ---- Approval ----------------------------------------------------- #
+        if not approved or settings.autonomy == AUTONOMY_ASK:
+            detail = charter.describe() if not approved else (
+                approval_changes(charter, approved) + "\n\n" + charter.describe())
+            question = (
+                f"Approve this charter? {len(charter.workers)} Worker Birb(s) will run "
+                "unattended inside exactly these scopes, with no further prompts."
+                if not approved else
+                f"Approve round {round_number}? {len(charter.workers)} ticket(s) to try again or add."
+            )
+            ask.show(detail)
+            if not ask.confirm(question, detail):
+                run.stopped_at = "approval"
+                run.report = ("Charter not approved; nothing ran." if not approved else
+                              f"Round {round_number} not approved; stopped after round {round_number - 1}.")
+                break
+        else:
+            ask.show(f"Round {round_number} approved automatically (auto mode, inside the sandbox).\n"
+                     + approval_changes(charter, approved))
+        approved.append(charter)
+
+        # ---- Fan out ------------------------------------------------------ #
+        concurrency = charter.effective_concurrency
+        if probe and concurrency > 1 and round_number == 1 and ask.confirm(
+            "Check whether your model endpoint serves two requests at once?",
+            "It takes a few seconds. A server that queues them would make a concurrent "
+            "flock quietly sequential.",
+        ):
+            run.probe = probe_concurrency(orchestrator.model)
+            ask.show(run.probe.describe())
+            if run.probe.concurrent is False:
+                concurrency = 1
+        ask.show(f"Round {round_number}: fanning out {len(charter.workers)} ticket(s), "
+                 f"{concurrency} at a time…")
+        outcome = run_flock(
+            charter, cwd, config=config, concurrency=concurrency, stop=stop,
+            on_event=on_event, io_for=io_for, canceller=canceller,
+            grants=getattr(orchestrator, "grants", None),
+        )
+        run.outcome = outcome
+        run.rounds.append(outcome)
+        ask.show(outcome.describe())
+
+        # ---- Stop, or plan the next round --------------------------------- #
+        if outcome.all_done or outcome.stopped or (stop is not None and stop.is_set()):
+            break
+        failing = _failing(outcome)
+        if failing == last_failing:
+            run.stopped_at = "no_progress"
+            ask.show("Stopping: this round ended with the same tickets failing the same way as the last.")
+            break
+        last_failing = failing
+        if round_number >= settings.max_rounds:
+            run.stopped_at = "rounds"
+            break
+        try:
+            next_tickets, whys, _ = stager.evaluate(round_number, _round_verdict(outcome))
+        except RuntimeError as exc:
+            ask.show(f"Stopping: the evaluation failed because the model server failed ({exc}).")
+            break
+        if not next_tickets:
+            break
+        problem = check_tickets(next_tickets)
+        if problem:
+            ask.show(f"Stopping: the next round's tickets could not be used — {problem}.")
+            break
+        reports = {r.worker_id: r for r in outcome.reports}
+        previous = {
+            t.id: "\n".join(filter(None, [
+                f"What must change: {whys.get(t.id, '')}",
+                f"Last plan:\n{stager.design.plans.get(t.id, '')}",
+                f"Report: {reports[t.id].report_text()}" if t.id in reports else "",
+            ]))
+            for t in next_tickets
+        }
+        by_id = {t.id: t for t in stager.design.tickets}
+        by_id.update({t.id: t for t in next_tickets})
+        stager.design.tickets = list(by_id.values())
+        tickets = next_tickets
+
+    run.design = stager.design.document()
+    if run.rounds:
+        lines = [f"Flock finished after {len(run.rounds)} round(s)."]
+        for index, outcome in enumerate(run.rounds, 1):
+            lines.append(f"\n--- Round {index} ---\n{outcome.describe()}")
+        if run.stopped_at == "no_progress":
+            lines.append("\nStopped: the last round changed nothing.")
+        elif run.stopped_at == "rounds":
+            lines.append(f"\nStopped at the round cap ({settings.max_rounds}).")
+        run.report = "\n".join(lines)
     return run
 
 
@@ -700,10 +890,15 @@ def _close_branch(main, flock_session, run: FlockRun, password: str | None) -> N
     if flock_session is None:
         return
     try:
-        for report in (run.outcome.reports if run.outcome else []):
-            flock_session.session.add_text(report.worker_id, report.describe())
-        for review in (run.outcome.reviews if run.outcome else []):
-            flock_session.session.add_text(f"review:{review.worker_id}", review.describe())
+        if run.design:
+            flock_session.session.add_text("design", run.design)
+        outcomes = run.rounds or ([run.outcome] if run.outcome else [])
+        for number, outcome in enumerate(outcomes, 1):
+            prefix = f"round {number}: " if len(outcomes) > 1 else ""
+            for report in outcome.reports:
+                flock_session.session.add_text(prefix + report.worker_id, report.describe())
+            for review in outcome.reviews:
+                flock_session.session.add_text(f"{prefix}review:{review.worker_id}", review.describe())
         flock_session.session.summary = run.report
         flock_session.save(password)
     except Exception:  # noqa: BLE001 - a lost record must not cost the round

@@ -361,6 +361,7 @@ def test_a_worker_that_could_not_start_is_tried_again(monkeypatch, tmp_path):
     class _Flaky:
         last_verification = None
         last_run_tool_calls: list = []
+        tools: dict = {}
 
         def run(self, *args, **kwargs):
             attempts.append(1)
@@ -390,6 +391,7 @@ def test_a_worker_that_already_changed_files_is_not_restarted(monkeypatch, tmp_p
     class _FailsLate:
         last_verification = None
         last_run_tool_calls = [{"name": "write_file", "ok": True}]
+        tools: dict = {}
 
         def run(self, *args, **kwargs):
             attempts.append(1)
@@ -414,6 +416,7 @@ def test_every_attempt_failing_reports_how_many_there_were(monkeypatch, tmp_path
     class _Dead:
         last_verification = None
         last_run_tool_calls: list = []
+        tools: dict = {}
 
         def run(self, *args, **kwargs):
             raise RuntimeError("timed out")
@@ -442,6 +445,7 @@ def test_a_force_stop_is_not_retried(monkeypatch, tmp_path):
     class _Cancelled:
         last_verification = None
         last_run_tool_calls: list = []
+        tools: dict = {}
 
         def run(self, *args, **kwargs):
             attempts.append(1)

@@ -173,25 +173,45 @@ starts generating. Two things keep that from costing you tickets:
 If your endpoint serves one request at a time, the real fix is on its side — `OLLAMA_NUM_PARALLEL` for
 Ollama. `/flock` offers to measure it before fanning out, and you can drop `concurrency` to 1.
 
-### Planning in steps
+### Staged planning, in rounds
 
-By default Brainy Birb plans in one prompt. With `"flock_planning": "staged"` it plans in three
-steps instead, each opening with the work itself so nothing depends on remembering it, and each
-carrying only its own instructions:
+By default Brainy Birb plans in one prompt. Set `"flock": {"planning": "staged"}` and it plans the
+way you would plan with a colleague: an overview first, then one focused stage per Worker Birb,
+then rounds until the work is done.
 
-1. **Divide.** Read the project and record the tickets with `add_worker` — before any file exists.
-   Declining to divide is still a correct answer.
-2. **The skeleton, one ticket at a time.** Typed stubs with semantic docstrings in that ticket's
-   files, and failing tests in its test files — then the ticket's real brief, written from that
-   skeleton. The first step also writes any finished shared files.
-3. **Seal**, after reading each brief against the skeleton. Sealing is refused until every ticket
-   has had its skeleton step — otherwise a model that finishes eagerly seals in step 1, and the
-   workers start from one-line briefs and no stubs.
+1. **The overview**, section by section: what is asked, the decisions, the architecture, the seams,
+   the tickets, the risks. Read-only: nothing is written yet. These are Brainy Birb's design
+   documents, and it carries them into every later stage.
+2. **The skeleton**: finished shared files, and typed stubs for every ticket. The charter's tickets
+   come straight from the overview's ticket list.
+3. **One fresh stage per ticket**, holding the design documents and that ticket only. It writes the
+   ticket's tests and its ticket plan: exact procedures, values and a worked example. The ticket
+   plan is the Worker Birb's whole brief.
+4. **Approve and run.** You approve the first charter. Workers run, then each reports whether its
+   tests pass, whether it kept the contract, and what is missing and why, including a test it
+   thinks contradicts the contract.
+5. **Evaluate.** CoBirb re-runs every check on the finished tree. Brainy Birb reads that, the review
+   and the reports, and plans only what is still open, then back to step 2 or 3.
 
-Asking for everything at once was more than a weaker planner could hold: in CoBirb's benchmark the
-weakest ended half its rounds without a charter, and staged planning gave it one every time. It
-also cost the strongest model a detail of the spec in every rep, which is why it isn't the default
-yet — try it if your planning model is small.
+It stops when every check passes, at `max_rounds` (5), or when a round ends with the same tickets
+failing the same way as the one before.
+
+Each stage is its own model call with a fresh context, and gets only the tools it needs. A write
+outside the stage's files is refused without asking, and CoBirb seals the charter itself: a step
+that must happen cannot be skipped by a model that finishes eagerly.
+
+**Autonomy.** `"flock": {"autonomy": "ask"}` (the default) puts Brainy Birb's design decisions to
+you after the overview, with its proposal for each; answer any of them, or none. It also asks you
+to approve every later round, showing only what that round adds. `"autonomy": "auto"` lets Brainy
+Birb decide, and approves later rounds without asking. **Auto only runs inside the shell sandbox**,
+and refuses to start without it. You approve the first charter either way.
+
+```json
+"flock": {"planning": "staged", "autonomy": "ask", "max_rounds": 5}
+```
+
+The design documents and every round's reports are kept in the flock's encrypted session, never in
+your repository.
 
 ### Planning runs until the plan is finished
 

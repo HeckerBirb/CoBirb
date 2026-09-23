@@ -90,6 +90,24 @@ class TuiAsker:
             return False
         return bool(answer)
 
+    def decide(self, decisions: str) -> "str | None":
+        """Put Brainy Birb's design decisions to the user, in *ask* mode.
+
+        The answer is free text naming the ones the user wants to settle; an
+        empty or cancelled prompt leaves every decision to Brainy Birb. Unlike
+        a charter approval, failing here is safe to resolve that way: a design
+        decision grants nothing.
+        """
+        try:
+            return self._app.call_from_thread(
+                self._app.prompt_text,
+                "Brainy Birb's design decisions",
+                f"{decisions}\n\nAnswer any of them by number — e.g. '2: use curses; 4: no colours' — "
+                "or leave this empty to let Brainy Birb decide them all.",
+            )
+        except Exception:  # noqa: BLE001 - nobody to ask means Brainy Birb decides
+            return None
+
     def show(self, text: str) -> None:
         """Progress, into the Flock tab and the transcript.
 

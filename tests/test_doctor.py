@@ -126,6 +126,25 @@ def test_both_spellings_of_max_num_ctx_pass(tmp_path):
         assert _check(report, "config references").status == doctor.OK
 
 
+@pytest.mark.parametrize("flock, named", [
+    ({"planning": "stagd"}, "stagd"),
+    ({"autonomy": "yolo"}, "yolo"),
+    ({"max_rounds": 0}, "max_rounds"),
+    ({"rounds": 3}, "rounds"),
+])
+def test_an_unreadable_flock_setting_is_a_warning(tmp_path, flock, named):
+    """The flock block falls back to its defaults in silence, so doctor says so."""
+    check = _check(_run(tmp_path, {"flock": flock}), "config references")
+
+    assert check.status == doctor.WARN and named in check.detail
+
+
+def test_a_readable_flock_block_passes(tmp_path):
+    report = _run(tmp_path, {"flock": {"planning": "staged", "autonomy": "auto", "max_rounds": 3}})
+
+    assert _check(report, "config references").status == doctor.OK
+
+
 def test_no_config_file_at_all_is_fine(tmp_path):
     """Defaults apply, and that is a legitimate way to run."""
     report = _run(tmp_path)
