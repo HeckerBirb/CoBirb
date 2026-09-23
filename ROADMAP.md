@@ -17,6 +17,18 @@ loopback — for people who run their models on a rented GPU or a machine elsewh
 traffic on a network, and that is a line to cross on purpose, if at all, rather than by accident.
 Today `base_url` is whatever the config says, and nothing is done to make a remote address safer.
 
+## A sandbox without bubblewrap (Landlock)
+
+A second sandbox backend built from what a modern Linux kernel already provides: Landlock to confine
+where a command may write, plus unprivileged user and network namespaces for the no-network rule —
+all through the standard library, with no binary to install. Machines without bubblewrap would then
+get contained commands too, instead of falling back to asking about every one.
+
+**Why it waits:** it is security code, and it has to be exactly right; bubblewrap already covers the
+machines that have it. Landlock also only grants access rather than denying it, so hiding credential
+directories while leaving the rest of the filesystem readable needs a careful design of its own —
+without that, this backend would contain writes and network but hide less than bubblewrap does.
+
 ## Editor integration over the Agent Client Protocol
 
 A `cobirb acp` mode speaking [ACP](https://zed.dev/acp) — JSON-RPC over stdio — so
