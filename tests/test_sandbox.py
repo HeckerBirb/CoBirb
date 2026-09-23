@@ -112,3 +112,26 @@ def test_cobirbs_own_home_is_hidden_wherever_it_is(tmp_path, monkeypatch):
     from cobirb import paths
 
     assert paths.cobirb_dir() in sandbox.from_config("auto", str(tmp_path)).hidden
+
+
+@needs_bwrap
+def test_the_projects_history_cannot_be_changed_from_inside(tmp_path):
+    import subprocess
+
+    project = tmp_path / "proj"
+    project.mkdir()
+    git = ["git", "-C", str(project), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    (project / "a.txt").write_text("1")
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "one"], check=True)
+    (project / "a.txt").write_text("2")
+    tool = _shell(project)
+
+    status = tool.execute({"command": "git status --porcelain"})
+    commit = tool.execute({"command": "git -c user.name=x -c user.email=x@x commit -qam two"})
+
+    assert status.content.startswith("exit=0") and "a.txt" in status.content
+    assert not commit.content.startswith("exit=0")
+    log = subprocess.run([*git, "log", "--oneline"], capture_output=True, text=True).stdout
+    assert len(log.strip().splitlines()) == 1

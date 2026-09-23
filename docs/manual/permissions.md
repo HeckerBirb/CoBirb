@@ -23,8 +23,9 @@ The prompt says what "Always" would actually grant before you press it.
 ## The shell sandbox
 
 With [bubblewrap](https://github.com/containers/bubblewrap) installed, every shell command runs
-contained: **no network**, the filesystem read-only except your project and a private `/tmp`, and
-credential directories (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`, `~/.docker`, `~/.cobirb` and
+contained: **no network**, the filesystem read-only except your project and a private `/tmp`, your
+project's `.git` read-only (so nothing commits or rewrites history without asking), and credential
+directories (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`, `~/.docker`, `~/.cobirb` and
 similar) hidden. `cobirb doctor` tells you whether it is active.
 
 ```json

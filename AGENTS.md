@@ -170,8 +170,10 @@ prompt → model call → tool calls (policy-gated) → results into history →
   exactly as safe as what contains it. Combined with the progress brakes (§4) it is the recommended
   way to run long work unattended.
 - **Shell commands run in a sandbox** (`cobirb/sandbox.py`, bubblewrap): the filesystem read-only
-  except the project and a private `/tmp`, no network namespace, own PID/IPC/UTS namespaces, and
-  credential paths hidden (`DEFAULT_HIDDEN`, resolved to real paths because on WSL `~/.aws` is a
+  except the project and a private `/tmp` — and **the project's own `.git` read-only too**, since
+  whole-tree undo restores working files but not commits or refs, so history is the one thing in the
+  project a contained command must not change unasked — no network namespace, own PID/IPC/UTS namespaces, and
+  credential paths hidden (`DEFAULT_HIDDEN` plus `paths.cobirb_dir()` wherever `COBIRB_HOME` puts it, resolved to real paths because on WSL `~/.aws` is a
   symlink into the Windows drive and bubblewrap resolves links inside the new root). Modes:
   `"auto"` (default since 0.36.0 — contained and not asked, via `Policy.sandbox_auto`, set by the
   wiring for the main agent only, so a Worker Birb's shell stays the charter's to grant; a

@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Your git history cannot be changed from inside the sandbox.** The project's `.git` is read-only
+  there, so a command that runs without asking can still `git status`, `diff` and `log`, but cannot
+  commit, reset or switch branches — `/undo` restores files, not history, so history is kept out of
+  reach. A command that needs to write it is sent unsandboxed, which always asks.
+- The sandbox hides CoBirb's own home wherever `COBIRB_HOME` puts it, not only at `~/.cobirb`.
+
 ## [0.40.0]
 
 - **A `delete_file` tool.** Removing a file used to need a shell command, and "…and delete the old

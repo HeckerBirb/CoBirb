@@ -9,6 +9,8 @@ the command could reach once it did — an approved ``npm test`` could read
 - there is **no network** — its own network namespace, with nothing in it;
 - its own **process and IPC namespaces**, so it cannot see or signal anything
   outside;
+- the project's own **``.git`` is read-only**, so history cannot be rewritten
+  unasked — undo covers working files, not commits;
 - **credential directories are hidden** (``~/.ssh``, ``~/.gnupg``, cloud CLI
   configs, CoBirb's own home), because a command that runs without asking must
   not be able to read a secret into the model's context either.
@@ -84,6 +86,14 @@ class Sandbox:
             "--tmpfs", "/tmp",
             "--bind", project, project,
         ]
+        # The project's repository is read-only inside: `git status`, `diff`
+        # and `log` work, but a commit, reset or branch change cannot happen
+        # without asking. Whole-tree undo restores working files, not history,
+        # so history is the one thing in the project a contained command must
+        # not be able to change unasked.
+        repository = os.path.join(project, ".git")
+        if os.path.lexists(repository):
+            args += ["--ro-bind", repository, repository]
         # By real path: a hidden entry is often a symlink (on WSL, ~/.aws points
         # into the Windows drive), and bubblewrap resolves it inside the new
         # root, where masking the link itself fails.
