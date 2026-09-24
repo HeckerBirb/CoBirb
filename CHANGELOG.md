@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.43.2]
 
 - **Staged planning is now the Flock's default.** On the golden benchmark task, a terminal game big
   enough to divide, it passed 91 of 95 hidden tests on both models tried, against 83–88 for the
