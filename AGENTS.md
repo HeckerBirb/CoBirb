@@ -338,8 +338,8 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
 - **All five tools are moves on one `CharterDesk`** (owner of the draft, the charter and every counter),
   registered and permitted together for the whole session by `install_charter_tool` — the planning
   rules stay in context, so a missing tool is an `Unknown tool` the model cannot argue past.
-- **The one-prompt planner** is the default (`flock.planning = "single"`) and everything in this list
-  up to *Staged planning* describes it.
+- **The one-prompt planner** (`flock.planning = "single"`) is what everything in this list up to
+  *Staged planning* describes. Staged planning is the default (`run.DEFAULT_PLANNING`).
 - **A driven loop with a completion predicate** (`run._plan`, `MAX_PLAN_STEPS = 5`): after each pass, no
   sealed charter → `brainy.next_move_prompt` asks for exactly the missing move. Exits: a charter; no
   tool called and nothing built (a legitimate "do not divide"); `tool.exhausted`, the turn budget, or
@@ -366,8 +366,10 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
 - The Flock tab shows Brainy Birb's tool calls while it plans (`FlockPane.planning_note`, last
   `PLANNING_TAIL` lines); streamed tokens deliberately do not feed it.
 
-**Staged planning, in rounds** (`flock/stages.py`, `run._drive_staged`; `"flock": {"planning":
-"staged"}`). The design is the *Flock Flight Plan*; its rules, as built:
+**Staged planning, in rounds** (`flock/stages.py`, `run._drive_staged`; the default). Measured on the
+golden task it beat the one-prompt planner and a single agent on both models tried (91/95 each); on
+the small flock tasks a single agent beat every flock, which the manual says. The design is the
+*Flock Flight Plan*; its rules, as built:
 - **Stages, each a fresh `Orchestrator`** built on the main one's model, policy, grants, front-end and
   checkpoints, with only that stage's tools and a `_GatedHooks` gate that refuses a write outside the
   stage's files through `before_tool` — **before** the policy, so it is refused without asking. The

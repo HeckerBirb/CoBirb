@@ -6,6 +6,14 @@ and its §17 decisions record for the ones that were designed and then deliberat
 
 ## [Unreleased]
 
+- **Staged planning is now the Flock's default.** On the golden benchmark task, a terminal game big
+  enough to divide, it passed 91 of 95 hidden tests on both models tried, against 83–88 for the
+  one-prompt planner and 75–83 for a single agent. `"flock": {"planning": "single"}` restores the
+  one-prompt planner. For small jobs a single agent did better than any flock, and the manual now
+  says so.
+- **Golden benchmark results** for both models are in `bench/results/golden*`, and the golden spec
+  now states that `game.snake` and `game.food` can be assigned, which its tests relied on.
+
 - **Staged planning: fixes from the first overnight measurement.** A file listed by two tickets is
   explained in the overview's own terms (most often a ticket listing another ticket's tests as its
   own), and the ticket list gets three attempts instead of two. An evaluation that can't be read no

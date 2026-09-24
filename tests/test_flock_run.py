@@ -33,6 +33,13 @@ def _no_preflight(monkeypatch):
     monkeypatch.setattr("cobirb.flock.run.missing_models", lambda *a, **k: "")
 
 
+@pytest.fixture(autouse=True)
+def _one_prompt_planner(monkeypatch):
+    """Everything in this file is about the one-prompt planner; staged
+    planning is the default and has its own tests (test_flock_stages.py)."""
+    monkeypatch.setattr("cobirb.flock.run.DEFAULT_PLANNING", "single")
+
+
 def _charter_toml(tmp_path, workers=2):
     entries = "\n".join(
         textwrap.dedent(f"""

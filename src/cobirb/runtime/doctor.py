@@ -210,7 +210,8 @@ def _check_referenced_things(report: Report, raw: dict[str, Any]) -> None:
     # (see flock.run.FlockSettings), so a misspelt value is otherwise silent.
     flock = raw.get("flock")
     if isinstance(flock, dict):
-        allowed = {"planning": ("single", "staged"), "autonomy": ("ask", "auto")}
+        # The first of each is the default, which the warning names.
+        allowed = {"planning": ("staged", "single"), "autonomy": ("ask", "auto")}
         for key, values in allowed.items():
             if key in flock and flock[key] not in values:
                 problems.append(

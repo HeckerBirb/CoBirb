@@ -264,6 +264,12 @@ def _without_project_verification(orchestrator: Orchestrator):
 
 PLANNING_SINGLE = "single"
 PLANNING_STAGED = "staged"
+# Staged by default. On the golden task — work big enough to divide — it came
+# first on both models measured (91/95 each, against 88 and 83 for the
+# one-prompt planner and 83 and 75 for a single agent). On small tasks the
+# one-prompt planner does better, and a single agent better still, which is
+# why the docs say to use a single agent for small jobs rather than a flock.
+DEFAULT_PLANNING = PLANNING_STAGED
 
 
 @dataclass
@@ -275,7 +281,7 @@ class FlockSettings:
     becomes the default cap.
     """
 
-    planning: str = PLANNING_SINGLE
+    planning: str = DEFAULT_PLANNING
     autonomy: str = AUTONOMY_ASK
     max_rounds: int = DEFAULT_MAX_ROUNDS
 
@@ -284,14 +290,14 @@ class FlockSettings:
         block = config.get("flock") or {}
         if not isinstance(block, dict):
             block = {}
-        planning = block.get("planning", PLANNING_SINGLE)
+        planning = block.get("planning", DEFAULT_PLANNING)
         autonomy = block.get("autonomy", AUTONOMY_ASK)
         try:
             rounds = int(block.get("max_rounds", DEFAULT_MAX_ROUNDS))
         except (TypeError, ValueError):
             rounds = DEFAULT_MAX_ROUNDS
         return cls(
-            planning=planning if planning in (PLANNING_SINGLE, PLANNING_STAGED) else PLANNING_SINGLE,
+            planning=planning if planning in (PLANNING_SINGLE, PLANNING_STAGED) else DEFAULT_PLANNING,
             autonomy=autonomy if autonomy in (AUTONOMY_ASK, AUTONOMY_AUTO) else AUTONOMY_ASK,
             max_rounds=rounds if rounds >= 1 else DEFAULT_MAX_ROUNDS,
         )

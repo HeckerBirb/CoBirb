@@ -175,9 +175,14 @@ Ollama. `/flock` offers to measure it before fanning out, and you can drop `conc
 
 ### Staged planning, in rounds
 
-By default Brainy Birb plans in one prompt. Set `"flock": {"planning": "staged"}` and it plans the
-way you would plan with a colleague: an overview first, then one focused stage per Worker Birb,
-then rounds until the work is done.
+Brainy Birb plans the way you would plan with a colleague: an overview first, then one focused
+stage per Worker Birb, then rounds until the work is done. `"flock": {"planning": "single"}` puts
+the older one-prompt planner back.
+
+**Use the Flock for work big enough to divide.** On CoBirb's own benchmark, a terminal game split
+into four parts came out best with staged planning (95 hidden tests: 91 passed on both models
+tried, against 83–88 for one-prompt planning and 75–83 for a single agent). On small jobs a single
+agent did better than any flock, so for those, just ask CoBirb directly.
 
 1. **The overview**, section by section: what is asked, the decisions, the architecture, the seams,
    the tickets, the risks. Read-only: nothing is written yet. These are Brainy Birb's design

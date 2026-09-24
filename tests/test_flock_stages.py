@@ -188,10 +188,11 @@ def test_the_gate_leaves_reads_alone(tmp_path):
 # Settings
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("block, expected", [
-    ({}, ("single", "ask", 5)),
+    ({}, ("staged", "ask", 5)),
     ({"planning": "staged", "autonomy": "auto", "max_rounds": 3}, ("staged", "auto", 3)),
-    ({"planning": "stagd", "autonomy": "yolo", "max_rounds": "lots"}, ("single", "ask", 5)),
-    ({"max_rounds": 0}, ("single", "ask", 5)),
+    ({"planning": "stagd", "autonomy": "yolo", "max_rounds": "lots"}, ("staged", "ask", 5)),
+    ({"max_rounds": 0}, ("staged", "ask", 5)),
+    ({"planning": "single"}, ("single", "ask", 5)),
 ])
 def test_flock_settings_fall_back_on_anything_unreadable(tmp_path, block, expected):
     from cobirb.config import Config
@@ -245,7 +246,17 @@ def test_declining_to_divide_ends_planning(monkeypatch, tmp_path):
     assert "one function" in run.report
 
 
-def test_the_one_prompt_planner_is_the_default(monkeypatch, tmp_path):
+def test_staged_planning_is_the_default(monkeypatch, tmp_path):
+    brainy = _StagedBrainy()
+
+    _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path,
+         ask=Asker(confirm=lambda q, detail="": False))
+
+    assert any("Write the next section:" in p for p in brainy.prompts)
+
+
+def test_the_one_prompt_planner_is_one_setting_away(monkeypatch, tmp_path):
+    write_config(tmp_path, {"flock": {"planning": "single"}})
     brainy = _StagedBrainy()
 
     _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path,
