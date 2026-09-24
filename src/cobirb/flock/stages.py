@@ -87,7 +87,10 @@ constants), or `(stub)` if a ticket implements it."""),
   - builds: <what it builds, one sentence>
   - done when: <one sentence>
 
-- No file may appear in two tickets' `writes`. A `(finished)` seam file is in no ticket.
+- Every ticket is implementation work that one Worker Birb does. Do NOT make a ticket for tests, \
+for the skeleton or for setup: you write the skeleton and every ticket's tests yourself, in the \
+next stages. A ticket's `tests` are the test files for its own code, and it `writes` them too.
+- No file may appear in two tickets. A `(finished)` seam file is in no ticket.
 - A ticket's tests must pass with its own code and the skeleton alone.
 - If this work should not be divided at all, write exactly `NO TICKETS` and one \
 sentence saying why."""),
