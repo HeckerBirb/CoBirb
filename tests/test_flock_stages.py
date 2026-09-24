@@ -482,3 +482,60 @@ def test_a_reported_contradiction_always_gets_its_test_rewritten(monkeypatch, tm
     assert len(run_.rounds) == 2
     second = [p for p in brainy.prompts if "Stage: the plan for ticket 'b'" in p][-1]
     assert "REWRITE these tests" in second and "expects 5 for 2" in second
+
+
+# --------------------------------------------------------------------------- #
+# /autopilot: nothing asks, except the first charter approval
+# --------------------------------------------------------------------------- #
+def _autopilot(orchestrator, monkeypatch):
+    """Auto-pilot's state without its preconditions: a sandbox that reports
+    itself active, and the main agent's flag."""
+    monkeypatch.setattr(type(orchestrator.tools["shell"].sandbox), "active", property(lambda self: True))
+    orchestrator.autopilot = True
+
+
+def test_under_autopilot_a_planning_stage_refuses_instead_of_asking(monkeypatch, tmp_path):
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _StagedBrainy())
+    orchestrator.autopilot = True
+    stager = stages.Stager(orchestrator, str(tmp_path), "x", turns=3, trace=[])
+
+    assert stager._stage(set(), None, "").autopilot is True
+
+
+def test_under_autopilot_the_flock_runs_in_auto_autonomy(monkeypatch, tmp_path):
+    """Decisions are not put to the user and later rounds are not asked about;
+    the first charter still is."""
+    _staged(tmp_path, autonomy="ask")
+    _project(tmp_path)
+    _workers(monkeypatch, tmp_path, fail_first={"b"})
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _StagedBrainy(evaluations=[_REDO_B]))
+    _autopilot(orchestrator, monkeypatch)
+    questions, decided = [], []
+    ask = Asker(confirm=lambda q, detail="": questions.append(q) or True,
+                decide=lambda text: decided.append(text) or "")
+
+    run = _run(orchestrator, tmp_path, ask=ask)
+
+    assert len(run.rounds) == 2 and decided == []
+    assert [q for q in questions if q.startswith("Approve")] == [questions[0]]
+
+
+def test_under_autopilot_workers_refuse_instead_of_asking(monkeypatch, tmp_path):
+    _staged(tmp_path)
+    _project(tmp_path)
+    from cobirb.flock import supervisor
+
+    seen = []
+
+    def run(worker, cwd, **kwargs):
+        seen.append(kwargs.get("refuse"))
+        (tmp_path / f"{worker.id}.py").write_text(f"def {worker.id}(n):\n    return n * 2\n")
+        return WorkerReport(worker_id=worker.id, ok=True, accepted=True)
+
+    monkeypatch.setattr(supervisor, "run_worker", run)
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _StagedBrainy())
+    _autopilot(orchestrator, monkeypatch)
+
+    _run(orchestrator, tmp_path)
+
+    assert seen and all(seen)

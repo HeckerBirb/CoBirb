@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **`/autopilot` now reaches the whole flock.** Planning stages and Worker Birbs refuse what they
+  aren't allowed instead of asking you, and the flock runs in `auto` autonomy — no design decisions
+  or later-round approvals put to you. The first charter approval remains, since that is where the
+  workers' scopes are granted. Before, `/autopilot` stopped the main agent asking, but workers still
+  asked in their panes.
+
 ## [0.43.3]
 
 - **A test a Worker Birb reports as contradicting the contract is always rewritten.** Its ticket goes

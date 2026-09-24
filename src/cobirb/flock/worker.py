@@ -23,6 +23,7 @@ from typing import Any
 
 from ..config import Config
 from ..typing.spi import Tool, ToolResult
+from ..runtime.headless import HeadlessIO
 from ..runtime.wiring import build_subagent
 from .charter import WorkerBrief, policy_for
 
@@ -250,6 +251,38 @@ class ReportTool(Tool):
         return ToolResult(ok=True, content="Recorded. Finish with your short account.")
 
 
+class RefusingIO:
+    """A worker's front-end, with every approval answered "no" without asking.
+
+    What ``/autopilot`` means for a Worker Birb: nothing asks the user. The
+    worker's pane still shows its work — every rendering call goes through —
+    but a request for something outside its charter is refused on the spot,
+    the way ``HeadlessIO`` refuses. Only ``confirm`` is offered: the richer
+    ``confirm_scoped`` and ``confirm_request`` are hidden, so the orchestrator
+    falls back to the one answer this gives.
+    """
+
+    _HIDDEN = frozenset({"confirm_scoped", "confirm_request"})
+
+    def __init__(self, base: Any) -> None:
+        self._base = base
+
+    def confirm(self, *args: Any, **kwargs: Any) -> bool:
+        return False
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self._HIDDEN:
+            raise AttributeError(name)
+        return getattr(self._base, name)
+
+
+AUTOPILOT_NOTE = (
+    "Auto-pilot is on: nothing outside your files and your check can be granted, and a request "
+    "for anything else is refused without asking anyone. Work within them, and report anything "
+    "you could not do as missing."
+)
+
+
 def compose_brief(worker: WorkerBrief, cwd: str = "") -> str:
     """The whole prompt a Worker Birb is given: the rules, then its ticket.
 
@@ -298,6 +331,7 @@ def run_worker(
     io=None,
     canceller=None,
     grants=None,
+    refuse: bool = False,
 ) -> WorkerReport:
     """Run one brief to completion and report on it.
 
@@ -314,6 +348,9 @@ def run_worker(
     of the codebase uses, applied one level up.
     """
     config = config or Config()
+    if refuse:
+        # Under /autopilot: nothing asks the user (see RefusingIO).
+        io = RefusingIO(io if io is not None else HeadlessIO())
     policy = policy_for(worker, cwd, audit_log_enabled=bool(config.get("audit_log")))
     orchestrator = build_subagent(
         cwd, policy, accept=worker.accept, config=config, io=io,
@@ -337,6 +374,8 @@ def run_worker(
 
     logger.info("worker %s starting; writes=%s", worker.id, ", ".join(worker.writes))
     brief = compose_brief(worker, cwd)
+    if refuse:
+        brief += "\n" + AUTOPILOT_NOTE
     try:
         session = None
         for attempt in range(1, START_ATTEMPTS + 1):

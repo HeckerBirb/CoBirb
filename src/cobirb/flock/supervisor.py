@@ -255,6 +255,7 @@ def run_flock(
     io_for=None,
     canceller: "Canceller | None" = None,
     grants=None,
+    refuse: bool = False,
 ) -> FlockOutcome:
     """Run one round of a charter and report on it.
 
@@ -352,7 +353,7 @@ def run_flock(
             report = run_worker(
                 worker, cwd, config=config,
                 io=io_for(worker, slots) if io_for else None,
-                canceller=canceller, grants=grants,
+                canceller=canceller, grants=grants, refuse=refuse,
             )
         announce("finished", report)
         return report

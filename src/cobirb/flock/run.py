@@ -487,6 +487,15 @@ def _drive(
         return run
 
     settings = FlockSettings.from_config(config)
+    # **/autopilot means nothing asks.** The flock runs in auto autonomy (its
+    # design decisions and later rounds are not put to the user) and every
+    # Worker Birb refuses what its charter does not cover instead of asking.
+    # The first charter approval stays: it is the one question that grants
+    # capability. Auto autonomy's own requirement, the sandbox, is one
+    # /autopilot already has.
+    autopilot = bool(getattr(orchestrator, "autopilot", False))
+    if autopilot:
+        settings.autonomy = AUTONOMY_AUTO
     if charter is None and settings.planning == PLANNING_STAGED:
         return _drive_staged(run, orchestrator, objective, cwd, ask, config, stop, on_event,
                              plan_turns, probe, io_for, on_charter, canceller, settings)
@@ -666,6 +675,7 @@ def _drive(
         # copy through every caller would be the same object in two places,
         # free to be the wrong one.
         grants=getattr(orchestrator, "grants", None),
+        refuse=bool(getattr(orchestrator, "autopilot", False)),
     )
     run.outcome = outcome
     ask.show(outcome.describe())
@@ -860,6 +870,7 @@ def _drive_staged(
             charter, cwd, config=config, concurrency=concurrency, stop=stop,
             on_event=on_event, io_for=io_for, canceller=canceller,
             grants=getattr(orchestrator, "grants", None),
+            refuse=bool(getattr(orchestrator, "autopilot", False)),
         )
         run.outcome = outcome
         run.rounds.append(outcome)

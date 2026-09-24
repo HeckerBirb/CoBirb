@@ -214,6 +214,10 @@ to approve every later round, showing only what that round adds. `"autonomy": "a
 Birb decide, and approves later rounds without asking. **Auto only runs inside the shell sandbox**,
 and refuses to start without it. You approve the first charter either way.
 
+**Under `/autopilot`** the flock runs in auto autonomy whatever the setting says, and nothing else
+asks you either: planning stages and Worker Birbs refuse what they aren't allowed instead of asking.
+Only the first charter approval remains.
+
 ```json
 "flock": {"planning": "staged", "autonomy": "ask", "max_rounds": 5}
 ```

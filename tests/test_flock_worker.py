@@ -483,3 +483,24 @@ def test_the_brief_points_at_the_file_tools_rather_than_the_shell():
 
     assert "glob" in text and "grep" in text
     assert "find" in text  # named as something it does not have
+
+
+def test_a_refusing_front_end_says_no_and_still_shows_the_work():
+    """Under /autopilot a worker's pane still renders, and nothing is asked."""
+    from cobirb.flock.worker import RefusingIO
+
+    shown = []
+
+    class _Pane:
+        def render(self, text):
+            shown.append(text)
+
+        def confirm_request(self, request):  # would ask the user
+            raise AssertionError("asked")
+
+    io = RefusingIO(_Pane())
+
+    assert io.confirm("run ls?") is False
+    assert getattr(io, "confirm_request", None) is None
+    io.render("working")
+    assert shown == ["working"]

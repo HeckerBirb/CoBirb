@@ -51,6 +51,12 @@ outside the project, a command outside the sandbox, an MCP or plugin tool — is
 asked about**, so a long job never stalls on a dialog nobody is watching. It will not start unless
 the sandbox and git-backed undo are both active. Review with `/diff`, take a turn back with `/undo`.
 
+**In a flock, auto-pilot reaches every agent.** Brainy Birb's planning stages refuse instead of
+asking. Each Worker Birb refuses anything its charter doesn't cover, rather than asking in its pane,
+and is told so in its brief. The flock runs in `auto` autonomy: no design decisions put to you, and
+no approval of later rounds. **The one question that remains is the first charter approval**,
+because that is where the workers' scopes are granted.
+
 ## Reading and writing are separate
 
 | Set | Tools |

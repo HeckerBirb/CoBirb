@@ -398,7 +398,10 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
   puts the Decisions section to the user (`Asker.decide`; empty leaves them to Brainy Birb, safe because a
   design decision grants nothing) and asks before every later round, showing only what it adds
   (`approval_changes`). `auto` decides itself and approves later rounds without asking, so **it refuses to
-  start unless the shell sandbox is active**. The benchmark's driver answers approvals itself; that is
+  start unless the shell sandbox is active**. **`/autopilot` reaches the whole flock**: it forces `auto`
+  autonomy, stages copy the main agent's `autopilot` flag (refuse, don't ask), and workers run with
+  `refuse=True` (`worker.RefusingIO` over their pane, plus `AUTOPILOT_NOTE` in the brief). Only the first
+  charter approval remains — the one question that grants capability. The benchmark's driver answers approvals itself; that is
   its controlled exception.
 - The design and every round's reports go to the flock's encrypted session (`_close_branch`), never the
   repo; `FlockRun.trace` records each planning step's tool calls, for either planner.
@@ -420,6 +423,8 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
 - A worker ends by calling `report` (`worker.ReportTool`, permitted outright: it reaches nothing):
   tests pass, contract kept, what is missing and why, any test that contradicts the contract. Kept as
   `WorkerReport.structured`; `report_text()` marks a worker that never called it "unstructured".
+- Under `/autopilot` a worker never asks: `run_worker(refuse=True)` answers every approval "no" (see
+  *Staged planning*, autonomy). Otherwise:
 - A worker may ask for what its scope lacks (`WorkerPaneIO.confirm_request`) — **in its own pane, never
   a modal** (distinct positions, nothing focused by default, fail closed with no pane) — and releases its
   concurrency slot while it waits. Answers: once / session / deny-with-instruction.

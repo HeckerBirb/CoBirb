@@ -414,7 +414,7 @@ class Stager:
         hooks = main.hooks
         if allowed is not None:
             hooks = _GatedHooks(main.hooks, self.cwd, allowed, why)
-        return Orchestrator(
+        stage = Orchestrator(
             model=main.model,
             tools={name: tool for name, tool in main.tools.items() if name in tools},
             policy=main.policy,
@@ -428,6 +428,11 @@ class Stager:
             grants=main.grants,
             max_turns=self.turns,
         )
+        # Under /autopilot a stage refuses rather than asks, like the main
+        # agent. The permissions themselves (the project, the sandbox) are
+        # already on the shared policy; this is the "nobody asks" half.
+        stage.autopilot = bool(getattr(main, "autopilot", False))
+        return stage
 
     def _run(self, orchestrator: Orchestrator, step: str, prompt: str) -> str:
         try:
