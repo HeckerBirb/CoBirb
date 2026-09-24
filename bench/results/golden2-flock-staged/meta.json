@@ -1,0 +1,16 @@
+{
+  "label": "golden2-flock-staged",
+  "sha": "5906e6c4484862ab803a40c3414df245c6b8ef11",
+  "tasks": 1,
+  "reps": 1,
+  "flock": true,
+  "models": [
+    "qwen3.5:35b-a3b"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {
+    "flock": {
+      "planning": "staged"
+    }
+  }
+}
