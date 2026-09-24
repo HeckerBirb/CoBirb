@@ -200,7 +200,9 @@ agent did better than any flock, so for those, just ask CoBirb directly.
 
 It stops when every check passes, at `max_rounds` (5), when a round ends with the same tickets
 failing the same way as the one before, or when Brainy Birb says another round would not change
-anything. If its evaluation can't be read, the tickets still failing are simply tried again.
+anything. If its evaluation can't be read, the tickets still failing are simply tried again. And
+when a worker reports that one of its tests contradicts the contract, that ticket always gets
+another round, in which its tests are rewritten.
 
 Each stage is its own model call with a fresh context, and gets only the tools it needs. A write
 outside the stage's files is refused without asking, and CoBirb seals the charter itself: a step

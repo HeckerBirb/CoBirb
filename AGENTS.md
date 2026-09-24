@@ -390,7 +390,9 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
   skeleton for new files and a stage per ticket, carrying the last plan, the `why` and the report. Stops
   on all green, `flock.max_rounds` (default 5), a round whose failing set equals the last one's
   (`stopped_at="no_progress"`), or an explicit `NO TICKETS` — an evaluation that cannot be read retries
-  the tickets still failing rather than ending the flock. A stage whose model call fails is sent once
+  the tickets still failing rather than ending the flock. **A reported test contradiction always sends
+  its ticket back** (`run._with_contradicted_tests`), even past `NO TICKETS`, with the tests named so
+  the ticket's stage rewrites them; the cap and the no-progress stop still bound it. A stage whose model call fails is sent once
   more before the failure stands.
 - **Autonomy** (`flock.autonomy`): the first charter is approved by the user in both modes. `ask` (default)
   puts the Decisions section to the user (`Asker.decide`; empty leaves them to Brainy Birb, safe because a

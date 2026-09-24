@@ -453,3 +453,32 @@ def test_a_rejected_ticket_list_is_kept_in_the_trace(monkeypatch, tmp_path):
     failed = [t for t in run.trace if t.get("problem")]
     assert run.stopped_at == "charter" and len(failed) == stages.SECTION_ATTEMPTS
     assert failed[0]["text"] == bad
+
+
+def test_a_reported_contradiction_always_gets_its_test_rewritten(monkeypatch, tmp_path):
+    """Even when the evaluation says there is nothing left: a worker that names
+    a test contradicting the contract sends that ticket back, with the test
+    named, so its stage rewrites it."""
+    _staged(tmp_path)
+    _project(tmp_path)
+    from cobirb.flock import supervisor
+
+    seen = set()
+
+    def run(worker, cwd, **kwargs):
+        if worker.id == "b" and "b" not in seen:
+            seen.add("b")
+            return WorkerReport(worker_id="b", ok=True, accepted=False, structured={
+                "tests_pass": False, "contract_kept": True, "missing": [],
+                "test_contradicts": ["test_it — expects 5 for 2, the contract says 4"]})
+        (tmp_path / f"{worker.id}.py").write_text(f"def {worker.id}(n):\n    return n * 2\n")
+        return WorkerReport(worker_id=worker.id, ok=True, accepted=True)
+
+    monkeypatch.setattr(supervisor, "run_worker", run)
+    brainy = _StagedBrainy(evaluations=["NO TICKETS — looks finished to me."])
+
+    run_ = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
+
+    assert len(run_.rounds) == 2
+    second = [p for p in brainy.prompts if "Stage: the plan for ticket 'b'" in p][-1]
+    assert "REWRITE these tests" in second and "expects 5 for 2" in second

@@ -4,6 +4,13 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **A test a Worker Birb reports as contradicting the contract is always rewritten.** Its ticket goes
+  back into the next round with those tests named, even when Brainy Birb's evaluation would have
+  stopped. On the golden task, a worker had named five wrong tests correctly and the round ended
+  anyway.
+
 ## [0.43.2]
 
 - **Staged planning is now the Flock's default.** On the golden benchmark task, a terminal game big

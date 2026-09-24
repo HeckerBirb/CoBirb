@@ -696,6 +696,38 @@ def _round_verdict(outcome: FlockOutcome) -> str:
     return "\n".join(lines)
 
 
+def _with_contradicted_tests(outcome: FlockOutcome, known: list, tickets: list,
+                             whys: dict[str, str]) -> "tuple[list, dict[str, str]]":
+    """Add every ticket whose worker reported a test contradicting the contract.
+
+    **A reported contradiction always leads to that test being rewritten.**
+    On the golden task a worker named five of the planner's tests with a
+    precise, correct reason each ("expects 0 ticks when elapsed = 0.14 ≥
+    tick_seconds = 0.1"), and the evaluation stopped the flock instead of
+    planning a round to fix them. The ticket's own stage rewrites its tests
+    in the next round, so the ticket goes back in — even past an evaluation
+    that said there was nothing left — with the tests named in its reason.
+    The round cap and the no-progress stop still bound it.
+    """
+    tickets, whys = list(tickets), dict(whys)
+    present = {t.id for t in tickets}
+    by_id = {t.id: t for t in known}
+    for report in outcome.reports:
+        contradicted = (report.structured or {}).get("test_contradicts") or []
+        if not contradicted or report.worker_id not in by_id:
+            continue
+        if report.worker_id not in present:
+            tickets.append(by_id[report.worker_id])
+            present.add(report.worker_id)
+        whys[report.worker_id] = " ".join(filter(None, [
+            whys.get(report.worker_id, ""),
+            "REWRITE these tests, which the worker reported as contradicting the contract "
+            "(check each against the contract; if the worker is right, fix the test): "
+            + "; ".join(contradicted),
+        ]))
+    return tickets, whys
+
+
 def _failing(outcome: FlockOutcome) -> tuple:
     """What was still wrong after a round, for noticing a round that changed nothing."""
     return tuple(sorted((r.worker_id, bool(r.ok), r.accepted) for r in outcome.outstanding))
@@ -852,6 +884,7 @@ def _drive_staged(
         except RuntimeError as exc:
             ask.show(f"Stopping: the evaluation failed because the model server failed ({exc}).")
             break
+        next_tickets, whys = _with_contradicted_tests(outcome, stager.design.tickets, next_tickets, whys)
         if not next_tickets:
             break
         problem = check_tickets(next_tickets)
