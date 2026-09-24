@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.43.5]
 
 - **The app stays responsive during a flock.** Streamed replies used to reach the screen one token at
   a time, each redrawing the whole reply so far while the model's thread waited, so a long planning
