@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.43.1]
 
 - **Benchmark results for 0.43**, in `bench/results/v043-*`: on the two flock tasks, a single agent
   passed 24/24, the flock with the one-prompt planner 25/30 (83%), and the flock with staged planning
