@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.43.3]
 
 - **A test a Worker Birb reports as contradicting the contract is always rewritten.** Its ticket goes
   back into the next round with those tests named, even when Brainy Birb's evaluation would have
