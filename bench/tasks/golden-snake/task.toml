@@ -21,6 +21,7 @@ snake/engine.py
   cell chosen with `random.Random(seed)`.
 - `game.width`, `game.height`; `game.snake`: a list of (x, y) tuples, head first; `game.food`: (x, y),
   or None when the board is full; `game.score`: an int starting at 0; `game.over`: a bool.
+  `game.snake` and `game.food` can also be assigned, to set up a position.
 - `game.turn(direction)`: "up", "down", "left" or "right". Turns are queued, at most two. A turn equal
   to, or opposite to, the last queued direction (or the current one if none is queued) is ignored.
 - `game.tick()`: moves the snake one cell, applying the oldest queued turn first. Moving onto the food
