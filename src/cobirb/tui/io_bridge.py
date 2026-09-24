@@ -50,7 +50,10 @@ class TuiIO(I_OAdapter):
         self._app = app
         self._pending: list[str] = []
         self._pending_lock = threading.Lock()
-        self._last_push = 0.0
+        # Never pushed, so the first token goes straight out. Not 0.0:
+        # `time.monotonic()` counts from boot on Linux, so on a freshly booted
+        # machine "0.0" could be less than an interval ago.
+        self._last_push = float("-inf")
 
     def name(self) -> str:
         return "tui"

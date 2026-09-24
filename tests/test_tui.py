@@ -3669,18 +3669,26 @@ async def test_a_request_with_no_pane_to_ask_in_is_denied():
         assert instruction == ""
 
 
-async def test_a_write_into_another_workers_files_is_refused_without_asking():
+def test_a_write_into_another_workers_files_is_refused_without_asking():
     """The one thing that is never a question. Exclusive file ownership is
     what makes concurrent workers safe, so it cannot be granted away at a
-    dialog — and CoBirb has the charter to check it against."""
+    dialog — and CoBirb has the charter to check it against.
+
+    Against a stand-in app rather than a running one: the pane's queue is
+    drained by the real app's timer, which made this test flaky, and what it
+    is about — refused, the owner named, nobody asked — needs no screen.
+    """
+    import collections
+
     from cobirb.flock.charter import parse_charter
     from cobirb.tui.flock_bridge import WorkerPaneIO
     from cobirb.typing.spi import ApprovalRequest
 
-    app = _make_app()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        app.flock_charter = parse_charter(textwrap.dedent("""
+    def ask(*args):
+        raise AssertionError("nobody may be asked about another worker's files")
+
+    app = SimpleNamespace(
+        flock_charter=parse_charter(textwrap.dedent("""
             objective = "two tickets"
 
             [[workers]]
@@ -3692,16 +3700,17 @@ async def test_a_write_into_another_workers_files_is_refused_without_asking():
             id     = "b"
             writes = ["b.py"]
             brief  = "Do b."
-        """))
+        """)),
+        flock_write_queue=collections.deque(),
+        call_from_thread=ask,
+    )
 
-        outcome = WorkerPaneIO(app, "a").confirm_request(
-            ApprovalRequest(tool_name="write_file", arguments={"path": "b.py"})
-        )
+    outcome = WorkerPaneIO(app, "a").confirm_request(
+        ApprovalRequest(tool_name="write_file", arguments={"path": "b.py"})
+    )
 
-        assert outcome.decision == "deny"
-        assert "'b'" in outcome.instruction
-        # No request was raised anywhere: nobody was asked anything.
-        assert not app.query(".worker-request")
+    assert outcome.decision == "deny"
+    assert "'b'" in outcome.instruction
 
 
 async def test_a_worker_may_still_ask_for_a_file_nobody_owns():

@@ -4,6 +4,13 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Two flaky tests are fixed.** The first streamed token now always reaches the screen at once;
+  before, a machine booted less than a streaming interval ago held it back, which failed the
+  streaming test on a fresh CI runner. The test that a worker's pane refuses a write into another
+  worker's files without asking now runs without a live app, whose drain timer made it flaky.
+
 ## [0.44.0]
 
 - **Worker Birbs get their brief in precise, literal language.** After Brainy Birb writes a ticket
