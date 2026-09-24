@@ -1,0 +1,13 @@
+{
+  "label": "golden-flock-single",
+  "sha": "e1127a89ba89084398426dc76d89e0feffc4bccf",
+  "tasks": 1,
+  "reps": 1,
+  "flock": true,
+  "models": [
+    "qwen3.5:35b-a3b",
+    "qwen3-coder:30b"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {}
+}
