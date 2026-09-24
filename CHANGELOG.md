@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.44.0]
 
 - **Worker Birbs get their brief in precise, literal language.** After Brainy Birb writes a ticket
   plan, it restates it for the worker: ambiguous words become the technical terms they stand for,
