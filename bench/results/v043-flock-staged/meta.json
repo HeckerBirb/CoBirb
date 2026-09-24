@@ -1,0 +1,20 @@
+{
+  "label": "v043-flock-staged",
+  "sha": "47918a2d1c8e83746accc8093bb84595c3b03330",
+  "tasks": 2,
+  "reps": 3,
+  "flock": true,
+  "models": [
+    "qwen3.5:35b-a3b",
+    "qwen3-coder:30b",
+    "gpt-oss:20b",
+    "devstral-small-2:latest",
+    "ornith-1.5:35b"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {
+    "flock": {
+      "planning": "staged"
+    }
+  }
+}
