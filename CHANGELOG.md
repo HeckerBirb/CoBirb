@@ -4,6 +4,11 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **A flaky test from 0.43.5 is fixed.** The worker-pane queue test read a pane's lines before the
+  pane had been laid out, so it failed intermittently under the parallel run. The app was unaffected.
+
 ## [0.43.5]
 
 - **The app stays responsive during a flock.** Streamed replies used to reach the screen one token at

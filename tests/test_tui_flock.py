@@ -598,5 +598,12 @@ async def test_worker_output_is_queued_and_lands_before_a_state_change():
         app.flock_worker_state("a", "done")
 
         assert not app.flock_write_queue
-        log = "\n".join(str(line.text) for line in app.query_one("#worker-a").query_one("RichLog").lines)
+        # A RichLog holds writes back until it has been laid out, which under a
+        # loaded parallel run can be after this point — so wait for the lines.
+        rich_log = app.query_one("#worker-a").query_one("RichLog")
+        for _ in range(60):
+            log = "\n".join(str(line.text) for line in rich_log.lines)
+            if "second" in log:
+                break
+            await pilot.pause()
         assert log.index("first") < log.index("second")
