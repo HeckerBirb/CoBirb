@@ -100,6 +100,26 @@ def _isolated_cobirb_home(tmp_path, monkeypatch):
     monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
 
 
+@pytest.fixture(autouse=True)
+def _per_file_checkpoints(request, monkeypatch):
+    """Wire per-file checkpoints instead of whole-tree ones.
+
+    Whole-tree checkpoints are git snapshots of the entire project, taken
+    before and after every turn — several git processes per turn, which made
+    every test that runs a scripted agent slow, and made the suite depend on
+    git for no reason most of those tests care about. Tests about whole-tree
+    behaviour (undo of shell changes, auto-pilot, the sandbox's default auto
+    mode) opt back in with ``@pytest.mark.tree_checkpoints``;
+    ``tests/test_checkpoints.py`` builds its own either way.
+    """
+    if request.node.get_closest_marker("tree_checkpoints"):
+        return
+    from cobirb import checkpoints
+    from cobirb.runtime import wiring
+
+    monkeypatch.setattr(wiring, "checkpoints_for", checkpoints.Checkpoints)
+
+
 def write_config(home, data) -> str:
     """Write CoBirb's config file under ``home`` and return its path.
 

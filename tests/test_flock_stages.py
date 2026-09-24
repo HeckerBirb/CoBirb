@@ -49,9 +49,10 @@ _PLAN = "## Job\nImplement it.\n" + "## Procedure\n1. Return n * 2.\n" * 20
 class _StagedBrainy:
     """Answers each stage by the marker in the prompt it was given."""
 
-    def __init__(self, tickets=_BLOCKS, evaluations=None):
+    def __init__(self, tickets=_BLOCKS, evaluations=None, restate=None):
         self.tickets = tickets
         self.evaluations = list(evaluations or [])
+        self.restated = _PLAN.replace("Return n * 2.", "Return the product of n and 2.") if restate is None else restate
         self.prompts = []
 
     def name(self):
@@ -61,12 +62,14 @@ class _StagedBrainy:
         text = str(context)
         self.prompts.append(text)
         last = max(("Write the next section:", "Stage: the skeleton", "Stage: the plan for ticket",
-                    "Stage: after round"), key=text.rfind)
+                    "Stage: after round", "Stage: the worker's brief"), key=text.rfind)
         if last == "Write the next section:":
             heading = text[text.rfind(last) + len(last):].split("---")[0].strip()
             return self.tickets if heading == "Tickets" else f"The {heading} section."
         if last == "Stage: the plan for ticket":
             return _PLAN
+        if last == "Stage: the worker's brief":
+            return self.restated
         if last == "Stage: after round":
             return self.evaluations.pop(0) if self.evaluations else "NO TICKETS nothing left."
         return "Skeleton written."
@@ -218,8 +221,36 @@ def test_a_staged_flock_runs_every_stage_and_the_workers(monkeypatch, tmp_path):
     steps = [entry["step"] for entry in run.trace]
     assert steps[:6] == [f"overview: {h}" for h, _ in stages.SECTIONS]
     assert "skeleton" in steps and "ticket: a" in steps and "ticket: b" in steps
-    # The ticket plan is the brief the Worker Birb gets.
+    # The ticket plan, restated, is the brief the Worker Birb gets.
     assert run.charter.worker("a").brief.startswith("## Job")
+
+
+def test_the_worker_gets_the_plan_restated_and_brainy_birb_keeps_its_own(monkeypatch, tmp_path):
+    _staged(tmp_path)
+    _project(tmp_path)
+    _workers(monkeypatch, tmp_path)
+    brainy = _StagedBrainy()
+
+    run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
+
+    restating = next(p for p in brainy.prompts if "Stage: the worker's brief" in p)
+    assert "Unpack one level deep." in restating and "Return n * 2." in restating
+    assert "Return the product of n and 2." in run.charter.worker("a").brief
+    assert "Return n * 2." not in run.charter.worker("a").brief
+
+
+@pytest.mark.parametrize("restated", ["", "## Job\nDo it."])
+def test_a_restatement_that_drops_content_leaves_the_plan_as_the_brief(monkeypatch, tmp_path, restated):
+    """Restating only adds; a reply far shorter than the plan has left things out."""
+    _staged(tmp_path)
+    _project(tmp_path)
+    _workers(monkeypatch, tmp_path)
+    brainy = _StagedBrainy(restate=restated)
+
+    run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
+
+    assert run.charter.worker("a").brief.strip() == _PLAN.strip()
+    assert any(t["step"] == "brief: a" and t.get("problem") for t in run.trace)
 
 
 def test_every_ticket_stage_carries_the_design_and_its_own_ticket_only(monkeypatch, tmp_path):

@@ -15,8 +15,10 @@ So the planning is split the way a person plans with someone else:
    tickets come from the overview's ticket blocks, derived rather than written
    a second time.
 2. **One fresh stage per ticket**: the design documents plus that ticket and
-   nothing else. It writes that ticket's tests and its ticket plan, and the
-   ticket plan is the Worker Birb's brief.
+   nothing else. It writes that ticket's tests and its ticket plan.
+3. **The brief**: the ticket plan restated in precise, literal language
+   (``RESTATE_RULES``) is the Worker Birb's brief, before the charter is put
+   to the user.
 
 After a round the verdict is computed (checks re-run on the finished tree,
 review), each worker's report is read, and an **evaluation** stage re-plans
@@ -346,6 +348,40 @@ behind it ("`step` runs in O(length of the snake)", never "because the game \
 renders at 60 fps"). Do not mention the other tickets or the overall feature."""
 
 
+# Run on each ticket plan before it becomes a Worker Birb's brief. The plan is
+# written in Brainy Birb's own words, with everything it knows of the project
+# behind them; the worker has none of that, so a term that is plain to the
+# planner ("kill the children", "the usual handshake") can be ambiguous to the
+# worker, and a model that reads it the wrong way refuses benign work. The
+# planner keeps its own wording (`Design.plans`); only the brief is restated.
+RESTATE_RULES = """\
+Restate this request in precise, literal technical language, so that a reader
+with no shared context understands exactly what is to be built.
+- Keep the meaning exactly: every behaviour, every requirement, every name.
+  Leave nothing out and water nothing down.
+- Replace slang and ambiguous everyday words with the technical terms they
+  stand for.
+- Wherever a term relies on assumed knowledge — a protocol, format, standard,
+  acronym, tool or domain term — keep the term and add, in parentheses, what it
+  consists of and what happens when it is used, as far as that matters to this
+  task. Describe the term's standard meaning only; do not add features,
+  options or behaviour it does not imply.
+- Unpack one level deep. Do not explain a term inside an explanation.
+- Do not add claims about who is allowed to do what, or why."""
+
+RESTATE_PROMPT = """\
+--- Stage: the worker's brief ---
+
+{rules}
+
+Keep the headings as they are, and copy code, signatures, file paths and \
+commands exactly. Reply with the restated text only.
+
+The text to restate:
+
+{plan}"""
+
+
 EVALUATE_PROMPT = """\
 {intro}
 
@@ -423,7 +459,9 @@ class Stager:
             project_context=main.project_context,
             redact_secrets=main.redact_secrets,
             verify=None,
-            checkpoints=main.checkpoints,
+            # A stage with no tools can change nothing, so there is nothing to
+            # snapshot; a whole-tree snapshot either side of it is only cost.
+            checkpoints=main.checkpoints if tools else None,
             hooks=hooks,
             grants=main.grants,
             max_turns=self.turns,
@@ -525,6 +563,23 @@ class Stager:
                 + "Do both now."
             )
         self.design.plans[ticket.id] = text
+        return text
+
+    def restate(self, ticket_id: str, plan: str) -> str:
+        """The ticket plan in precise, literal language: the worker's brief.
+
+        No tools: it rewrites text it is given. A reply under half the plan's
+        length has left things out, since restating only adds; then the plan
+        itself is the brief — it is accurate, only less explicit.
+        """
+        if not plan.strip():
+            return plan
+        stage = self._stage(set(), None, "")
+        text = self._run(stage, f"brief: {ticket_id}", RESTATE_PROMPT.format(rules=RESTATE_RULES, plan=plan))
+        if len(text) < len(plan) // 2:
+            self.trace[-1].update(problem="the restatement was too short; the plan was used as written",
+                                  text=text[:4000])
+            return plan
         return text
 
     def evaluate(self, round_number: int, verdict: str,

@@ -817,7 +817,8 @@ def _drive_staged(
                 briefs = {}
                 for ticket in tickets:
                     ask.show(f"Round {round_number}: planning ticket '{ticket.id}'…")
-                    briefs[ticket.id] = stager.ticket_plan(ticket, previous.get(ticket.id, ""))
+                    plan = stager.ticket_plan(ticket, previous.get(ticket.id, ""))
+                    briefs[ticket.id] = stager.restate(ticket.id, plan)
             charter = stager.charter(tickets, briefs)
         except RuntimeError as exc:
             run.stopped_at = "error"

@@ -379,8 +379,11 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
   by `parse_tickets` and checked by `check_tickets` (a file in two tickets is named in overview terms
   first, then a scratch `PlanDraft`), asked up to `SECTION_ATTEMPTS = 3` times, each rejected attempt
   kept in the trace. `NO TICKETS` is a legitimate decline. (1) **Skeleton**, any file but the tickets' tests.
-  (2) **One stage per ticket**, writing only that ticket's tests; its reply is the ticket plan and
-  becomes the brief. Test rules (the user's): contracts only, `parametrize` over input → output,
+  (2) **One stage per ticket**, writing only that ticket's tests; its reply is the ticket plan.
+  (3) **The brief** (`Stager.restate`, no tools, no checkpoints): the plan restated by `RESTATE_RULES`
+  in precise, literal language (terms unpacked, names kept, nothing added or dropped), so a worker
+  without the planner's context does not misread a benign term; before approval. `Design.plans` keeps
+  Brainy Birb's own wording; a reply under half the plan's length leaves the plan as the brief. Test rules (the user's): contracts only, `parametrize` over input → output,
   K.I.S.S., no design knowledge, no nudging toward an implementation. **The harness seals**
   (`Stager.charter`); no stage has a seal tool. (Staged planning as first built offered one, and
   qwen3-coder sealed in step 1 on every seed traced, so no skeleton step ever ran.)
@@ -543,6 +546,8 @@ python bench/cobirb_bench.py --models <m1,m2> --reps 2   # the offline benchmark
   every test is isolated. A test that touches something genuinely shared — the real `pip` runs in
   `test_plugin_install.py` write into the one virtualenv — goes in an `xdist_group` so its file runs
   on one worker. Run one test serially with `-n 0` (`-p no:xdist` fails: the config passes `-n`).
+- **Unit tests don't use git snapshots**: `conftest._per_file_checkpoints` wires per-file `Checkpoints`;
+  a test about whole-tree behaviour opts in with `@pytest.mark.tree_checkpoints`.
 - One test file per module; `COBIRB_HOME` is a tmp dir for every test; `write_config(home, data)` is the
   only sanctioned way to set config. `asyncio_mode = "auto"` for the Textual Pilot tests. Crypto runs
   against the real backend. Subprocess boundaries are usually mocked, with at least one real test.

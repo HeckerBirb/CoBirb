@@ -4,6 +4,16 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Worker Birbs get their brief in precise, literal language.** After Brainy Birb writes a ticket
+  plan, it restates it for the worker: ambiguous words become the technical terms they stand for,
+  and terms that rely on assumed knowledge are kept and briefly unpacked. A worker that shares none
+  of the planner's context is less likely to misread a benign task and refuse it. Brainy Birb keeps
+  its own wording for later rounds, and the restated brief is ready before you approve the charter.
+- The unit tests no longer take git snapshots of every scripted turn, and run in about a third of
+  the time.
+
 ## [0.43.6]
 
 - **A flaky test from 0.43.5 is fixed.** The worker-pane queue test read a pane's lines before the

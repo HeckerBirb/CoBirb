@@ -190,8 +190,14 @@ agent did better than any flock, so for those, just ask CoBirb directly.
 2. **The skeleton**: finished shared files, and typed stubs for every ticket. The charter's tickets
    come straight from the overview's ticket list.
 3. **One fresh stage per ticket**, holding the design documents and that ticket only. It writes the
-   ticket's tests and its ticket plan: exact procedures, values and a worked example. The ticket
-   plan is the Worker Birb's whole brief.
+   ticket's tests and its ticket plan: exact procedures, values and a worked example.
+   Brainy Birb then restates the plan in precise, literal language for the worker, who shares
+   none of its context: slang and ambiguous words become the technical terms they stand for, and
+   a term that relies on assumed knowledge (a protocol, a format, an acronym, a tool) keeps its
+   name and gets a short description of what it involves. Nothing is left out or added, and names,
+   code and commands are copied exactly. The restatement is the Worker Birb's whole brief, and it
+   is ready before you approve the charter. A reply much shorter than the plan has left something
+   out, so then the plan itself is the brief.
 4. **Approve and run.** You approve the first charter. Workers run, then each reports whether its
    tests pass, whether it kept the contract, and what is missing and why, including a test it
    thinks contradicts the contract.

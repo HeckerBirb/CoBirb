@@ -93,4 +93,5 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "integration: hits a real local Ollama server; skipped unless COBIRB_TEST_MODEL is set (see tests/test_integration_ollama.py)",
+    "tree_checkpoints: wire whole-tree (git) checkpoints instead of the per-file ones every other test gets (see tests/conftest.py)",
 ]
