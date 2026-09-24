@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
@@ -40,8 +41,16 @@ class TuiIO(I_OAdapter):
     for and nothing falls back to plain text.
     """
 
+    # How often streamed tokens reach the screen, at most. A model streams far
+    # faster than anyone reads, and every trip to the UI thread blocks the
+    # model's thread until that thread has drawn it.
+    STREAM_INTERVAL = 0.1
+
     def __init__(self, app: "CoBirbApp") -> None:
         self._app = app
+        self._pending: list[str] = []
+        self._pending_lock = threading.Lock()
+        self._last_push = 0.0
 
     def name(self) -> str:
         return "tui"
@@ -57,9 +66,27 @@ class TuiIO(I_OAdapter):
         otherwise raise, since ``call_from_thread`` refuses to be called
         from the thread it dispatches to.
         """
+        # Tokens still buffered go first, so nothing ever lands ahead of the
+        # text that came before it — the same order rule the transcript keeps
+        # (see TranscriptView.write).
+        if callback is not self._app.append_stream:
+            self._push_stream()
+        return self._dispatch(callback, *args)
+
+    def _dispatch(self, callback: Callable[..., Any], *args: Any) -> Any:
         if threading.get_ident() == self._app.ui_thread_id:
             return callback(*args)
         return self._app.call_from_thread(callback, *args)
+
+    def _push_stream(self) -> None:
+        """Send every buffered token to the preview, in one trip."""
+        with self._pending_lock:
+            if not self._pending:
+                return
+            text = "".join(self._pending)
+            self._pending.clear()
+            self._last_push = time.monotonic()
+        self._dispatch(self._app.append_stream, text)
 
     # ------------------------------------------------------------------ #
     # I_OAdapter
@@ -70,8 +97,19 @@ class TuiIO(I_OAdapter):
         Goes to the streaming preview rather than the transcript: a
         ``RichLog`` appends whole lines and can't rewrite the last one, so
         per-token writes would stack every token on its own line.
+
+        **Buffered, and sent at most every ``STREAM_INTERVAL``.** Each token
+        used to be its own blocking trip to the UI thread, and each redrew the
+        whole reply so far — quadratic in the reply's length, with the model's
+        thread waiting on every one. A long planning reply made the whole app
+        lag. Whatever is left in the buffer goes out before the next thing
+        this adapter draws (see ``_call``).
         """
-        self._call(self._app.append_stream, text)
+        with self._pending_lock:
+            self._pending.append(text)
+            due = time.monotonic() - self._last_push >= self.STREAM_INTERVAL
+        if due:
+            self._push_stream()
 
     def listen(self) -> str | None:
         """The TUI's input path is its own ``Input`` widget; there is no

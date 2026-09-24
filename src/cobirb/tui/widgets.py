@@ -147,23 +147,31 @@ class StreamPreview(Static):
     the transcript.
     """
 
+    # While a reply streams, only its end is drawn. Redrawing a reply thousands
+    # of characters long on every update made each one cost as much as the
+    # whole reply; the full text still goes to the transcript when it ends.
+    TAIL_CHARS = 3000
+
     def __init__(self, **kwargs: object) -> None:
         super().__init__("", **kwargs)  # type: ignore[arg-type]
-        self._buffer: list[str] = []
+        self._text = ""
 
     @property
     def buffered(self) -> str:
-        return "".join(self._buffer)
+        return self._text
 
     def append(self, text: str) -> None:
-        self._buffer.append(text)
-        self.update(render.build_streamed_message(self.buffered))
+        self._text += text
+        shown = self._text
+        if len(shown) > self.TAIL_CHARS:
+            shown = "…" + shown[-self.TAIL_CHARS:]
+        self.update(render.build_streamed_message(shown))
         self.display = True
 
     def take(self) -> str:
         """Return everything buffered and reset to empty/hidden."""
-        text = self.buffered
-        self._buffer.clear()
+        text = self._text
+        self._text = ""
         self.update("")
         self.display = False
         return text

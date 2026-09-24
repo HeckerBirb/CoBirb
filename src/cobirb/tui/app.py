@@ -20,6 +20,7 @@ modes, which a full-screen app's stderr is invisible to).
 """
 from __future__ import annotations
 
+import collections
 import logging
 import os
 import threading
@@ -212,6 +213,10 @@ class CoBirbApp(App[None]):
         # know the real name doesn't exist yet at mount time.
         self.resolved_model_name = wiring.resolve_model_name(model_name, cwd)
         self.ui_thread_id = threading.get_ident()
+        # Worker panes' output, queued by the workers and drawn by the timer
+        # set in on_mount (see drain_flock_writes). A deque's append and
+        # popleft are thread-safe, which is all this needs.
+        self.flock_write_queue: "collections.deque" = collections.deque()
         # True for exactly the span between submitting a prompt and
         # _on_turn_finished — see action_cancel_turn and action_quit, which
         # both need to know whether there's a turn worth cancelling.
@@ -262,6 +267,9 @@ class CoBirbApp(App[None]):
         # the event loop actually lives on, which is the one TuiIO must
         # compare against to decide whether it needs to bridge at all.
         self.ui_thread_id = threading.get_ident()
+        # Ten times a second is faster than anyone reads a pane and slow
+        # enough that a busy flock never floods the event loop.
+        self.set_interval(0.1, self.drain_flock_writes)
 
         status = self.query_one(StatusBar)
         status.model_name = self.resolved_model_name
@@ -1076,6 +1084,18 @@ class CoBirbApp(App[None]):
         bar.activity = activity
         bar.detail = detail
 
+    def drain_flock_writes(self) -> None:
+        """Draw everything the workers have queued, in the order they queued it.
+
+        Main thread only: called by the timer, and before anything that has to
+        appear after a worker's queued output — a state change, the end of the
+        round — so a pane never shows "done" above its own last lines.
+        """
+        queue = self.flock_write_queue
+        while queue:
+            worker_id, renderable = queue.popleft()
+            self.flock_write(worker_id, renderable)
+
     def flock_write(self, worker_id: str, renderable) -> None:
         """One renderable into one Worker Birb's pane. Main thread only."""
         worker = self.query_one(FlockPane).pane(worker_id)
@@ -1090,6 +1110,7 @@ class CoBirbApp(App[None]):
         the worker is doing inside its run — the difference between "has not
         started" and "started, and now waiting on you".
         """
+        self.drain_flock_writes()
         worker = self.query_one(FlockPane).pane(worker_id)
         if worker is not None:
             worker.set_state(state)
@@ -1115,6 +1136,7 @@ class CoBirbApp(App[None]):
         await self.query_one(FlockPane).begin(charter)
 
     def _on_flock_finished(self, run) -> None:
+        self.drain_flock_writes()
         self._flock_stop = None
         self._planning_calls = 0
         self.charter_in_hand = False

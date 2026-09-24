@@ -579,3 +579,24 @@ async def test_a_pane_remembers_the_state_it_is_showing():
         assert worker.state == "waiting"
         worker.set_state("running")
         assert worker.state == "running"
+
+
+async def test_worker_output_is_queued_and_lands_before_a_state_change():
+    """Workers queue their panels instead of each blocking the UI thread; the
+    queue is drawn in order, and a state change draws it first so a pane never
+    shows "done" above its own last lines."""
+    from rich.text import Text
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        pane = await _flock_tab(pilot, app)
+        await pane.begin(_CHARTER)
+        await pilot.pause()
+        app.flock_write_queue.append(("a", Text("first")))
+        app.flock_write_queue.append(("a", Text("second")))
+
+        app.flock_worker_state("a", "done")
+
+        assert not app.flock_write_queue
+        log = "\n".join(str(line.text) for line in app.query_one("#worker-a").query_one("RichLog").lines)
+        assert log.index("first") < log.index("second")

@@ -796,6 +796,10 @@ async def test_streamed_tokens_preview_live_and_land_in_the_transcript(monkeypat
     sets ``last_turn_streamed`` so it isn't shown twice), so the preview's
     contents have to be committed to the transcript when the stream ends —
     otherwise the answer would disappear the moment the preview cleared."""
+    from cobirb.tui.io_bridge import TuiIO
+
+    # Every token straight through, so "live" is observable token by token.
+    monkeypatch.setattr(TuiIO, "STREAM_INTERVAL", 0)
     seen_mid_stream: list[str] = []
 
     def on_run(orchestrator):
@@ -817,6 +821,38 @@ async def test_streamed_tokens_preview_live_and_land_in_the_transcript(monkeypat
         assert "hello world" in _transcript_text(app)
         # Flushed, not left behind to be shown twice.
         assert app.query_one("#streaming-preview").buffered == ""
+
+
+async def test_streamed_tokens_are_batched_and_nothing_is_lost_or_reordered(monkeypatch):
+    """Tokens reach the screen at most every STREAM_INTERVAL rather than one
+    blocking trip each; what is still buffered goes out before the next thing
+    drawn, so a tool panel still follows the text that led to it."""
+    from cobirb.tui.io_bridge import TuiIO
+
+    monkeypatch.setattr(TuiIO, "STREAM_INTERVAL", 3600)
+    seen_mid_stream: list[str] = []
+
+    def on_run(orchestrator):
+        for token in ("one ", "two ", "three"):
+            orchestrator.io.render(token)
+        seen_mid_stream.append(orchestrator.io._app.query_one("#streaming-preview").buffered)
+        orchestrator.io.render_tool_call("read_file", {"path": "a.py"}, None)
+        orchestrator.last_turn_streamed = True
+
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(_StubOrchestrator(on_run=on_run)))
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _submit(pilot, app, "count")
+        await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
+
+        # Only the first token went straight out; the rest waited…
+        assert seen_mid_stream == ["one "]
+        text = _transcript_text(app)
+        # …and all of it landed, whole, above the panel it came before.
+        assert "one two three" in text
+        assert text.index("one two three") < text.index("read_file")
 
 
 async def test_a_panel_flushes_the_stream_first_so_ordering_is_preserved(monkeypatch):

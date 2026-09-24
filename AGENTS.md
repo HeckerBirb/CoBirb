@@ -70,7 +70,7 @@ sized for a 4096-token window, and that one assumption made four wrong calls.)
 | `runtime/` | Shared composition: `wiring`, `plugins`, `models`, `system_prompt`, `setup`, `commands`, `command_index`, `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues`, `mentions`, `doctor`. |
 | `mcp/` | stdio MCP client and its tool adapter. |
 | `flock/` | Multi-agent runs: `charter`, `plan`, `brainy`, `stages` (staged planning), `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. |
-| `tui/` | Textual app: `app`, `slash_commands` (handlers + `COMMANDS`), `transcript` (flush-before-write), `attachments`, `mention_picker`, `command_picker`, `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. |
+| `tui/` | Textual app (streamed tokens reach the screen at most every `TuiIO.STREAM_INTERVAL` and the preview draws only the reply's tail; worker panes are fed by a queue the app drains on a 0.1 s timer — both because per-token and per-panel blocking trips to the UI thread made a flock lag): `app`, `slash_commands` (handlers + `COMMANDS`), `transcript` (flush-before-write), `attachments`, `mention_picker`, `command_picker`, `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. |
 | `help_text.py` | `cobirb help` — the overview; `cobirb help <topic>` renders the manual (§14). |
 | `docs/manual/` | The user manual. Shipped in the package as `cobirb/manual/`. |
 | `install.sh` | Installer, upgrader and downgrader; shipped in the package (§14). |

@@ -269,7 +269,18 @@ class WorkerPaneIO(HeadlessIO):
         self._write(render.build_notice(text))
 
     def _write(self, renderable: Any) -> None:
-        try:
-            self._app.call_from_thread(self._app.flock_write, self._worker_id, renderable)
-        except Exception:  # noqa: BLE001 - a pane that cannot be drawn is not a failed run
+        """Queue a renderable for this worker's pane, without waiting.
+
+        The app drains the queue on a timer (``CoBirbApp.drain_flock_writes``)
+        rather than each worker blocking in ``call_from_thread`` until its
+        panel is drawn — several workers doing that at once flooded the UI
+        thread one event at a time and made the whole app lag.
+        """
+        queue = getattr(self._app, "flock_write_queue", None)
+        if queue is None:
+            try:
+                self._app.call_from_thread(self._app.flock_write, self._worker_id, renderable)
+            except Exception:  # noqa: BLE001 - a pane that cannot be drawn is not a failed run
+                pass
             return
+        queue.append((self._worker_id, renderable))

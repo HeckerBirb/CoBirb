@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **The app stays responsive during a flock.** Streamed replies used to reach the screen one token at
+  a time, each redrawing the whole reply so far while the model's thread waited, so a long planning
+  reply made everything lag. Tokens are now sent at most ten times a second and the live preview draws
+  only the end of the reply; Worker Birbs' panes are fed through a queue drawn ten times a second
+  instead of each worker waiting on the screen.
+
 ## [0.43.4]
 
 - **`/autopilot` now reaches the whole flock.** Planning stages and Worker Birbs refuse what they
