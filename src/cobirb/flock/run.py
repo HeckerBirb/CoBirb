@@ -840,7 +840,9 @@ def _drive_staged(
             run.stopped_at = "rounds"
             break
         try:
-            next_tickets, whys, _ = stager.evaluate(round_number, _round_verdict(outcome))
+            next_tickets, whys, _ = stager.evaluate(
+                round_number, _round_verdict(outcome),
+                outstanding=[r.worker_id for r in outcome.outstanding])
         except RuntimeError as exc:
             ask.show(f"Stopping: the evaluation failed because the model server failed ({exc}).")
             break

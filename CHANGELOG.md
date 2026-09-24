@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Staged planning: fixes from the first overnight measurement.** A file listed by two tickets is
+  explained in the overview's own terms (most often a ticket listing another ticket's tests as its
+  own), and the ticket list gets three attempts instead of two. An evaluation that can't be read no
+  longer ends the flock with tickets still failing; those tickets are tried again, and only an explicit
+  `NO TICKETS` stops it. A planning stage whose model call fails is sent once more.
+
 ## [0.43.1]
 
 - **Benchmark results for 0.43**, in `bench/results/v043-*`: on the two flock tasks, a single agent

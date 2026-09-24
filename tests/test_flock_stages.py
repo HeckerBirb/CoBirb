@@ -142,7 +142,10 @@ def test_ticket_blocks_are_read_whatever_their_formatting():
     ("### ticket: a\n- writes: a.py\n- accept: x", "names no test files"),
     ("### ticket: a\n- writes: a.py\n- tests: t.py", "no `accept`"),
     ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: x\n"
-     "### ticket: b\n- writes: a.py\n- tests: tb.py\n- accept: x", "already written by ticket 'a'"),
+     "### ticket: b\n- writes: a.py\n- tests: tb.py\n- accept: x", "listed by more than one ticket"),
+    # Another ticket's test file under `tests` — "the tests I must pass".
+    ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: x\n"
+     "### ticket: b\n- writes: b.py\n- tests: tb.py, ta.py\n- accept: x", "never another ticket's"),
     ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: x\n- needs: ghost", "ghost"),
 ])
 def test_ticket_blocks_that_cannot_become_a_charter_say_why(blocks, problem):
@@ -393,3 +396,49 @@ def test_a_ticket_stage_that_writes_no_tests_is_asked_again(monkeypatch, tmp_pat
     a_stages = [p for p in brainy.prompts if "Stage: the plan for ticket 'a'" in p]
     assert len(a_stages) == 2 and "test files were not written" in a_stages[-1]
     assert not os.path.exists(tmp_path / "test_a.py")
+
+
+def test_an_unreadable_evaluation_tries_the_failing_tickets_again(monkeypatch, tmp_path):
+    """Stopping takes an explicit NO TICKETS. Four overnight runs stopped after
+    round 1 with tickets still failing because the reply could not be read."""
+    _staged(tmp_path)
+    _project(tmp_path)
+    _workers(monkeypatch, tmp_path, fail_first={"b"})
+    brainy = _StagedBrainy(evaluations=["I think b needs another go, it was close."])
+
+    run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
+
+    assert len(run.rounds) == 2 and run.outcome.all_done
+    assert [w.id for w in run.rounds[1].charter.workers] == ["b"]
+
+
+def test_a_stage_survives_one_dropped_connection(monkeypatch, tmp_path):
+    _staged(tmp_path)
+    _project(tmp_path)
+    _workers(monkeypatch, tmp_path)
+    brainy = _StagedBrainy()
+    real, dropped = brainy.chat, []
+
+    def flaky(*args, **kwargs):
+        if not dropped:
+            dropped.append(1)
+            raise RuntimeError("The connection to the model provider was lost part-way through the reply")
+        return real(*args, **kwargs)
+
+    brainy.chat = flaky
+
+    run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
+
+    assert run.ran and run.outcome.all_done
+
+
+def test_a_rejected_ticket_list_is_kept_in_the_trace(monkeypatch, tmp_path):
+    _staged(tmp_path)
+    bad = "### ticket: a\n- writes: a.py\n- accept: x"
+    brainy = _StagedBrainy(tickets=bad)
+
+    run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
+
+    failed = [t for t in run.trace if t.get("problem")]
+    assert run.stopped_at == "charter" and len(failed) == stages.SECTION_ATTEMPTS
+    assert failed[0]["text"] == bad

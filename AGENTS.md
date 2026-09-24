@@ -374,8 +374,9 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
   design documents (`stages.Design`) are what a stage carries; nothing else survives between stages.
   (0) **Overview**, section by section in one context, read-only: `SECTIONS`, fixed headings with a
   checklist each; the Tickets section is fixed-form blocks (`### ticket: <id>` + `- key: value`), parsed
-  by `parse_tickets` and checked by `check_tickets` through a scratch `PlanDraft`, re-asked once on a
-  problem. `NO TICKETS` is a legitimate decline. (1) **Skeleton**, any file but the tickets' tests.
+  by `parse_tickets` and checked by `check_tickets` (a file in two tickets is named in overview terms
+  first, then a scratch `PlanDraft`), asked up to `SECTION_ATTEMPTS = 3` times, each rejected attempt
+  kept in the trace. `NO TICKETS` is a legitimate decline. (1) **Skeleton**, any file but the tickets' tests.
   (2) **One stage per ticket**, writing only that ticket's tests; its reply is the ticket plan and
   becomes the brief. Test rules (the user's): contracts only, `parametrize` over input → output,
   K.I.S.S., no design knowledge, no nudging toward an implementation. **The harness seals**
@@ -385,8 +386,10 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
   pass, contract kept, what is missing and why, a test that contradicts the contract) go to an evaluation
   stage, which returns ticket blocks for only what is open, each with a `why`. The next round re-runs the
   skeleton for new files and a stage per ticket, carrying the last plan, the `why` and the report. Stops
-  on all green, `flock.max_rounds` (default 5), or a round whose failing set equals the last one's
-  (`stopped_at="no_progress"`).
+  on all green, `flock.max_rounds` (default 5), a round whose failing set equals the last one's
+  (`stopped_at="no_progress"`), or an explicit `NO TICKETS` — an evaluation that cannot be read retries
+  the tickets still failing rather than ending the flock. A stage whose model call fails is sent once
+  more before the failure stands.
 - **Autonomy** (`flock.autonomy`): the first charter is approved by the user in both modes. `ask` (default)
   puts the Decisions section to the user (`Asker.decide`; empty leaves them to Brainy Birb, safe because a
   design decision grants nothing) and asks before every later round, showing only what it adds

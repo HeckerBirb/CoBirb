@@ -193,8 +193,9 @@ then rounds until the work is done.
 5. **Evaluate.** CoBirb re-runs every check on the finished tree. Brainy Birb reads that, the review
    and the reports, and plans only what is still open, then back to step 2 or 3.
 
-It stops when every check passes, at `max_rounds` (5), or when a round ends with the same tickets
-failing the same way as the one before.
+It stops when every check passes, at `max_rounds` (5), when a round ends with the same tickets
+failing the same way as the one before, or when Brainy Birb says another round would not change
+anything. If its evaluation can't be read, the tickets still failing are simply tried again.
 
 Each stage is its own model call with a fresh context, and gets only the tools it needs. A write
 outside the stage's files is refused without asking, and CoBirb seals the charter itself: a step

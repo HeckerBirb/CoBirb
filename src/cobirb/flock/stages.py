@@ -46,6 +46,9 @@ from .plan import PlanDraft
 AUTONOMY_ASK = "ask"
 AUTONOMY_AUTO = "auto"
 DEFAULT_MAX_ROUNDS = 5
+# How many times a section is asked for before planning gives up. Two was too
+# few: the first overnight run lost 7 of its 13 failed staged rounds here.
+SECTION_ATTEMPTS = 3
 
 _WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch"})
 
@@ -163,6 +166,22 @@ def check_tickets(tickets: list[TicketSpec]) -> str:
     """
     if not tickets:
         return "no ticket blocks were found — each needs a `### ticket: <id>` heading"
+    # A file in two tickets, said in the overview's own terms. The charter
+    # moves' refusal ("call drop_worker…") names a tool no overview stage has,
+    # and every model in the first overnight run that met it failed the same
+    # way twice — most often by listing another ticket's test file under its
+    # own `tests`, meaning "the tests I must pass".
+    owners: dict[str, list[str]] = {}
+    for ticket in tickets:
+        for path in dict.fromkeys((*ticket.writes, *ticket.tests)):
+            owners.setdefault(path, []).append(ticket.id)
+    for path, who in owners.items():
+        if len(who) > 1:
+            return (
+                f"`{path}` is listed by more than one ticket ({', '.join(repr(w) for w in who)}). "
+                "Every file belongs to exactly one ticket: keep it only in the ticket that writes it. "
+                "A ticket's `tests` are its own test files, never another ticket's"
+            )
     draft = PlanDraft()
     for ticket in tickets:
         if not ticket.tests:
@@ -408,8 +427,16 @@ class Stager:
         )
 
     def _run(self, orchestrator: Orchestrator, step: str, prompt: str) -> str:
-        session = orchestrator.run(prompt, system="", cwd=self.cwd, label="Brainy Birb",
-                                   max_turns=self.turns)
+        try:
+            session = orchestrator.run(prompt, system="", cwd=self.cwd, label="Brainy Birb",
+                                       max_turns=self.turns)
+        except RuntimeError:
+            # Sent once more. Staged planning makes many more model calls than
+            # one prompt does, and in the first overnight run one model lost
+            # four of six rounds to a single dropped connection each. A second
+            # failure is real and goes to the caller.
+            session = orchestrator.run(prompt, system="", cwd=self.cwd, label="Brainy Birb",
+                                       max_turns=self.turns)
         self.trace.append({"step": step, "calls": [c["name"] for c in orchestrator.last_run_tool_calls]})
         return (session.summary or "").strip()
 
@@ -423,12 +450,14 @@ class Stager:
         reader = self._stage(set(READ_TOOLS), None, "")
         for heading, checklist in SECTIONS:
             problem = ""
-            for _attempt in range(2):
+            for _attempt in range(SECTION_ATTEMPTS):
                 text = self._run(reader, f"overview: {heading}",
                                  section_prompt(self.design, heading, checklist, problem))
                 problem = self._check_section(heading, text)
                 if not problem or problem.startswith("declined:"):
                     break
+                # Kept, so a failed section can be read back afterwards.
+                self.trace[-1].update(problem=problem, text=text[:4000])
             if problem and not problem.startswith("declined:"):
                 return f"the {heading} section could not be completed: {problem}"
             self.design.sections[heading] = text
@@ -490,14 +519,27 @@ class Stager:
         self.design.plans[ticket.id] = text
         return text
 
-    def evaluate(self, round_number: int, verdict: str) -> "tuple[list[TicketSpec], dict[str, str], str]":
-        """The next round's tickets, the reason for each, and the reply."""
+    def evaluate(self, round_number: int, verdict: str,
+                 outstanding: "list[str] | None" = None) -> "tuple[list[TicketSpec], dict[str, str], str]":
+        """The next round's tickets, the reason for each, and the reply.
+
+        **Stopping takes an explicit `NO TICKETS`.** A reply that could not be
+        read, or whose tickets cannot become a charter, used to end the flock —
+        in the first overnight run, four runs stopped after round 1 with
+        tickets still failing. Now the tickets whose checks still fail are
+        simply tried again, with the evaluation's reply as the reason.
+        """
         reader = self._stage(set(READ_TOOLS), None, "")
         text = self._run(reader, f"evaluate round {round_number}", EVALUATE_PROMPT.format(
             intro=INTRO, document=self.design.document(), round=round_number, verdict=verdict))
-        if text.lstrip().upper().startswith("NO TICKETS") or not parse_tickets(text):
+        if text.lstrip().upper().startswith("NO TICKETS"):
             return [], {}, text
-        return parse_tickets(text), evaluation_why(text), text
+        tickets = parse_tickets(text)
+        if tickets and not check_tickets(tickets):
+            return tickets, evaluation_why(text), text
+        retry = [t for t in self.design.tickets if t.id in set(outstanding or ())]
+        why = "its check still fails — see the report" + (f"; the evaluation said: {text[:600]}" if text else "")
+        return retry, {t.id: why for t in retry}, text
 
     # ------------------------------------------------------------------ #
     def charter(self, tickets: list[TicketSpec], briefs: dict[str, str]) -> Charter:
