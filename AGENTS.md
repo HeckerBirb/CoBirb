@@ -389,8 +389,9 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
   (`- renamed: old -> new`), and the code behind a kept name gets an invented internal name. The
   mapping is `stages.NameMap` (`Design.names`), Brainy Birb's and the user's only. **A renamed name
   that survives anywhere in the text is refused** (`NameMap.survivors`, whole-identifier match, kept
-  and new names blanked first), as are missing sections, unusable tickets, and tickets that are not
-  the overview's under their mapped ids; `SECTION_ATTEMPTS` tries, then `stopped_at="restatement"`.
+  and new names blanked first), as are missing sections, unusable tickets, tickets that are not
+  the overview's under their mapped ids, and a test file that lost pytest's `test_` prefix (the first bench
+  run renamed `test_roman.py` to `verification_for_roman.py`); `SECTION_ATTEMPTS` tries, then `stopped_at="restatement"`.
   The cleared tickets replace the overview's: charter, rounds and reports are keyed by cleared ids.
   (2) **Skeleton** and (3) **one stage per ticket** are **Architect Birb** (`ARCHITECT_INTRO`,
   `_stage(architect=True)`): given only `Design.cleared_document()`, **no project context** (the

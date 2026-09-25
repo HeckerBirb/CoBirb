@@ -298,6 +298,9 @@ _SURVIVOR = _BLOCKS.replace("ticket: a", "ticket: double_a")  # renamed, but a.p
     # Renamed without saying so: the tickets no longer match Brainy Birb's.
     (_restatement(_BLOCKS.replace("ticket: a", "ticket: double_a")), "same tickets under their new ids"),
     (_restatement("no tickets at all"), "restated tickets cannot be used"),
+    # A literal name pytest never collects.
+    (_restatement(_BLOCKS.replace("test_a.py", "check_a.py"), "- renamed: test_a.py -> check_a.py"),
+     "lost the `test_` prefix"),
 ])
 def test_a_restatement_that_cannot_be_used_is_asked_for_again_then_stops_the_flock(
         monkeypatch, tmp_path, reply, problem):

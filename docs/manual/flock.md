@@ -197,7 +197,8 @@ agent did better than any flock, so for those, just ask CoBirb directly.
    Names are restated too, because the skeleton is made of them. A name your request states — a
    `/kill` command you asked for — is a requirement and is kept exactly. A name Brainy Birb
    invented is renamed to say literally what it does (`kill_children` → `terminate_child_processes`),
-   and the code behind a kept name gets an invented internal name like any other. Brainy Birb keeps
+   and the code behind a kept name gets an invented internal name like any other. A name whose
+   form a tool depends on keeps it: a test file stays `test_…`, so pytest still finds it. Brainy Birb keeps
    the list of renames, and CoBirb refuses a restatement in which an old name still appears; after
    three tries the flock stops before anything is written.
 3. **The skeleton**, by Architect Birb, from the restated design only: finished shared files, and

@@ -256,6 +256,12 @@ _ARROW = re.compile(r"\s*(?:->|→|=>)\s*")
 _NAME_EDGE = r"A-Za-z0-9_"
 
 
+def _is_test_file(path: str) -> bool:
+    """Named the way pytest collects: ``test_*.py`` or ``*_test.py``."""
+    base = os.path.basename(path)
+    return base.startswith("test_") or base.endswith("_test.py")
+
+
 def _bare(name: str) -> str:
     return name.strip().strip("`'\"").strip()
 
@@ -533,7 +539,11 @@ Names:
 - Every name you invented — a file path, module, class, function, method,
   variable, constant, test file, ticket id — restate as a precise, literal name
   for what it does or holds, unless it already is one. List each one you
-  change as `- renamed: <old> -> <new>`. Code that implements a kept name gets
+  change as `- renamed: <old> -> <new>`. A name whose form a tool or
+  convention depends on keeps that form, and only the part you chose is
+  restated: a test file or test function keeps its `test_` prefix
+  (`test_kill.py` -> `test_send_sigterm.py`), and `__init__.py`,
+  `conftest.py`, `__main__.py` and dunder methods stay as they are. Code that implements a kept name gets
   an invented internal name like any other: a `/kill` command the user asked
   for stays `/kill`, and its handler `kill` becomes `send_sigterm`.
 - After this, use only the new names, everywhere — in prose, signatures, file
@@ -838,6 +848,18 @@ class Stager:
             return {}, self.design.names, (
                 f"the restated tickets must be the same tickets under their new ids — expected "
                 f"{', '.join(expected)}, found {', '.join(found)}")
+        # A test file renamed out of pytest's naming is never collected. The
+        # first benchmark run of this stage renamed `test_roman.py` to
+        # `verification_for_roman.py`: a literal name, and a test nobody runs.
+        by_id = {t.id: t for t in tickets}
+        for ticket in raw:
+            if not any(_is_test_file(p) for p in ticket.tests):
+                continue
+            lost = [p for p in by_id[names.forward(ticket.id)].tests if not _is_test_file(p)]
+            if lost:
+                return {}, self.design.names, (
+                    f"`{lost[0]}` has lost the `test_` prefix pytest needs to find it — "
+                    "a test file keeps `test_`; restate only the part after it")
         return cleared, names, ""
 
     def skeleton(self, tickets: list[TicketSpec]) -> None:
