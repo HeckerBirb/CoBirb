@@ -109,7 +109,9 @@ constants), or `(stub)` if a ticket implements it."""),
 
 - Every ticket is implementation work that one Worker Birb does. Do NOT make a ticket for tests, \
 for the skeleton or for setup: Architect Birb writes the skeleton and every ticket's tests, in the \
-next stages. A ticket's `tests` are the test files for its own code, and it `writes` them too.
+next stages. Every ticket still names its own test files on its `- tests:` line: Architect Birb \
+writes them, and the Worker Birb must make them pass. They are the test files for its own code, \
+and it `writes` them too.
 - No file may appear in two tickets. A `(finished)` seam file is in no ticket.
 - A ticket's tests must pass with its own code and the skeleton alone.
 - If this work should not be divided at all, write exactly `NO TICKETS` and one \

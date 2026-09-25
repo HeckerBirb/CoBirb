@@ -9,7 +9,9 @@ and its §17 decisions record for the ones that were designed and then deliberat
 - **A ticket whose test file is only under `writes` is no longer refused.** The Flock stopped with
   "names no test files" on a ticket that did write tests, because its block had no `- tests:` line.
   A block without one now takes the test files it writes (`test_*.py`, `*_test.py`) as its tests,
-  and a ticket with none at all is told to add the line, with an example.
+  and a ticket with none at all is told to add the line, with an example. The Tickets checklist
+  now also says that every ticket names its own test files on its `- tests:` line, even though
+  Architect Birb writes them.
 
 ## [0.45.2]
 
