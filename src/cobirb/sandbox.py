@@ -72,7 +72,10 @@ class Sandbox:
             return "off"
         if not self.active:
             return "unavailable (install bubblewrap)"
-        return f"bubblewrap, {'runs without asking' if self.auto_approve else 'asks first'}"
+        if self.auto_approve:
+            return ("bubblewrap: shell commands run contained, without asking "
+                    "(no network, writes only inside the project)")
+        return "bubblewrap: shell commands run contained, and each is asked about first"
 
     def argv(self, command: str, cwd: str) -> list[str]:
         """The command line that runs ``command`` inside the sandbox."""

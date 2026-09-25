@@ -4,6 +4,12 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **`cobirb doctor` says plainly what the sandbox does.** "bubblewrap, runs without asking" did not
+  say what runs: it now reads "shell commands run contained, without asking (no network, writes
+  only inside the project)", or that each is asked about first. Behaviour is unchanged.
+
 ## [0.45.0]
 
 - **Architect Birb: Worker Birbs no longer see the planner's own words, anywhere.** Brainy Birb

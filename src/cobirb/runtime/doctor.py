@@ -367,8 +367,8 @@ def _check_sandbox(report: Report, config: Config) -> None:
                "'sudo dnf install bubblewrap' or 'sudo pacman -S bubblewrap'")
         report.add("sandbox", WARN, f"{why}; shell commands run unsandboxed and are always asked about")
     elif box.mode == sandbox.MODE_AUTO and not box.explicit and not shutil.which("git"):
-        report.add("sandbox", OK, "bubblewrap, asks first — commands would run without asking, "
-                   "but git is missing so their changes could not be undone")
+        report.add("sandbox", OK, "bubblewrap: shell commands run contained, but each is asked "
+                   "about first: git is missing, so what they change could not be undone")
     else:
         report.add("sandbox", OK, box.describe())
 
