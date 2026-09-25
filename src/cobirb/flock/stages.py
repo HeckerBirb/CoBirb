@@ -788,9 +788,8 @@ class Stager:
             max_turns=self.turns,
         )
         # Under /autopilot a stage refuses rather than asks, like the main
-        # agent. The permissions themselves (the project, the sandbox) are
-        # already on the shared policy; this is the "nobody asks" half.
-        stage.autopilot = bool(getattr(main, "autopilot", False))
+        # agent — and follows it being switched on or off mid-stage, because
+        # auto-pilot is read off the policy they share (Orchestrator.autopilot).
         return stage
 
     def _run(self, orchestrator: Orchestrator, step: str, prompt: str, label: str = "Brainy Birb") -> str:

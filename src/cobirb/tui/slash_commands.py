@@ -25,12 +25,14 @@ from typing import TYPE_CHECKING, Callable
 from textual.widgets import TabbedContent
 
 from ..flock.supervisor import Canceller
+from ..flock.worker import AUTOPILOT_NOTE
 from ..plugins.core import render
 from ..runtime import commands as command_helpers
 from ..runtime.custom_commands import describe_commands, discover_commands
 from ..runtime.export import write_export
 from ..session import turns_since_clear
 from . import attachments
+from .panes import FlockPane
 from .screens import MemoryCataloguesModal, RememberModal
 from .widgets import PromptInput, StatusBar, TranscriptLog
 
@@ -259,7 +261,7 @@ def cmd_plan(app: "CoBirbApp", argument: str) -> None:
 
 
 def cmd_autopilot(app: "CoBirbApp", argument: str) -> None:
-    """Work unattended in this project. `/autopilot on|off`.
+    """Work unattended in this project. `/autopilot on|off`, or F3.
 
     Inside auto-pilot the agent reads and changes files in the project and
     runs commands in the sandbox without asking; anything else is refused
@@ -278,18 +280,24 @@ def cmd_autopilot(app: "CoBirbApp", argument: str) -> None:
     turn_on = (word == "on") or (word == "" and not orchestrator.autopilot)
     if not turn_on:
         orchestrator.disable_autopilot()
-        app.query_one(StatusBar).autopilot = False
+        app.show_autopilot(False)
         app.write_transcript(render.build_notice("Auto-pilot off. Changes outside the sandbox ask first again."))
         return
     problem = orchestrator.enable_autopilot()
     if problem:
         app.write_transcript(render.build_notice(f"Auto-pilot cannot start: {problem}."))
         return
-    app.query_one(StatusBar).autopilot = True
+    app.show_autopilot(True)
+    # Takes effect on what is already waiting, too: a Worker Birb's open
+    # request is answered the way auto-pilot would have answered it. Switching
+    # auto-pilot on is how to get out from under a request whose buttons are
+    # out of reach, so leaving it open would defeat the point.
+    refused = app.query_one(FlockPane).refuse_pending(AUTOPILOT_NOTE)
     app.write_transcript(render.build_notice(
         "Auto-pilot on. The agent will read and change files in this project and run commands in "
         "the sandbox without asking, and refuse anything else instead of stopping for you. "
-        "/diff shows what it did; /undo takes back a turn; /autopilot off to stop."
+        "/diff shows what it did; /undo takes back a turn; /autopilot off (or F3) to stop."
+        + (f" Refused {refused} waiting worker request(s)." if refused else "")
     ))
 
 

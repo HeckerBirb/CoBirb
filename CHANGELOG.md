@@ -4,6 +4,16 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **A Worker Birb's request can no longer push its buttons out of reach.** A request quoting a long
+  command — a script sent on stdin — grew past the bottom of its pane, and Once, Session and Deny
+  with it. The buttons now stay at the bottom of the request and the rest scrolls above them.
+- **`f3` switches auto-pilot on or off at once**, including mid-turn and mid-flock, and the footer
+  shows which way it is (`Autopilot: off` / `Autopilot: ON`). Auto-pilot is now read at every
+  decision rather than once: a running planning stage, a running Worker Birb and the flock's
+  autonomy follow the switch, and a worker request already waiting is answered "no".
+
 ## [0.45.3]
 
 - **A ticket whose test file is only under `writes` is no longer refused.** The Flock stopped with

@@ -687,17 +687,22 @@ def test_a_reported_contradiction_always_gets_its_test_rewritten(monkeypatch, tm
 # --------------------------------------------------------------------------- #
 def _autopilot(orchestrator, monkeypatch):
     """Auto-pilot's state without its preconditions: a sandbox that reports
-    itself active, and the main agent's flag."""
+    itself active, and the project granted on the main agent's policy."""
     monkeypatch.setattr(type(orchestrator.tools["shell"].sandbox), "active", property(lambda self: True))
-    orchestrator.autopilot = True
+    orchestrator.policy.autopilot_root = str(orchestrator.policy.cwd)
 
 
-def test_under_autopilot_a_planning_stage_refuses_instead_of_asking(monkeypatch, tmp_path):
+def test_a_planning_stage_follows_autopilot_switched_on_and_off_while_it_runs(monkeypatch, tmp_path):
     orchestrator = _orchestrator(monkeypatch, tmp_path, _StagedBrainy())
-    orchestrator.autopilot = True
     stager = stages.Stager(orchestrator, str(tmp_path), "x", turns=3, trace=[])
+    stage = stager._stage(set(), None, "")
+    assert stage.autopilot is False
 
-    assert stager._stage(set(), None, "").autopilot is True
+    _autopilot(orchestrator, monkeypatch)
+    assert stage.autopilot is True
+
+    orchestrator.disable_autopilot()
+    assert stage.autopilot is False
 
 
 def test_under_autopilot_the_flock_runs_in_auto_autonomy(monkeypatch, tmp_path):

@@ -98,7 +98,7 @@ PRIVACY BY CONSTRUCTION
 These are enforced in code, not by asking the model to behave.
 
 In the app: ? or /help for this, /help <topic> for a page, f1 help,
-f2 next tab, ctrl+q quit.
+f2 next tab, f3 auto-pilot on/off, ctrl+q quit.
 """
 
 

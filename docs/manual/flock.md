@@ -242,7 +242,9 @@ and refuses to start without it. You approve the first charter either way.
 
 **Under `/autopilot`** the flock runs in auto autonomy whatever the setting says, and nothing else
 asks you either: planning stages and Worker Birbs refuse what they aren't allowed instead of asking.
-Only the first charter approval remains.
+Only the first charter approval remains. Switched on or off mid-flock (`f3`), it takes effect at the
+next question — a running stage or worker included, and a request already waiting in a pane is
+answered "no".
 
 ```json
 "flock": {"planning": "staged", "autonomy": "ask", "max_rounds": 5}
@@ -420,6 +422,9 @@ positions, so that can't happen.
 
 Nothing is focused by default, deliberately: a default target would put the same race on the
 keyboard. Click the button in the pane you mean, or tab to it.
+
+The buttons stay at the bottom of the request however long it is; a tall request — a script sent
+on stdin, say — scrolls above them. Or press `f3`: auto-pilot answers it "no" for you.
 
 Its own `accept` command isn't one of these — see below.
 

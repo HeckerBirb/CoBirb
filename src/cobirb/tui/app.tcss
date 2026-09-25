@@ -336,10 +336,19 @@ FlockPane {
    unmissable and unambiguous about which column it belongs to. */
 .worker-request {
     height: auto;
+    max-height: 100%;
     margin-bottom: 1;
     padding: 0 1;
     border: round $warning;
     background: $surface;
+}
+
+/* The body and the instruction field scroll; the buttons are docked below
+   them. A request as tall as a script sent on stdin used to push its own
+   buttons off the bottom of the pane, out of reach. */
+.worker-request-scroll {
+    height: auto;
+    max-height: 100%;
 }
 
 .worker-request-body {
@@ -353,6 +362,7 @@ FlockPane {
 }
 
 .worker-request-buttons {
+    dock: bottom;
     height: auto;
     padding-top: 1;
     align-horizontal: center;

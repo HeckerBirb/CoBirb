@@ -9,7 +9,7 @@ Type these in the app. Anything else starting with `/` is tried as one of your o
 | `/model` | Pick a model from what your endpoint offers. |
 | `/plan on` · `/plan off` | Look and plan first — the model can read but not change anything — then act. |
 | `/plan` | Say whether plan mode is on. |
-| `/autopilot on` · `/autopilot off` | Work unattended: read and change files in the project and run commands in the sandbox without asking; refuse anything else. Needs the sandbox and git. |
+| `/autopilot on` · `/autopilot off` (or `f3`) | Work unattended: read and change files in the project and run commands in the sandbox without asking; refuse anything else. Needs the sandbox and git. |
 | `/context` | How much of the model's window this session is using. |
 | `/clear` | Start over from here — clears the screen and the model's context, deletes nothing. |
 | `/diff` | Everything the agent changed this session, as one diff. |

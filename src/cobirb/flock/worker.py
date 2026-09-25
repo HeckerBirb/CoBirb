@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from ..config import Config
 from ..typing.spi import Tool, ToolResult
@@ -260,18 +260,28 @@ class RefusingIO:
     the way ``HeadlessIO`` refuses. Only ``confirm`` is offered: the richer
     ``confirm_scoped`` and ``confirm_request`` are hidden, so the orchestrator
     falls back to the one answer this gives.
+
+    **``when`` is asked at every approval, not once.** Auto-pilot can be
+    switched on or off while a round runs, and a worker that took its answer
+    at start would go on asking — in a pane whose buttons may be off screen —
+    after the user had switched asking off. While ``when()`` is false this
+    passes everything through, asking included; the orchestrator probes the
+    hooks with ``getattr`` on each approval, so hiding them is decided then.
     """
 
     _HIDDEN = frozenset({"confirm_scoped", "confirm_request"})
 
-    def __init__(self, base: Any) -> None:
+    def __init__(self, base: Any, when: Callable[[], bool] = lambda: True) -> None:
         self._base = base
+        self._when = when
 
     def confirm(self, *args: Any, **kwargs: Any) -> bool:
-        return False
+        if self._when():
+            return False
+        return bool(self._base.confirm(*args, **kwargs))
 
     def __getattr__(self, name: str) -> Any:
-        if name in self._HIDDEN:
+        if name in self._HIDDEN and self._when():
             raise AttributeError(name)
         return getattr(self._base, name)
 
@@ -331,7 +341,7 @@ def run_worker(
     io=None,
     canceller=None,
     grants=None,
-    refuse: bool = False,
+    refuse: bool | Callable[[], bool] = False,
 ) -> WorkerReport:
     """Run one brief to completion and report on it.
 
@@ -342,15 +352,19 @@ def run_worker(
     two workers racing for the same modal is exactly what that decision avoids.
     Default is ``HeadlessIO``, which does refuse.
 
+    ``refuse`` may be a callable, asked at each approval rather than once: it
+    is how auto-pilot switched on or off mid-round reaches a running worker.
+
     Never raises. A worker that blows up is a fact Brainy Birb needs in order
     to plan the next round, and taking down the whole flock because one ticket
     failed would be the wrong trade — the same fail-closed reasoning the rest
     of the codebase uses, applied one level up.
     """
     config = config or Config()
+    refusing = refuse if callable(refuse) else (lambda: bool(refuse))
     if refuse:
         # Under /autopilot: nothing asks the user (see RefusingIO).
-        io = RefusingIO(io if io is not None else HeadlessIO())
+        io = RefusingIO(io if io is not None else HeadlessIO(), when=refusing)
     policy = policy_for(worker, cwd, audit_log_enabled=bool(config.get("audit_log")))
     orchestrator = build_subagent(
         cwd, policy, accept=worker.accept, config=config, io=io,
@@ -374,7 +388,7 @@ def run_worker(
 
     logger.info("worker %s starting; writes=%s", worker.id, ", ".join(worker.writes))
     brief = compose_brief(worker, cwd)
-    if refuse:
+    if refusing():
         brief += "\n" + AUTOPILOT_NOTE
     try:
         session = None

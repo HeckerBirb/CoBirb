@@ -51,7 +51,13 @@ outside the project, a command outside the sandbox, an MCP or plugin tool — is
 asked about**, so a long job never stalls on a dialog nobody is watching. It will not start unless
 the sandbox and git-backed undo are both active. Review with `/diff`, take a turn back with `/undo`.
 
-**In a flock, auto-pilot reaches every agent.** Brainy Birb's planning stages refuse instead of
+**`f3` switches it on or off at once**, even while a turn or a flock is running, when the prompt
+steers rather than taking commands. The footer says which way it is (`Autopilot: off` /
+`Autopilot: ON`), as does `AUTOPILOT` on the status bar. Switching it on answers a Worker Birb's
+request already waiting in its pane with "no", as auto-pilot would have; a main-agent approval
+dialog already on screen still waits for your answer.
+
+**In a flock, auto-pilot reaches every agent, from the moment it is switched on.** Brainy Birb's planning stages refuse instead of
 asking. Each Worker Birb refuses anything its charter doesn't cover, rather than asking in its pane,
 and is told so in its brief. The flock runs in `auto` autonomy: no design decisions put to you, and
 no approval of later rounds. **The one question that remains is the first charter approval**,

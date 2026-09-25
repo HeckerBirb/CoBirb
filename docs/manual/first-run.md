@@ -48,6 +48,7 @@ Nothing is pre-approved. See [Permissions](permissions.md).
 | `up` / `down` | Previous prompts |
 | `f1` | Help |
 | `f2` | Next tab |
+| `f3` | Auto-pilot on or off — works mid-turn and mid-flock; the footer shows which |
 | `ctrl+c` | Copy selection, or cancel the running turn |
 | `ctrl+q` | Quit |
 

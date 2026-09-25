@@ -14,7 +14,7 @@ import time
 from typing import TYPE_CHECKING, cast
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, HorizontalScroll, Vertical
+from textual.containers import Horizontal, HorizontalScroll, Vertical, VerticalScroll
 from rich.text import Text
 from textual.widgets import Button, Input, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
@@ -160,6 +160,13 @@ class WorkerRequest(Vertical):
     Resolves a ``(decision, instruction)`` pair through an ``asyncio.Future``,
     which is what lets the worker's thread block on an answer while the rest of
     the flock carries on (see ``WorkerPane.ask``).
+
+    **The buttons are docked and the rest scrolls.** A request is as tall as
+    what it quotes, and a shell command carrying a script on stdin is dozens
+    of lines: grown to fit, the request pushed its own buttons past the bottom
+    of the pane, where nothing could reach them. Now the body and the
+    instruction field scroll inside the request, capped at the pane's height,
+    and the buttons stay on screen however long the command is.
     """
 
     INSTRUCTION_PLACEHOLDER = "Deny; do this instead…"
@@ -185,8 +192,9 @@ class WorkerRequest(Vertical):
             body.append("\nSession = ", style="dim")
             body.append(self._scope, style="bold")
             body.append(" for every agent, including workers not yet started.", style="dim")
-        yield Static(body, classes="worker-request-body")
-        yield Input(placeholder=self.INSTRUCTION_PLACEHOLDER, classes="worker-request-instruction")
+        with VerticalScroll(classes="worker-request-scroll"):
+            yield Static(body, classes="worker-request-body")
+            yield Input(placeholder=self.INSTRUCTION_PLACEHOLDER, classes="worker-request-instruction")
         with Horizontal(classes="worker-request-buttons"):
             yield Button("Once", variant="primary", classes="worker-request-once")
             yield Button("Session", variant="warning", classes="worker-request-session")
@@ -443,6 +451,18 @@ class FlockPane(Vertical):
             self.query(WorkerPane), key=lambda p: (order.get(p.state, 9), p._worker_id)
         )
         return " · ".join(f"{pane._worker_id} {pane.state}" for pane in panes)
+
+    def refuse_pending(self, instruction: str) -> int:
+        """Answer every open worker request "deny", with ``instruction``.
+
+        What switching auto-pilot on does to a request already on screen: the
+        same answer the worker would have got had it asked a moment later. How
+        many were answered, so the notice can say so.
+        """
+        pending = [r for r in self.query(WorkerRequest) if not r.answered.done()]
+        for request in pending:
+            request.resolve("deny", instruction)
+        return len(pending)
 
     async def clear(self) -> None:
         await self.query_one("#flock-workers", HorizontalScroll).remove_children()

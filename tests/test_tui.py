@@ -41,7 +41,7 @@ from cobirb.tui import slash_commands
 from cobirb.tui.command_picker import CommandPicker
 from cobirb.tui.mention_picker import MentionPicker
 from cobirb.tui.attachments import split_argument as _split_image_argument
-from cobirb.tui.panes import PluginsPane, SessionsPane
+from cobirb.tui.panes import FlockPane, PluginsPane, SessionsPane, WorkerRequest
 from cobirb.tui.screens import (
     ApprovalModal,
     HelpModal,
@@ -3736,6 +3736,94 @@ async def test_a_worker_may_still_ask_for_a_file_nobody_owns():
         assert adapter._blocked_owner(
             ApprovalRequest(tool_name="write_file", arguments={"path": "new_helper.py"})
         ) == ""
+
+
+class _AutopilotStub(_StubOrchestrator):
+    """An orchestrator whose auto-pilot always starts."""
+
+    autopilot = False
+
+    def enable_autopilot(self):
+        self.autopilot = True
+        return ""
+
+    def disable_autopilot(self):
+        self.autopilot = False
+
+
+def _footer_labels(app) -> list[str]:
+    return [b.binding.description for b in app.screen.active_bindings.values()
+            if b.binding.show and b.enabled]
+
+
+_ONE_TICKET = """
+    objective = "one ticket"
+
+    [[workers]]
+    id     = "a"
+    writes = ["a.py"]
+    brief  = "Do a."
+"""
+
+
+async def test_f3_switches_autopilot_and_the_footer_says_which_way(monkeypatch):
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(_AutopilotStub()))
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert "Autopilot: off" in _footer_labels(app)
+
+        await pilot.press("f3")
+        await pilot.pause()
+        assert "Autopilot: ON" in _footer_labels(app)
+        assert "AUTOPILOT" in str(app.query_one(StatusBar).render())
+
+        await pilot.press("f3")
+        await pilot.pause()
+        assert "Autopilot: off" in _footer_labels(app)
+        assert "AUTOPILOT" not in str(app.query_one(StatusBar).render())
+
+
+async def test_switching_autopilot_on_refuses_a_worker_request_already_waiting(monkeypatch):
+    from cobirb.flock.charter import parse_charter
+
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(_AutopilotStub()))
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        flock = app.query_one(FlockPane)
+        await flock.begin(parse_charter(textwrap.dedent(_ONE_TICKET)))
+        answer = asyncio.ensure_future(app.request_worker_approval("a", "shell", {"command": "ls"}))
+        await _until(pilot, lambda: len(app.query(WorkerRequest)) == 1)
+
+        await pilot.press("f3")
+        await _until(pilot, answer.done)
+
+        decision, instruction = answer.result()
+        assert decision == "deny" and "Auto-pilot" in instruction
+        # And one asked after it is refused without appearing at all.
+        assert (await app.request_worker_approval("a", "shell", {"command": "ls"}))[0] == "deny"
+
+
+async def test_a_worker_request_taller_than_its_pane_keeps_its_buttons_on_screen():
+    """A script sent on stdin used to push the buttons past the pane's bottom."""
+    from cobirb.flock.charter import parse_charter
+
+    app = _make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        app.query_one(TabbedContent).active = "flock"
+        flock = app.query_one(FlockPane)
+        await flock.begin(parse_charter(textwrap.dedent(_ONE_TICKET)))
+        script = "python - <<'EOF'\n" + "\n".join(f"print({i})" for i in range(200)) + "\nEOF"
+        answer = asyncio.ensure_future(app.request_worker_approval("a", "shell", {"command": script}))
+        await _until(pilot, lambda: len(app.query(WorkerRequest)) == 1)
+        await pilot.pause()
+
+        pane = flock.pane("a")
+        for button in app.query(WorkerRequest).first().query(Button):
+            assert pane.region.contains_region(button.region), button.label
+        answer.cancel()
 
 
 async def test_picking_a_model_with_none_configured_offers_to_remember_it(monkeypatch, tmp_path):

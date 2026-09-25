@@ -304,6 +304,28 @@ class FlockSettings:
         )
 
 
+# **/autopilot means nothing asks.** The flock runs in auto autonomy (its design
+# decisions and later rounds are not put to the user) and every Worker Birb
+# refuses what its charter does not cover instead of asking. The first charter
+# approval stays: it is the one question that grants capability. Auto
+# autonomy's own requirement, the sandbox, is one /autopilot already has.
+#
+# Read at each decision rather than once at the start, because auto-pilot can be
+# switched on or off (F3) while a flock runs, and a flock that took its answer at
+# the start would keep asking — or keep not asking — after the user changed it.
+def _autopilot(orchestrator: Orchestrator) -> bool:
+    return bool(getattr(orchestrator, "autopilot", False))
+
+
+def _autonomy(settings: FlockSettings, orchestrator: Orchestrator) -> str:
+    return AUTONOMY_AUTO if _autopilot(orchestrator) else settings.autonomy
+
+
+def _unless_autopilot(decide, orchestrator: Orchestrator):
+    """``decide``, answered by nobody while auto-pilot is on (Brainy Birb decides)."""
+    return lambda text: "" if _autopilot(orchestrator) else decide(text)
+
+
 def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int,
           trace: "list | None" = None) -> PlanResult:
     """Let Brainy Birb plan and scaffold, and take the charter it proposes.
@@ -488,15 +510,6 @@ def _drive(
         return run
 
     settings = FlockSettings.from_config(config)
-    # **/autopilot means nothing asks.** The flock runs in auto autonomy (its
-    # design decisions and later rounds are not put to the user) and every
-    # Worker Birb refuses what its charter does not cover instead of asking.
-    # The first charter approval stays: it is the one question that grants
-    # capability. Auto autonomy's own requirement, the sandbox, is one
-    # /autopilot already has.
-    autopilot = bool(getattr(orchestrator, "autopilot", False))
-    if autopilot:
-        settings.autonomy = AUTONOMY_AUTO
     if charter is None and settings.planning == PLANNING_STAGED:
         return _drive_staged(run, orchestrator, objective, cwd, ask, config, stop, on_event,
                              plan_turns, probe, io_for, on_charter, canceller, settings)
@@ -676,7 +689,7 @@ def _drive(
         # copy through every caller would be the same object in two places,
         # free to be the wrong one.
         grants=getattr(orchestrator, "grants", None),
-        refuse=bool(getattr(orchestrator, "autopilot", False)),
+        refuse=lambda: _autopilot(orchestrator),
     )
     run.outcome = outcome
     ask.show(outcome.describe())
@@ -768,7 +781,7 @@ def _drive_staged(
     why ``auto`` refuses to start outside a working sandbox — a mode that runs
     rounds unattended is only as safe as what contains it.
     """
-    if settings.autonomy == AUTONOMY_AUTO:
+    if _autonomy(settings, orchestrator) == AUTONOMY_AUTO:
         box = getattr(orchestrator.tools.get("shell"), "sandbox", None)
         if box is None or not box.active:
             run.stopped_at = "autonomy"
@@ -781,7 +794,8 @@ def _drive_staged(
 
     stager = Stager(
         orchestrator, cwd, objective, turns=plan_turns, trace=run.trace,
-        decide=ask.decide if settings.autonomy == AUTONOMY_ASK else None, show=ask.show,
+        decide=_unless_autopilot(ask.decide, orchestrator) if settings.autonomy == AUTONOMY_ASK else None,
+        show=ask.show,
     )
     ask.show("Brainy Birb is writing the overview…")
     try:
@@ -852,7 +866,7 @@ def _drive_staged(
                 logger.debug("a charter handler raised", exc_info=True)
 
         # ---- Approval ----------------------------------------------------- #
-        if not approved or settings.autonomy == AUTONOMY_ASK:
+        if not approved or _autonomy(settings, orchestrator) == AUTONOMY_ASK:
             detail = CharterApproval(charter, approved, stager.design.names)
             question = (
                 f"Approve this charter? {len(charter.workers)} Worker Birb(s) will run "
@@ -888,7 +902,7 @@ def _drive_staged(
             charter, cwd, config=config, concurrency=concurrency, stop=stop,
             on_event=on_event, io_for=io_for, canceller=canceller,
             grants=getattr(orchestrator, "grants", None),
-            refuse=bool(getattr(orchestrator, "autopilot", False)),
+            refuse=lambda: _autopilot(orchestrator),
         )
         run.outcome = outcome
         run.rounds.append(outcome)

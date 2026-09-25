@@ -53,6 +53,7 @@ from ..policy import PermissionError
 from .io_bridge import TuiIO
 from ..flock.brainy import PROPOSE_CHARTER
 from ..flock.supervisor import Canceller
+from ..flock.worker import AUTOPILOT_NOTE
 from .flock_bridge import TuiAsker, WorkerPaneIO
 from .panes import FlockPane, PluginsPane, SessionsPane
 from .screens import (
@@ -134,6 +135,13 @@ class CoBirbApp(App[None]):
     BINDINGS = [
         Binding("f1", "help", "Help"),
         Binding("f2", "next_tab", "Next tab"),
+        # One key, two bindings, and check_action shows the one that matches
+        # the state — so the footer is the indicator: "Autopilot: off" while it
+        # is off, "Autopilot: ON" while it is on. A key rather than only the
+        # /autopilot command because it is needed most while a turn or a flock
+        # is running, when the prompt steers instead of running commands.
+        Binding("f3", "autopilot('on')", "Autopilot: off", key_display="f3"),
+        Binding("f3", "autopilot('off')", "Autopilot: ON", key_display="f3"),
         Binding("ctrl+q", "quit", "Quit"),
         # priority=True: fires even while the (disabled, mid-turn) prompt
         # input nominally holds focus — Ctrl+C should always be able to
@@ -399,6 +407,10 @@ class CoBirbApp(App[None]):
         pane = self.query_one(FlockPane).pane(worker_id)
         if pane is None:
             return (DECISION_DENY, "")
+        # Auto-pilot switched on after the worker decided to ask, before its
+        # question reached the screen: answered as auto-pilot answers it.
+        if self._autopilot_on():
+            return (DECISION_DENY, AUTOPILOT_NOTE)
         detail = arguments.get("command") or arguments.get("path") or arguments.get("pattern") or ""
         return await pane.ask(tool_name, str(detail), scope, preview)
 
@@ -540,9 +552,8 @@ class CoBirbApp(App[None]):
         # Auto-pilot and the checklist belonged to that orchestrator; the next
         # one starts without either, so the status bar must not claim them.
         try:
-            status = self.query_one(StatusBar)
-            status.autopilot = False
-            status.checklist = ""
+            self.show_autopilot(False)
+            self.query_one(StatusBar).checklist = ""
         except Exception:  # noqa: BLE001 - on the way out the widgets may already be gone
             pass
 
@@ -1333,6 +1344,24 @@ class CoBirbApp(App[None]):
                 + HELP_TEXT
             )
         self.push_screen(HelpModal(text))
+
+    def action_autopilot(self, state: str) -> None:
+        """F3: auto-pilot on or off, at once — mid-turn and mid-flock included."""
+        slash_commands.cmd_autopilot(self, state)
+
+    def show_autopilot(self, on: bool) -> None:
+        """Mark auto-pilot on the status bar and in the footer's F3 label."""
+        self.query_one(StatusBar).autopilot = on
+        self.refresh_bindings()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Show whichever F3 binding switches auto-pilot to the other state."""
+        if action == "autopilot":
+            return parameters == ("off" if self._autopilot_on() else "on",)
+        return True
+
+    def _autopilot_on(self) -> bool:
+        return bool(getattr(self.orchestrator, "autopilot", False))
 
     def action_next_tab(self) -> None:
         tabs = self.query_one(TabbedContent)

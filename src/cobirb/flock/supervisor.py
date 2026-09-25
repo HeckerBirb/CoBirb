@@ -39,6 +39,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
+from typing import Callable
 
 from ..config import Config
 from ..runtime.verify import DEFAULT_TIMEOUT_SECONDS, run_verification
@@ -255,7 +256,7 @@ def run_flock(
     io_for=None,
     canceller: "Canceller | None" = None,
     grants=None,
-    refuse: bool = False,
+    refuse: bool | Callable[[], bool] = False,
 ) -> FlockOutcome:
     """Run one round of a charter and report on it.
 

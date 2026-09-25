@@ -147,7 +147,8 @@ prompt → model call → tool calls (policy-gated) → results into history →
   project (`Policy.autopilot_root`) and contained commands run unasked; **everything else is refused
   without asking** (`_autopilot_refusal`). It will not start without the sandbox *and* whole-tree
   checkpoints, or in a project that is `/` or the home directory — it is exactly as safe as what
-  contains it.
+  contains it. **Its state is `Policy.autopilot_root`** (`Orchestrator.autopilot` is a property), so
+  stages sharing the policy follow a toggle mid-run; `f3` toggles it in the TUI at any time.
 - `todo` and the charter tools reach nothing and are permitted outright — a considered exception:
   default-deny gates capability (filesystem, network, subprocess), and these touch none of it.
 - `AuditLog` is **off** unless `"audit_log": true`; it stores arguments verbatim, so it is 0600,
@@ -431,6 +432,10 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
   `refuse=True` (`worker.RefusingIO` over their pane, plus `AUTOPILOT_NOTE` in the brief). Only the first
   charter approval remains — the one question that grants capability. The benchmark's driver answers approvals itself; that is
   its controlled exception.
+- **Auto-pilot is read at each decision, never once** (`run._autonomy`, `_unless_autopilot`, and
+  `refuse` as a callable through `run_flock`/`run_worker` into `RefusingIO(when=...)`), because `f3`
+  can switch it mid-flock; switching it on answers open `WorkerRequest`s "deny"
+  (`FlockPane.refuse_pending`).
 - The design and every round's reports go to the flock's encrypted session (`_close_branch`), never the
   repo; `FlockRun.trace` records each planning step's tool calls, for either planner.
 - `FlockSettings.from_config` reads the `flock` block and falls back per value; `doctor` names a value it
@@ -454,7 +459,8 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
 - Under `/autopilot` a worker never asks: `run_worker(refuse=True)` answers every approval "no" (see
   *Staged planning*, autonomy). Otherwise:
 - A worker may ask for what its scope lacks (`WorkerPaneIO.confirm_request`) — **in its own pane, never
-  a modal** (distinct positions, nothing focused by default, fail closed with no pane) — and releases its
+  a modal** (distinct positions, nothing focused by default, fail closed with no pane; buttons docked,
+  body scrolls, so a tall request cannot push them off screen) — and releases its
   concurrency slot while it waits. Answers: once / session / deny-with-instruction.
 - `START_ATTEMPTS = 3`, only when nothing happened yet (no tool calls) and not during a force-stop;
   `START_RETRY_SECONDS = 2`, no backoff (a retry queues behind the work that made the endpoint busy).
@@ -504,7 +510,8 @@ none is configured), `/plan`, `/autopilot`, `/context`, `/clear`, `/undo`, `/exp
 picker and sends the file with the message (expanded for the model, never in the transcript). `/` opens
 the command picker (descriptions from each handler's docstring; `_COMMAND_IN_PROGRESS` matches the whole
 message, so a slash mid-sentence is prose). Anything else starting with `/` is tried as a custom command,
-then sent as typed. Keys: `f1`, `f2`, `ctrl+q`, `ctrl+c` (copy, else cancel), `up`/`down` history. The
+then sent as typed. Keys: `f1`, `f2`, `f3` (auto-pilot; two bindings on one key, `check_action` shows the one matching
+the state, so the footer label is the indicator), `ctrl+q`, `ctrl+c` (copy, else cancel), `up`/`down` history. The
 prompt stays enabled during a turn — submitting steers. Approval is a modal (`y`/`a`/`n`) stating what
 "always" grants. The status bar shows AUTOPILOT, checklist progress, model, plan mode, cwd, session.
 

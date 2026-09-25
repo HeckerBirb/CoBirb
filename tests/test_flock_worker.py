@@ -504,3 +504,25 @@ def test_a_refusing_front_end_says_no_and_still_shows_the_work():
     assert getattr(io, "confirm_request", None) is None
     io.render("working")
     assert shown == ["working"]
+
+
+def test_a_refusing_front_end_follows_autopilot_switched_on_and_off_mid_run():
+    """Auto-pilot can change while a worker runs; each approval asks again."""
+    from cobirb.flock.worker import RefusingIO
+
+    class _Pane:
+        def confirm(self, prompt):
+            return True
+
+        def confirm_request(self, request):
+            return "asked"
+
+    autopilot = [False]
+    io = RefusingIO(_Pane(), when=lambda: autopilot[0])
+
+    assert io.confirm("run ls?") is True
+    assert io.confirm_request(None) == "asked"
+
+    autopilot[0] = True
+    assert io.confirm("run ls?") is False
+    assert getattr(io, "confirm_request", None) is None

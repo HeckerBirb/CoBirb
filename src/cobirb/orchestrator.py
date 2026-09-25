@@ -304,8 +304,8 @@ class Orchestrator:
         # The ceiling for a run() that names none — see DEFAULT_MAX_TURNS.
         self.max_turns = max_turns
         # Auto-pilot (enable_autopilot): unattended work inside the project and
-        # the sandbox; anything else is refused instead of asked about.
-        self.autopilot = False
+        # the sandbox; anything else is refused instead of asked about. Its
+        # state is the policy's (see the ``autopilot`` property).
         self._before_autopilot = False
         self.tools = tools
         self.policy = policy
@@ -988,16 +988,28 @@ class Orchestrator:
         if root is None:
             return "the working directory is your home directory or /, which is too broad a project"
         self._before_autopilot = self.policy.sandbox_auto
-        self.policy.autopilot_root = root
         self.policy.sandbox_auto = True
-        self.autopilot = True
+        self.policy.autopilot_root = root
         return ""
 
     def disable_autopilot(self) -> None:
         if self.autopilot:
             self.policy.autopilot_root = None
             self.policy.sandbox_auto = self._before_autopilot
-        self.autopilot = False
+
+    @property
+    def autopilot(self) -> bool:
+        """Whether auto-pilot is on, read off the policy at the moment of asking.
+
+        **Not a flag of its own, so a toggle reaches a run already under way.**
+        A flock's planning stages share this agent's policy, and they used to
+        copy a separate flag when they were built: auto-pilot switched on mid-
+        flock left the stage running then still asking, with its dialog as the
+        thing the user was trying to get out from under. The policy's
+        ``autopilot_root`` is what actually grants the project, so it is also
+        the one place that says whether auto-pilot is on.
+        """
+        return self.policy.autopilot_root is not None
 
     def _request_approval(
         self, tool_name: str, arguments: dict[str, Any]
