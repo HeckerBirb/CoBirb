@@ -403,13 +403,29 @@ def request_literals(request: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(m for m in re.findall(r'"([^"\n]{1,80})"', request) if m and m == m.strip()))
 
 
-def split_sections(text: str) -> dict[str, str]:
-    """A reply's ``## Heading`` sections, by heading. ``###`` stays inside."""
+def split_sections(text: str, headings: "tuple[str, ...] | list[str]") -> dict[str, str]:
+    """A reply's ``## <heading>`` sections, for the headings asked for only.
+
+    Any other ``##`` line is content. The overview's sections are free
+    Markdown, so Brainy Birb's own sub-headings (``## Components``) sit inside
+    them and a faithful restatement copies them; splitting at every ``##``
+    cut those sections short — an Architecture section that opened with a
+    sub-heading came out empty — and the length check then refused a correct
+    restatement three times over. The first line naming a heading starts it
+    (case aside); a repeat is content.
+    """
+    wanted = {heading.lower(): heading for heading in headings}
+    starts: list[tuple[re.Match, str]] = []
+    seen: set[str] = set()
+    for match in re.finditer(r"^##\s+(.+?)\s*$", text, re.M):
+        heading = wanted.get(match.group(1).strip().strip("#").strip().lower())
+        if heading and heading not in seen:
+            seen.add(heading)
+            starts.append((match, heading))
     sections: dict[str, str] = {}
-    heads = list(re.finditer(r"^##\s+(.+?)\s*$", text, re.M))
-    for index, head in enumerate(heads):
-        end = heads[index + 1].start() if index + 1 < len(heads) else len(text)
-        sections[head.group(1).strip().strip("#").strip()] = text[head.end():end].strip()
+    for index, (match, heading) in enumerate(starts):
+        end = starts[index + 1][0].start() if index + 1 < len(starts) else len(text)
+        sections[heading] = text[match.end():end].strip()
     return sections
 
 
@@ -898,7 +914,7 @@ class Stager:
         **A renamed name that survives is refused, not trusted.** The model
         saying it renamed everything is not the check; the text is.
         """
-        sections = split_sections(text)
+        sections = split_sections(text, ("Names", *headings))
         missing = [h for h in ("Names", *headings) if h not in sections]
         if missing:
             return {}, self.design.names, (

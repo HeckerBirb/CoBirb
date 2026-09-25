@@ -349,6 +349,34 @@ def test_a_restatement_asked_again_can_succeed(monkeypatch, tmp_path):
     assert "could not be used" in retry
 
 
+@pytest.mark.parametrize("text, expected", [
+    ("## Names\n- none\n## Tickets\nx", {"Names": "- none", "Tickets": "x"}),
+    # A sub-heading of Brainy Birb's own is content, even as a section's first line.
+    ("## Names\n- none\n## Tickets\n## Parts\nx", {"Names": "- none", "Tickets": "## Parts\nx"}),
+    ("## names\n- none\n## TICKETS\nx", {"Names": "- none", "Tickets": "x"}),
+    ("## Names\na\n## Names\nb", {"Names": "a\n## Names\nb"}),   # a repeat is content
+    ("## Tickets\nx", {"Tickets": "x"}),                             # a missing one is absent
+])
+def test_a_restatement_splits_only_at_the_headings_asked_for(text, expected):
+    assert stages.split_sections(text, ("Names", "Tickets")) == expected
+
+
+def test_sub_headings_in_the_design_survive_the_restatement(monkeypatch, tmp_path):
+    """The overview is free Markdown; its own sub-headings reach the
+    restatement, which must not read them as sections of its own."""
+    _staged(tmp_path)
+    _project(tmp_path)
+    _workers(monkeypatch, tmp_path)
+    sub_headed = _restatement().replace("## Architecture\n", "## Architecture\n## Components\n")
+    brainy = _StagedBrainy(restatements=[sub_headed])
+
+    run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
+
+    assert run.ran and run.outcome.all_done
+    skeleton = next(p for p in brainy.prompts if "Stage: the skeleton" in p)
+    assert "## Components" in skeleton and "The Architecture section, restated." in skeleton
+
+
 # --------------------------------------------------------------------------- #
 # The name mapping
 # --------------------------------------------------------------------------- #

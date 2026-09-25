@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **A correct restatement is no longer refused for its sub-headings.** Brainy Birb's design is free
+  Markdown, and a sub-heading of its own (`## Components`) was read as the end of the section it
+  sat in. A section that opened with one looked empty, the length check refused the restatement
+  three times, and the flock stopped with "the design could not be restated". Only the section
+  headings asked for now split the reply.
+
 ## [0.45.1]
 
 - **`cobirb doctor` says plainly what the sandbox does.** "bubblewrap, runs without asking" did not
