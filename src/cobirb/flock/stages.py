@@ -855,10 +855,20 @@ class Stager:
         cleared = {h: sections[h] for h in headings}
         survivors = names.survivors("\n".join(cleared.values()))
         if survivors:
+            # Said with where, and with the other way out: a bench run renamed
+            # the request's own "CLI", was told only that it survived, and
+            # spent every attempt failing to scrub it.
+            first = survivors[0]
+            line = next((ln.strip() for ln in "\n".join(cleared.values()).splitlines()
+                         if NameMap({first: ""}).survivors(ln)), "")
+            hint = (f" `{first}` is in the user's request: if the request names it as something to "
+                    f"build, it is a kept name — list it as `- kept: {first}` instead of renaming it."
+                    if NameMap({first: ""}).survivors(self.design.objective) else "")
             return {}, self.design.names, (
                 "these names were renamed but still appear in the text: "
                 + ", ".join(f"`{s}`" for s in survivors)
-                + " — use only the new names outside the `- renamed:` lines")
+                + f" — for example: \"{line[:160]}\". Use only the new names outside the "
+                "`- renamed:` lines." + hint)
         # The user's quoted values are requirements, copied exactly. A benchmark
         # run's CLI answered "OK: set" where the request says "OK".
         body = "\n".join(cleared.values())
