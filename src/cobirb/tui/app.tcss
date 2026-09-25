@@ -411,6 +411,26 @@ ConfirmModal {
     margin: 0 1;
 }
 
+/* The charter approval: most of the screen, because it is read line by line. */
+CharterModal {
+    align: center middle;
+}
+
+#charter-box {
+    width: 85%;
+    height: auto;
+    max-height: 90%;
+    padding: 1 2;
+    border: round $warning;
+    background: $surface;
+}
+
+#charter-body {
+    height: auto;
+    max-height: 70vh;
+    margin-top: 1;
+}
+
 /* One line, above the status bar, only present while something is running. */
 #activity-bar {
     height: auto;

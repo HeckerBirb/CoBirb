@@ -68,6 +68,108 @@ def build_plan_panel(label: str, text: str) -> Panel:
     )
 
 
+# The charter approval's colours, each borrowed from what it already means in
+# the transcript: cyan headings (a charter is a plan, and plans are cyan),
+# yellow for what may be written (edit previews are yellow), green for the
+# check that must pass (a successful tool panel is green), and the secondary
+# gray for what only informs.
+_CHARTER_HEADING = "bold cyan"
+_CHARTER_WRITES = "yellow"
+_CHARTER_ACCEPT = "green"
+_CHARTER_NEW = "bold green"
+
+
+def build_charter(charter: Any, approved: Any = (), names: Any = None) -> Text:
+    """A Flock charter, in colour, for the approval dialog.
+
+    Duck-typed on ``flock.charter.Charter`` (and ``flock.stages.NameMap``)
+    rather than importing them: this module is the renderers' shared layer,
+    and the Flock sits above it. The plain-text form stays
+    ``Charter.describe()`` — this is only how the dialog draws the same facts.
+
+    ``approved`` are the charters approved in earlier rounds: anything this
+    one asks for that none of them covered is marked NEW, so a later round's
+    approval shows what it adds rather than asking the user to diff it.
+    """
+    text = Text()
+
+    def heading(title: str) -> None:
+        if text:
+            text.append("\n")
+        text.append(f"{title}\n", style=_CHARTER_HEADING)
+
+    heading("Objective")
+    text.append(f"{str(charter.objective).strip()}\n", style=CREST_GRAY)
+
+    files = {p for c in approved for w in c.workers for p in w.writes}
+    commands = {w.accept for c in approved for w in c.workers}
+    if approved:
+        fresh = any(p not in files for w in charter.workers for p in w.writes) or any(
+            w.accept and w.accept not in commands for w in charter.workers)
+        text.append("\n")
+        if fresh:
+            text.append("This round asks for files or commands you have not approved before — marked ",
+                        style="bold yellow")
+            text.append("NEW", style=_CHARTER_NEW)
+            text.append(".\n", style="bold yellow")
+        else:
+            text.append("Everything this round touches, you approved in an earlier round.\n", style="green")
+
+    if charter.seams:
+        heading("Seams")
+        for seam in charter.seams:
+            text.append("  ")
+            text.append(str(seam.at), style=f"bold {CREST_GRAY}")
+            if seam.enforced_by_types:
+                text.append(f"  {seam.kind}, held up by the type system", style="green")
+            else:
+                text.append(f"  {seam.kind}, held up only by a test", style="yellow")
+            text.append(f"\n    {seam.what}\n", style=CREST_GRAY)
+
+    heading("Worker Birbs")
+    headline = f"{len(charter.workers)} Worker Birb(s), {charter.concurrency} at a time"
+    if charter.effective_concurrency < charter.concurrency:
+        headline += f" — {charter.effective_concurrency} in practice, because some wait for others"
+    text.append(headline + "\n", style=FEATHER_GRAY)
+    for worker in charter.workers:
+        text.append("\n  ")
+        text.append(f"[{worker.id}]", style=f"bold {CREST_GRAY}")
+        text.append("\n    writes  ", style=FEATHER_GRAY)
+        for index, path in enumerate(worker.writes):
+            if index:
+                text.append(", ", style=FEATHER_GRAY)
+            text.append(str(path), style=_CHARTER_WRITES)
+            if approved and path not in files:
+                text.append(" NEW", style=_CHARTER_NEW)
+        if worker.reads:
+            text.append("\n    reads   ", style=FEATHER_GRAY)
+            text.append(", ".join(worker.reads), style=FEATHER_GRAY)
+        if worker.needs:
+            text.append("\n    after   ", style=FEATHER_GRAY)
+            text.append(", ".join(worker.needs), style=FEATHER_GRAY)
+        if worker.accept:
+            text.append("\n    accept  ", style=FEATHER_GRAY)
+            text.append(str(worker.accept), style=_CHARTER_ACCEPT)
+            if approved and worker.accept not in commands:
+                text.append(" NEW", style=_CHARTER_NEW)
+        text.append("\n")
+
+    if names:
+        heading("Names restated for Architect Birb and the Worker Birbs")
+        for name in names.kept:
+            text.append("  ")
+            text.append(name, style=f"bold {CREST_GRAY}")
+            text.append("  (yours, kept)\n", style=FEATHER_GRAY)
+        for old, new in names.renamed.items():
+            text.append("  ")
+            text.append(old, style=FEATHER_GRAY)
+            text.append(" → ", style=FEATHER_GRAY)
+            text.append(new, style=CREST_GRAY)
+            text.append("\n")
+    text.rstrip()
+    return text
+
+
 def build_validation_panel(label: str, text: str) -> Panel:
     """Plan mode's validate-phase report: whether/how the request was
     actually fulfilled, with references."""

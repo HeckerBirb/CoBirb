@@ -315,8 +315,12 @@ when to use a tool and which neighbour fits better — small models lean on them
 
 ## 13. The Flock (`flock/`)
 
-One **Brainy Birb** plans, designs the seams, writes the skeleton (interfaces, typed stubs, semantic
-docstrings, failing tests) and builds a **charter**. The user approves it — the single decision point.
+One **Brainy Birb** plans, designs the seams and builds a **charter**; under staged planning (the
+default) it restates the design and an **Architect Birb** writes the skeleton (interfaces, typed stubs,
+semantic docstrings, failing tests) and the briefs from that restatement alone — under the one-prompt
+planner Brainy Birb writes them itself. The user approves the charter — the single decision point —
+in a wide, coloured dialog (`stages.CharterApproval`, a `str` carrying the charter and `NameMap`, drawn
+by `render.build_charter` in `tui.screens.CharterModal`; everything else prints its plain text).
 **Worker Birbs** then run inside charter-derived scopes, are reviewed, and Brainy Birb reports.
 
 **Measured, and not yet the headline** (`bench --flock`, 0.40): on two divisible tasks and three models
@@ -378,18 +382,34 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
   checklist each; the Tickets section is fixed-form blocks (`### ticket: <id>` + `- key: value`), parsed
   by `parse_tickets` and checked by `check_tickets` (a file in two tickets is named in overview terms
   first, then a scratch `PlanDraft`), asked up to `SECTION_ATTEMPTS = 3` times, each rejected attempt
-  kept in the trace. `NO TICKETS` is a legitimate decline. (1) **Skeleton**, any file but the tickets' tests.
-  (2) **One stage per ticket**, writing only that ticket's tests; its reply is the ticket plan.
-  (3) **The brief** (`Stager.restate`, no tools, no checkpoints): the plan restated by `RESTATE_RULES`
-  in precise, literal language (terms unpacked, names kept, nothing added or dropped), so a worker
-  without the planner's context does not misread a benign term; before approval. `Design.plans` keeps
-  Brainy Birb's own wording; a reply under half the plan's length leaves the plan as the brief. Test rules (the user's): contracts only, `parametrize` over input → output,
+  kept in the trace. `NO TICKETS` is a legitimate decline. (1) **Restatement** (`Stager.clear`, Brainy
+  Birb, no tools): the whole design, request included, restated by `CLEAR_RULES` in precise, literal
+  language — the *cleared* design (`Design.cleared`). Names too: one the user's request states is a
+  requirement, kept (`- kept:`); one Brainy Birb invented is renamed to say literally what it does
+  (`- renamed: old -> new`), and the code behind a kept name gets an invented internal name. The
+  mapping is `stages.NameMap` (`Design.names`), Brainy Birb's and the user's only. **A renamed name
+  that survives anywhere in the text is refused** (`NameMap.survivors`, whole-identifier match, kept
+  and new names blanked first), as are missing sections, unusable tickets, and tickets that are not
+  the overview's under their mapped ids; `SECTION_ATTEMPTS` tries, then `stopped_at="restatement"`.
+  The cleared tickets replace the overview's: charter, rounds and reports are keyed by cleared ids.
+  (2) **Skeleton** and (3) **one stage per ticket** are **Architect Birb** (`ARCHITECT_INTRO`,
+  `_stage(architect=True)`): given only `Design.cleared_document()`, **no project context** (the
+  project's instructions and repo map are uncleared too; it has the read tools). Skeleton: any file
+  but the tickets' tests. Ticket stage: only that ticket's tests; **its reply is the brief as it
+  stands** — the per-brief restatement it replaced was removed, since restating a cleared plan only
+  drifts. (Before, Brainy Birb wrote the skeleton and tests itself and only the brief was restated:
+  a worker was told one thing literally while the files it read carried the planner's slang — a leak
+  across need-to-know.) Architect Birb is the one agent that sees the whole shape, in cleared form —
+  accepted by the user for it alone. Test rules (the user's): contracts only, `parametrize` over input → output,
   K.I.S.S., no design knowledge, no nudging toward an implementation. **The harness seals**
   (`Stager.charter`); no stage has a seal tool. (Staged planning as first built offered one, and
   qwen3-coder sealed in step 1 on every seed traced, so no skeleton step ever ran.)
 - **Rounds.** After a round: `recheck`, review, and each worker's structured report (`ReportTool`: tests
   pass, contract kept, what is missing and why, a test that contradicts the contract) go to an evaluation
-  stage, which returns ticket blocks for only what is open, each with a `why`. The next round re-runs the
+  stage, which returns ticket blocks for only what is open, each with a `why`. The evaluation is Brainy
+  Birb, on its raw design plus the `NameMap` (the reports use cleared names); its blocks are restated
+  (`Stager.clear_round`, same checks, the mapping extended) before Architect Birb sees them, and a
+  fallback retry's `why` is the harness's own words, never the unrestated evaluation. The next round re-runs the
   skeleton for new files and a stage per ticket, carrying the last plan, the `why` and the report. Stops
   on all green, `flock.max_rounds` (default 5), a round whose failing set equals the last one's
   (`stopped_at="no_progress"`), or an explicit `NO TICKETS` — an evaluation that cannot be read retries

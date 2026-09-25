@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, cast
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, OptionList, Static
 from textual.widgets.option_list import Option
@@ -281,6 +281,33 @@ class ConfirmModal(ModalScreen[bool]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
         self.dismiss(event.button.id == "confirm-yes")
+
+
+class CharterModal(ConfirmModal):
+    """The Flock's charter approval: the same yes/no, wide and in colour.
+
+    The charter is the one thing a person reads line by line before Worker
+    Birbs run unattended, so it gets most of the screen and the transcript's
+    colours (``render.build_charter``) rather than ``ConfirmModal``'s narrow
+    box of muted text. The body scrolls between a fixed question and fixed
+    buttons, and comes first in focus order, so Enter scrolls rather than
+    approving — the same fail-closed bindings as its parent.
+    """
+
+    def __init__(self, question: str, approval: Any) -> None:
+        super().__init__(question, str(approval))
+        self._approval = approval
+
+    def compose(self) -> ComposeResult:
+        approval = self._approval
+        with Vertical(id="charter-box"):
+            yield Static(Text(self._question, style="bold"), id="confirm-question")
+            with VerticalScroll(id="charter-body"):
+                yield Static(render.build_charter(approval.charter, approval.approved, approval.names),
+                             id="charter-detail")
+            with Horizontal(id="confirm-actions"):
+                yield Button(self._confirm_label, id="confirm-yes", variant="primary")
+                yield Button("No", id="confirm-no")
 
 
 # --------------------------------------------------------------------------- #

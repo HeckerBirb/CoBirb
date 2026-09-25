@@ -48,6 +48,7 @@ from .stages import (
     AUTONOMY_ASK,
     AUTONOMY_AUTO,
     DEFAULT_MAX_ROUNDS,
+    CharterApproval,
     Stager,
     approval_changes,
     check_tickets,
@@ -642,7 +643,7 @@ def _drive(
     if not ask.confirm(
         f"Approve this charter? {len(charter.workers)} Worker Birb(s) will run "
         "unattended inside exactly these scopes, with no further prompts.",
-        charter.describe(),
+        CharterApproval(charter),
     ):
         run.stopped_at = "approval"
         run.report = "Charter not approved; nothing ran."
@@ -801,6 +802,22 @@ def _drive_staged(
         return run
     ask.show(run.design)
 
+    # ---- Restatement: everything after this works from the cleared design - #
+    ask.show("Brainy Birb is restating the design for Architect Birb…")
+    try:
+        problem = stager.clear()
+    except RuntimeError as exc:
+        run.stopped_at = "error"
+        run.report = f"No flock ran: planning stopped because the model server failed.\n\n{exc}"
+        return run
+    run.design = stager.design.record()
+    if problem:
+        run.stopped_at = "restatement"
+        run.report = f"No flock ran: {problem}."
+        return run
+    if stager.design.names:
+        ask.show("Names restated for Architect Birb and the Worker Birbs:\n" + stager.design.names.describe())
+
     tickets = list(stager.design.tickets)
     previous: dict[str, str] = {}
     approved: list[Charter] = []
@@ -812,13 +829,14 @@ def _drive_staged(
                 known = {p for c in approved for w in c.workers for p in w.writes}
                 fresh = [t for t in tickets if any(p not in known for p in t.writes)]
                 if fresh:
-                    ask.show(f"Round {round_number}: Brainy Birb is writing the skeleton…")
+                    ask.show(f"Round {round_number}: Architect Birb is writing the skeleton…")
                     stager.skeleton(fresh)
                 briefs = {}
                 for ticket in tickets:
-                    ask.show(f"Round {round_number}: planning ticket '{ticket.id}'…")
-                    plan = stager.ticket_plan(ticket, previous.get(ticket.id, ""))
-                    briefs[ticket.id] = stager.restate(ticket.id, plan)
+                    ask.show(f"Round {round_number}: Architect Birb is planning ticket '{ticket.id}'…")
+                    # The plan is written from the cleared design, so it is the
+                    # brief as it stands — restating it again would only drift.
+                    briefs[ticket.id] = stager.ticket_plan(ticket, previous.get(ticket.id, ""))
             charter = stager.charter(tickets, briefs)
         except RuntimeError as exc:
             run.stopped_at = "error"
@@ -826,7 +844,7 @@ def _drive_staged(
                           f"server failed.\n\n{exc}")
             return run
         run.charter = charter
-        run.design = stager.design.document()
+        run.design = stager.design.record()
         if on_charter is not None:
             try:
                 on_charter(charter)
@@ -835,8 +853,7 @@ def _drive_staged(
 
         # ---- Approval ----------------------------------------------------- #
         if not approved or settings.autonomy == AUTONOMY_ASK:
-            detail = charter.describe() if not approved else (
-                approval_changes(charter, approved) + "\n\n" + charter.describe())
+            detail = CharterApproval(charter, approved, stager.design.names)
             question = (
                 f"Approve this charter? {len(charter.workers)} Worker Birb(s) will run "
                 "unattended inside exactly these scopes, with no further prompts."
@@ -917,7 +934,7 @@ def _drive_staged(
         stager.design.tickets = list(by_id.values())
         tickets = next_tickets
 
-    run.design = stager.design.document()
+    run.design = stager.design.record()
     if run.rounds:
         lines = [f"Flock finished after {len(run.rounds)} round(s)."]
         for index, outcome in enumerate(run.rounds, 1):

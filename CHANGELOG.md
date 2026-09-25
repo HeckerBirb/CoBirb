@@ -4,6 +4,25 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Architect Birb: Worker Birbs no longer see the planner's own words, anywhere.** Brainy Birb
+  used to write the skeleton and each ticket's tests itself, so while a worker's brief was restated
+  in precise, literal language, the files it read still carried the planner's slang and assumed
+  knowledge. Now, after the overview, Brainy Birb restates the whole design, your request included,
+  and a new agent, **Architect Birb**, writes the skeleton, the tests and every brief from that
+  restatement alone. It never sees the request or Brainy Birb's wording, and gets no project
+  instructions in its prompt. Names are restated too: names your request states (a `/kill` command)
+  are kept, names Brainy Birb invented are renamed to say literally what they do, and Brainy Birb
+  keeps the list so it can judge the workers' results. CoBirb refuses a restatement in which an old
+  name survives. The separate restatement of each brief is gone, since the brief is now written in
+  restated terms from the start.
+- **The charter approval is wide and in colour.** It takes most of the screen, with headings in
+  cyan, the files a worker may write in yellow, the check it must pass in green, seams marked by how
+  firmly they hold, and the list of renamed names with yours marked *kept*. On a later round,
+  whatever you have not approved before is marked NEW. The dialog's body scrolls and has the focus,
+  so Enter never approves.
+
 ## [0.44.1]
 
 - **Two flaky tests are fixed.** The first streamed token now always reaches the screen at once;

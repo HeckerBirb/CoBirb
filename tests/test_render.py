@@ -301,3 +301,34 @@ def test_a_replayed_tool_panel_still_shows_its_diff():
 
 def test_the_history_divider_names_what_was_restored():
     assert "4 earlier turns" in _printed(render.build_history_divider("4 earlier turns"))
+
+
+# --------------------------------------------------------------------------- #
+# The charter approval
+# --------------------------------------------------------------------------- #
+def _charter(writes, accept="pytest"):
+    from cobirb.flock.charter import parse_charter
+
+    return parse_charter(f'objective = "double it"\n[[workers]]\nid = "a"\nwrites = {writes!r}\n'
+                         f'accept = "{accept}"\nbrief = "go"')
+
+
+@pytest.mark.parametrize("earlier, writes, accept, new", [
+    ([], ["a.py"], "pytest", []),                                   # a first charter marks nothing
+    ([["a.py"]], ["a.py"], "pytest", []),                           # all approved before
+    ([["a.py"]], ["a.py"], "pytest -x", ["pytest -x NEW"]),         # a new command
+    ([["a.py"]], ["a.py", "extra.py"], "pytest", ["extra.py NEW"]),  # a new file
+])
+def test_a_charter_marks_what_no_earlier_approval_covered(earlier, writes, accept, new):
+    plain = render.build_charter(_charter(writes, accept), [_charter(w) for w in earlier]).plain
+
+    assert all(item in plain for item in new)
+    assert new or "NEW" not in plain
+
+
+def test_a_charter_shows_the_names_the_user_is_cleared_to_see():
+    from cobirb.flock.stages import NameMap
+
+    plain = render.build_charter(_charter(["a.py"]), names=NameMap({"kill": "send_sigterm"}, ["/kill"])).plain
+
+    assert "kill → send_sigterm" in plain and "/kill  (yours, kept)" in plain

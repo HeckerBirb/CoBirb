@@ -1,7 +1,8 @@
 # The Flock
 
-Split one job across several agents. A **Brainy Birb** plans and writes the skeleton; **Worker
-Birbs** fill it in, in parallel, each locked to its own files.
+Split one job across several agents. A **Brainy Birb** plans; an **Architect Birb** writes the
+skeleton and tests from a restated plan; **Worker Birbs** fill it in, in parallel, each locked to
+its own files.
 
 ## Run one
 
@@ -120,10 +121,10 @@ If it re-proposes the same overlap, it's told so and told to stop.
 
 ### When one worker has to go first
 
-Usually none of them do — that's what the skeleton is for. Brainy Birb writes the signatures the
-workers meet at, so their tickets are independent and all start at once. A ticket's tests should
-pass with its own code and the skeleton alone — against a small fake where they'd otherwise need
-another ticket's unfinished code.
+Usually none of them do — that's what the skeleton is for. Brainy Birb designs the signatures the
+workers meet at and they go into the skeleton first, so the tickets are independent and all start
+at once. A ticket's tests should pass with its own code and the skeleton alone — against a small
+fake where they'd otherwise need another ticket's unfinished code.
 
 For the case it can't hoist into the skeleton, a worker can name what it waits for:
 
@@ -186,23 +187,39 @@ agent did better than any flock, so for those, just ask CoBirb directly.
 
 1. **The overview**, section by section: what is asked, the decisions, the architecture, the seams,
    the tickets, the risks. Read-only: nothing is written yet. These are Brainy Birb's design
-   documents, and it carries them into every later stage.
-2. **The skeleton**: finished shared files, and typed stubs for every ticket. The charter's tickets
-   come straight from the overview's ticket list.
-3. **One fresh stage per ticket**, holding the design documents and that ticket only. It writes the
-   ticket's tests and its ticket plan: exact procedures, values and a worked example.
-   Brainy Birb then restates the plan in precise, literal language for the worker, who shares
-   none of its context: slang and ambiguous words become the technical terms they stand for, and
-   a term that relies on assumed knowledge (a protocol, a format, an acronym, a tool) keeps its
-   name and gets a short description of what it involves. Nothing is left out or added, and names,
-   code and commands are copied exactly. The restatement is the Worker Birb's whole brief, and it
-   is ready before you approve the charter. A reply much shorter than the plan has left something
-   out, so then the plan itself is the brief.
-4. **Approve and run.** You approve the first charter. Workers run, then each reports whether its
-   tests pass, whether it kept the contract, and what is missing and why, including a test it
-   thinks contradicts the contract.
-5. **Evaluate.** CoBirb re-runs every check on the finished tree. Brainy Birb reads that, the review
-   and the reports, and plans only what is still open, then back to step 2 or 3.
+   documents.
+2. **The restatement.** Brainy Birb restates the whole design, your request included, in precise,
+   literal language for **Architect Birb**, who never sees the original. Slang and ambiguous words
+   become the technical terms they stand for, and a term that relies on assumed knowledge (a
+   protocol, a format, an acronym, a tool) keeps its name and gets a short description of what it
+   involves. Nothing is left out or added.
+
+   Names are restated too, because the skeleton is made of them. A name your request states — a
+   `/kill` command you asked for — is a requirement and is kept exactly. A name Brainy Birb
+   invented is renamed to say literally what it does (`kill_children` → `terminate_child_processes`),
+   and the code behind a kept name gets an invented internal name like any other. Brainy Birb keeps
+   the list of renames, and CoBirb refuses a restatement in which an old name still appears; after
+   three tries the flock stops before anything is written.
+3. **The skeleton**, by Architect Birb, from the restated design only: finished shared files, and
+   typed stubs for every ticket. The charter's tickets come straight from the restated ticket list.
+4. **One fresh Architect Birb stage per ticket**, holding the restated design and that ticket only.
+   It writes the ticket's tests and its ticket plan — exact procedures, values and a worked example —
+   and that plan is the Worker Birb's whole brief.
+
+   So everything a Worker Birb can see — the skeleton, its tests, its brief — is written by an agent
+   that never saw your request or Brainy Birb's wording, and all of it uses the same vocabulary.
+   Architect Birb is the one agent that sees the whole shape of the feature, in restated form.
+   It gets no project instructions or repo map in its prompt; it has the read tools.
+5. **Approve and run.** You approve the first charter, in a wide dialog in colour: files a worker
+   may write in yellow, the check it must pass in green, and the renamed names with yours marked
+   *kept*. You are the one person besides Brainy Birb who sees both sides. Workers run, then each
+   reports whether its tests pass, whether it kept the contract, and what is missing and why,
+   including a test it thinks contradicts the contract.
+6. **Evaluate.** CoBirb re-runs every check on the finished tree. Brainy Birb reads that, the review
+   and the reports — which use the new names, so it gets the list of renames too — and plans only
+   what is still open. Its ticket blocks are restated the same way before Architect Birb plans them,
+   then back to step 3 or 4. On a later round's approval, anything you have not approved before is
+   marked NEW.
 
 It stops when every check passes, at `max_rounds` (5), when a round ends with the same tickets
 failing the same way as the one before, or when Brainy Birb says another round would not change
@@ -228,8 +245,8 @@ Only the first charter approval remains.
 "flock": {"planning": "staged", "autonomy": "ask", "max_rounds": 5}
 ```
 
-The design documents and every round's reports are kept in the flock's encrypted session, never in
-your repository.
+The design documents, the restated design, the list of renames and every round's reports are kept
+in the flock's encrypted session, never in your repository.
 
 ### Planning runs until the plan is finished
 

@@ -25,7 +25,7 @@ _BLOCKS = """
 - tests: test_a.py
 - accept: "{py}" -m pytest test_a.py -q
 - needs: none
-- builds: doubles a number
+- builds: doubles the number
 - done when: test_a passes
 
 ### ticket: b
@@ -33,7 +33,7 @@ _BLOCKS = """
 - tests: test_b.py
 - accept: "{py}" -m pytest test_b.py -q
 - needs: none
-- builds: doubles a number too
+- builds: doubles the number too
 - done when: test_b passes
 """.replace("{py}", sys.executable)
 
@@ -46,14 +46,25 @@ def _no_preflight(monkeypatch):
 _PLAN = "## Job\nImplement it.\n" + "## Procedure\n1. Return n * 2.\n" * 20
 
 
+def _restatement(tickets=_BLOCKS, names="- none"):
+    """A restated design: every section reworded, the tickets as given."""
+    parts = [f"## Names\n{names}", "## The request\nDouble two numbers, restated."]
+    for heading, _ in stages.SECTIONS:
+        parts.append(f"## {heading}\n" + (tickets if heading == "Tickets" else f"The {heading} section, restated."))
+    return "\n\n".join(parts)
+
+
 class _StagedBrainy:
     """Answers each stage by the marker in the prompt it was given."""
 
-    def __init__(self, tickets=_BLOCKS, evaluations=None, restate=None):
+    def __init__(self, tickets=_BLOCKS, evaluations=None, restatements=None):
         self.tickets = tickets
         self.evaluations = list(evaluations or [])
-        self.restated = _PLAN.replace("Return n * 2.", "Return the product of n and 2.") if restate is None else restate
+        # Replies to "restate the design", in order; the last one repeats.
+        self.restatements = list(restatements or [_restatement(tickets)])
+        self.last_evaluation = ""
         self.prompts = []
+        self.systems = []
 
     def name(self):
         return "staged-brainy"
@@ -61,17 +72,22 @@ class _StagedBrainy:
     def chat(self, system, context, tools=None, *, stream=False):
         text = str(context)
         self.prompts.append(text)
+        self.systems.append(str(system))
         last = max(("Write the next section:", "Stage: the skeleton", "Stage: the plan for ticket",
-                    "Stage: after round", "Stage: the worker's brief"), key=text.rfind)
+                    "Stage: after round", "Stage: restate the design", "Stage: restate the next round"),
+                   key=text.rfind)
         if last == "Write the next section:":
             heading = text[text.rfind(last) + len(last):].split("---")[0].strip()
             return self.tickets if heading == "Tickets" else f"The {heading} section."
         if last == "Stage: the plan for ticket":
             return _PLAN
-        if last == "Stage: the worker's brief":
-            return self.restated
+        if last == "Stage: restate the design":
+            return self.restatements.pop(0) if len(self.restatements) > 1 else self.restatements[0]
+        if last == "Stage: restate the next round":
+            return f"## Names\n- none\n\n## Tickets\n{self.last_evaluation}"
         if last == "Stage: after round":
-            return self.evaluations.pop(0) if self.evaluations else "NO TICKETS nothing left."
+            self.last_evaluation = self.evaluations.pop(0) if self.evaluations else "NO TICKETS nothing left."
+            return self.last_evaluation
         return "Skeleton written."
 
     def parse_tool_calls(self, reply):
@@ -219,41 +235,31 @@ def test_a_staged_flock_runs_every_stage_and_the_workers(monkeypatch, tmp_path):
 
     assert run.ran and len(run.rounds) == 1 and run.outcome.all_done
     steps = [entry["step"] for entry in run.trace]
-    assert steps[:6] == [f"overview: {h}" for h, _ in stages.SECTIONS]
+    assert steps[:7] == [f"overview: {h}" for h, _ in stages.SECTIONS] + ["restate the design"]
     assert "skeleton" in steps and "ticket: a" in steps and "ticket: b" in steps
-    # The ticket plan, restated, is the brief the Worker Birb gets.
-    assert run.charter.worker("a").brief.startswith("## Job")
+    # Architect Birb's ticket plan is the brief the Worker Birb gets, as written.
+    assert run.charter.worker("a").brief == _PLAN.strip()
 
 
-def test_the_worker_gets_the_plan_restated_and_brainy_birb_keeps_its_own(monkeypatch, tmp_path):
+@pytest.mark.parametrize("marker", ["Stage: the skeleton", "Stage: the plan for ticket 'a'"])
+def test_architect_birb_sees_only_the_restated_design(monkeypatch, tmp_path, marker):
     _staged(tmp_path)
     _project(tmp_path)
     _workers(monkeypatch, tmp_path)
     brainy = _StagedBrainy()
+    orchestrator = _orchestrator(monkeypatch, tmp_path, brainy)
+    orchestrator.project_context = "PROJECT NOTES in the planner's own terms"
 
-    run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
+    _run(orchestrator, tmp_path)
 
-    restating = next(p for p in brainy.prompts if "Stage: the worker's brief" in p)
-    assert "Unpack one level deep." in restating and "Return n * 2." in restating
-    assert "Return the product of n and 2." in run.charter.worker("a").brief
-    assert "Return n * 2." not in run.charter.worker("a").brief
-
-
-@pytest.mark.parametrize("restated", ["", "## Job\nDo it."])
-def test_a_restatement_that_drops_content_leaves_the_plan_as_the_brief(monkeypatch, tmp_path, restated):
-    """Restating only adds; a reply far shorter than the plan has left things out."""
-    _staged(tmp_path)
-    _project(tmp_path)
-    _workers(monkeypatch, tmp_path)
-    brainy = _StagedBrainy(restate=restated)
-
-    run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
-
-    assert run.charter.worker("a").brief.strip() == _PLAN.strip()
-    assert any(t["step"] == "brief: a" and t.get("problem") for t in run.trace)
+    index = next(i for i, p in enumerate(brainy.prompts) if marker in p)
+    prompt, system = brainy.prompts[index], brainy.systems[index]
+    assert "Double two numbers, restated." in prompt and "The Architecture section, restated." in prompt
+    assert "double two numbers" not in prompt and "The Architecture section." not in prompt
+    assert "PROJECT NOTES" not in system + prompt
 
 
-def test_every_ticket_stage_carries_the_design_and_its_own_ticket_only(monkeypatch, tmp_path):
+def test_every_ticket_stage_carries_its_own_ticket_only(monkeypatch, tmp_path):
     _staged(tmp_path)
     _project(tmp_path)
     _workers(monkeypatch, tmp_path)
@@ -262,9 +268,101 @@ def test_every_ticket_stage_carries_the_design_and_its_own_ticket_only(monkeypat
     _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
 
     a_stage = next(p for p in brainy.prompts if "Stage: the plan for ticket 'a'" in p)
-    assert "The Architecture section." in a_stage          # the design documents
-    assert "double two numbers" in a_stage                  # and the request
     assert "Stage: the plan for ticket 'b'" not in a_stage  # a fresh context
+
+
+def test_the_restatement_renames_what_the_workers_see_and_the_user_is_shown_the_names(monkeypatch, tmp_path):
+    _staged(tmp_path)
+    for name in ("double_a", "b"):
+        (tmp_path / f"{name}.py").write_text(f"def {name}(n):\n    raise NotImplementedError\n")
+        (tmp_path / f"test_{name}.py").write_text(f"from {name} import {name}\n\ndef test_it():\n    assert {name}(2) == 4\n")
+    renamed = _BLOCKS.replace("ticket: a", "ticket: double_a").replace("a.py", "double_a.py")
+    brainy = _StagedBrainy(restatements=[_restatement(renamed, "- renamed: a -> double_a\n- kept: b")])
+    details = []
+
+    run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path,
+               ask=Asker(confirm=lambda q, detail="": details.append(detail) or False))
+
+    assert [w.id for w in run.charter.workers] == ["double_a", "b"]
+    assert run.charter.worker("double_a").writes == ("double_a.py", "test_double_a.py")
+    assert "a → double_a" in details[0] and "b  (yours, kept)" in details[0]
+    assert details[0].names.renamed == {"a": "double_a"}
+
+
+_SURVIVOR = _BLOCKS.replace("ticket: a", "ticket: double_a")  # renamed, but a.py is still there
+
+
+@pytest.mark.parametrize("reply, problem", [
+    ("## Names\n- none", "sections are missing"),
+    (_restatement(_SURVIVOR, "- renamed: a.py -> double_a.py"), "still appear"),
+    # Renamed without saying so: the tickets no longer match Brainy Birb's.
+    (_restatement(_BLOCKS.replace("ticket: a", "ticket: double_a")), "same tickets under their new ids"),
+    (_restatement("no tickets at all"), "restated tickets cannot be used"),
+])
+def test_a_restatement_that_cannot_be_used_is_asked_for_again_then_stops_the_flock(
+        monkeypatch, tmp_path, reply, problem):
+    _staged(tmp_path)
+    brainy = _StagedBrainy(restatements=[reply])
+
+    run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
+
+    failed = [t for t in run.trace if t["step"] == "restate the design" and t.get("problem")]
+    assert run.stopped_at == "restatement" and not run.ran
+    assert len(failed) == stages.SECTION_ATTEMPTS and problem in failed[0]["problem"]
+    assert problem in run.report
+
+
+def test_a_restatement_asked_again_can_succeed(monkeypatch, tmp_path):
+    _staged(tmp_path)
+    _project(tmp_path)
+    _workers(monkeypatch, tmp_path)
+    brainy = _StagedBrainy(restatements=["## Names\n- none", _restatement()])
+
+    run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
+
+    assert run.ran and run.outcome.all_done
+    retry = [p for p in brainy.prompts if "Stage: restate the design" in p][-1]
+    assert "could not be used" in retry
+
+
+# --------------------------------------------------------------------------- #
+# The name mapping
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("section, renamed, kept", [
+    ("- none", {}, []),
+    ("- renamed: `kill` -> `send_sigterm`", {"kill": "send_sigterm"}, []),
+    ("- renamed: kill → send_sigterm\n- kept: /kill", {"kill": "send_sigterm"}, ["/kill"]),
+    ("* Renamed: a => b\n- kept: none", {"a": "b"}, []),
+    ("- renamed: same -> same\n- renamed: broken", {}, []),
+])
+def test_the_names_section_is_read(section, renamed, kept):
+    names = stages.parse_names(section)
+
+    assert (names.renamed, names.kept) == (renamed, kept)
+
+
+@pytest.mark.parametrize("text, survivors", [
+    ("call send_sigterm on the child", []),
+    ("call kill on the child", ["kill"]),
+    ("the user's /kill command stays", []),           # kept names do not count
+    ("SIGKILL and kill_all and skill", []),           # a name only as a whole word
+    ("see kill.py", ["kill"]),
+])
+def test_a_renamed_name_is_found_wherever_it_survives(text, survivors):
+    names = stages.NameMap({"kill": "send_sigterm"}, ["/kill"])
+
+    assert names.survivors(text) == survivors
+
+
+@pytest.mark.parametrize("first, second, problem", [
+    ({"a": "b"}, {"a": "c"}, "already renamed"),
+    ({"a": "c"}, {"b": "c"}, "both renamed"),
+    ({"a": "b"}, {"c": "d"}, ""),
+])
+def test_names_merge_only_when_they_agree(first, second, problem):
+    _, found = stages.NameMap(first).merged(stages.NameMap(second))
+
+    assert (problem in found) if problem else found == ""
 
 
 def test_declining_to_divide_ends_planning(monkeypatch, tmp_path):
@@ -311,7 +409,8 @@ def test_ask_mode_puts_the_decisions_to_the_user_and_carries_the_answer(monkeypa
     _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path, ask=ask)
 
     assert asked == ["The Decisions section."]
-    assert any("1: use curses" in p for p in brainy.prompts if "Stage: the plan for ticket" in p)
+    # The answer is part of the design Brainy Birb restates for Architect Birb.
+    assert any("1: use curses" in p for p in brainy.prompts if "Stage: restate the design" in p)
 
 
 def test_auto_mode_refuses_to_start_without_a_sandbox(monkeypatch, tmp_path):
@@ -452,6 +551,9 @@ def test_an_unreadable_evaluation_tries_the_failing_tickets_again(monkeypatch, t
 
     assert len(run.rounds) == 2 and run.outcome.all_done
     assert [w.id for w in run.rounds[1].charter.workers] == ["b"]
+    # Brainy Birb's unrestated words never reach Architect Birb.
+    second = [p for p in brainy.prompts if "Stage: the plan for ticket 'b'" in p][-1]
+    assert "it was close" not in second
 
 
 def test_a_stage_survives_one_dropped_connection(monkeypatch, tmp_path):

@@ -21,7 +21,8 @@ from cobirb.tui.app import CoBirbApp
 from cobirb.tui.widgets import PromptInput
 from cobirb.tui.flock_bridge import TuiAsker, WorkerPaneIO
 from cobirb.tui.panes import FlockPane, WorkerPane
-from cobirb.tui.screens import ConfirmModal
+from cobirb.flock.stages import CharterApproval, NameMap
+from cobirb.tui.screens import CharterModal, ConfirmModal
 
 _CHARTER = parse_charter("""
 objective = "two things"
@@ -253,6 +254,33 @@ async def test_answering_yes_approves():
         await _settle(pilot, lambda: bool(answers))
 
     assert answers == [True]
+
+
+@pytest.mark.parametrize("keys, expected", [
+    (["y"], True),
+    (["n"], False),
+    (["escape"], False),
+    # The scrolling body has the focus, so Enter never approves.
+    (["enter", "escape"], False),
+])
+async def test_a_charter_approval_gets_the_wide_dialog_with_the_same_answers(keys, expected):
+    app = _make_app()
+    answers = []
+    approval = CharterApproval(_CHARTER, names=NameMap({"kill": "send_sigterm"}, ["/kill"]))
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        app.run_worker(
+            lambda: answers.append(TuiAsker(app).confirm("Approve this charter?", approval)),
+            thread=True,
+        )
+        await _settle(pilot, lambda: isinstance(app.screen, CharterModal))
+        assert app.screen.query_one("#charter-box").size.width >= 160 * 0.8
+        for key in keys:
+            await pilot.press(key)
+            await pilot.pause()
+        await _settle(pilot, lambda: bool(answers))
+
+    assert answers == [expected]
 
 
 def test_an_asker_with_no_app_to_ask_refuses():

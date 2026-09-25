@@ -11,19 +11,32 @@ So the planning is split the way a person plans with someone else:
 0. **Overview**, section by section in one context, read-only: what is asked,
    the decisions (put to the user in ``ask`` mode), the architecture, the seams,
    the tickets, the risks. This is Brainy Birb's design documents.
-1. **Skeleton**: the finished shared files and the typed stubs. The charter's
-   tickets come from the overview's ticket blocks, derived rather than written
-   a second time.
-2. **One fresh stage per ticket**: the design documents plus that ticket and
-   nothing else. It writes that ticket's tests and its ticket plan.
-3. **The brief**: the ticket plan restated in precise, literal language
-   (``RESTATE_RULES``) is the Worker Birb's brief, before the charter is put
-   to the user.
+1. **Restatement**: Brainy Birb restates the whole design in precise, literal
+   language (``CLEAR_RULES``) — the *cleared* design — and renames every name
+   it invented, keeping a mapping (``NameMap``). Names the user's request
+   states are requirements and are kept. The harness refuses a restatement in
+   which a renamed name survives.
+2. **Skeleton**, by **Architect Birb**: the finished shared files and the typed
+   stubs. The charter's tickets come from the cleared ticket blocks, derived
+   rather than written a second time.
+3. **One fresh Architect Birb stage per ticket**: the cleared design plus that
+   ticket and nothing else. It writes that ticket's tests, and its reply — the
+   ticket plan — is the Worker Birb's brief.
+
+Everything a Worker Birb can see — the skeleton, its tests, its brief — is
+written from the cleared design by stages that never saw the request or
+Brainy Birb's own wording. Before, Brainy Birb wrote the skeleton and tests
+itself and only the brief was restated, so a worker was told one thing in
+literal terms while the files it read carried the planner's slang and assumed
+knowledge: a leak across the need-to-know boundary. Architect Birb is the one
+agent that sees the whole shape of the feature, in cleared form only.
 
 After a round the verdict is computed (checks re-run on the finished tree,
-review), each worker's report is read, and an **evaluation** stage re-plans
-only what is still open. That repeats up to ``max_rounds``, and stops early
-when a round changed nothing.
+review), each worker's report is read, and an **evaluation** stage — Brainy
+Birb, against its own design and the mapping — re-plans only what is still
+open. Its ticket blocks are restated the same way before Architect Birb sees
+them. That repeats up to ``max_rounds``, and stops early when a round changed
+nothing.
 
 **Every stage is enforced by the harness, not asked for.** The first staged
 planner offered a seal tool in every step, and the strongest model measured
@@ -90,7 +103,7 @@ constants), or `(stub)` if a ticket implements it."""),
   - done when: <one sentence>
 
 - Every ticket is implementation work that one Worker Birb does. Do NOT make a ticket for tests, \
-for the skeleton or for setup: you write the skeleton and every ticket's tests yourself, in the \
+for the skeleton or for setup: Architect Birb writes the skeleton and every ticket's tests, in the \
 next stages. A ticket's `tests` are the test files for its own code, and it `writes` them too.
 - No file may appear in two tickets. A `(finished)` seam file is in no ticket.
 - A ticket's tests must pass with its own code and the skeleton alone.
@@ -236,20 +249,151 @@ class _GatedHooks:
         return getattr(self._base, name)
 
 
+_NAME_LINE = re.compile(r"^\s*[-*]\s*(kept|renamed)\s*:\s*(.+?)\s*$", re.I)
+_ARROW = re.compile(r"\s*(?:->|→|=>)\s*")
+# What counts as "the same name" when checking a restatement for survivors:
+# an identifier, path or command bounded by anything that could not continue it.
+_NAME_EDGE = r"A-Za-z0-9_"
+
+
+def _bare(name: str) -> str:
+    return name.strip().strip("`'\"").strip()
+
+
+@dataclass
+class NameMap:
+    """The names Brainy Birb restated, and the user's names it kept.
+
+    **Two kinds of name, treated differently.** A name the user's request
+    states — a `/kill` command, a file they named — is a requirement, so it is
+    kept exactly. A name Brainy Birb invented is restated into a precise,
+    literal one (`kill_children` → `terminate_child_processes`), because a
+    Worker Birb reads the skeleton and a name carries the planner's slang and
+    assumed knowledge as surely as prose does. Code that implements a kept name
+    still gets an invented internal name like any other.
+
+    Kept by Brainy Birb (for the evaluation) and shown to the user at charter
+    approval; never given to Architect Birb or a Worker Birb.
+    """
+
+    renamed: dict[str, str] = field(default_factory=dict)
+    kept: list[str] = field(default_factory=list)
+
+    def __bool__(self) -> bool:
+        return bool(self.renamed or self.kept)
+
+    def forward(self, name: str) -> str:
+        return self.renamed.get(name, name)
+
+    def merged(self, other: "NameMap") -> "tuple[NameMap, str]":
+        """Both maps as one, or a problem when they disagree about a name."""
+        renamed = dict(self.renamed)
+        for old, new in other.renamed.items():
+            if renamed.get(old, new) != new:
+                return self, f"`{old}` was already renamed to `{renamed[old]}`; keep that name"
+            renamed[old] = new
+        targets: dict[str, str] = {}
+        for old, new in renamed.items():
+            if new in targets and targets[new] != old:
+                return self, f"`{targets[new]}` and `{old}` were both renamed to `{new}`; every name needs its own"
+            targets[new] = old
+        kept = list(dict.fromkeys([*self.kept, *other.kept]))
+        return NameMap(renamed, kept), ""
+
+    def survivors(self, text: str) -> list[str]:
+        """The renamed names that still appear in ``text``.
+
+        Kept names and the new names are blanked out first, so `/kill` kept
+        for the user does not count as `kill` surviving, and `engine` renamed
+        to `engine.core` does not count as `engine`.
+        """
+        for name in sorted({*self.kept, *self.renamed.values()}, key=len, reverse=True):
+            if name:
+                text = text.replace(name, " ")
+        return [
+            old for old in self.renamed
+            if re.search(rf"(?<![{_NAME_EDGE}]){re.escape(old)}(?![{_NAME_EDGE}])", text)
+        ]
+
+    def describe(self) -> str:
+        """Plain text, one name a line; "" when there is nothing to say."""
+        lines = [f"  {name}  (yours, kept)" for name in self.kept]
+        lines += [f"  {old} → {new}" for old, new in self.renamed.items()]
+        return "\n".join(lines)
+
+
+def parse_names(text: str) -> NameMap:
+    """The `- kept:` and `- renamed: old -> new` lines of a Names section."""
+    names = NameMap()
+    for line in text.splitlines():
+        match = _NAME_LINE.match(line)
+        if not match:
+            continue
+        kind, value = match.group(1).lower(), match.group(2)
+        if kind == "kept":
+            name = _bare(value)
+            if name and name.lower() != "none" and name not in names.kept:
+                names.kept.append(name)
+            continue
+        parts = _ARROW.split(value, maxsplit=1)
+        if len(parts) == 2 and _bare(parts[0]) and _bare(parts[1]) and _bare(parts[0]) != _bare(parts[1]):
+            names.renamed[_bare(parts[0])] = _bare(parts[1])
+    return names
+
+
+def split_sections(text: str) -> dict[str, str]:
+    """A reply's ``## Heading`` sections, by heading. ``###`` stays inside."""
+    sections: dict[str, str] = {}
+    heads = list(re.finditer(r"^##\s+(.+?)\s*$", text, re.M))
+    for index, head in enumerate(heads):
+        end = heads[index + 1].start() if index + 1 < len(heads) else len(text)
+        sections[head.group(1).strip().strip("#").strip()] = text[head.end():end].strip()
+    return sections
+
+
+# The cleared design's sections: the request, restated, then the overview's.
+CLEARED_HEADINGS: tuple[str, ...] = ("The request", *(heading for heading, _ in SECTIONS))
+
+
 @dataclass
 class Design:
-    """Brainy Birb's design documents, carried from stage to stage."""
+    """The design documents, carried from stage to stage.
+
+    ``sections`` are Brainy Birb's own words; ``cleared`` the restatement
+    Architect Birb works from. ``tickets`` and ``plans`` are the cleared ones —
+    the ids, files and briefs the charter and every later round are keyed by.
+    """
 
     objective: str
     sections: dict[str, str] = field(default_factory=dict)
     tickets: list[TicketSpec] = field(default_factory=list)
     plans: dict[str, str] = field(default_factory=dict)
+    cleared: dict[str, str] = field(default_factory=dict)
+    names: NameMap = field(default_factory=NameMap)
 
     def document(self) -> str:
+        """Brainy Birb's design, the request included. Never shown to Architect Birb."""
         parts = [f"# Design\n\n## The request\n\n{self.objective.strip()}"]
         for heading, _ in SECTIONS:
             if heading in self.sections:
                 parts.append(f"## {heading}\n\n{self.sections[heading].strip()}")
+        return "\n\n".join(parts)
+
+    def cleared_document(self) -> str:
+        """The restated design: all Architect Birb is given."""
+        parts = ["# Design"]
+        for heading in CLEARED_HEADINGS:
+            if heading in self.cleared:
+                parts.append(f"## {heading}\n\n{self.cleared[heading].strip()}")
+        return "\n\n".join(parts)
+
+    def record(self) -> str:
+        """Everything, for the user and the flock's encrypted session."""
+        parts = [self.document()]
+        if self.names:
+            parts.append("## Names restated for Architect Birb and the Worker Birbs\n\n" + self.names.describe())
+        if self.cleared:
+            parts.append("# The restated design\n\n" + self.cleared_document().removeprefix("# Design").strip())
         return "\n\n".join(parts)
 
 
@@ -258,6 +402,17 @@ You are Brainy Birb, the lead engineer of a Flock. You divide a piece of work \
 between Worker Birbs who never speak to each other and see nothing but the \
 ticket plan you write for them. You plan in stages, and every stage gives you \
 only what it needs."""
+
+# Architect Birb never sees the request or Brainy Birb's wording, and is not
+# told that there is anything it has not seen: the cleared design is simply
+# the design, as far as it knows.
+ARCHITECT_INTRO = """\
+You are Architect Birb, the engineer who prepares the work of a Flock. You \
+write the skeleton — shared types and typed stubs — and every ticket's tests \
+and ticket plan. Worker Birbs then implement the tickets; they never speak to \
+each other and see nothing but the ticket plan you write for them and the \
+files in the project. You work in stages, and every stage gives you only what \
+it needs."""
 
 
 def section_prompt(design: Design, heading: str, checklist: str, problem: str = "") -> str:
@@ -284,7 +439,9 @@ SKELETON_PROMPT = """\
 
 --- Stage: the skeleton ---
 
-Write the skeleton into the project now:
+{blocks}
+
+Write the skeleton for these tickets into the project now:
 
 - Every `(finished)` seam file, complete — shared types and constants.
 - For every ticket, the files in its `writes` that are not tests, as typed stubs: \
@@ -348,17 +505,17 @@ behind it ("`step` runs in O(length of the snake)", never "because the game \
 renders at 60 fps"). Do not mention the other tickets or the overall feature."""
 
 
-# Run on each ticket plan before it becomes a Worker Birb's brief. The plan is
-# written in Brainy Birb's own words, with everything it knows of the project
-# behind them; the worker has none of that, so a term that is plain to the
-# planner ("kill the children", "the usual handshake") can be ambiguous to the
-# worker, and a model that reads it the wrong way refuses benign work. The
-# planner keeps its own wording (`Design.plans`); only the brief is restated.
-RESTATE_RULES = """\
-Restate this request in precise, literal technical language, so that a reader
+# Run on the design before anyone but Brainy Birb works from it. The design is
+# written in Brainy Birb's own words, with the request and everything it knows
+# of the project behind them; Architect Birb and the Worker Birbs have none of
+# that, so a term that is plain to the planner ("kill the children", "the usual
+# handshake") can be ambiguous to them, and a model that reads it the wrong way
+# refuses benign work. Names are restated too: the skeleton is made of them.
+CLEAR_RULES = """\
+Restate the text in precise, literal technical language, so that a reader
 with no shared context understands exactly what is to be built.
-- Keep the meaning exactly: every behaviour, every requirement, every name.
-  Leave nothing out and water nothing down.
+- Keep the meaning exactly: every behaviour, every requirement. Leave nothing
+  out and water nothing down.
 - Replace slang and ambiguous everyday words with the technical terms they
   stand for.
 - Wherever a term relies on assumed knowledge — a protocol, format, standard,
@@ -367,19 +524,74 @@ with no shared context understands exactly what is to be built.
   task. Describe the term's standard meaning only; do not add features,
   options or behaviour it does not imply.
 - Unpack one level deep. Do not explain a term inside an explanation.
-- Do not add claims about who is allowed to do what, or why."""
+- Do not add claims about who is allowed to do what, or why.
 
-RESTATE_PROMPT = """\
---- Stage: the worker's brief ---
+Names:
+- A name the user's request states itself — a command, file, function, option
+  or message the user asked for by name — is a requirement. Keep it exactly,
+  and list it as `- kept: <name>`.
+- Every name you invented — a file path, module, class, function, method,
+  variable, constant, test file, ticket id — restate as a precise, literal name
+  for what it does or holds, unless it already is one. List each one you
+  change as `- renamed: <old> -> <new>`. Code that implements a kept name gets
+  an invented internal name like any other: a `/kill` command the user asked
+  for stays `/kill`, and its handler `kill` becomes `send_sigterm`.
+- After this, use only the new names, everywhere — in prose, signatures, file
+  lists and commands. An old name must not appear anywhere in your reply
+  except on its own `- renamed:` line."""
+
+CLEAR_PROMPT = """\
+{intro}
+
+{document}
+
+--- Stage: restate the design ---
+
+Everything after this stage — the skeleton, the tests and every Worker Birb's \
+ticket plan — is written by Architect Birb, who never sees the request or the \
+design above. It sees only the restatement you write now, so everything it \
+needs must be in it.
 
 {rules}
 
-Keep the headings as they are, and copy code, signatures, file paths and \
-commands exactly. Reply with the restated text only.
+Reply with exactly these sections, in this order, each under its own `## ` \
+heading, and nothing else:
 
-The text to restate:
+## Names
+The `- kept:` and `- renamed:` lines. Write `- none` if there are none.
+{headings}
 
-{plan}"""
+Restate every section of the design above, including the request. The Tickets \
+section keeps exactly the block form it has now — the same tickets, with their \
+ids, files and commands under the new names."""
+
+CLEAR_ROUND_PROMPT = """\
+{intro}
+
+{document}
+
+--- Stage: restate the next round ---
+
+The names restated so far — use the new names, and keep the kept ones:
+
+{names}
+
+These are the ticket blocks for the next round. Architect Birb, who never \
+sees the design above, plans them from what you write now.
+
+{rules}
+
+{blocks}
+
+Reply with exactly these two sections, each under its own `## ` heading, and \
+nothing else:
+
+## Names
+The `- kept:` and `- renamed:` lines for names that are new in these blocks. \
+Write `- none` if there are none.
+## Tickets
+The same ticket blocks, in exactly the same form, restated — each `- why:` \
+line kept under its block."""
 
 
 EVALUATE_PROMPT = """\
@@ -395,8 +607,13 @@ own account is not:
 
 {verdict}
 
+The tickets, files and reports above use the restated names Architect Birb and \
+the Worker Birbs were given. Your names on the left, theirs on the right:
+
+{names}
+
 Decide the next round. Reply with ticket blocks, in exactly the form used in \
-the Tickets section, for:
+the Tickets section, with the restated ids and files, for:
 
 - each ticket that is not done and should be tried again (same id; change \
 `writes` only if it truly needs another file), and
@@ -445,7 +662,12 @@ class Stager:
         self.show = show or (lambda text: None)
 
     # ------------------------------------------------------------------ #
-    def _stage(self, tools: set[str], allowed: Callable[[str], bool] | None, why: str) -> Orchestrator:
+    def _stage(self, tools: set[str], allowed: Callable[[str], bool] | None, why: str, *,
+               architect: bool = False) -> Orchestrator:
+        """A fresh stage. ``architect`` makes it Architect Birb's: no project
+        context, since the project's instructions and repo map are written in
+        the same uncleared terms as the request — it has the read tools, and
+        the files themselves, to orient."""
         main = self.main
         hooks = main.hooks
         if allowed is not None:
@@ -456,7 +678,7 @@ class Stager:
             policy=main.policy,
             io=main.io,
             session=None,
-            project_context=main.project_context,
+            project_context="" if architect else main.project_context,
             redact_secrets=main.redact_secrets,
             verify=None,
             # A stage with no tools can change nothing, so there is nothing to
@@ -472,16 +694,16 @@ class Stager:
         stage.autopilot = bool(getattr(main, "autopilot", False))
         return stage
 
-    def _run(self, orchestrator: Orchestrator, step: str, prompt: str) -> str:
+    def _run(self, orchestrator: Orchestrator, step: str, prompt: str, label: str = "Brainy Birb") -> str:
         try:
-            session = orchestrator.run(prompt, system="", cwd=self.cwd, label="Brainy Birb",
+            session = orchestrator.run(prompt, system="", cwd=self.cwd, label=label,
                                        max_turns=self.turns)
         except RuntimeError:
             # Sent once more. Staged planning makes many more model calls than
             # one prompt does, and in the first overnight run one model lost
             # four of six rounds to a single dropped connection each. A second
             # failure is real and goes to the caller.
-            session = orchestrator.run(prompt, system="", cwd=self.cwd, label="Brainy Birb",
+            session = orchestrator.run(prompt, system="", cwd=self.cwd, label=label,
                                        max_turns=self.turns)
         self.trace.append({"step": step, "calls": [c["name"] for c in orchestrator.last_run_tool_calls]})
         return (session.summary or "").strip()
@@ -536,23 +758,111 @@ class Stager:
                 f"{text}\n\n**The user's answers — these override the proposals above:**\n\n{answer.strip()}"
             )
 
+    def clear(self) -> str:
+        """Restate the design for Architect Birb. "" when done, else why not.
+
+        No tools: it rewrites what it is given. Asked up to
+        ``SECTION_ATTEMPTS`` times, each refusal naming what to fix; the
+        tickets it produces replace the overview's as the ones the charter
+        is built from.
+        """
+        raw = parse_tickets(self.design.sections.get("Tickets", ""))
+        headings = "\n".join(f"## {heading}" for heading in CLEARED_HEADINGS)
+        prompt = CLEAR_PROMPT.format(intro=INTRO, document=self.design.document(), rules=CLEAR_RULES,
+                                     headings=headings)
+        cleared, names, problem = self._restated(prompt, "restate the design", CLEARED_HEADINGS, raw)
+        if problem:
+            return problem
+        self.design.cleared = cleared
+        self.design.names = names
+        self.design.tickets = parse_tickets(cleared["Tickets"])
+        return ""
+
+    def clear_round(self, text: str) -> "tuple[list[TicketSpec], dict[str, str], str]":
+        """An evaluation's ticket blocks, restated: the tickets, their `why`, or a problem."""
+        raw = parse_tickets(text)
+        prompt = CLEAR_ROUND_PROMPT.format(
+            intro=INTRO, document=self.design.document(), names=self.design.names.describe() or "  (none)",
+            rules=CLEAR_RULES, blocks=text.strip())
+        cleared, names, problem = self._restated(prompt, "restate the next round", ("Tickets",), raw)
+        if problem:
+            return [], {}, problem
+        self.design.names = names
+        return parse_tickets(cleared["Tickets"]), evaluation_why(cleared["Tickets"]), ""
+
+    def _restated(self, prompt: str, step: str, headings: "tuple[str, ...]",
+                  raw: list[TicketSpec]) -> "tuple[dict[str, str], NameMap, str]":
+        stage = self._stage(set(), None, "")
+        problem = ""
+        for _attempt in range(SECTION_ATTEMPTS):
+            asked = prompt if not problem else (
+                f"{prompt}\n\nYour last restatement could not be used: {problem}\n"
+                "Write the whole reply again with that fixed.")
+            text = self._run(stage, step, asked)
+            sections, names, problem = self._check_restatement(text, headings, raw)
+            if not problem:
+                return sections, names, ""
+            # Kept, so a failed restatement can be read back afterwards.
+            self.trace[-1].update(problem=problem, text=text[:4000])
+        return {}, self.design.names, f"the design could not be restated: {problem}"
+
+    def _check_restatement(self, text: str, headings: "tuple[str, ...]",
+                           raw: list[TicketSpec]) -> "tuple[dict[str, str], NameMap, str]":
+        """The restated sections and the names so far, or why they cannot be used.
+
+        **A renamed name that survives is refused, not trusted.** The model
+        saying it renamed everything is not the check; the text is.
+        """
+        sections = split_sections(text)
+        missing = [h for h in ("Names", *headings) if h not in sections]
+        if missing:
+            return {}, self.design.names, (
+                "these sections are missing: " + ", ".join(f"`## {h}`" for h in missing))
+        names, problem = self.design.names.merged(parse_names(sections["Names"]))
+        if problem:
+            return {}, self.design.names, problem
+        cleared = {h: sections[h] for h in headings}
+        survivors = names.survivors("\n".join(cleared.values()))
+        if survivors:
+            return {}, self.design.names, (
+                "these names were renamed but still appear in the text: "
+                + ", ".join(f"`{s}`" for s in survivors)
+                + " — use only the new names outside the `- renamed:` lines")
+        tickets = parse_tickets(cleared["Tickets"])
+        problem = check_tickets(tickets)
+        if problem:
+            return {}, self.design.names, f"the restated tickets cannot be used: {problem}"
+        expected = sorted(names.forward(t.id) for t in raw)
+        found = sorted(t.id for t in tickets)
+        if expected != found:
+            return {}, self.design.names, (
+                f"the restated tickets must be the same tickets under their new ids — expected "
+                f"{', '.join(expected)}, found {', '.join(found)}")
+        return cleared, names, ""
+
     def skeleton(self, tickets: list[TicketSpec]) -> None:
         tests = {path for ticket in tickets for path in ticket.tests}
         stage = self._stage(set(READ_TOOLS) | _WRITE_TOOLS, lambda path: path not in tests,
-                            "test files are written in each ticket's own stage, after the skeleton.")
-        self._run(stage, "skeleton", SKELETON_PROMPT.format(intro=INTRO, document=self.design.document()))
+                            "test files are written in each ticket's own stage, after the skeleton.",
+                            architect=True)
+        blocks = "\n\n".join(ticket.block() for ticket in tickets)
+        self._run(stage, "skeleton", SKELETON_PROMPT.format(
+            intro=ARCHITECT_INTRO, document=self.design.cleared_document(), blocks=blocks),
+            label="Architect Birb")
 
     def ticket_plan(self, ticket: TicketSpec, previous: str = "") -> str:
-        """Write one ticket's tests and return its ticket plan (its brief)."""
+        """Write one ticket's tests and return its ticket plan: the worker's brief."""
         tests = set(ticket.tests)
         stage = self._stage(set(READ_TOOLS) | _WRITE_TOOLS, lambda path: path in tests,
-                            f"this stage writes only the tests of ticket {ticket.id!r}: {', '.join(ticket.tests)}.")
+                            f"this stage writes only the tests of ticket {ticket.id!r}: {', '.join(ticket.tests)}.",
+                            architect=True)
         prior = f"\nThe last round's attempt at this ticket, and what happened:\n\n{previous}\n" if previous else ""
-        prompt = TICKET_PROMPT.format(intro=INTRO, document=self.design.document(), id=ticket.id,
-                                      block=ticket.block(), previous=prior, tests=", ".join(ticket.tests))
+        prompt = TICKET_PROMPT.format(intro=ARCHITECT_INTRO, document=self.design.cleared_document(),
+                                      id=ticket.id, block=ticket.block(), previous=prior,
+                                      tests=", ".join(ticket.tests))
         text = ""
         for _attempt in range(2):
-            text = self._run(stage, f"ticket: {ticket.id}", prompt)
+            text = self._run(stage, f"ticket: {ticket.id}", prompt, label="Architect Birb")
             missing = [p for p in ticket.tests if not os.path.isfile(os.path.join(self.cwd, p))]
             if len(text) >= 200 and not missing:
                 break
@@ -565,44 +875,31 @@ class Stager:
         self.design.plans[ticket.id] = text
         return text
 
-    def restate(self, ticket_id: str, plan: str) -> str:
-        """The ticket plan in precise, literal language: the worker's brief.
-
-        No tools: it rewrites text it is given. A reply under half the plan's
-        length has left things out, since restating only adds; then the plan
-        itself is the brief — it is accurate, only less explicit.
-        """
-        if not plan.strip():
-            return plan
-        stage = self._stage(set(), None, "")
-        text = self._run(stage, f"brief: {ticket_id}", RESTATE_PROMPT.format(rules=RESTATE_RULES, plan=plan))
-        if len(text) < len(plan) // 2:
-            self.trace[-1].update(problem="the restatement was too short; the plan was used as written",
-                                  text=text[:4000])
-            return plan
-        return text
-
     def evaluate(self, round_number: int, verdict: str,
                  outstanding: "list[str] | None" = None) -> "tuple[list[TicketSpec], dict[str, str], str]":
-        """The next round's tickets, the reason for each, and the reply.
+        """The next round's tickets, restated, the reason for each, and the reply.
 
         **Stopping takes an explicit `NO TICKETS`.** A reply that could not be
         read, or whose tickets cannot become a charter, used to end the flock —
         in the first overnight run, four runs stopped after round 1 with
         tickets still failing. Now the tickets whose checks still fail are
-        simply tried again, with the evaluation's reply as the reason.
+        simply tried again. The reason given for those is the harness's own,
+        never the evaluation's words: they are Brainy Birb's, and have not been
+        restated.
         """
         reader = self._stage(set(READ_TOOLS), None, "")
         text = self._run(reader, f"evaluate round {round_number}", EVALUATE_PROMPT.format(
-            intro=INTRO, document=self.design.document(), round=round_number, verdict=verdict))
+            intro=INTRO, document=self.design.document(), round=round_number, verdict=verdict,
+            names=self.design.names.describe() or "  (no names were restated)"))
         if text.lstrip().upper().startswith("NO TICKETS"):
             return [], {}, text
         tickets = parse_tickets(text)
         if tickets and not check_tickets(tickets):
-            return tickets, evaluation_why(text), text
+            cleared, whys, problem = self.clear_round(text)
+            if not problem:
+                return cleared, whys, text
         retry = [t for t in self.design.tickets if t.id in set(outstanding or ())]
-        why = "its check still fails — see the report" + (f"; the evaluation said: {text[:600]}" if text else "")
-        return retry, {t.id: why for t in retry}, text
+        return retry, {t.id: "its check still fails — see the report" for t in retry}, text
 
     # ------------------------------------------------------------------ #
     def charter(self, tickets: list[TicketSpec], briefs: dict[str, str]) -> Charter:
@@ -637,3 +934,32 @@ def approval_changes(charter: Charter, approved: list[Charter]) -> str:
     head = ("This round asks for files or commands you have not approved before:"
             if fresh else "Everything this round touches, you approved in an earlier round:")
     return head + "\n" + "\n".join(lines)
+
+
+class CharterApproval(str):
+    """The text of a charter approval, carrying what it describes.
+
+    A ``str`` — the plain text every asker already prints (the CLI, headless,
+    a test) — with the charter, the charters approved before it and the name
+    mapping attached, so a front-end that can draw it better does: the TUI
+    draws this one in colour, in a dialog wide enough to read. Nothing that
+    only reads the text needs to know it is anything more.
+    """
+
+    charter: Charter
+    approved: "tuple[Charter, ...]"
+    names: "NameMap | None"
+
+    def __new__(cls, charter: Charter, approved: "list[Charter] | tuple[Charter, ...]" = (),
+                names: "NameMap | None" = None) -> "CharterApproval":
+        parts = []
+        if approved:
+            parts.append(approval_changes(charter, list(approved)))
+        parts.append(charter.describe())
+        if names:
+            parts.append("Names restated for Architect Birb and the Worker Birbs:\n" + names.describe())
+        text = super().__new__(cls, "\n\n".join(parts))
+        text.charter = charter
+        text.approved = tuple(approved)
+        text.names = names if names else None
+        return text

@@ -46,6 +46,7 @@ from .mention_picker import MentionPicker
 from .transcript import TranscriptView
 from ..runtime.custom_commands import expand_custom_command
 from ..config import Config
+from ..flock.stages import CharterApproval
 from ..orchestrator import REPLY_LABEL, Orchestrator, render_through
 from ..plugins.core import render
 from ..policy import PermissionError
@@ -56,6 +57,7 @@ from .flock_bridge import TuiAsker, WorkerPaneIO
 from .panes import FlockPane, PluginsPane, SessionsPane
 from .screens import (
     ApprovalModal,
+    CharterModal,
     ConfirmModal,
     HelpModal,
     ModelPickerModal,
@@ -1120,8 +1122,11 @@ class CoBirbApp(App[None]):
         """Show a yes/no modal and resolve to the answer.
 
         Awaited on the event loop on behalf of the flock's thread, exactly as
-        ``request_approval`` is for a tool call.
+        ``request_approval`` is for a tool call. A charter approval carries the
+        charter itself and gets the wide, coloured dialog.
         """
+        if isinstance(detail, CharterApproval):
+            return await self.push_screen_wait(CharterModal(question, detail))
         return await self.push_screen_wait(ConfirmModal(question, detail))
 
     async def prepare_flock_panes(self, charter) -> None:
