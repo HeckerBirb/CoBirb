@@ -17,6 +17,12 @@ and its §17 decisions record for the ones that were designed and then deliberat
   keeps the list so it can judge the workers' results. CoBirb refuses a restatement in which an old
   name survives. The separate restatement of each brief is gone, since the brief is now written in
   restated terms from the start.
+- **The restatement is checked, not trusted.** It is refused and asked for again when a renamed
+  name still appears (with the line it appears on), when a section is much shorter than the
+  original, when a value your request quotes is missing, when a test file loses its `test_` prefix,
+  or when the tickets no longer match. On the golden benchmark task, qwen3-coder's first
+  restatement cut the request to a fifth of its length and scored 32/95; with the length check it
+  scored 94/95, and qwen3.5 89/95 (against 91/95 each before).
 - **The charter approval is wide and in colour.** It takes most of the screen, with headings in
   cyan, the files a worker may write in yellow, the check it must pass in green, seams marked by how
   firmly they hold, and the list of renamed names with yours marked *kept*. On a later round,
