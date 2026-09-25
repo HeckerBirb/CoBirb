@@ -1,0 +1,17 @@
+{
+  "label": "run",
+  "sha": "c77c6ce0024230fa1f9b41877074e0fb192e0d2c",
+  "tasks": 1,
+  "reps": 1,
+  "flock": true,
+  "models": [
+    "qwen3.5:35b-a3b",
+    "qwen3-coder:30b"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {
+    "flock": {
+      "planning": "staged"
+    }
+  }
+}
