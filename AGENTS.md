@@ -380,7 +380,7 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
   design documents (`stages.Design`) are what a stage carries; nothing else survives between stages.
   (0) **Overview**, section by section in one context, read-only: `SECTIONS`, fixed headings with a
   checklist each; the Tickets section is fixed-form blocks (`### ticket: <id>` + `- key: value`), parsed
-  by `parse_tickets` and checked by `check_tickets` (a file in two tickets is named in overview terms
+  by `parse_tickets` (a block with no `tests` line takes the test files in its `writes`) and checked by `check_tickets` (a file in two tickets is named in overview terms
   first, then a scratch `PlanDraft`), asked up to `SECTION_ATTEMPTS = 3` times, each rejected attempt
   kept in the trace. `NO TICKETS` is a legitimate decline. (1) **Restatement** (`Stager.clear`, Brainy
   Birb, no tools): the whole design, request included, restated by `CLEAR_RULES` in precise, literal

@@ -164,7 +164,7 @@ def test_ticket_blocks_are_read_whatever_their_formatting():
 
 @pytest.mark.parametrize("blocks, problem", [
     ("no blocks here", "no ticket blocks"),
-    ("### ticket: a\n- writes: a.py\n- accept: x", "names no test files"),
+    ("### ticket: a\n- writes: a.py\n- accept: x", "has no test files"),
     ("### ticket: a\n- writes: a.py\n- tests: t.py", "no `accept`"),
     ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: x\n"
      "### ticket: b\n- writes: a.py\n- tests: tb.py\n- accept: x", "listed by more than one ticket"),
@@ -175,6 +175,17 @@ def test_ticket_blocks_are_read_whatever_their_formatting():
 ])
 def test_ticket_blocks_that_cannot_become_a_charter_say_why(blocks, problem):
     assert problem in check_tickets(parse_tickets(blocks))
+
+
+@pytest.mark.parametrize("block, tests", [
+    ("### ticket: a\n- writes: a.py, tests/test_a.py\n- tests: tests/test_a.py", ("tests/test_a.py",)),
+    # No `tests` line: the test files it writes are its tests.
+    ("### ticket: a\n- writes: a.py, tests/test_a.py", ("tests/test_a.py",)),
+    ("### ticket: a\n- writes: a.py, a_test.py", ("a_test.py",)),
+    ("### ticket: a\n- writes: a.py", ()),
+])
+def test_a_tickets_tests_are_read_from_its_block(block, tests):
+    assert parse_tickets(block)[0].tests == tests
 
 
 def test_good_ticket_blocks_pass_the_check():

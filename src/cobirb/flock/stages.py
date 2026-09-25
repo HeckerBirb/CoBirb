@@ -168,10 +168,16 @@ def parse_tickets(text: str) -> list[TicketSpec]:
             n.strip().strip("`") for n in fields.get("needs", "").split(",")
             if n.strip() and n.strip().lower() != "none"
         )
+        writes = _paths(fields.get("writes", ""))
+        # A block with no `tests` line whose `writes` holds its test files
+        # means them: the checklist says a ticket writes its own tests. A
+        # user's flock stopped on a ticket listing
+        # `tests/test_communication_protocol.py` under `writes` only.
+        tests = _paths(fields.get("tests", "")) or tuple(p for p in writes if _is_test_file(p))
         tickets.append(TicketSpec(
             id=head.group(1),
-            writes=_paths(fields.get("writes", "")),
-            tests=_paths(fields.get("tests", "")),
+            writes=writes,
+            tests=tests,
             accept=fields.get("accept", "").strip().strip("`"),
             needs=needs,
             builds=fields.get("builds", ""),
@@ -208,7 +214,8 @@ def check_tickets(tickets: list[TicketSpec]) -> str:
     draft = PlanDraft()
     for ticket in tickets:
         if not ticket.tests:
-            return f"ticket {ticket.id!r} names no test files in `tests` — every ticket needs at least one"
+            return (f"ticket {ticket.id!r} has no test files: add a `- tests:` line naming them "
+                    "(e.g. `- tests: tests/test_x.py`), and list them in `writes` too")
         if not ticket.accept:
             return f"ticket {ticket.id!r} has no `accept` command"
         try:
