@@ -266,9 +266,11 @@ def _bare(name: str) -> str:
     """The name itself: the first `backticked` span if there is one, since a
     model writes "- kept: `Store` class" as often as "- kept: Store"."""
     quoted = re.search(r"`([^`]+)`", name)
-    if quoted:
-        return quoted.group(1).strip()
-    return name.strip().strip("`'\"").strip()
+    name = quoted.group(1) if quoted else name.strip().strip("`'\"")
+    # A ticket id written the way its block heading is: a bench run renamed
+    # `implement_roman` to `ticket: implement_roman`, and no restated ticket
+    # could ever carry that id.
+    return re.sub(r"^#*\s*ticket\s*[:：]\s*", "", name.strip(), flags=re.I).strip()
 
 
 @dataclass

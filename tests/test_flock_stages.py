@@ -351,6 +351,7 @@ def test_a_restatement_asked_again_can_succeed(monkeypatch, tmp_path):
     ("* Renamed: a => b\n- kept: none", {"a": "b"}, []),
     ("- renamed: same -> same\n- renamed: broken", {}, []),
     ("- kept: `Store` class\n- renamed: `tick()` method -> `advance()` method", {"tick()": "advance()"}, ["Store"]),
+    ("- renamed: a -> `ticket: a`\n- renamed: b -> ### ticket: c", {"b": "c"}, []),
 ])
 def test_the_names_section_is_read(section, renamed, kept):
     names = stages.parse_names(section)
