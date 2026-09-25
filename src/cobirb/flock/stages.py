@@ -66,6 +66,11 @@ DEFAULT_MAX_ROUNDS = 5
 SECTION_ATTEMPTS = 3
 
 _WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch"})
+# A restated section under this share of its original's length is refused as
+# incomplete; one shorter than the floor is too short for the ratio to mean
+# anything ("none", a one-line decision).
+_MIN_RESTATED_SHARE = 0.75
+_SHORTEN_FLOOR = 200
 
 # The overview's sections, in order: heading, then what the section must
 # contain as a checklist. Fixed headings in a fixed order, because a missing
@@ -572,7 +577,9 @@ CLEAR_RULES = """\
 Restate the text in precise, literal technical language, so that a reader
 with no shared context understands exactly what is to be built.
 - Keep the meaning exactly: every behaviour, every requirement. Leave nothing
-  out and water nothing down.
+  out and water nothing down. Restate by editing, never by summarising: keep
+  every sentence and every detail, so the restatement is never shorter than
+  the original.
 - Copy every literal exactly as the design gives it: output strings, messages,
   formats, numbers, limits, code, signatures, file paths and commands. `"OK"`
   stays `"OK"`, and `"1"`/`"0"` stays `"1"`/`"0"`. The only change to a literal
@@ -837,8 +844,13 @@ class Stager:
         headings = "\n".join(f"## {heading}" for heading in CLEARED_HEADINGS)
         prompt = CLEAR_PROMPT.format(intro=INTRO, document=self.design.document(), rules=CLEAR_RULES,
                                      headings=headings)
+        # The Tickets section has structural checks of its own, and ids and
+        # paths may shorten legitimately when renamed.
+        originals = {"The request": self.design.objective,
+                     **{h: t for h, t in self.design.sections.items() if h != "Tickets"}}
         cleared, names, problem = self._restated(prompt, "restate the design", CLEARED_HEADINGS, raw,
-                                                 literals=request_literals(self.design.objective))
+                                                 literals=request_literals(self.design.objective),
+                                                 originals=originals)
         if problem:
             return problem
         self.design.cleared = cleared
@@ -858,8 +870,9 @@ class Stager:
         self.design.names = names
         return parse_tickets(cleared["Tickets"]), evaluation_why(cleared["Tickets"]), ""
 
-    def _restated(self, prompt: str, step: str, headings: "tuple[str, ...]",
-                  raw: list[TicketSpec], literals: "tuple[str, ...]" = ()) -> "tuple[dict[str, str], NameMap, str]":
+    def _restated(self, prompt: str, step: str, headings: "tuple[str, ...]", raw: list[TicketSpec],
+                  literals: "tuple[str, ...]" = (),
+                  originals: "dict[str, str] | None" = None) -> "tuple[dict[str, str], NameMap, str]":
         stage = self._stage(set(), None, "")
         problem = ""
         for _attempt in range(SECTION_ATTEMPTS):
@@ -867,7 +880,7 @@ class Stager:
                 f"{prompt}\n\nYour last restatement could not be used: {problem}\n"
                 "Write the whole reply again with that fixed.")
             text = self._run(stage, step, asked)
-            sections, names, problem = self._check_restatement(text, headings, raw, literals)
+            sections, names, problem = self._check_restatement(text, headings, raw, literals, originals)
             if not problem:
                 return sections, names, ""
             # Kept, so a failed restatement can be read back afterwards —
@@ -878,7 +891,8 @@ class Stager:
         return {}, self.design.names, f"the design could not be restated: {problem}"
 
     def _check_restatement(self, text: str, headings: "tuple[str, ...]", raw: list[TicketSpec],
-                           literals: "tuple[str, ...]" = ()) -> "tuple[dict[str, str], NameMap, str]":
+                           literals: "tuple[str, ...]" = (),
+                           originals: "dict[str, str] | None" = None) -> "tuple[dict[str, str], NameMap, str]":
         """The restated sections and the names so far, or why they cannot be used.
 
         **A renamed name that survives is refused, not trusted.** The model
@@ -893,6 +907,19 @@ class Stager:
         if problem:
             return {}, self.design.names, problem
         cleared = {h: sections[h] for h in headings}
+        # Restating only adds, so a section much shorter than its original has
+        # left things out. On the golden task one model cut the request to a
+        # fifth — the whole API spec gone — and every stage after it built
+        # from what was left.
+        short = [h for h, original in (originals or {}).items()
+                 if h in cleared and len(original) >= _SHORTEN_FLOOR
+                 and len(cleared[h]) < _MIN_RESTATED_SHARE * len(original)]
+        if short:
+            return {}, self.design.names, (
+                "these sections are much shorter than the original, so something was left out: "
+                + ", ".join(f"`## {h}` ({len(cleared[h])} characters, from {len((originals or {})[h])})"
+                            for h in short)
+                + " — restate by editing the original text, keeping every sentence and detail")
         survivors = names.survivors("\n".join(cleared.values()))
         if survivors:
             # Said with where, and with the other way out: a bench run renamed

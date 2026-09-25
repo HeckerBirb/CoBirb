@@ -390,7 +390,8 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
   mapping is `stages.NameMap` (`Design.names`), Brainy Birb's and the user's only. **A renamed name
   that survives anywhere in the text is refused** (`NameMap.survivors`, whole-identifier match, kept
   and new names blanked first), as are missing sections, unusable tickets, tickets that are not
-  the overview's under their mapped ids, a double-quoted value from the request that is no longer there as a quoted unit
+  the overview's under their mapped ids, a section under 75 % of its original's length (restating only adds; qwen3-coder cut the golden
+  request to 18 % and lost the whole API spec), a double-quoted value from the request that is no longer there as a quoted unit
   (`request_literals`; a bench CLI answered `"OK: set"` for `"OK"`), and a test file that lost pytest's `test_` prefix (the first bench
   run renamed `test_roman.py` to `verification_for_roman.py`); `SECTION_ATTEMPTS` tries, then `stopped_at="restatement"`. A ticket refusal shows the blocks
   expected with the model's own renames applied (`_expected_blocks`), leaving only `builds`/`done`

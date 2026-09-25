@@ -192,7 +192,8 @@ agent did better than any flock, so for those, just ask CoBirb directly.
    literal language for **Architect Birb**, who never sees the original. Slang and ambiguous words
    become the technical terms they stand for, and a term that relies on assumed knowledge (a
    protocol, a format, an acronym, a tool) keeps its name and gets a short description of what it
-   involves. Nothing is left out or added, and every value your request quotes — an output like
+   involves. Nothing is left out or added — a restatement much shorter than the original is
+   refused as incomplete — and every value your request quotes — an output like
    `"OK"` — must still be there exactly, or the restatement is refused.
 
    Names are restated too, because the skeleton is made of them. A name your request states — a

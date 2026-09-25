@@ -43,6 +43,9 @@ def _no_preflight(monkeypatch):
     monkeypatch.setattr("cobirb.flock.run.missing_models", lambda *a, **k: "")
 
 
+# Long enough for the restatement's shortening check to apply to it.
+_DETAIL = " It has detail." * 20
+
 _PLAN = "## Job\nImplement it.\n" + "## Procedure\n1. Return n * 2.\n" * 20
 
 
@@ -50,7 +53,8 @@ def _restatement(tickets=_BLOCKS, names="- none"):
     """A restated design: every section reworded, the tickets as given."""
     parts = [f"## Names\n{names}", '## The request\nDouble two numbers, restated; print "OK".']
     for heading, _ in stages.SECTIONS:
-        parts.append(f"## {heading}\n" + (tickets if heading == "Tickets" else f"The {heading} section, restated."))
+        parts.append(f"## {heading}\n" + (tickets if heading == "Tickets" else f"The {heading} section, restated."
+                                          + (_DETAIL if heading == "Architecture" else "")))
     return "\n\n".join(parts)
 
 
@@ -78,6 +82,8 @@ class _StagedBrainy:
                    key=text.rfind)
         if last == "Write the next section:":
             heading = text[text.rfind(last) + len(last):].split("---")[0].strip()
+            if heading == "Architecture":
+                return f"The {heading} section.{_DETAIL}"
             return self.tickets if heading == "Tickets" else f"The {heading} section."
         if last == "Stage: the plan for ticket":
             return _PLAN
@@ -298,6 +304,8 @@ _SURVIVOR = _BLOCKS.replace("ticket: a", "ticket: double_a")  # renamed, but a.p
     # Renamed without saying so: the tickets no longer match Brainy Birb's.
     (_restatement(_BLOCKS.replace("ticket: a", "ticket: double_a")), "same tickets under their new ids"),
     (_restatement("no tickets at all"), "restated tickets cannot be used"),
+    # A section summarised rather than restated: the overview's is far longer.
+    (_restatement().replace("The Architecture section, restated." + _DETAIL, "Parts."), "much shorter than the original"),
     # A value the request quotes ("OK"), not copied exactly.
     (_restatement().replace('print "OK"', "print OK"), "exact values"),
     # A literal name pytest never collects.
