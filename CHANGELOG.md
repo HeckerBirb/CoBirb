@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.45.1]
 
 - **`cobirb doctor` says plainly what the sandbox does.** "bubblewrap, runs without asking" did not
   say what runs: it now reads "shell commands run contained, without asking (no network, writes
