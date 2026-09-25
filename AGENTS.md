@@ -368,8 +368,9 @@ to the repo. Stage 3 is the only place one is approved, however it arrived.
   budget is reported before approval.
 - Planning runs with the project's `verify_command` **off** (`_without_project_verification`) — its job
   is to write failing tests, which verification would tell it to "fix".
-- The Flock tab shows Brainy Birb's tool calls while it plans (`FlockPane.planning_note`, last
-  `PLANNING_TAIL` lines); streamed tokens deliberately do not feed it.
+- The Flock tab shows the planner's tool calls while it plans (`FlockPane.planning_note`, last
+  `PLANNING_TAIL` lines), titled with the stage's agent (`Stager._run` → `Asker.speaking` →
+  `FlockPane.planning_agent`); streamed tokens deliberately do not feed it.
 
 **Staged planning, in rounds** (`flock/stages.py`, `run._drive_staged`; the default). Measured on the
 golden task it beat the one-prompt planner and a single agent on both models tried (91/95 each); on

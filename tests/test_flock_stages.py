@@ -288,6 +288,19 @@ def test_every_ticket_stage_carries_its_own_ticket_only(monkeypatch, tmp_path):
     assert "Stage: the plan for ticket 'b'" not in a_stage  # a fresh context
 
 
+def test_the_front_end_is_told_which_agent_each_planning_stage_is(monkeypatch, tmp_path):
+    """Architect Birb's stages share Brainy Birb's front-end; it is told whose they are."""
+    _staged(tmp_path)
+    speakers = []
+
+    _run(_orchestrator(monkeypatch, tmp_path, _StagedBrainy()), tmp_path,
+         ask=Asker(confirm=lambda q, detail="": False, speaking=speakers.append))
+
+    first_architect = speakers.index("Architect Birb")
+    assert set(speakers[:first_architect]) == {"Brainy Birb"}  # overview and restatement
+    assert set(speakers[first_architect:]) == {"Architect Birb"}  # skeleton and ticket stages
+
+
 def test_the_restatement_renames_what_the_workers_see_and_the_user_is_shown_the_names(monkeypatch, tmp_path):
     _staged(tmp_path)
     for name in ("double_a", "b"):

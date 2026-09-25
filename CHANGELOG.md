@@ -13,6 +13,9 @@ and its §17 decisions record for the ones that were designed and then deliberat
   shows which way it is (`Autopilot: off` / `Autopilot: ON`). Auto-pilot is now read at every
   decision rather than once: a running planning stage, a running Worker Birb and the flock's
   autonomy follow the switch, and a worker request already waiting is answered "no".
+- **The Flock tab names Architect Birb when it is the one working.** Its skeleton and ticket stages
+  appeared under a "Brainy Birb" heading, so it looked as though Architect Birb never ran. The
+  planning strip and the activity line now name whichever agent the current stage is.
 
 ## [0.45.3]
 

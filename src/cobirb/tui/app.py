@@ -194,6 +194,8 @@ class CoBirbApp(App[None]):
         # How many tool calls this flock's planning phase has made, for the
         # progress line, and whether planning has finished.
         self._planning_calls = 0
+        # Who is making them: Brainy Birb, or Architect Birb in its stages.
+        self._planning_agent = FlockPane.PLANNER
         self.charter_in_hand = False
         # The last reply written into the transcript, so that a report which is
         # that same reply is not written a second time — see
@@ -1076,9 +1078,19 @@ class CoBirbApp(App[None]):
             return
         self._planning_calls += 1
         self.set_activity(
-            f"Brainy Birb is planning — {self._planning_calls} tool call(s), "
+            f"{self._planning_agent} is planning — {self._planning_calls} tool call(s), "
             f"last: {tool_name}"
         )
+
+    def flock_speaker(self, label: str) -> None:
+        """A planning stage is starting under ``label``. Main thread only.
+
+        The Flock tab used to title every stage "Brainy Birb", so Architect
+        Birb's skeleton and tests appeared under its colleague's name and it
+        looked as though Architect Birb never ran.
+        """
+        self._planning_agent = label
+        self.query_one(FlockPane).planning_agent(label)
 
     def flock_progress(self, text: str) -> None:
         """Progress from the flock itself. Main thread only."""
@@ -1155,6 +1167,7 @@ class CoBirbApp(App[None]):
         self.drain_flock_writes()
         self._flock_stop = None
         self._planning_calls = 0
+        self._planning_agent = FlockPane.PLANNER
         self.charter_in_hand = False
         self.query_one(FlockPane).end_planning()
         if run is not None and run.ran:

@@ -99,6 +99,10 @@ class Asker:
     # a decision about the design is not a capability, so "nobody answered"
     # safely means "use your judgement", unlike a charter approval.
     decide: Callable[[str], "str | None"] = lambda decisions: None
+    # Which agent is working now — "Brainy Birb" or "Architect Birb" — told at
+    # the start of every planning stage, so a front-end can name the one it is
+    # showing. Nothing to do by default.
+    speaking: Callable[[str], None] = lambda label: None
 
 
 @dataclass
@@ -795,7 +799,7 @@ def _drive_staged(
     stager = Stager(
         orchestrator, cwd, objective, turns=plan_turns, trace=run.trace,
         decide=_unless_autopilot(ask.decide, orchestrator) if settings.autonomy == AUTONOMY_ASK else None,
-        show=ask.show,
+        show=ask.show, speaking=getattr(ask, "speaking", None),
     )
     ask.show("Brainy Birb is writing the overview…")
     try:

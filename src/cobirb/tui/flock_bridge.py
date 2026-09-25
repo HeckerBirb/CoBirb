@@ -108,6 +108,13 @@ class TuiAsker:
         except Exception:  # noqa: BLE001 - nobody to ask means Brainy Birb decides
             return None
 
+    def speaking(self, label: str) -> None:
+        """Which agent is planning now, for the Flock tab's strip."""
+        if threading.get_ident() == self._app.ui_thread_id:
+            self._app.flock_speaker(label)
+        else:
+            self._app.call_from_thread(self._app.flock_speaker, label)
+
     def show(self, text: str) -> None:
         """Progress, into the Flock tab and the transcript.
 

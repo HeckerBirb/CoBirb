@@ -151,8 +151,11 @@ the cycle named.
 ### While it plans
 
 `/flock` moves you to the Flock tab, and the worker panes only exist once there is a charter — so
-until then the tab shows what Brainy Birb is doing: the last eight things it did, and
-`[ Waiting for LLM... ]` while it is blocked on a reply. It disappears the moment a charter is
+until then the tab shows what the planner is doing: the last eight things it did, and
+`[ Waiting for LLM... ]` while it is blocked on a reply. It is titled with whoever that is —
+Brainy Birb for the overview and the restatement, Architect Birb for the skeleton and each ticket's
+tests. All of that happens before you approve the charter, which is why the Worker Birbs start as
+soon as you do. It disappears the moment a charter is
 proposed and the panes take over.
 
 Building a skeleton for a large partition takes a while, and this is how you tell a run that is

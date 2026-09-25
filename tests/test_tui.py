@@ -3361,6 +3361,21 @@ async def test_waiting_on_the_model_says_so():
         assert FlockPane.WAITING not in str(_brainy_panel(app).render())
 
 
+async def test_the_strip_names_the_agent_that_is_planning():
+    """Architect Birb's stages used to appear under Brainy Birb's name."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._flock_stop = threading.Event()
+        app.charter_in_hand = False
+        app.flock_speaker("Architect Birb")
+        app.note_brainy_planning("write_file test_a.py")
+        app.note_flock_planning_progress("write_file")
+
+        assert str(_brainy_panel(app).render()).startswith("Architect Birb")
+        assert "Architect Birb is planning" in str(app.query_one(ActivityBar).render())
+
+
 async def test_the_section_goes_away_once_the_charter_arrives():
     """From then on the worker panes are what the tab is for."""
     from cobirb.flock.charter import Charter, WorkerBrief

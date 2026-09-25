@@ -345,10 +345,14 @@ class FlockPane(Vertical):
 
     WAITING = "[ Waiting for LLM... ]"
 
+    # Who the strip is titled with until a stage says otherwise.
+    PLANNER = "Brainy Birb"
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._planning_lines: list[str] = []
         self._planning_waiting = False
+        self._planning_agent = self.PLANNER
 
     def on_mount(self) -> None:
         self.query_one("#brainy-status", Static).display = False
@@ -395,10 +399,16 @@ class FlockPane(Vertical):
         self._planning_waiting = waiting
         self._draw_planning()
 
+    def planning_agent(self, label: str) -> None:
+        """Title the strip with the agent now working (Brainy or Architect Birb)."""
+        self._planning_agent = label or self.PLANNER
+        self._draw_planning()
+
     def end_planning(self) -> None:
         """Take the section away. The worker panes speak for themselves."""
         self._planning_lines = []
         self._planning_waiting = False
+        self._planning_agent = self.PLANNER
         panel = self.query_one("#brainy-status", Static)
         panel.update("")
         panel.display = False
@@ -409,7 +419,7 @@ class FlockPane(Vertical):
             panel.display = False
             return
         body = Text()
-        body.append("Brainy Birb\n", style="bold")
+        body.append(f"{self._planning_agent}\n", style="bold")
         for line in self._planning_lines:
             body.append(f"  {line[:200]}\n", style="dim")
         if self._planning_waiting:
