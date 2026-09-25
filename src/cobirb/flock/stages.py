@@ -568,13 +568,17 @@ the design above, only this, so everything it needs must be in it. Use exactly \
 these headings:
 
 ## Job
-Two lines: what to implement.
+A short paragraph: what this component is and does, in its own terms.
 ## Files
 Which files it may change, and which it should read but not change.
 ## Done when
 The command in `accept`, and that its tests pass unchanged.
 ## Contract
 The signatures and data shapes it implements and uses, copied exactly.
+## State and rules
+What the component holds between calls, what is always true of it, which \
+calls may follow which, and what each misuse does — with exact values. \
+"Stateless" if it holds nothing.
 ## Procedure
 Each function as numbered steps, in order, with every exact value: limits, \
 formats, messages, edge cases and what happens in each.
@@ -586,6 +590,11 @@ this plan disagree the plan is right; if something is impossible, say which \
 step and why.
 ## Out of scope
 What other parts of the system handle, without describing them.
+
+Before replying, check every exact value in this plan — messages, limits, \
+formats, results — against the tests you just wrote. Where they differ, fix \
+whichever is wrong: the worker is told the plan wins, so a plan that \
+contradicts its own tests fails them.
 
 State every requirement as a local fact of this ticket, without the reason \
 behind it ("`step` runs in O(length of the snake)", never "because the game \

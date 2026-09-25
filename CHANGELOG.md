@@ -16,6 +16,11 @@ and its §17 decisions record for the ones that were designed and then deliberat
 - **The Flock tab names Architect Birb when it is the one working.** Its skeleton and ticket stages
   appeared under a "Brainy Birb" heading, so it looked as though Architect Birb never ran. The
   planning strip and the activity line now name whichever agent the current stage is.
+- **A Worker Birb's brief says more about what it builds.** Architect Birb's ticket plan gains a
+  `## State and rules` section (what the component holds between calls, what is always true, which
+  calls may follow which, what each misuse does), `## Job` is a short paragraph rather than two
+  lines, and the plan is checked against the ticket's own tests before it is sent. A bench brief
+  had told its worker one error message while its tests expected another, and said the plan wins.
 
 ## [0.45.3]
 

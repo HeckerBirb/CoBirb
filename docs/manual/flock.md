@@ -209,8 +209,9 @@ agent did better than any flock, so for those, just ask CoBirb directly.
 3. **The skeleton**, by Architect Birb, from the restated design only: finished shared files, and
    typed stubs for every ticket. The charter's tickets come straight from the restated ticket list.
 4. **One fresh Architect Birb stage per ticket**, holding the restated design and that ticket only.
-   It writes the ticket's tests and its ticket plan — exact procedures, values and a worked example —
-   and that plan is the Worker Birb's whole brief.
+   It writes the ticket's tests and its ticket plan — the component's state and rules, exact
+   procedures, values and a worked example, checked against those tests — and that plan is the
+   Worker Birb's whole brief.
 
    So everything a Worker Birb can see — the skeleton, its tests, its brief — is written by an agent
    that never saw your request or Brainy Birb's wording, and all of it uses the same vocabulary.
