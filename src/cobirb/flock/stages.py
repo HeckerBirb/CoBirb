@@ -352,6 +352,41 @@ def parse_names(text: str) -> NameMap:
     return names
 
 
+def _expected_blocks(raw: "list[TicketSpec]", names: NameMap) -> str:
+    """The ticket blocks a restatement should contain, its own renames applied.
+
+    Ids, files and commands are structured data, and asking a model to carry
+    them through a rewrite of the whole design is where it most often failed:
+    both models in the first benchmark runs lost the block form at least once.
+    So a refusal shows the blocks with everything mechanical already mapped,
+    leaving only the two sentences that are prose to restate.
+    """
+    if not raw:
+        return ""
+
+    def path(p: str) -> str:
+        if p in names.renamed:
+            return names.renamed[p]
+        base = os.path.basename(p)
+        return os.path.join(os.path.dirname(p), names.renamed[base]) if base in names.renamed else p
+
+    def command(text: str) -> str:
+        for old, new in sorted(names.renamed.items(), key=lambda item: len(item[0]), reverse=True):
+            text = re.sub(rf"(?<![{_NAME_EDGE}]){re.escape(old)}(?![{_NAME_EDGE}])", new, text)
+        return text
+
+    blocks = [
+        TicketSpec(id=names.forward(t.id), writes=tuple(path(p) for p in t.writes),
+                   tests=tuple(path(p) for p in t.tests), accept=command(t.accept),
+                   needs=tuple(names.forward(n) for n in t.needs),
+                   builds="<one sentence, restated>", done="<one sentence, restated>").block()
+        for t in raw
+    ]
+    return ("\nWrite the Tickets section as exactly these blocks, filling in `builds` and "
+            "`done when` in restated words, and change anything else only to apply a rename "
+            "you list under Names:\n\n" + "\n\n".join(blocks))
+
+
 def request_literals(request: str) -> tuple[str, ...]:
     """The double-quoted values in the user's request: requirements, verbatim.
 
@@ -833,8 +868,11 @@ class Stager:
             sections, names, problem = self._check_restatement(text, headings, raw, literals)
             if not problem:
                 return sections, names, ""
-            # Kept, so a failed restatement can be read back afterwards.
-            self.trace[-1].update(problem=problem, text=text[:4000])
+            # Kept, so a failed restatement can be read back afterwards —
+            # head and tail, because the Tickets section it most often gets
+            # wrong comes last and a 4000-character head never reached it.
+            kept = text if len(text) <= 6000 else f"{text[:1500]}\n[…]\n{text[-4500:]}"
+            self.trace[-1].update(problem=problem, text=kept)
         return {}, self.design.names, f"the design could not be restated: {problem}"
 
     def _check_restatement(self, text: str, headings: "tuple[str, ...]", raw: list[TicketSpec],
@@ -882,13 +920,14 @@ class Stager:
         tickets = parse_tickets(cleared["Tickets"])
         problem = check_tickets(tickets)
         if problem:
-            return {}, self.design.names, f"the restated tickets cannot be used: {problem}"
+            return {}, self.design.names, (
+                f"the restated tickets cannot be used: {problem}." + _expected_blocks(raw, names))
         expected = sorted(names.forward(t.id) for t in raw)
         found = sorted(t.id for t in tickets)
         if expected != found:
             return {}, self.design.names, (
                 f"the restated tickets must be the same tickets under their new ids — expected "
-                f"{', '.join(expected)}, found {', '.join(found)}")
+                f"{', '.join(expected)}, found {', '.join(found)}." + _expected_blocks(raw, names))
         # A test file renamed out of pytest's naming is never collected. The
         # first benchmark run of this stage renamed `test_roman.py` to
         # `verification_for_roman.py`: a literal name, and a test nobody runs.

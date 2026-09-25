@@ -392,7 +392,9 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
   and new names blanked first), as are missing sections, unusable tickets, tickets that are not
   the overview's under their mapped ids, a double-quoted value from the request that is no longer there as a quoted unit
   (`request_literals`; a bench CLI answered `"OK: set"` for `"OK"`), and a test file that lost pytest's `test_` prefix (the first bench
-  run renamed `test_roman.py` to `verification_for_roman.py`); `SECTION_ATTEMPTS` tries, then `stopped_at="restatement"`.
+  run renamed `test_roman.py` to `verification_for_roman.py`); `SECTION_ATTEMPTS` tries, then `stopped_at="restatement"`. A ticket refusal shows the blocks
+  expected with the model's own renames applied (`_expected_blocks`), leaving only `builds`/`done`
+  to restate — both bench models lost the block form in a whole-design rewrite.
   The cleared tickets replace the overview's: charter, rounds and reports are keyed by cleared ids.
   (2) **Skeleton** and (3) **one stage per ticket** are **Architect Birb** (`ARCHITECT_INTRO`,
   `_stage(architect=True)`): given only `Design.cleared_document()`, **no project context** (the

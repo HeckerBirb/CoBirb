@@ -317,6 +317,17 @@ def test_a_restatement_that_cannot_be_used_is_asked_for_again_then_stops_the_flo
     assert problem in run.report
 
 
+def test_a_restatement_that_loses_the_ticket_blocks_is_shown_the_blocks_expected(monkeypatch, tmp_path):
+    _staged(tmp_path)
+    broken = _restatement("the tickets, in prose", "- renamed: a -> double_a")
+    brainy = _StagedBrainy(restatements=[broken, _restatement()])
+
+    _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path, ask=Asker(confirm=lambda q, detail="": False))
+
+    retry = [p for p in brainy.prompts if "Stage: restate the design" in p][-1]
+    assert "### ticket: double_a" in retry and "- writes: a.py, test_a.py" in retry
+
+
 def test_a_restatement_asked_again_can_succeed(monkeypatch, tmp_path):
     _staged(tmp_path)
     _project(tmp_path)
