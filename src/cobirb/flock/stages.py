@@ -263,6 +263,11 @@ def _is_test_file(path: str) -> bool:
 
 
 def _bare(name: str) -> str:
+    """The name itself: the first `backticked` span if there is one, since a
+    model writes "- kept: `Store` class" as often as "- kept: Store"."""
+    quoted = re.search(r"`([^`]+)`", name)
+    if quoted:
+        return quoted.group(1).strip()
     return name.strip().strip("`'\"").strip()
 
 
@@ -345,6 +350,15 @@ def parse_names(text: str) -> NameMap:
         if len(parts) == 2 and _bare(parts[0]) and _bare(parts[1]) and _bare(parts[0]) != _bare(parts[1]):
             names.renamed[_bare(parts[0])] = _bare(parts[1])
     return names
+
+
+def request_literals(request: str) -> tuple[str, ...]:
+    """The double-quoted values in the user's request: requirements, verbatim.
+
+    A capture with space at either end is the gap between two quoted values
+    (an unpaired quote shifted the pairing), not a value, and is skipped.
+    """
+    return tuple(dict.fromkeys(m for m in re.findall(r'"([^"\n]{1,80})"', request) if m and m == m.strip()))
 
 
 def split_sections(text: str) -> dict[str, str]:
@@ -522,6 +536,10 @@ Restate the text in precise, literal technical language, so that a reader
 with no shared context understands exactly what is to be built.
 - Keep the meaning exactly: every behaviour, every requirement. Leave nothing
   out and water nothing down.
+- Copy every literal exactly as the design gives it: output strings, messages,
+  formats, numbers, limits, code, signatures, file paths and commands. `"OK"`
+  stays `"OK"`, and `"1"`/`"0"` stays `"1"`/`"0"`. The only change to a literal
+  is a name you rename under Names.
 - Replace slang and ambiguous everyday words with the technical terms they
   stand for.
 - Wherever a term relies on assumed knowledge — a protocol, format, standard,
@@ -782,7 +800,8 @@ class Stager:
         headings = "\n".join(f"## {heading}" for heading in CLEARED_HEADINGS)
         prompt = CLEAR_PROMPT.format(intro=INTRO, document=self.design.document(), rules=CLEAR_RULES,
                                      headings=headings)
-        cleared, names, problem = self._restated(prompt, "restate the design", CLEARED_HEADINGS, raw)
+        cleared, names, problem = self._restated(prompt, "restate the design", CLEARED_HEADINGS, raw,
+                                                 literals=request_literals(self.design.objective))
         if problem:
             return problem
         self.design.cleared = cleared
@@ -803,7 +822,7 @@ class Stager:
         return parse_tickets(cleared["Tickets"]), evaluation_why(cleared["Tickets"]), ""
 
     def _restated(self, prompt: str, step: str, headings: "tuple[str, ...]",
-                  raw: list[TicketSpec]) -> "tuple[dict[str, str], NameMap, str]":
+                  raw: list[TicketSpec], literals: "tuple[str, ...]" = ()) -> "tuple[dict[str, str], NameMap, str]":
         stage = self._stage(set(), None, "")
         problem = ""
         for _attempt in range(SECTION_ATTEMPTS):
@@ -811,15 +830,15 @@ class Stager:
                 f"{prompt}\n\nYour last restatement could not be used: {problem}\n"
                 "Write the whole reply again with that fixed.")
             text = self._run(stage, step, asked)
-            sections, names, problem = self._check_restatement(text, headings, raw)
+            sections, names, problem = self._check_restatement(text, headings, raw, literals)
             if not problem:
                 return sections, names, ""
             # Kept, so a failed restatement can be read back afterwards.
             self.trace[-1].update(problem=problem, text=text[:4000])
         return {}, self.design.names, f"the design could not be restated: {problem}"
 
-    def _check_restatement(self, text: str, headings: "tuple[str, ...]",
-                           raw: list[TicketSpec]) -> "tuple[dict[str, str], NameMap, str]":
+    def _check_restatement(self, text: str, headings: "tuple[str, ...]", raw: list[TicketSpec],
+                           literals: "tuple[str, ...]" = ()) -> "tuple[dict[str, str], NameMap, str]":
         """The restated sections and the names so far, or why they cannot be used.
 
         **A renamed name that survives is refused, not trusted.** The model
@@ -840,6 +859,16 @@ class Stager:
                 "these names were renamed but still appear in the text: "
                 + ", ".join(f"`{s}`" for s in survivors)
                 + " — use only the new names outside the `- renamed:` lines")
+        # The user's quoted values are requirements, copied exactly. A benchmark
+        # run's CLI answered "OK: set" where the request says "OK".
+        body = "\n".join(cleared.values())
+        lost = [literal for literal in literals if not re.search(
+            "[\"'`“‘]" + re.escape(names.forward(literal)) + "[\"'`”’]", body)]
+        if lost:
+            return {}, self.design.names, (
+                "these exact values from the request are missing: "
+                + ", ".join(f'"{literal}"' for literal in lost)
+                + " — copy every value the request gives exactly")
         tickets = parse_tickets(cleared["Tickets"])
         problem = check_tickets(tickets)
         if problem:

@@ -48,7 +48,7 @@ _PLAN = "## Job\nImplement it.\n" + "## Procedure\n1. Return n * 2.\n" * 20
 
 def _restatement(tickets=_BLOCKS, names="- none"):
     """A restated design: every section reworded, the tickets as given."""
-    parts = [f"## Names\n{names}", "## The request\nDouble two numbers, restated."]
+    parts = [f"## Names\n{names}", '## The request\nDouble two numbers, restated; print "OK".']
     for heading, _ in stages.SECTIONS:
         parts.append(f"## {heading}\n" + (tickets if heading == "Tickets" else f"The {heading} section, restated."))
     return "\n\n".join(parts)
@@ -138,9 +138,9 @@ def _staged(tmp_path, **flock):
     write_config(tmp_path, {"flock": {"planning": "staged", **flock}})
 
 
-def _run(orchestrator, tmp_path, ask=None):
+def _run(orchestrator, tmp_path, ask=None, request='double two numbers, printing "OK"'):
     return run_flock_session(
-        orchestrator, "double two numbers", str(tmp_path),
+        orchestrator, request, str(tmp_path),
         ask=ask or Asker(confirm=lambda q, detail="": True), probe=False,
     )
 
@@ -254,7 +254,7 @@ def test_architect_birb_sees_only_the_restated_design(monkeypatch, tmp_path, mar
 
     index = next(i for i, p in enumerate(brainy.prompts) if marker in p)
     prompt, system = brainy.prompts[index], brainy.systems[index]
-    assert "Double two numbers, restated." in prompt and "The Architecture section, restated." in prompt
+    assert "Double two numbers, restated;" in prompt and "The Architecture section, restated." in prompt
     assert "double two numbers" not in prompt and "The Architecture section." not in prompt
     assert "PROJECT NOTES" not in system + prompt
 
@@ -298,6 +298,8 @@ _SURVIVOR = _BLOCKS.replace("ticket: a", "ticket: double_a")  # renamed, but a.p
     # Renamed without saying so: the tickets no longer match Brainy Birb's.
     (_restatement(_BLOCKS.replace("ticket: a", "ticket: double_a")), "same tickets under their new ids"),
     (_restatement("no tickets at all"), "restated tickets cannot be used"),
+    # A value the request quotes ("OK"), not copied exactly.
+    (_restatement().replace('print "OK"', "print OK"), "exact values"),
     # A literal name pytest never collects.
     (_restatement(_BLOCKS.replace("test_a.py", "check_a.py"), "- renamed: test_a.py -> check_a.py"),
      "lost the `test_` prefix"),
@@ -337,6 +339,7 @@ def test_a_restatement_asked_again_can_succeed(monkeypatch, tmp_path):
     ("- renamed: kill → send_sigterm\n- kept: /kill", {"kill": "send_sigterm"}, ["/kill"]),
     ("* Renamed: a => b\n- kept: none", {"a": "b"}, []),
     ("- renamed: same -> same\n- renamed: broken", {}, []),
+    ("- kept: `Store` class\n- renamed: `tick()` method -> `advance()` method", {"tick()": "advance()"}, ["Store"]),
 ])
 def test_the_names_section_is_read(section, renamed, kept):
     names = stages.parse_names(section)

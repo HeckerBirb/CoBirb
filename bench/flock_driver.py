@@ -98,7 +98,9 @@ def main() -> int:
         # back to the step that went wrong (a seal in the wrong step, a stage
         # that wrote nothing).
         "trace": run.trace,
-        "design": run.design[:20000],
+        # The raw design comes first and the restated one after it; a cap
+        # at 20000 lost the restated half, which is what the workers saw.
+        "design": run.design[:60000],
         "turns": sum(r.turns for r in reports),
         "tool_calls": calls,
         "denied": [c.get("target") or c["name"] for c in calls if c.get("denied")],
