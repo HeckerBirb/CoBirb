@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.45.2]
 
 - **A correct restatement is no longer refused for its sub-headings.** Brainy Birb's design is free
   Markdown, and a sub-heading of its own (`## Components`) was read as the end of the section it
