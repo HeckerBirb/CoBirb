@@ -546,6 +546,8 @@ Names:
   `conftest.py`, `__main__.py` and dunder methods stay as they are. Code that implements a kept name gets
   an invented internal name like any other: a `/kill` command the user asked
   for stays `/kill`, and its handler `kill` becomes `send_sigterm`.
+- The Flock's own terms are not names in the design: Flock, Brainy Birb,
+  Architect Birb, Worker Birb, ticket, ticket plan. Never list or rename them.
 - After this, use only the new names, everywhere — in prose, signatures, file
   lists and commands. An old name must not appear anywhere in your reply
   except on its own `- renamed:` line."""
