@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.45.0]
 
 - **Architect Birb: Worker Birbs no longer see the planner's own words, anywhere.** Brainy Birb
   used to write the skeleton and each ticket's tests itself, so while a worker's brief was restated
