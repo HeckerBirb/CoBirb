@@ -214,7 +214,18 @@ def build_tool_call_panel(
     style = "dim" if replayed else ("green" if ok else "red")
 
     body: Any = Text(content)
-    if tool_name == "apply_patch" and arguments.get("patch"):
+    command = arguments.get("command") if tool_name == "shell" else None
+    path = arguments.get("path") if tool_name in _PATH_HEADED else None
+    if command:
+        # The command above its result, refused or not. The panel used to show
+        # only the result, so a refusal read "tool 'shell' is not permitted"
+        # with nothing to say what had been tried, and a run showed its output
+        # without the command that produced it.
+        body = Group(Text(f"$ {_bounded_command(str(command))}", style="bold"), body)
+    elif path:
+        # The same for the file tools whose result does not name the file.
+        body = Group(Text(str(path)[:_COMMAND_CHARS], style="bold"), body)
+    elif tool_name == "apply_patch" and arguments.get("patch"):
         body = Syntax(arguments["patch"], "diff", theme="ansi_dark", background_color="default")
     elif tool_name == "edit_file" and "old_str" in arguments and "new_str" in arguments:
         diff_text = unified_diff(arguments.get("path", ""), arguments["old_str"], arguments["new_str"])
@@ -222,6 +233,27 @@ def build_tool_call_panel(
             body = Syntax(diff_text, "diff", theme="ansi_dark", background_color="default")
 
     return Panel(body, title=f"tool: {tool_name}", title_align="left", border_style=style)
+
+
+# File tools whose panel is headed by the path: their result (a file's text, a
+# confirmation, a refusal) does not say which file. `edit_file` and
+# `apply_patch` are not here: their diff names it.
+_PATH_HEADED = frozenset({"read_file", "write_file", "delete_file"})
+
+# How much of a command a tool panel shows: a script sent on stdin can be
+# hundreds of lines, and the panel is a label for the result, not a copy.
+_COMMAND_LINES = 6
+_COMMAND_CHARS = 600
+
+
+def _bounded_command(command: str) -> str:
+    lines = command.rstrip("\n").split("\n")
+    shown = "\n".join(lines[:_COMMAND_LINES])
+    if len(shown) > _COMMAND_CHARS:
+        shown = shown[:_COMMAND_CHARS] + "…"
+    if len(lines) > _COMMAND_LINES:
+        shown += f"\n… ({len(lines) - _COMMAND_LINES} more lines)"
+    return shown
 
 
 def build_preview_panel(tool_name: str, preview: str) -> Panel:

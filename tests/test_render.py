@@ -96,7 +96,6 @@ def test_tool_call_panel_shows_the_name_and_result_content():
     )
 
     assert panel.title == "tool: read_file"
-    assert isinstance(panel.renderable, Text)
     assert "banana" in _printed(panel)
 
 
@@ -141,6 +140,35 @@ def test_tool_call_panel_falls_back_to_plain_content_when_there_is_no_diff():
 
     assert isinstance(panel.renderable, Text)
     assert "no change" in _printed(panel)
+
+
+@pytest.mark.parametrize("ok, content", [
+    (False, "Permission denied: tool 'shell' is not permitted."),
+    (True, "exit=0\nhello"),
+])
+def test_a_shell_panel_shows_the_command_above_its_result(ok, content):
+    printed = _printed(render.build_tool_call_panel(
+        "shell", {"command": "gcc -Wall x.c"}, ToolResult(ok=ok, content=content)))
+
+    assert "$ gcc -Wall x.c" in printed and content.splitlines()[-1] in printed
+
+
+@pytest.mark.parametrize("tool", ["read_file", "write_file", "delete_file"])
+def test_a_file_tool_panel_shows_the_path_above_its_result(tool):
+    refusal = f"Permission denied: tool '{tool}' is not permitted."
+
+    printed = _printed(render.build_tool_call_panel(tool, {"path": "src/x.py"}, ToolResult(ok=False, content=refusal)))
+
+    assert "src/x.py" in printed and refusal in printed
+
+
+def test_a_long_shell_command_is_shown_bounded_and_says_so():
+    script = "python - <<'EOF'\n" + "\n".join(f"print({i})" for i in range(40)) + "\nEOF"
+
+    printed = _printed(render.build_tool_call_panel("shell", {"command": script}, ToolResult(ok=False, content="no")))
+
+    assert "print(3)" in printed and "print(39)" not in printed
+    assert "more lines)" in printed
 
 
 def test_tool_call_panel_accepts_a_result_that_is_not_a_ToolResult():

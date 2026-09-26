@@ -927,6 +927,7 @@ CLEAR_RULES="""
 
 3.  **Atomic Requirement Codification (The Literal Truth)**
     *   All literal data—be it a message string, a file path, a hex value, a function signature, or a rate limit—are treated as **un-negotiable, atomic constants**. They are fixed points in the flux. They cannot be rounded, generalized, or 'prettified.'
+    *   Restate by editing, never by summarising: keep every sentence and detail, so no section is shorter than its original.
 
 ### 🧬 The Vectorization Protocol
 
@@ -934,11 +935,14 @@ CLEAR_RULES="""
 
 1.  **Kept Vectors (External Constraints)**
     *   A name mentioned by the original user request (a hard command, an explicit artifact name) is treated as an external, physical vector. It exists outside the model's internal logic.
-    *   **Format:** `**- KEPT_VECTOR: <name>**`
+    *   **Format:** `- kept: <name>`
 
 2.  **Renamed Vectors (Internal Logic Abstraction)**
     *   Every name invented or abstracted by this stage (module, internal state, function) must be redefined as a highly specialized, mathematically rigorous vector. The change must explain the *shift in the data structure*.
-    *   **Format:** `- RENAMED_VECTOR: <Old_Scribbled_Name> -> <New_Vector_Signature>`
+    *   **Format:** `- renamed: <Old_Scribbled_Name> -> <New_Vector_Signature>`
+    *   An old name appears nowhere in the reply except on its own `- renamed:` line.
+    *   A form a tool depends on stays: a test file keeps its `test_` prefix (`test_kill.py` -> `test_send_sigterm.py`); `__init__.py`, `conftest.py`, `__main__.py` and dunder methods are unchanged.
+    *   Never list or rename: Brainy Birb, Architect Birb, Worker Birb, ticket, ticket plan.
 
 3.  **Exclusion Resonance (The Anti-Noise Field)**
     *   **ZERO NARRATIVE:** Exclude all meta-narrative, all explanations of *why* the process works, or all commentary on the *human* user's intent. The output must be pure, distilled, executable schema.

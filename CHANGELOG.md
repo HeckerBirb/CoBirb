@@ -4,6 +4,19 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **A tool panel shows what the call was aimed at.** It showed only the result, so a refusal read
+  "tool 'shell' is not permitted" with nothing to say what had been tried. A `shell` panel is now
+  headed by its command (the first six lines, with a note of how many more), and a `read_file`,
+  `write_file` or `delete_file` panel by its path — in the transcript, the worker panes, the
+  terminal and a resumed session.
+- **The restatement rules match the checks again.** They asked for names in a form CoBirb cannot
+  read and left out rules the restatement is checked on, so a restatement could be refused for an
+  old name left in the text. The name lines are `- kept:` / `- renamed:` again, and the rules now
+  say that an old name appears only on its renamed line, that a restatement is never shorter than
+  the original, that test files keep `test_`, and that the Flock's own words are never renamed.
+
 ## [0.45.6]
 
 - **On WSL, a command in the sandbox can no longer start a Windows program.** WSL's interop runs a
