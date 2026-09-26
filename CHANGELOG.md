@@ -4,18 +4,8 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [0.45.4]
+## [Unreleased]
 
-- **A Worker Birb's request can no longer push its buttons out of reach.** A request quoting a long
-  command — a script sent on stdin — grew past the bottom of its pane, and Once, Session and Deny
-  with it. The buttons now stay at the bottom of the request and the rest scrolls above them.
-- **`f3` switches auto-pilot on or off at once**, including mid-turn and mid-flock, and the footer
-  shows which way it is (`Autopilot: off` / `Autopilot: ON`). Auto-pilot is now read at every
-  decision rather than once: a running planning stage, a running Worker Birb and the flock's
-  autonomy follow the switch, and a worker request already waiting is answered "no".
-- **The Flock tab names Architect Birb when it is the one working.** Its skeleton and ticket stages
-  appeared under a "Brainy Birb" heading, so it looked as though Architect Birb never ran. The
-  planning strip and the activity line now name whichever agent the current stage is.
 - **A Worker Birb's brief says more about what it builds.** Architect Birb's ticket plan gains a
   `## State and rules` section (what the component holds between calls, what is always true, which
   calls may follow which, what each misuse does), `## Job` is a short paragraph rather than two
@@ -30,6 +20,19 @@ and its §17 decisions record for the ones that were designed and then deliberat
 - **A ticket field whose name is bold is read.** `- **accept**: …` or `- **writes:** …`, as models
   often write them, were skipped entirely, and the ticket was refused for having no files or no
   check.
+
+## [0.45.4]
+
+- **A Worker Birb's request can no longer push its buttons out of reach.** A request quoting a long
+  command — a script sent on stdin — grew past the bottom of its pane, and Once, Session and Deny
+  with it. The buttons now stay at the bottom of the request and the rest scrolls above them.
+- **`f3` switches auto-pilot on or off at once**, including mid-turn and mid-flock, and the footer
+  shows which way it is (`Autopilot: off` / `Autopilot: ON`). Auto-pilot is now read at every
+  decision rather than once: a running planning stage, a running Worker Birb and the flock's
+  autonomy follow the switch, and a worker request already waiting is answered "no".
+- **The Flock tab names Architect Birb when it is the one working.** Its skeleton and ticket stages
+  appeared under a "Brainy Birb" heading, so it looked as though Architect Birb never ran. The
+  planning strip and the activity line now name whichever agent the current stage is.
 
 ## [0.45.3]
 
