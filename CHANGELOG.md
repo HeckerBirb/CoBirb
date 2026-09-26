@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.45.7]
 
 - **A tool panel shows what the call was aimed at.** It showed only the result, so a refusal read
   "tool 'shell' is not permitted" with nothing to say what had been tried. A `shell` panel is now
