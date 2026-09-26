@@ -376,6 +376,13 @@ What it does **not** get is anything the check never named, and that's deliberat
   can't read through — `$(…)`, a subshell, `find -exec` — since a grant over something unreadable is
   a grant over whatever it contains.
 
+**So a ticket's `accept` is checked when Brainy Birb writes it.** Every program it names must be
+installed here, and it must be readable; otherwise the ticket list is sent back with the reason, as
+any other ticket problem is. A program given as a path (`/tmp/test_x`) isn't looked for, since the
+command may build it — `cc -Wall -o /tmp/test_x src/x.c tests/test_x.c && /tmp/test_x` is fine. A
+flock once went to approval with `c src/x.c tests/test_x.c`: its worker could run only `c`, which
+doesn't exist, and spent the ticket being refused.
+
 ### Your config does not apply to workers
 
 This surprises people, so: `allow_tools`, `allow_read_dirs` and `allow_write_dirs` in

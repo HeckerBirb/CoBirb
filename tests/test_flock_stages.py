@@ -171,10 +171,24 @@ def test_ticket_blocks_are_read_whatever_their_formatting():
     # Another ticket's test file under `tests` — "the tests I must pass".
     ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: x\n"
      "### ticket: b\n- writes: b.py\n- tests: tb.py, ta.py\n- accept: x", "never another ticket's"),
-    ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: x\n- needs: ghost", "ghost"),
+    ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: true\n- needs: ghost", "ghost"),
+    # The language's name where the program goes — a real flock's `accept`.
+    ("### ticket: a\n- writes: a.c\n- tests: ta.c\n- accept: c a.c ta.c", "`c`, which is not a program"),
+    ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: true && no-such-program-here", "no-such-program-here"),
+    ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: true $(x)", "cannot be read"),
 ])
 def test_ticket_blocks_that_cannot_become_a_charter_say_why(blocks, problem):
     assert problem in check_tickets(parse_tickets(blocks))
+
+
+@pytest.mark.parametrize("accept", [
+    "true",
+    "cd sub && FLAG=1 true",
+    # A program given as a path may be built by the command itself.
+    "./build.sh && /tmp/test_a",
+])
+def test_an_accept_command_naming_real_programs_passes_the_check(accept):
+    assert check_tickets(parse_tickets(f"### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: {accept}")) == ""
 
 
 @pytest.mark.parametrize("block, tests", [

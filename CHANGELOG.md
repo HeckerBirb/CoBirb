@@ -21,6 +21,12 @@ and its §17 decisions record for the ones that were designed and then deliberat
   calls may follow which, what each misuse does), `## Job` is a short paragraph rather than two
   lines, and the plan is checked against the ticket's own tests before it is sent. A bench brief
   had told its worker one error message while its tests expected another, and said the plan wins.
+- **A ticket's `accept` command must name programs that exist.** A flock went to approval with
+  `c bacon_main.c tests/test_bacon_main.c` — Brainy Birb had put the language's name where the
+  program goes — and its worker, allowed only the programs its check names, spent 43 turns refused.
+  The overview's ticket check now refuses a command naming a program that isn't installed, or one
+  it cannot read, and the Tickets checklist says what `accept` must do, with a compiled-language
+  example beside the Python one.
 
 ## [0.45.3]
 

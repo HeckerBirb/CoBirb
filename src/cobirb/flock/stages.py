@@ -48,11 +48,12 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ..orchestrator import Orchestrator
-from ..policy import READ_TOOLS, patch_target
+from ..policy import READ_TOOLS, _segments, patch_target
 from ..runtime.hooks import EVENT_BEFORE_TOOL, HookOutcome
 from .brainy import NEED_TO_KNOW_DIRECTIVE
 from .charter import Charter, CharterError
@@ -102,7 +103,7 @@ constants), or `(stub)` if a ticket implements it."""),
   ### ticket: <id>
   - writes: <every file this ticket creates or changes, comma-separated>
   - tests: <its test files, comma-separated — at least one>
-  - accept: <the command that proves it is done, e.g. python -m pytest tests/test_x.py -q>
+  - accept: <the command that runs this ticket's tests, e.g. python -m pytest tests/test_x.py -q>
   - needs: <ticket ids that must finish first, or none>
   - builds: <what it builds, one sentence>
   - done when: <one sentence>
@@ -113,6 +114,10 @@ next stages. Every ticket still names its own test files on its `- tests:` line:
 writes them, and the Worker Birb must make them pass. They are the test files for its own code, \
 and it `writes` them too.
 - No file may appear in two tickets. A `(finished)` seam file is in no ticket.
+- `accept` is a real shell command, run in the project directory: it runs this ticket's \
+tests and exits non-zero if any fails. Name real programs — `python -m pytest …` for \
+Python; for a compiled language, build the tests and run what was built, e.g. \
+`cc -Wall -o /tmp/test_x src/x.c tests/test_x.c && /tmp/test_x`.
 - A ticket's tests must pass with its own code and the skeleton alone.
 - If this work should not be divided at all, write exactly `NO TICKETS` and one \
 sentence saying why."""),
@@ -188,6 +193,42 @@ def parse_tickets(text: str) -> list[TicketSpec]:
     return tickets
 
 
+# Shell builtins with no program of their own on PATH. `cd` is the one an
+# acceptance command really uses (`cd sub && pytest`); the rest are here so a
+# plausible command is not refused for a word the shell answers itself.
+_BUILTINS = frozenset({"cd", "export", "set", "source", ".", "exit"})
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _accept_problem(command: str) -> str:
+    """Why ``command`` cannot run here, or "" if every program it names exists.
+
+    **Checked when the overview is written, because nothing later would.** A
+    user's flock went to approval with `c bacon_main.c tests/test_bacon_main.c`
+    — the ticket template's `python …` example with the language's name put
+    where the program goes. Its worker could run only the programs its check
+    names, so it spent 43 turns refused and never wrote a line.
+
+    Read the way the worker's grant is (``policy._segments``): a command that
+    scan cannot read grants the worker nothing, so it could never be run. A
+    program given as a path is not looked for — the command may build it
+    (`cc -o /tmp/t … && /tmp/t`).
+    """
+    segments = _segments(command)
+    if not segments:
+        return ("cannot be read (command substitution, a subshell or unbalanced quotes), "
+                "so the Worker Birb could not be allowed to run it. Write it as plain commands "
+                "joined with `&&`")
+    for words in segments:
+        program = next((w for w in words if not _ASSIGNMENT.match(w)), "")
+        if not program or "/" in program or program in _BUILTINS:
+            continue
+        if shutil.which(program) is None:
+            return (f"names `{program}`, which is not a program installed here. Name the real "
+                    "program that runs this ticket's tests")
+    return ""
+
+
 def check_tickets(tickets: list[TicketSpec]) -> str:
     """Why these tickets cannot become a charter, or "" if they can.
 
@@ -220,6 +261,9 @@ def check_tickets(tickets: list[TicketSpec]) -> str:
                     "(e.g. `- tests: tests/test_x.py`), and list them in `writes` too")
         if not ticket.accept:
             return f"ticket {ticket.id!r} has no `accept` command"
+        problem = _accept_problem(ticket.accept)
+        if problem:
+            return f"ticket {ticket.id!r}: its `accept` command `{ticket.accept}` {problem}"
         try:
             draft.add_worker(ticket.id, brief="-", writes=list(ticket.writes), accept=ticket.accept,
                              tests=list(ticket.tests), needs=list(ticket.needs))

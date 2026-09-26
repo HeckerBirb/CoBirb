@@ -383,7 +383,8 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
   (0) **Overview**, section by section in one context, read-only: `SECTIONS`, fixed headings with a
   checklist each; the Tickets section is fixed-form blocks (`### ticket: <id>` + `- key: value`), parsed
   by `parse_tickets` (a block with no `tests` line takes the test files in its `writes`) and checked by `check_tickets` (a file in two tickets is named in overview terms
-  first, then a scratch `PlanDraft`), asked up to `SECTION_ATTEMPTS = 3` times, each rejected attempt
+  first, then a scratch `PlanDraft`; every program an `accept` names must be on `PATH` and the
+  command readable by `policy._segments` — `_accept_problem` — since a worker may run only those), asked up to `SECTION_ATTEMPTS = 3` times, each rejected attempt
   kept in the trace. `NO TICKETS` is a legitimate decline. (1) **Restatement** (`Stager.clear`, Brainy
   Birb, no tools): the whole design, request included, restated by `CLEAR_RULES` in precise, literal
   language — the *cleared* design (`Design.cleared`). Names too: one the user's request states is a
