@@ -191,6 +191,16 @@ def test_an_accept_command_naming_real_programs_passes_the_check(accept):
     assert check_tickets(parse_tickets(f"### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: {accept}")) == ""
 
 
+@pytest.mark.parametrize("line", [
+    "- writes: a.py",
+    "- **writes**: a.py",
+    "- **writes:** a.py",
+    "* __writes__ : a.py",
+])
+def test_a_field_is_read_whether_or_not_its_name_is_bold(line):
+    assert parse_tickets(f"### ticket: a\n{line}\n")[0].writes == ("a.py",)
+
+
 @pytest.mark.parametrize("block, tests", [
     ("### ticket: a\n- writes: a.py, tests/test_a.py\n- tests: tests/test_a.py", ("tests/test_a.py",)),
     # No `tests` line: the test files it writes are its tests.

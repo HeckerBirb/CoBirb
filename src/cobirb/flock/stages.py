@@ -127,7 +127,10 @@ sentence saying why."""),
 )
 
 _TICKET_HEADING = re.compile(r"^\s{0,4}#{2,4}\s*ticket\s*[:：]\s*`?([A-Za-z0-9_.-]+)`?\s*$", re.I | re.M)
-_FIELD = re.compile(r"^\s*[-*]\s*([a-z ]+?)\s*:\s*(.*)$", re.I)
+# The key may be bold, as models often write it in Markdown — `**accept**:` or
+# `**accept:**`. Without that the whole line was skipped, and a ticket written
+# that way was refused for having no files and no check.
+_FIELD = re.compile(r"^\s*[-*]\s*(?:\*\*|__)?([a-z ]+?)(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*(.*)$", re.I)
 
 
 @dataclass

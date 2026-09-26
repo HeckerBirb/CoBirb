@@ -27,6 +27,9 @@ and its §17 decisions record for the ones that were designed and then deliberat
   The overview's ticket check now refuses a command naming a program that isn't installed, or one
   it cannot read, and the Tickets checklist says what `accept` must do, with a compiled-language
   example beside the Python one.
+- **A ticket field whose name is bold is read.** `- **accept**: …` or `- **writes:** …`, as models
+  often write them, were skipped entirely, and the ticket was refused for having no files or no
+  check.
 
 ## [0.45.3]
 
