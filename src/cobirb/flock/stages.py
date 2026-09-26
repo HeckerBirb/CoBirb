@@ -47,6 +47,7 @@ before anyone is asked about it, and the harness seals — there is no seal tool
 from __future__ import annotations
 
 import os
+import platform
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -77,6 +78,34 @@ _SHORTEN_FLOOR = 200
 # contain as a checklist. Fixed headings in a fixed order, because a missing
 # heading is trivial to detect and a weak model fills a checklist better than it
 # interprets prose.
+# What cannot be built or checked on this machine, and what is left for the
+# user to do elsewhere. Its own section so the flock's report can quote it.
+LIMITS_HEADING = "Limits on this machine"
+
+
+def machine_block() -> str:
+    """The machine every build and check runs on, for the planning prompts.
+
+    **Facts, not a list of tools.** Which compiler builds what, for which OS,
+    is what the model knows and CoBirb should not: a table of toolchains would
+    confine the Flock to the languages someone thought to list. Given the OS it
+    is planning for, Brainy Birb picks the tools; the `accept` check then
+    refuses any program that is not actually installed.
+    """
+    lines = [f"- Operating system: {platform.system() or 'unknown'} {platform.release()}".rstrip()]
+    try:
+        distro = platform.freedesktop_os_release().get("PRETTY_NAME", "")
+    except OSError:  # not Linux, or no os-release: the OS line stands alone
+        distro = ""
+    if distro:
+        lines.append(f"- Distribution: {distro}")
+    lines.append(f"- CPU architecture: {platform.machine() or 'unknown'}")
+    if "microsoft" in platform.release().lower():
+        lines.append("- Linux under WSL, on a Windows computer")
+    return ("--- This machine ---\n\nEvery build and every ticket's check runs here, in the "
+            "project directory:\n\n" + "\n".join(lines))
+
+
 SECTIONS: tuple[tuple[str, str], ...] = (
     ("What is asked", """\
 - One short paragraph: what the user wants, in your own words.
@@ -91,6 +120,12 @@ library, formats, limits, behaviour at the edges.
 - The parts of the system and what each is responsible for, as a bullet list.
 - How data and control move between them, in two or three sentences.
 - Name every part exactly as it will appear in code (`engine.step`, not "the step function")."""),
+    (LIMITS_HEADING, """\
+- Anything this work needs that cannot be built, run or tested on this machine (see \
+"This machine" above) — for example code calling the Windows API, when this machine runs Linux.
+- For each: what the tickets do instead (a build-only check with a cross-compiler, or the part \
+kept behind an interface that can be tested here), and what the user must still do, and where.
+- Write "none" if everything can be built and checked here."""),
     ("Seams", """\
 - Every place where two tickets' code meets, one bullet each.
 - For each: the file (or `file::symbol`), the exact signature or data shape, and \
@@ -114,10 +149,14 @@ next stages. Every ticket still names its own test files on its `- tests:` line:
 writes them, and the Worker Birb must make them pass. They are the test files for its own code, \
 and it `writes` them too.
 - No file may appear in two tickets. A `(finished)` seam file is in no ticket.
-- `accept` is a real shell command, run in the project directory: it runs this ticket's \
-tests and exits non-zero if any fails. Name real programs — `python -m pytest …` for \
-Python; for a compiled language, build the tests and run what was built, e.g. \
-`cc -Wall -o /tmp/test_x src/x.c tests/test_x.c && /tmp/test_x`.
+- `accept` is a real shell command, run on this machine in the project directory: it runs \
+this ticket's tests and exits non-zero if any fails. Use the tools that are standard for the \
+language and for the OS the code is built for, as they are used on this machine — \
+`python -m pytest …` for Python; for a compiled language, build the tests and run what was \
+built, e.g. `cc -Wall -o /tmp/test_x src/x.c tests/test_x.c && /tmp/test_x`. Code for another \
+OS is built with that OS's cross-compiler and only built, not run: on Linux, a Windows binary \
+is built with `x86_64-w64-mingw32-gcc`, never `cc`. A program not installed here is refused, \
+and you will be told which.
 - A ticket's tests must pass with its own code and the skeleton alone.
 - If this work should not be divided at all, write exactly `NO TICKETS` and one \
 sentence saying why."""),
@@ -552,7 +591,7 @@ it needs."""
 def section_prompt(design: Design, heading: str, checklist: str, problem: str = "") -> str:
     written = design.document()
     lines = [
-        INTRO, "", written, "",
+        INTRO, "", machine_block(), "", written, "",
         f"--- Write the next section: {heading} ---", "",
         f"Reply with the content of the \"{heading}\" section only, in Markdown. "
         "It must contain:", "", checklist, "",
@@ -568,6 +607,8 @@ def section_prompt(design: Design, heading: str, checklist: str, problem: str = 
 
 SKELETON_PROMPT = """\
 {intro}
+
+{machine}
 
 {document}
 
@@ -589,6 +630,8 @@ When the skeleton is written, stop and say which files you wrote."""
 
 TICKET_PROMPT = """\
 {intro}
+
+{machine}
 
 {document}
 
@@ -757,6 +800,8 @@ line kept under its block."""
 EVALUATE_PROMPT = """\
 {intro}
 
+{machine}
+
 {document}
 
 --- Stage: after round {round} ---
@@ -783,8 +828,22 @@ Leave out tickets that are complete. Under each block add one line \
 `- why: <what the next attempt must do differently>`. If a report says a test \
 contradicts the contract, say so in `why` — its test is rewritten next round.
 
+A ticket whose check cannot pass on this machine however it is written (see \
+"This machine" and "{limits}") is not tried again: leave it out, and add a line \
+`- left to do: <ticket id>: <what the user must still do, and where>` — outside \
+any ticket block. It goes to the user's report.
+
 If everything is done, or another round would not change the outcome, reply \
-exactly `NO TICKETS` and one sentence why."""
+exactly `NO TICKETS` and one sentence why (and any `- left to do:` lines)."""
+
+
+_LEFT_TO_DO = re.compile(r"^\s*[-*]\s*(?:\*\*|__)?left to do(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*(.+?)\s*$",
+                         re.I | re.M)
+
+
+def left_to_do(text: str) -> list[str]:
+    """The `- left to do:` lines of an evaluation: what the user must still do."""
+    return [match.group(1) for match in _LEFT_TO_DO.finditer(text)]
 
 
 def evaluation_why(text: str) -> dict[str, str]:
@@ -1069,7 +1128,8 @@ class Stager:
                             architect=True)
         blocks = "\n\n".join(ticket.block() for ticket in tickets)
         self._run(stage, "skeleton", SKELETON_PROMPT.format(
-            intro=ARCHITECT_INTRO, document=self.design.cleared_document(), blocks=blocks),
+            intro=ARCHITECT_INTRO, machine=machine_block(), document=self.design.cleared_document(),
+            blocks=blocks),
             label="Architect Birb")
 
     def ticket_plan(self, ticket: TicketSpec, previous: str = "") -> str:
@@ -1079,7 +1139,8 @@ class Stager:
                             f"this stage writes only the tests of ticket {ticket.id!r}: {', '.join(ticket.tests)}.",
                             architect=True)
         prior = f"\nThe last round's attempt at this ticket, and what happened:\n\n{previous}\n" if previous else ""
-        prompt = TICKET_PROMPT.format(intro=ARCHITECT_INTRO, document=self.design.cleared_document(),
+        prompt = TICKET_PROMPT.format(intro=ARCHITECT_INTRO, machine=machine_block(),
+                                      document=self.design.cleared_document(),
                                       id=ticket.id, block=ticket.block(), previous=prior,
                                       tests=", ".join(ticket.tests))
         text = ""
@@ -1111,7 +1172,8 @@ class Stager:
         """
         reader = self._stage(set(READ_TOOLS), None, "")
         text = self._run(reader, f"evaluate round {round_number}", EVALUATE_PROMPT.format(
-            intro=INTRO, document=self.design.document(), round=round_number, verdict=verdict,
+            intro=INTRO, machine=machine_block(), document=self.design.document(),
+            round=round_number, verdict=verdict, limits=LIMITS_HEADING,
             names=self.design.names.describe() or "  (no names were restated)"))
         if text.lstrip().upper().startswith("NO TICKETS"):
             return [], {}, text

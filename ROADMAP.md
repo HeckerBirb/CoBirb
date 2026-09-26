@@ -29,6 +29,17 @@ machines that have it. Landlock also only grants access rather than denying it, 
 directories while leaving the rest of the filesystem readable needs a careful design of its own —
 without that, this backend would contain writes and network but hide less than bubblewrap does.
 
+## Worker Birbs on other machines
+
+Brainy Birb on one machine, Worker Birbs spawned on others — macOS, Debian, Windows — so a ticket that
+can only be built or tested on a particular OS runs where it can. Today every build and check runs on
+the machine CoBirb runs on, and work for another OS ends up as a build-only check plus a note in the
+flock's report of what is left to do elsewhere.
+
+**Why it waits:** to be discussed. It puts a worker's brief, files and results on a network, which
+crosses invariant 3 on purpose; each remote machine needs its own sandbox, checkpoints and way to
+return a worker's changes; and the permission model has to say who may grant what on which machine.
+
 ## Editor integration over the Agent Client Protocol
 
 A `cobirb acp` mode speaking [ACP](https://zed.dev/acp) — JSON-RPC over stdio — so

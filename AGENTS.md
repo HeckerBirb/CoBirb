@@ -383,7 +383,10 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
   stage's files through `before_tool` — **before** the policy, so it is refused without asking. The
   design documents (`stages.Design`) are what a stage carries; nothing else survives between stages.
   (0) **Overview**, section by section in one context, read-only: `SECTIONS`, fixed headings with a
-  checklist each; the Tickets section is fixed-form blocks (`### ticket: <id>` + `- key: value`), parsed
+  checklist each (`LIMITS_HEADING` says what cannot be built or checked on this machine, quoted in
+  the report by `run._left_elsewhere` with any evaluation's `- left to do:` lines; every planning
+  prompt carries `stages.machine_block()` — OS, distribution, CPU, never a toolchain list, so tools
+  are Brainy Birb's choice); the Tickets section is fixed-form blocks (`### ticket: <id>` + `- key: value`), parsed
   by `parse_tickets` (a block with no `tests` line takes the test files in its `writes`) and checked by `check_tickets` (a file in two tickets is named in overview terms
   first, then a scratch `PlanDraft`; every program an `accept` names must be on `PATH` and the
   command readable by `policy._segments` — `_accept_problem` — since a worker may run only those), asked up to `SECTION_ATTEMPTS = 3` times, each rejected attempt

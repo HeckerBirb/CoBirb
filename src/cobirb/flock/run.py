@@ -48,10 +48,12 @@ from .stages import (
     AUTONOMY_ASK,
     AUTONOMY_AUTO,
     DEFAULT_MAX_ROUNDS,
+    LIMITS_HEADING,
     CharterApproval,
     Stager,
     approval_changes,
     check_tickets,
+    left_to_do,
 )
 from .supervisor import Canceller, FlockOutcome, check_partition, run_flock
 
@@ -840,6 +842,8 @@ def _drive_staged(
     previous: dict[str, str] = {}
     approved: list[Charter] = []
     last_failing: tuple | None = None
+    # What an evaluation said cannot be done on this machine, for the report.
+    left: list[str] = []
     for round_number in range(1, settings.max_rounds + 1):
         # ---- Skeleton, then one stage per ticket -------------------------- #
         try:
@@ -925,9 +929,10 @@ def _drive_staged(
             run.stopped_at = "rounds"
             break
         try:
-            next_tickets, whys, _ = stager.evaluate(
+            next_tickets, whys, evaluation = stager.evaluate(
                 round_number, _round_verdict(outcome),
                 outstanding=[r.worker_id for r in outcome.outstanding])
+            left += [line for line in left_to_do(evaluation) if line not in left]
         except RuntimeError as exc:
             ask.show(f"Stopping: the evaluation failed because the model server failed ({exc}).")
             break
@@ -961,8 +966,26 @@ def _drive_staged(
             lines.append("\nStopped: the last round changed nothing.")
         elif run.stopped_at == "rounds":
             lines.append(f"\nStopped at the round cap ({settings.max_rounds}).")
+        lines += _left_elsewhere(stager.design.sections.get(LIMITS_HEADING, ""), left)
         run.report = "\n".join(lines)
     return run
+
+
+def _left_elsewhere(limits: str, left: list[str]) -> list[str]:
+    """The report's account of what could not be done on this machine.
+
+    Some work cannot pass here however well it is written — a call into the
+    Windows API, on Linux — and a flock that simply reported those tickets as
+    failed would leave the user to work out why, and what to do. Brainy Birb
+    names these limits in the overview and after each round; they go to the
+    user in its words.
+    """
+    lines = []
+    if limits.strip() and not limits.strip().lower().rstrip(".").startswith("none"):
+        lines += ["", f"--- {LIMITS_HEADING} (from the design) ---", limits.strip()]
+    if left:
+        lines += ["", "--- Left to do elsewhere (from the evaluation) ---"] + [f"- {item}" for item in left]
+    return lines
 
 
 def _close_branch(main, flock_session, run: FlockRun, password: str | None) -> None:

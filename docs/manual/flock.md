@@ -376,6 +376,14 @@ What it does **not** get is anything the check never named, and that's deliberat
   can't read through — `$(…)`, a subshell, `find -exec` — since a grant over something unreadable is
   a grant over whatever it contains.
 
+**Brainy Birb plans for the machine it runs on.** Every planning stage is told its OS, distribution
+and CPU, and Brainy Birb picks the tools the language and the target OS call for — CoBirb keeps no
+list of languages. Code for another OS is built with that OS's cross-compiler and only built: on
+Linux, a Windows binary with `x86_64-w64-mingw32-gcc`. What cannot be built or tested here goes in
+the design's **Limits on this machine** section, and an evaluation leaves a ticket that cannot pass
+here out of the next round with a `left to do` note. Both end up in the flock's report, so you're
+told what is still left to do and where, rather than just that a ticket failed.
+
 **So a ticket's `accept` is checked when Brainy Birb writes it.** Every program it names must be
 installed here, and it must be readable; otherwise the ticket list is sent back with the reason, as
 any other ticket problem is. A program given as a path (`/tmp/test_x`) isn't looked for, since the

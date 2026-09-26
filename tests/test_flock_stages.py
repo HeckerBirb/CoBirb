@@ -276,7 +276,7 @@ def test_a_staged_flock_runs_every_stage_and_the_workers(monkeypatch, tmp_path):
 
     assert run.ran and len(run.rounds) == 1 and run.outcome.all_done
     steps = [entry["step"] for entry in run.trace]
-    assert steps[:7] == [f"overview: {h}" for h, _ in stages.SECTIONS] + ["restate the design"]
+    assert steps[:len(stages.SECTIONS) + 1] == [f"overview: {h}" for h, _ in stages.SECTIONS] + ["restate the design"]
     assert "skeleton" in steps and "ticket: a" in steps and "ticket: b" in steps
     # Architect Birb's ticket plan is the brief the Worker Birb gets, as written.
     assert run.charter.worker("a").brief == _PLAN.strip()
@@ -549,6 +549,42 @@ def test_a_failed_ticket_is_planned_again_in_a_second_round(monkeypatch, tmp_pat
     assert [w.id for w in run.rounds[1].charter.workers] == ["b"]
     second = [p for p in brainy.prompts if "Stage: the plan for ticket 'b'" in p][-1]
     assert "implement the body this time" in second and "ran out of ideas" in second
+
+
+def test_every_planning_stage_is_told_the_machine_it_plans_for(monkeypatch, tmp_path):
+    _staged(tmp_path)
+    _project(tmp_path)
+    _workers(monkeypatch, tmp_path)
+    brainy = _StagedBrainy()
+
+    _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
+
+    for marker in ("Write the next section: Tickets", "Stage: the skeleton", "Stage: the plan for ticket"):
+        prompt = next(p for p in brainy.prompts if marker in p)
+        assert "--- This machine ---" in prompt and "Operating system:" in prompt, marker
+
+
+def test_what_cannot_be_done_on_this_machine_reaches_the_report(monkeypatch, tmp_path):
+    """The design's limits, and an evaluation's `left to do`, in Brainy Birb's words."""
+    _staged(tmp_path)
+    _project(tmp_path)
+    _workers(monkeypatch, tmp_path, fail_first={"b"})
+
+    class _Limited(_StagedBrainy):
+        def chat(self, system, context, tools=None, *, stream=False):
+            text = str(context)
+            marker = "Write the next section:"
+            if text[text.rfind(marker) + len(marker):].split("---")[0].strip() == stages.LIMITS_HEADING:
+                self.prompts.append(text)
+                return "- The screen capture calls the Windows API: build-only here; run it on Windows."
+            return super().chat(system, context, tools, stream=stream)
+
+    brainy = _Limited(evaluations=["NO TICKETS b cannot pass here.\n- left to do: b: run its tests on Windows"])
+
+    run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
+
+    assert "calls the Windows API" in run.report
+    assert "b: run its tests on Windows" in run.report
 
 
 def test_ask_mode_asks_before_every_round(monkeypatch, tmp_path):

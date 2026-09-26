@@ -11,6 +11,12 @@ and its §17 decisions record for the ones that were designed and then deliberat
   drive writable — `cmd.exe` started from inside the sandbox ran outside every one of its limits,
   including for commands run without asking. The sandbox now hides WSL's interop socket, so
   starting one fails; `cobirb doctor` says so on WSL.
+- **Brainy Birb plans for the machine it runs on.** Every planning stage is told the OS,
+  distribution and CPU, and chooses the tools the language and target OS call for; code for another
+  OS is built with its cross-compiler and only built (a Windows binary on Linux with
+  `x86_64-w64-mingw32-gcc`). A new overview section, *Limits on this machine*, says what cannot be
+  built or checked here, and an evaluation leaves a ticket that cannot pass here out of the next
+  round with a `left to do` note; both go into the flock's report.
 
 ## [0.45.5]
 
