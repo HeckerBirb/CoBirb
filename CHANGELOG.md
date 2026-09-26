@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.45.6]
 
 - **On WSL, a command in the sandbox can no longer start a Windows program.** WSL's interop runs a
   Windows program on the Windows side, as you, with the Windows network and your whole Windows
