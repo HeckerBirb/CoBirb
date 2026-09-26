@@ -4,7 +4,7 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
-## [Unreleased]
+## [0.45.5]
 
 - **A Worker Birb's brief says more about what it builds.** Architect Birb's ticket plan gains a
   `## State and rules` section (what the component holds between calls, what is always true, which
