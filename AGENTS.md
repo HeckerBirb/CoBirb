@@ -137,7 +137,9 @@ prompt → model call → tool calls (policy-gated) → results into history →
 - **The sandbox** (bubblewrap): filesystem read-only except the project and a private `/tmp`; the
   project's **`.git` read-only** (undo restores files, not history); no network namespace; own
   PID/IPC/UTS namespaces; credential paths hidden (`DEFAULT_HIDDEN` plus `paths.cobirb_dir()`, masked at
-  their real paths because bubblewrap resolves symlinks inside the new root). Modes: `"auto"` (default
+  their real paths because bubblewrap resolves symlinks inside the new root); on WSL, the interop
+  socket dir `WSL_INTEROP_DIR` (`/run/WSL`) is masked, since a Windows program started from inside
+  ran outside the sandbox entirely (unsetting `WSL_INTEROP` alone does not stop it). Modes: `"auto"` (default
   — contained and not asked, via `Policy.sandbox_auto`, main agent only; a *default* auto applies only
   where whole-tree checkpoints exist), `"ask"`, `"off"`. In auto even a command the segment scan cannot
   read is allowed — containment is the guarantee. `unsandboxed: true` runs outside and always goes
@@ -628,7 +630,8 @@ Ideas not yet built, with why each waits, are in [`ROADMAP.md`](./ROADMAP.md).
 - **Guarantees end at the model socket.** The endpoint is a separate program.
 - **Without a working bubblewrap, an approved `shell` command runs with full user privileges** — as
   does one sent `unsandboxed`, or any with `sandbox: "off"`. The sandbox hides a fixed list of
-  credential paths, not every secret, and passes the environment through.
+  credential paths, not every secret, and passes the environment through. On WSL that list does not
+  reach the Windows drive: `/mnt/c` is readable, like the rest of the filesystem.
 - **Without `git`, `/undo` cannot cover shell changes** — only what a tool declared.
 - **Installing a plugin executes its code** before any permission layer exists.
 - **A configured MCP server can do what it likes with the arguments it receives.**

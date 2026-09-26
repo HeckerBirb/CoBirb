@@ -370,7 +370,10 @@ def _check_sandbox(report: Report, config: Config) -> None:
         report.add("sandbox", OK, "bubblewrap: shell commands run contained, but each is asked "
                    "about first: git is missing, so what they change could not be undone")
     else:
-        report.add("sandbox", OK, box.describe())
+        detail = box.describe()
+        if os.path.isdir(sandbox.WSL_INTEROP_DIR):
+            detail += "; on WSL, Windows programs cannot be started from inside it"
+        report.add("sandbox", OK, detail)
 
 
 def run(

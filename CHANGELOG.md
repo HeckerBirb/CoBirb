@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **On WSL, a command in the sandbox can no longer start a Windows program.** WSL's interop runs a
+  Windows program on the Windows side, as you, with the Windows network and your whole Windows
+  drive writable — `cmd.exe` started from inside the sandbox ran outside every one of its limits,
+  including for commands run without asking. The sandbox now hides WSL's interop socket, so
+  starting one fails; `cobirb doctor` says so on WSL.
+
 ## [0.45.5]
 
 - **A Worker Birb's brief says more about what it builds.** Architect Birb's ticket plan gains a

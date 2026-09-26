@@ -97,6 +97,19 @@ def test_credentials_are_hidden_from_a_contained_command(tmp_path, monkeypatch):
     assert "SECRET" not in result.content
 
 
+_CMD_EXE = "/mnt/c/Windows/System32/cmd.exe"
+
+
+@needs_bwrap
+@pytest.mark.skipif(not (os.path.isdir(sandbox.WSL_INTEROP_DIR) and os.path.exists(_CMD_EXE)),
+                    reason="not WSL with Windows interop")
+def test_a_contained_command_cannot_start_a_windows_program(tmp_path):
+    """On WSL a Windows program started from the sandbox ran outside it."""
+    result = _shell(tmp_path).execute({"command": f"{_CMD_EXE} /c ver"})
+
+    assert "Microsoft Windows" not in result.content
+
+
 @needs_bwrap
 def test_unsandboxed_runs_outside(tmp_path):
     target = tmp_path.parent / f"outside-{os.getpid()}.txt"

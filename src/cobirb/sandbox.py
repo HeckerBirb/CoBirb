@@ -13,7 +13,9 @@ the command could reach once it did — an approved ``npm test`` could read
   unasked — undo covers working files, not commits;
 - **credential directories are hidden** (``~/.ssh``, ``~/.gnupg``, cloud CLI
   configs, CoBirb's own home), because a command that runs without asking must
-  not be able to read a secret into the model's context either.
+  not be able to read a secret into the model's context either;
+- on WSL, **Windows programs cannot be started** (``WSL_INTEROP_DIR`` is
+  hidden) — see ``Sandbox.argv``.
 
 A network-less sandbox is what turns "an approved command cannot exfiltrate"
 from something hoped for into something enforced, which is the whole point for
@@ -45,6 +47,10 @@ DEFAULT_HIDDEN = (
     ".netrc", ".git-credentials", ".password-store", ".local/share/keyrings",
     ".pypirc", ".npmrc", ".cobirb",
 )
+
+# Where WSL keeps the socket its interop uses to start Windows programs from
+# Linux. Hidden in every sandbox where it exists — see Sandbox.argv.
+WSL_INTEROP_DIR = "/run/WSL"
 
 
 @dataclass
@@ -107,6 +113,14 @@ class Sandbox:
                 args += ["--tmpfs", path]
             elif os.path.exists(path):
                 args += ["--ro-bind", "/dev/null", path]
+        # **On WSL a contained command could start a Windows program, and that
+        # program is not contained at all**: interop runs it on the Windows
+        # side as the user, with the Windows network and the whole Windows
+        # drive writable — `cmd.exe /c ...` from inside this sandbox ran. The
+        # interop socket lives here; without it, starting a Windows program
+        # fails. (Unsetting WSL_INTEROP alone does not stop it.)
+        if os.path.isdir(WSL_INTEROP_DIR):
+            args += ["--tmpfs", WSL_INTEROP_DIR]
         args += [
             "--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
             "--die-with-parent", "--new-session",

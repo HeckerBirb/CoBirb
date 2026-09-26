@@ -26,7 +26,10 @@ With [bubblewrap](https://github.com/containers/bubblewrap) installed, every she
 contained: **no network**, the filesystem read-only except your project and a private `/tmp`, your
 project's `.git` read-only (so nothing commits or rewrites history without asking), and credential
 directories (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`, `~/.docker`, `~/.cobirb` and
-similar) hidden. `cobirb doctor` tells you whether it is active.
+similar) hidden. On WSL, a command in the sandbox **cannot start Windows programs**: one started
+through WSL's interop would run on the Windows side, outside every one of these limits. Your
+Windows drive (`/mnt/c`) is still readable, like the rest of the filesystem. `cobirb doctor` tells
+you whether the sandbox is active.
 
 ```json
 "sandbox": "ask"
