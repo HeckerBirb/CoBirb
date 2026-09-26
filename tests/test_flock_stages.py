@@ -349,6 +349,7 @@ def test_without_a_chooser_the_question_falls_back_to_confirm(monkeypatch, tmp_p
     ("cd sub && pytest tests/test_a.py tests/test_b.py", ("tests/test_a.py", "tests/test_b.py")),
     # A command naming its build output and the code under test keeps only the test.
     ("cc -Wall -o /tmp/t a.c tests/test_a.c && /tmp/t", ("tests/test_a.c",)),
+    ("cc -o /tmp/t latest.c tests/test_a.c && /tmp/t", ("tests/test_a.c",)),
     ("tests/test_a.py (unit tests for a)", ("tests/test_a.py",)),
     # Test files of any language, not only pytest's names.
     ("src/test/java/CaptureTest.java", ("src/test/java/CaptureTest.java",)),
@@ -385,6 +386,35 @@ def test_a_writes_line_of_files_without_extensions_passes():
     blocks = "### ticket: a\n- writes: Makefile, Dockerfile, a.c, tests/test_a.c\n- tests: tests/test_a.c\n- accept: true"
 
     assert check_tickets(parse_tickets(blocks)) == ""
+
+
+@pytest.mark.parametrize("line, needs", [
+    ("a", ("a",)),
+    ("a (for the socket)", ("a",)),
+    ("ticket a", ("a",)),
+    ("`a` and b", ("a", "b")),
+    ("a — the socket it opens", ("a",)),
+    ("b, c.", ("b", "c")),
+    ("None.", ()),
+])
+def test_a_needs_line_yields_the_ticket_ids_it_names(line, needs):
+    assert parse_tickets(f"### ticket: x\n- writes: x.py\n- needs: {line}\n")[0].needs == needs
+
+
+@pytest.mark.parametrize("writes, tests", [
+    ("a.py, tests/test_a.py", ("tests/test_a.py",)),
+    ("Capture.java, src/test/java/CaptureTest.java", ("src/test/java/CaptureTest.java",)),
+    ("capture.go, capture_test.go", ("capture_test.go",)),
+    ("src/Capture.hs, test/CaptureSpec.hs", ("test/CaptureSpec.hs",)),
+    # Only a directory says so: Rust's integration tests.
+    ("src/lib.rs, tests/integration.rs", ("tests/integration.rs",)),
+    # A helper beside a real test file is not taken for one.
+    ("tests/conftest.py, tests/test_a.py", ("tests/test_a.py",)),
+    # A word inside a name is not a test: latest, contest, inspect.
+    ("latest.py, contest.py, inspect.py", ()),
+])
+def test_without_a_tests_line_the_test_files_are_found_in_writes_in_any_language(writes, tests):
+    assert parse_tickets(f"### ticket: a\n- writes: {writes}\n")[0].tests == tests
 
 
 def test_good_ticket_blocks_pass_the_check():

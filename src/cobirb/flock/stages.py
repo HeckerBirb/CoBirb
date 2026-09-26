@@ -240,17 +240,58 @@ def _test_paths(value: str) -> tuple[str, ...]:
     A command also names files that are not tests: `cc -o /tmp/t capture.c
     tests/test_capture.c && /tmp/t` names the build output and the code under
     test. So from a command only project files are kept, and of those the ones
-    named as tests (`test` or `spec` in the path) when there are any. Not
-    `_is_test_file`: that knows pytest's names, and `CaptureTest.java` is a
-    test file too.
+    named as tests (``_named_as_tests``) when there are any.
     """
     words = _paths(re.sub(r"\([^)]*\)", " ", value))
     files = [w for w in words if not _command_word(w) and ("." in w or "/" in w)]
     if len(files) == len(words):
         return tuple(files)  # a plain list of files
     files = [w for w in dict.fromkeys(files) if not os.path.isabs(w)]
-    named = [w for w in files if re.search(r"test|spec", w, re.I)]
-    return tuple(named or files)
+    return tuple(_named_as_tests(files) or files)
+
+
+_NEED_ID = re.compile(r"^(?:ticket(?:\s*[:：]\s*|\s+))?[`'\"]*([A-Za-z0-9_.-]+)", re.I)
+
+
+def _need_ids(value: str) -> tuple[str, ...]:
+    """The ticket ids a `needs` line names.
+
+    Models add to them — `a (for the socket)`, `ticket a`, `a and b` — and
+    each extra word used to become part of an id no ticket had, refused as
+    unknown. The id is the leading name of each entry (the same characters a
+    `### ticket:` heading allows); a remark in parentheses is dropped.
+    """
+    ids = []
+    for entry in re.split(r"[,;]|\band\b", re.sub(r"\([^)]*\)", " ", value)):
+        match = _NEED_ID.match(entry.strip())
+        need = match.group(1).rstrip(".") if match else ""  # "b." ends a sentence, not an id
+        if need and need.lower() != "none":
+            ids.append(need)
+    return tuple(dict.fromkeys(ids))
+
+
+_TEST_WORD = re.compile(r"^(tests?|specs?)$", re.I)
+
+
+def _name_words(name: str) -> list[str]:
+    """``CaptureTest.java`` → Capture, Test, java; ``test_x.py`` → test, x, py."""
+    return re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", name)
+
+
+def _named_as_tests(paths: "list[str] | tuple[str, ...]") -> list[str]:
+    """The paths named as tests, in any language's convention.
+
+    A whole word of the file name — `test_x.py`, `x_test.go`, `CaptureTest.java`,
+    `CaptureSpec.hs` — and never a substring, which would take `latest.c` or
+    `inspect.py`. Only when no file name says so, a file under a `test`,
+    `tests` or `spec` directory (Rust's `tests/integration.rs`), so a helper
+    beside the tests (`tests/conftest.py`) is not taken for one when a real
+    test file is there.
+    """
+    by_name = [p for p in paths if any(_TEST_WORD.match(w) for w in _name_words(os.path.basename(p)))]
+    if by_name:
+        return by_name
+    return [p for p in paths if any(_TEST_WORD.match(part) for part in p.replace("\\", "/").split("/")[:-1])]
 
 
 def parse_tickets(text: str) -> list[TicketSpec]:
@@ -267,16 +308,13 @@ def parse_tickets(text: str) -> list[TicketSpec]:
                 requires.append(_requirement(match.group(2)))
             elif match:
                 fields[match.group(1).strip().lower()] = match.group(2).strip()
-        needs = tuple(
-            n.strip().strip("`") for n in fields.get("needs", "").split(",")
-            if n.strip() and n.strip().lower() != "none"
-        )
+        needs = _need_ids(fields.get("needs", ""))
         writes = _paths(fields.get("writes", ""))
         # A block with no `tests` line whose `writes` holds its test files
         # means them: the checklist says a ticket writes its own tests. A
         # user's flock stopped on a ticket listing
         # `tests/test_communication_protocol.py` under `writes` only.
-        tests = _test_paths(fields.get("tests", "")) or tuple(p for p in writes if _is_test_file(p))
+        tests = _test_paths(fields.get("tests", "")) or tuple(_named_as_tests(writes))
         tickets.append(TicketSpec(
             id=head.group(1),
             writes=writes,

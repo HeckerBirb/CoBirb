@@ -33,6 +33,12 @@ and its §17 decisions record for the ones that were designed and then deliberat
   file, both tickets "owned" one called `python`, and the flock stopped on a file-ownership refusal
   about the wrong problem. The test files the line names are now taken from it. A command or a
   remark on a `writes` line is refused with the real reason, before file ownership is checked.
+- **Test files are recognised in any language.** A ticket with no `tests` line takes the test files
+  it writes — now by any language's naming (`CaptureTest.java`, `capture_test.go`,
+  `CaptureSpec.hs`, or a file under `tests/` when no name says so), not only pytest's. A word inside
+  a name (`latest.c`) is never taken for a test.
+- **A `needs` line with a remark names the right ticket.** `a (for the socket)`, `ticket a` and
+  `a and b` were read as ids no ticket had; each entry's leading id is taken now.
 
 ## [0.45.5]
 

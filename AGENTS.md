@@ -394,7 +394,9 @@ the small flock tasks a single agent beat every flock, which the manual says. Th
   highlighted; falls back to `confirm`); CoBirb never runs the install); the Tickets section is fixed-form blocks (`### ticket: <id>` + `- key: value`), parsed
   by `parse_tickets` (a block with no `tests` line takes the test files in its `writes`; a `tests`
   line holding the command keeps only the files it names, preferring test-named project files —
-  `_test_paths`; a command word or remark on `writes` is refused before the ownership check) and checked by `check_tickets` (a file in two tickets is named in overview terms
+  `_test_paths`; "test-named" is `_named_as_tests`, whole words of the file name in any language's
+  convention, else a `test`/`tests`/`spec` directory; `needs` keeps each entry's leading id,
+  `_need_ids`; a command word or remark on `writes` is refused before the ownership check) and checked by `check_tickets` (a file in two tickets is named in overview terms
   first, then a scratch `PlanDraft`; every program an `accept` names must be on `PATH` and the
   command readable by `policy._segments` — `_accept_problem` — since a worker may run only those), asked up to `SECTION_ATTEMPTS = 3` times, each rejected attempt
   kept in the trace. `NO TICKETS` is a legitimate decline. (1) **Restatement** (`Stager.clear`, Brainy
