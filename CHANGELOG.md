@@ -17,6 +17,12 @@ and its §17 decisions record for the ones that were designed and then deliberat
   `x86_64-w64-mingw32-gcc`). A new overview section, *Limits on this machine*, says what cannot be
   built or checked here, and an evaluation leaves a ticket that cannot pass here out of the next
   round with a `left to do` note; both go into the flock's report.
+- **You're told what a flock needs installed before you approve it.** A ticket can name a
+  library, header or package it needs with a command that checks for it (`- requires: zlib headers
+  for MinGW — check: …`); Brainy Birb writes the check, so it works for any language. CoBirb runs
+  the checks before each approval — inside the sandbox, and only where contained commands run
+  without asking — and lists anything not found at the top of the charter dialog and in the report.
+  CoBirb never installs anything.
 
 ## [0.45.5]
 

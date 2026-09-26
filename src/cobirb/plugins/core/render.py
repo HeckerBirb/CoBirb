@@ -79,7 +79,7 @@ _CHARTER_ACCEPT = "green"
 _CHARTER_NEW = "bold green"
 
 
-def build_charter(charter: Any, approved: Any = (), names: Any = None) -> Text:
+def build_charter(charter: Any, approved: Any = (), names: Any = None, requirements: str = "") -> Text:
     """A Flock charter, in colour, for the approval dialog.
 
     Duck-typed on ``flock.charter.Charter`` (and ``flock.stages.NameMap``)
@@ -90,8 +90,16 @@ def build_charter(charter: Any, approved: Any = (), names: Any = None) -> Text:
     ``approved`` are the charters approved in earlier rounds: anything this
     one asks for that none of them covered is marked NEW, so a later round's
     approval shows what it adds rather than asking the user to diff it.
+
+    ``requirements`` is what the tickets need installed and was not found
+    (``flock.stages.describe_requirements``), drawn first and in warning
+    colours: it may mean installing something before saying yes.
     """
     text = Text()
+    if requirements:
+        head, _, rest = requirements.partition("\n")
+        text.append(f"{head}\n", style="bold yellow")
+        text.append(f"{rest}\n", style="yellow")
 
     def heading(title: str) -> None:
         if text:

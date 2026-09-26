@@ -303,7 +303,8 @@ class CharterModal(ConfirmModal):
         with Vertical(id="charter-box"):
             yield Static(Text(self._question, style="bold"), id="confirm-question")
             with VerticalScroll(id="charter-body"):
-                yield Static(render.build_charter(approval.charter, approval.approved, approval.names),
+                yield Static(render.build_charter(approval.charter, approval.approved, approval.names,
+                                                  getattr(approval, "requirements", "")),
                              id="charter-detail")
             with Horizontal(id="confirm-actions"):
                 yield Button(self._confirm_label, id="confirm-yes", variant="primary")

@@ -50,7 +50,7 @@ import os
 import platform
 import re
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
 from ..orchestrator import Orchestrator
@@ -149,6 +149,11 @@ next stages. Every ticket still names its own test files on its `- tests:` line:
 writes them, and the Worker Birb must make them pass. They are the test files for its own code, \
 and it `writes` them too.
 - No file may appear in two tickets. A `(finished)` seam file is in no ticket.
+- For each library, header or package a ticket needs that is not part of the project, add a line \
+`- requires: <what> — check: <a command that exits 0 only if it is installed here, for the \
+compiler or interpreter this ticket uses>`, e.g. `- requires: zlib headers for MinGW — check: \
+echo '#include <zlib.h>' | x86_64-w64-mingw32-gcc -E -x c - >/dev/null`. CoBirb runs these \
+checks and tells the user what is missing before anything is built.
 - `accept` is a real shell command, run on this machine in the project directory: it runs \
 this ticket's tests and exits non-zero if any fails. Use the tools that are standard for the \
 language and for the OS the code is built for, as they are used on this machine — \
@@ -183,6 +188,9 @@ class TicketSpec:
     needs: tuple[str, ...] = ()
     builds: str = ""
     done: str = ""
+    # What must be installed on this machine, each with the command that says
+    # whether it is: (what, check). See check_requirements.
+    requires: tuple[tuple[str, str], ...] = ()
 
     def block(self) -> str:
         """The ticket in the same form the overview uses."""
@@ -191,6 +199,7 @@ class TicketSpec:
             f"- writes: {', '.join(self.writes)}",
             f"- tests: {', '.join(self.tests)}",
             f"- accept: {self.accept}",
+            *(f"- requires: {what} — check: {check}" for what, check in self.requires),
             f"- needs: {', '.join(self.needs) or 'none'}",
             f"- builds: {self.builds}",
             f"- done when: {self.done}",
@@ -209,9 +218,12 @@ def parse_tickets(text: str) -> list[TicketSpec]:
     for index, head in enumerate(heads):
         end = heads[index + 1].start() if index + 1 < len(heads) else len(text)
         fields: dict[str, str] = {}
+        requires: list[tuple[str, str]] = []
         for line in text[head.end():end].splitlines():
             match = _FIELD.match(line)
-            if match:
+            if match and match.group(1).strip().lower() == "requires":
+                requires.append(_requirement(match.group(2)))
+            elif match:
                 fields[match.group(1).strip().lower()] = match.group(2).strip()
         needs = tuple(
             n.strip().strip("`") for n in fields.get("needs", "").split(",")
@@ -231,8 +243,20 @@ def parse_tickets(text: str) -> list[TicketSpec]:
             needs=needs,
             builds=fields.get("builds", ""),
             done=fields.get("done when", fields.get("done", "")),
+            requires=tuple(requires),
         ))
     return tickets
+
+
+_CHECK = re.compile(r"^(.*?)[\s,;—–-]*\bcheck\s*:\s*(.*)$", re.I)
+
+
+def _requirement(value: str) -> tuple[str, str]:
+    """``zlib headers — check: pkg-config --exists zlib`` → (what, check)."""
+    match = _CHECK.match(value.strip())
+    if not match:
+        return value.strip().strip("`"), ""
+    return match.group(1).strip().strip("`"), match.group(2).strip().strip("`")
 
 
 # Shell builtins with no program of their own on PATH. `cd` is the one an
@@ -271,6 +295,72 @@ def _accept_problem(command: str) -> str:
     return ""
 
 
+def _keep_requirements(cleared: list[TicketSpec], raw: list[TicketSpec], names: NameMap) -> list[TicketSpec]:
+    """The cleared tickets, with any `requires` lines the restatement dropped.
+
+    What must be installed is a fact about this machine, not wording to
+    restate, and a restatement that lost the lines would lose the only warning
+    the user gets before a worker hits a missing header.
+    """
+    by_id = {names.forward(t.id): t.requires for t in raw}
+    return [t if t.requires else replace(t, requires=by_id.get(t.id, ())) for t in cleared]
+
+
+REQUIREMENT_TIMEOUT = 30
+INSTALLED, MISSING, UNCHECKED = "installed", "MISSING", "not checked"
+
+
+def check_requirements(main: Orchestrator, tickets: list[TicketSpec], cwd: str,
+                       cache: "dict[str, str] | None" = None) -> list[tuple[str, str, str]]:
+    """Each ticket's requirements, run: ``(ticket id, what, status)``.
+
+    **The checks are Brainy Birb's commands, so they run only where a
+    contained command already runs without asking** — inside the sandbox, on
+    the main agent's policy with ``sandbox_auto``. Anywhere else nothing is
+    run, and each is reported as not checked: guessing "installed" would hide
+    the one thing this exists to show. A check that fails, times out or cannot
+    start counts as missing only when it ran; anything that stopped it running
+    at all is not checked. Only a check that passed is remembered in
+    ``cache``: something missing is looked for again next round, since the
+    user may have installed it in between.
+    """
+    import subprocess
+
+    box = getattr(main.tools.get("shell"), "sandbox", None)
+    runnable = bool(box is not None and box.active and getattr(main.policy, "sandbox_auto", False))
+    cache = {} if cache is None else cache
+    results = []
+    for ticket in tickets:
+        for what, check in ticket.requires:
+            status = cache.get(check, UNCHECKED)
+            if status != INSTALLED and runnable:
+                try:
+                    done = subprocess.run(box.argv(check, cwd), stdin=subprocess.DEVNULL,
+                                          capture_output=True, timeout=REQUIREMENT_TIMEOUT)
+                    status = INSTALLED if done.returncode == 0 else MISSING
+                except subprocess.TimeoutExpired:
+                    status = MISSING
+                except OSError:  # the sandbox itself would not start: nothing was checked
+                    status = UNCHECKED
+                if status == INSTALLED:
+                    cache[check] = status
+            results.append((ticket.id, what, status))
+    return results
+
+
+def describe_requirements(results: list[tuple[str, str, str]]) -> str:
+    """The requirements that are not known to be installed, for the user; "" if none."""
+    open_ = [(tid, what, status) for tid, what, status in results if status != INSTALLED]
+    if not open_:
+        return ""
+    lines = ["Needed on this machine, and not found installed:"]
+    lines += [f"  {tid}: {what} — {status}" for tid, what, status in open_]
+    if any(status == UNCHECKED for _, _, status in open_):
+        lines.append("  (not checked: requirement checks run only inside the sandbox, where commands "
+                     "run without asking)")
+    return "\n".join(lines)
+
+
 def check_tickets(tickets: list[TicketSpec]) -> str:
     """Why these tickets cannot become a charter, or "" if they can.
 
@@ -306,6 +396,13 @@ def check_tickets(tickets: list[TicketSpec]) -> str:
         problem = _accept_problem(ticket.accept)
         if problem:
             return f"ticket {ticket.id!r}: its `accept` command `{ticket.accept}` {problem}"
+        for what, check in ticket.requires:
+            if not check:
+                return (f"ticket {ticket.id!r}: its requirement `{what}` has no check — write it as "
+                        f"`- requires: {what} — check: <a command that succeeds only if it is installed>`")
+            problem = _accept_problem(check)
+            if problem:
+                return f"ticket {ticket.id!r}: the check for `{what}`, `{check}`, {problem}"
         try:
             draft.add_worker(ticket.id, brief="-", writes=list(ticket.writes), accept=ticket.accept,
                              tests=list(ticket.tests), needs=list(ticket.needs))
@@ -480,6 +577,7 @@ def _expected_blocks(raw: "list[TicketSpec]", names: NameMap) -> str:
     blocks = [
         TicketSpec(id=names.forward(t.id), writes=tuple(path(p) for p in t.writes),
                    tests=tuple(path(p) for p in t.tests), accept=command(t.accept),
+                   requires=tuple((what, command(check)) for what, check in t.requires),
                    needs=tuple(names.forward(n) for n in t.needs),
                    builds="<one sentence, restated>", done="<one sentence, restated>").block()
         for t in raw
@@ -1005,7 +1103,7 @@ class Stager:
             return problem
         self.design.cleared = cleared
         self.design.names = names
-        self.design.tickets = parse_tickets(cleared["Tickets"])
+        self.design.tickets = _keep_requirements(parse_tickets(cleared["Tickets"]), raw, names)
         return ""
 
     def clear_round(self, text: str) -> "tuple[list[TicketSpec], dict[str, str], str]":
@@ -1018,7 +1116,8 @@ class Stager:
         if problem:
             return [], {}, problem
         self.design.names = names
-        return parse_tickets(cleared["Tickets"]), evaluation_why(cleared["Tickets"]), ""
+        return (_keep_requirements(parse_tickets(cleared["Tickets"]), raw, names),
+                evaluation_why(cleared["Tickets"]), "")
 
     def _restated(self, prompt: str, step: str, headings: "tuple[str, ...]", raw: list[TicketSpec],
                   literals: "tuple[str, ...]" = (),
@@ -1233,10 +1332,15 @@ class CharterApproval(str):
     charter: Charter
     approved: "tuple[Charter, ...]"
     names: "NameMap | None"
+    requirements: str
 
     def __new__(cls, charter: Charter, approved: "list[Charter] | tuple[Charter, ...]" = (),
-                names: "NameMap | None" = None) -> "CharterApproval":
+                names: "NameMap | None" = None, requirements: str = "") -> "CharterApproval":
         parts = []
+        if requirements:
+            # First: something to install before approving is the one thing
+            # here the user may have to act on outside CoBirb.
+            parts.append(requirements)
         if approved:
             parts.append(approval_changes(charter, list(approved)))
         parts.append(charter.describe())
@@ -1246,4 +1350,5 @@ class CharterApproval(str):
         text.charter = charter
         text.approved = tuple(approved)
         text.names = names if names else None
+        text.requirements = requirements
         return text

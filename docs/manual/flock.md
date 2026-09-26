@@ -384,6 +384,15 @@ the design's **Limits on this machine** section, and an evaluation leaves a tick
 here out of the next round with a `left to do` note. Both end up in the flock's report, so you're
 told what is still left to do and where, rather than just that a ticket failed.
 
+**What a ticket needs installed is checked before you approve.** A ticket names each library,
+header or package it needs from outside the project, with a command that succeeds only if it is
+installed — `- requires: zlib headers for MinGW — check: echo '#include <zlib.h>' |
+x86_64-w64-mingw32-gcc -E -x c - >/dev/null`. Brainy Birb writes the check, so it works for any
+language. Before each charter approval CoBirb runs the checks, and anything not found is listed at
+the top of the dialog so you can install it first, or say no. They run only inside the sandbox, and
+only where contained commands already run without asking; anywhere else they're listed as "not
+checked". CoBirb never installs anything, and a worker can't either — the sandbox has no network.
+
 **So a ticket's `accept` is checked when Brainy Birb writes it.** Every program it names must be
 installed here, and it must be readable; otherwise the ticket list is sent back with the reason, as
 any other ticket problem is. A program given as a path (`/tmp/test_x`) isn't looked for, since the

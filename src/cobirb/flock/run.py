@@ -52,7 +52,9 @@ from .stages import (
     CharterApproval,
     Stager,
     approval_changes,
+    check_requirements,
     check_tickets,
+    describe_requirements,
     left_to_do,
 )
 from .supervisor import Canceller, FlockOutcome, check_partition, run_flock
@@ -844,6 +846,10 @@ def _drive_staged(
     last_failing: tuple | None = None
     # What an evaluation said cannot be done on this machine, for the report.
     left: list[str] = []
+    # Requirement checks already run (one per command), and what each round
+    # found missing.
+    checked: dict[str, str] = {}
+    missing_notes: dict[int, str] = {}
     for round_number in range(1, settings.max_rounds + 1):
         # ---- Skeleton, then one stage per ticket -------------------------- #
         try:
@@ -873,9 +879,14 @@ def _drive_staged(
             except Exception:  # noqa: BLE001 - a display is not worth the run
                 logger.debug("a charter handler raised", exc_info=True)
 
+        # ---- What the tickets need installed ------------------------------ #
+        requirements = describe_requirements(check_requirements(orchestrator, tickets, cwd, checked))
+        if requirements:
+            missing_notes[round_number] = requirements
+
         # ---- Approval ----------------------------------------------------- #
         if not approved or _autonomy(settings, orchestrator) == AUTONOMY_ASK:
-            detail = CharterApproval(charter, approved, stager.design.names)
+            detail = CharterApproval(charter, approved, stager.design.names, requirements)
             question = (
                 f"Approve this charter? {len(charter.workers)} Worker Birb(s) will run "
                 "unattended inside exactly these scopes, with no further prompts."
@@ -890,7 +901,8 @@ def _drive_staged(
                 break
         else:
             ask.show(f"Round {round_number} approved automatically (auto mode, inside the sandbox).\n"
-                     + approval_changes(charter, approved))
+                     + approval_changes(charter, approved)
+                     + (f"\n\n{requirements}" if requirements else ""))
         approved.append(charter)
 
         # ---- Fan out ------------------------------------------------------ #
@@ -967,6 +979,8 @@ def _drive_staged(
         elif run.stopped_at == "rounds":
             lines.append(f"\nStopped at the round cap ({settings.max_rounds}).")
         lines += _left_elsewhere(stager.design.sections.get(LIMITS_HEADING, ""), left)
+        if missing_notes:
+            lines += ["", "--- " + missing_notes[max(missing_notes)]]
         run.report = "\n".join(lines)
     return run
 

@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 from cobirb.flock import stages
 from cobirb.flock.run import Asker, FlockSettings, run_flock_session
+from cobirb import sandbox
 from cobirb.flock.stages import TicketSpec, _GatedHooks, check_tickets, parse_tickets
 from cobirb.flock.worker import WorkerReport
 from cobirb.runtime.hooks import EVENT_BEFORE_TOOL, HookOutcome
@@ -210,6 +212,70 @@ def test_a_field_is_read_whether_or_not_its_name_is_bold(line):
 ])
 def test_a_tickets_tests_are_read_from_its_block(block, tests):
     assert parse_tickets(block)[0].tests == tests
+
+
+@pytest.mark.parametrize("line, expected", [
+    ("- requires: zlib headers — check: pkg-config --exists zlib", ("zlib headers", "pkg-config --exists zlib")),
+    ("- **requires**: requests, check: `python3 -c \"import requests\"`",
+     ("requests", 'python3 -c "import requests"')),
+    ("- requires: zlib", ("zlib", "")),
+])
+def test_a_requirement_is_read_with_its_check(line, expected):
+    ticket = parse_tickets(f"### ticket: a\n- writes: a.c\n{line}\n")[0]
+
+    assert ticket.requires == (expected,)
+    assert parse_tickets(ticket.block())[0].requires == (expected,)
+
+
+@pytest.mark.parametrize("line, problem", [
+    ("- requires: zlib", "has no check"),
+    ("- requires: zlib — check: no-such-probe --exists zlib", "`no-such-probe`, which is not a program"),
+])
+def test_a_requirement_needs_a_check_that_can_run(line, problem):
+    blocks = f"### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: true\n{line}"
+
+    assert problem in check_tickets(parse_tickets(blocks))
+
+
+def _requiring(*checks):
+    return [TicketSpec(id="a", writes=("a.c",), tests=("ta.c",), accept="true",
+                       requires=tuple((f"dep{i}", c) for i, c in enumerate(checks)))]
+
+
+def test_requirements_are_not_run_where_commands_would_be_asked_about(tmp_path):
+    """Brainy Birb's checks run only where contained commands already run unasked."""
+    main = SimpleNamespace(tools={}, policy=SimpleNamespace(sandbox_auto=False))
+
+    results = stages.check_requirements(main, _requiring("true"), str(tmp_path))
+
+    assert results == [("a", "dep0", stages.UNCHECKED)]
+    assert "not checked" in stages.describe_requirements(results)
+
+
+@pytest.mark.skipif(sandbox.find_bwrap() is None, reason="bubblewrap not usable here")
+def test_requirements_are_checked_inside_the_sandbox(tmp_path):
+    box = sandbox.from_config("auto", str(tmp_path))
+    main = SimpleNamespace(tools={"shell": SimpleNamespace(sandbox=box)},
+                           policy=SimpleNamespace(sandbox_auto=True))
+
+    results = stages.check_requirements(main, _requiring("true", "false"), str(tmp_path))
+
+    assert [status for _, _, status in results] == [stages.INSTALLED, stages.MISSING]
+    assert "dep1 — MISSING" in stages.describe_requirements(results)
+    assert "dep0" not in stages.describe_requirements(results)
+
+
+def test_the_charter_approval_says_what_is_not_installed(monkeypatch, tmp_path):
+    _staged(tmp_path)
+    _project(tmp_path)
+    blocks = _BLOCKS.replace("- needs: none", "- requires: zlib — check: false\n- needs: none", 1)
+    details = []
+
+    _run(_orchestrator(monkeypatch, tmp_path, _StagedBrainy(tickets=blocks)), tmp_path,
+         ask=Asker(confirm=lambda q, detail="": details.append(detail) or False))
+
+    # Missing, or not checked where no sandbox runs commands unasked — named either way.
+    assert "zlib" in details[0] and "Needed on this machine" in details[0]
 
 
 def test_good_ticket_blocks_pass_the_check():
