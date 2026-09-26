@@ -23,6 +23,11 @@ and its §17 decisions record for the ones that were designed and then deliberat
   the checks before each approval — inside the sandbox, and only where contained commands run
   without asking — and lists anything not found at the top of the charter dialog and in the report.
   CoBirb never installs anything.
+- **When something is missing, you're shown how to install it and choose how to go on.** Each
+  requirement carries the command that installs it on this machine, written by Brainy Birb and
+  never run by CoBirb. Before the charter approval you pick: continue without it, say you've just
+  installed it (CoBirb checks again and asks again if it's still missing), or stop. It's a list to
+  pick from, with nothing highlighted at first.
 
 ## [0.45.5]
 

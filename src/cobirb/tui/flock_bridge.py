@@ -108,6 +108,16 @@ class TuiAsker:
         except Exception:  # noqa: BLE001 - nobody to ask means Brainy Birb decides
             return None
 
+    def choose(self, question: str, detail: str, options: list[str]) -> "int | None":
+        """One question, answered by picking from a list. None on cancel.
+
+        Fails closed like ``confirm``: an app that cannot ask means stop.
+        """
+        try:
+            return self._app.call_from_thread(self._app.request_choice, question, detail, options)
+        except Exception:  # noqa: BLE001 - nobody to ask means stop, never guess
+            return None
+
     def speaking(self, label: str) -> None:
         """Which agent is planning now, for the Flock tab's strip."""
         if threading.get_ident() == self._app.ui_thread_id:

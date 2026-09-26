@@ -170,6 +170,34 @@ PickerModal {
     max-height: 20;
 }
 
+ChoiceModal {
+    align: center middle;
+}
+
+#choice-dialog {
+    width: 90;
+    max-width: 95%;
+    height: auto;
+    max-height: 90%;
+    padding: 1 2;
+    border: round $warning;
+    background: $surface;
+}
+
+#choice-question {
+    padding-bottom: 1;
+}
+
+#choice-detail {
+    height: auto;
+    max-height: 20;
+    padding-bottom: 1;
+}
+
+#choice-options {
+    height: auto;
+}
+
 TextPromptModal {
     align: center middle;
 }

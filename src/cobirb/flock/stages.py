@@ -151,9 +151,11 @@ and it `writes` them too.
 - No file may appear in two tickets. A `(finished)` seam file is in no ticket.
 - For each library, header or package a ticket needs that is not part of the project, add a line \
 `- requires: <what> — check: <a command that exits 0 only if it is installed here, for the \
-compiler or interpreter this ticket uses>`, e.g. `- requires: zlib headers for MinGW — check: \
-echo '#include <zlib.h>' | x86_64-w64-mingw32-gcc -E -x c - >/dev/null`. CoBirb runs these \
-checks and tells the user what is missing before anything is built.
+compiler or interpreter this ticket uses> — install: <the command that installs it on this \
+machine>`, e.g. `- requires: zlib headers for MinGW — check: echo '#include <zlib.h>' | \
+x86_64-w64-mingw32-gcc -E -x c - >/dev/null — install: sudo apt install libz-mingw-w64-dev`. \
+CoBirb runs the checks and, before anything is built, shows the user what is missing and how \
+to install it. It never runs the install command.
 - `accept` is a real shell command, run on this machine in the project directory: it runs \
 this ticket's tests and exits non-zero if any fails. Use the tools that are standard for the \
 language and for the OS the code is built for, as they are used on this machine — \
@@ -188,9 +190,10 @@ class TicketSpec:
     needs: tuple[str, ...] = ()
     builds: str = ""
     done: str = ""
-    # What must be installed on this machine, each with the command that says
-    # whether it is: (what, check). See check_requirements.
-    requires: tuple[tuple[str, str], ...] = ()
+    # What must be installed on this machine: (what, check, install) — the
+    # command that says whether it is, and the one that would install it.
+    # CoBirb runs the check (see check_requirements) and only shows the install.
+    requires: tuple[tuple[str, str, str], ...] = ()
 
     def block(self) -> str:
         """The ticket in the same form the overview uses."""
@@ -199,7 +202,8 @@ class TicketSpec:
             f"- writes: {', '.join(self.writes)}",
             f"- tests: {', '.join(self.tests)}",
             f"- accept: {self.accept}",
-            *(f"- requires: {what} — check: {check}" for what, check in self.requires),
+            *(f"- requires: {what} — check: {check}" + (f" — install: {install}" if install else "")
+              for what, check, install in self.requires),
             f"- needs: {', '.join(self.needs) or 'none'}",
             f"- builds: {self.builds}",
             f"- done when: {self.done}",
@@ -249,14 +253,21 @@ def parse_tickets(text: str) -> list[TicketSpec]:
 
 
 _CHECK = re.compile(r"^(.*?)[\s,;—–-]*\bcheck\s*:\s*(.*)$", re.I)
+# Only whitespace, a comma or semicolon, or a long dash before `install:` —
+# never a plain hyphen, which a check command can end with (`gcc -x c -`).
+_INSTALL = re.compile(r"\s*[,;]?\s*(?:[—–]\s*)?\binstall\s*:\s*", re.I)
 
 
-def _requirement(value: str) -> tuple[str, str]:
-    """``zlib headers — check: pkg-config --exists zlib`` → (what, check)."""
+def _requirement(value: str) -> tuple[str, str, str]:
+    """``zlib — check: pkg-config --exists zlib — install: sudo apt install zlib1g-dev``
+    → (what, check, install)."""
     match = _CHECK.match(value.strip())
     if not match:
-        return value.strip().strip("`"), ""
-    return match.group(1).strip().strip("`"), match.group(2).strip().strip("`")
+        return value.strip().strip("`"), "", ""
+    parts = _INSTALL.split(match.group(2), maxsplit=1)
+    check = parts[0].strip().strip("`")
+    install = parts[1].strip().strip("`") if len(parts) > 1 else ""
+    return match.group(1).strip().strip("`"), check, install
 
 
 # Shell builtins with no program of their own on PATH. `cd` is the one an
@@ -311,8 +322,8 @@ INSTALLED, MISSING, UNCHECKED = "installed", "MISSING", "not checked"
 
 
 def check_requirements(main: Orchestrator, tickets: list[TicketSpec], cwd: str,
-                       cache: "dict[str, str] | None" = None) -> list[tuple[str, str, str]]:
-    """Each ticket's requirements, run: ``(ticket id, what, status)``.
+                       cache: "dict[str, str] | None" = None) -> list[tuple[str, str, str, str]]:
+    """Each ticket's requirements, run: ``(ticket id, what, status, install)``.
 
     **The checks are Brainy Birb's commands, so they run only where a
     contained command already runs without asking** — inside the sandbox, on
@@ -327,11 +338,11 @@ def check_requirements(main: Orchestrator, tickets: list[TicketSpec], cwd: str,
     import subprocess
 
     box = getattr(main.tools.get("shell"), "sandbox", None)
-    runnable = bool(box is not None and box.active and getattr(main.policy, "sandbox_auto", False))
+    runnable = requirements_checkable(main)
     cache = {} if cache is None else cache
     results = []
     for ticket in tickets:
-        for what, check in ticket.requires:
+        for what, check, install in ticket.requires:
             status = cache.get(check, UNCHECKED)
             if status != INSTALLED and runnable:
                 try:
@@ -344,19 +355,34 @@ def check_requirements(main: Orchestrator, tickets: list[TicketSpec], cwd: str,
                     status = UNCHECKED
                 if status == INSTALLED:
                     cache[check] = status
-            results.append((ticket.id, what, status))
+            results.append((ticket.id, what, status, install))
     return results
 
 
-def describe_requirements(results: list[tuple[str, str, str]]) -> str:
-    """The requirements that are not known to be installed, for the user; "" if none."""
-    open_ = [(tid, what, status) for tid, what, status in results if status != INSTALLED]
+def requirements_checkable(main: Orchestrator) -> bool:
+    """Whether ``check_requirements`` can run anything here (see its docstring)."""
+    box = getattr(main.tools.get("shell"), "sandbox", None)
+    return bool(box is not None and box.active and getattr(main.policy, "sandbox_auto", False))
+
+
+def describe_requirements(results: list[tuple[str, str, str, str]]) -> str:
+    """The requirements that are not known to be installed, for the user; "" if none.
+
+    With the command that would install each, as Brainy Birb wrote it for this
+    machine. CoBirb never runs it: installing is the user's decision, often
+    needs `sudo`, and reaches the network.
+    """
+    open_ = [row for row in results if row[2] != INSTALLED]
     if not open_:
         return ""
     lines = ["Needed on this machine, and not found installed:"]
-    lines += [f"  {tid}: {what} — {status}" for tid, what, status in open_]
-    if any(status == UNCHECKED for _, _, status in open_):
-        lines.append("  (not checked: requirement checks run only inside the sandbox, where commands "
+    for tid, what, status, _ in open_:
+        lines.append(f"  {tid}: {what} — {status}")
+    installs = list(dict.fromkeys(install for *_, install in open_ if install))
+    if installs:
+        lines += ["", "To install them (CoBirb does not run these):"] + [f"  {cmd}" for cmd in installs]
+    if any(status == UNCHECKED for _, _, status, _ in open_):
+        lines.append("\n  (not checked: requirement checks run only inside the sandbox, where commands "
                      "run without asking)")
     return "\n".join(lines)
 
@@ -396,7 +422,7 @@ def check_tickets(tickets: list[TicketSpec]) -> str:
         problem = _accept_problem(ticket.accept)
         if problem:
             return f"ticket {ticket.id!r}: its `accept` command `{ticket.accept}` {problem}"
-        for what, check in ticket.requires:
+        for what, check, _install in ticket.requires:
             if not check:
                 return (f"ticket {ticket.id!r}: its requirement `{what}` has no check — write it as "
                         f"`- requires: {what} — check: <a command that succeeds only if it is installed>`")
@@ -577,7 +603,7 @@ def _expected_blocks(raw: "list[TicketSpec]", names: NameMap) -> str:
     blocks = [
         TicketSpec(id=names.forward(t.id), writes=tuple(path(p) for p in t.writes),
                    tests=tuple(path(p) for p in t.tests), accept=command(t.accept),
-                   requires=tuple((what, command(check)) for what, check in t.requires),
+                   requires=tuple((what, command(check), install) for what, check, install in t.requires),
                    needs=tuple(names.forward(n) for n in t.needs),
                    builds="<one sentence, restated>", done="<one sentence, restated>").block()
         for t in raw

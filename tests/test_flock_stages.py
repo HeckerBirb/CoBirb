@@ -215,10 +215,14 @@ def test_a_tickets_tests_are_read_from_its_block(block, tests):
 
 
 @pytest.mark.parametrize("line, expected", [
-    ("- requires: zlib headers — check: pkg-config --exists zlib", ("zlib headers", "pkg-config --exists zlib")),
+    ("- requires: zlib headers — check: pkg-config --exists zlib",
+     ("zlib headers", "pkg-config --exists zlib", "")),
     ("- **requires**: requests, check: `python3 -c \"import requests\"`",
-     ("requests", 'python3 -c "import requests"')),
-    ("- requires: zlib", ("zlib", "")),
+     ("requests", 'python3 -c "import requests"', "")),
+    ("- requires: zlib", ("zlib", "", "")),
+    # A check ending in `-` keeps it: only a long dash, comma or space comes before `install:`.
+    ("- requires: zlib for MinGW — check: x86_64-w64-mingw32-gcc -E -x c - — install: sudo apt install libz-mingw-w64-dev",
+     ("zlib for MinGW", "x86_64-w64-mingw32-gcc -E -x c -", "sudo apt install libz-mingw-w64-dev")),
 ])
 def test_a_requirement_is_read_with_its_check(line, expected):
     ticket = parse_tickets(f"### ticket: a\n- writes: a.c\n{line}\n")[0]
@@ -239,7 +243,7 @@ def test_a_requirement_needs_a_check_that_can_run(line, problem):
 
 def _requiring(*checks):
     return [TicketSpec(id="a", writes=("a.c",), tests=("ta.c",), accept="true",
-                       requires=tuple((f"dep{i}", c) for i, c in enumerate(checks)))]
+                       requires=tuple((f"dep{i}", c, f"install dep{i}") for i, c in enumerate(checks)))]
 
 
 def test_requirements_are_not_run_where_commands_would_be_asked_about(tmp_path):
@@ -248,7 +252,7 @@ def test_requirements_are_not_run_where_commands_would_be_asked_about(tmp_path):
 
     results = stages.check_requirements(main, _requiring("true"), str(tmp_path))
 
-    assert results == [("a", "dep0", stages.UNCHECKED)]
+    assert results == [("a", "dep0", stages.UNCHECKED, "install dep0")]
     assert "not checked" in stages.describe_requirements(results)
 
 
@@ -260,9 +264,10 @@ def test_requirements_are_checked_inside_the_sandbox(tmp_path):
 
     results = stages.check_requirements(main, _requiring("true", "false"), str(tmp_path))
 
-    assert [status for _, _, status in results] == [stages.INSTALLED, stages.MISSING]
-    assert "dep1 — MISSING" in stages.describe_requirements(results)
-    assert "dep0" not in stages.describe_requirements(results)
+    assert [status for _, _, status, _ in results] == [stages.INSTALLED, stages.MISSING]
+    described = stages.describe_requirements(results)
+    assert "dep1 — MISSING" in described and "install dep1" in described
+    assert "dep0" not in described
 
 
 def test_the_charter_approval_says_what_is_not_installed(monkeypatch, tmp_path):
@@ -276,6 +281,64 @@ def test_the_charter_approval_says_what_is_not_installed(monkeypatch, tmp_path):
 
     # Missing, or not checked where no sandbox runs commands unasked — named either way.
     assert "zlib" in details[0] and "Needed on this machine" in details[0]
+
+
+_NEEDS_ZLIB = _BLOCKS.replace(
+    "- needs: none", "- requires: zlib — check: false — install: sudo apt install zlib1g-dev\n- needs: none", 1)
+
+
+@pytest.mark.parametrize("picked, stopped, approval_asked", [
+    (0, "approval", True),        # continue without: the charter is still put to the user
+    (2, "requirements", False),   # stop: nothing is approved
+    (None, "requirements", False),  # cancelled
+])
+def test_missing_requirements_are_settled_before_the_charter_approval(monkeypatch, tmp_path,
+                                                                      picked, stopped, approval_asked):
+    _staged(tmp_path)
+    _project(tmp_path)
+    asked, approvals = [], []
+    ask = Asker(confirm=lambda q, detail="": approvals.append(detail) or False,
+                choose=lambda q, detail, options: asked.append((detail, options)) or picked)
+
+    run = _run(_orchestrator(monkeypatch, tmp_path, _StagedBrainy(tickets=_NEEDS_ZLIB)), tmp_path, ask=ask)
+
+    detail, options = asked[0]
+    assert "zlib" in detail and "sudo apt install zlib1g-dev" in detail and len(options) == 3
+    assert run.stopped_at == stopped
+    assert bool(approvals) is approval_asked
+    if not approval_asked:
+        assert "sudo apt install zlib1g-dev" in run.report
+
+
+def test_installed_now_checks_again_until_nothing_is_missing(monkeypatch, tmp_path):
+    from cobirb.flock import run as flock_run
+
+    _staged(tmp_path)
+    _project(tmp_path)
+    found = iter([stages.MISSING, stages.MISSING, stages.INSTALLED])
+    monkeypatch.setattr(flock_run, "requirements_checkable", lambda main: True)
+    monkeypatch.setattr(flock_run, "check_requirements", lambda main, tickets, cwd, cache=None:
+                        [("a", "zlib", next(found), "sudo apt install zlib1g-dev")])
+    picks, approvals = [], []
+    ask = Asker(confirm=lambda q, detail="": approvals.append(detail) or False,
+                choose=lambda q, detail, options: picks.append(options) or 1)
+
+    _run(_orchestrator(monkeypatch, tmp_path, _StagedBrainy(tickets=_NEEDS_ZLIB)), tmp_path, ask=ask)
+
+    assert len(picks) == 2  # still missing after the first "installed"; found after the second
+    assert "Needed on this machine" not in approvals[0]
+
+
+def test_without_a_chooser_the_question_falls_back_to_confirm(monkeypatch, tmp_path):
+    """An asker with only `confirm` (the benchmark's driver) answers it as continue-without."""
+    _staged(tmp_path)
+    _project(tmp_path)
+    questions = []
+
+    _run(_orchestrator(monkeypatch, tmp_path, _StagedBrainy(tickets=_NEEDS_ZLIB)), tmp_path,
+         ask=Asker(confirm=lambda q, detail="": questions.append(q) or False))
+
+    assert "not installed" in questions[0] and "Continue without them" in questions[0]
 
 
 def test_good_ticket_blocks_pass_the_check():

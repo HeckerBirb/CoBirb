@@ -3841,6 +3841,33 @@ async def test_a_worker_request_taller_than_its_pane_keeps_its_buttons_on_screen
         answer.cancel()
 
 
+async def test_a_choice_is_only_made_by_moving_to_an_answer():
+    """Nothing is highlighted, so a stray enter picks nothing; escape cancels."""
+    from cobirb.tui.screens import ChoiceModal
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        picked = []
+        app.push_screen(ChoiceModal("Go on?", "zlib is missing", ["without", "installed", "stop"]),
+                        picked.append)
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert picked == [] and isinstance(app.screen, ChoiceModal)
+
+        await pilot.press("down", "down", "enter")
+        await pilot.pause()
+        assert picked == [1]
+
+        app.push_screen(ChoiceModal("Go on?", "", ["a", "b"]), picked.append)
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert picked == [1, None]
+
+
 async def test_picking_a_model_with_none_configured_offers_to_remember_it(monkeypatch, tmp_path):
     import json as _json
 

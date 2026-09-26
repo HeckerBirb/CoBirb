@@ -56,6 +56,7 @@ from .stages import (
     check_tickets,
     describe_requirements,
     left_to_do,
+    requirements_checkable,
 )
 from .supervisor import Canceller, FlockOutcome, check_partition, run_flock
 
@@ -103,6 +104,10 @@ class Asker:
     # a decision about the design is not a capability, so "nobody answered"
     # safely means "use your judgement", unlike a charter approval.
     decide: Callable[[str], "str | None"] = lambda decisions: None
+    # One question with a few long answers (``options``), returning the index
+    # picked or None for cancel. Optional: without it the question falls back
+    # to ``confirm`` on the first option (see _choose).
+    choose: "Callable[[str, str, list[str]], int | None] | None" = None
     # Which agent is working now — "Brainy Birb" or "Architect Birb" — told at
     # the start of every planning stage, so a front-end can name the one it is
     # showing. Nothing to do by default.
@@ -880,12 +885,23 @@ def _drive_staged(
                 logger.debug("a charter handler raised", exc_info=True)
 
         # ---- What the tickets need installed ------------------------------ #
+        asking = not approved or _autonomy(settings, orchestrator) == AUTONOMY_ASK
         requirements = describe_requirements(check_requirements(orchestrator, tickets, cwd, checked))
+        if requirements and asking:
+            go, requirements = _settle_requirements(ask, orchestrator, tickets, cwd, checked, requirements,
+                                                    first=not approved)
+            if not go:
+                run.stopped_at = "requirements"
+                run.report = (("Charter not approved: what the tickets need is not installed."
+                               if not approved else
+                               f"Stopped after round {round_number - 1}: what the next round needs "
+                               "is not installed.") + f"\n\n{requirements}")
+                break
         if requirements:
             missing_notes[round_number] = requirements
 
         # ---- Approval ----------------------------------------------------- #
-        if not approved or _autonomy(settings, orchestrator) == AUTONOMY_ASK:
+        if asking:
             detail = CharterApproval(charter, approved, stager.design.names, requirements)
             question = (
                 f"Approve this charter? {len(charter.workers)} Worker Birb(s) will run "
@@ -983,6 +999,57 @@ def _drive_staged(
             lines += ["", "--- " + missing_notes[max(missing_notes)]]
         run.report = "\n".join(lines)
     return run
+
+
+def _choose(ask: Asker, question: str, detail: str, options: list[str]) -> "int | None":
+    """``ask.choose``, or ``confirm`` on the first option where there is none.
+
+    Fails closed: an asker that raises, or answers with anything but an index
+    it offered, is a cancel.
+    """
+    choose = getattr(ask, "choose", None)
+    try:
+        if callable(choose):
+            picked = choose(question, detail, options)
+            return picked if isinstance(picked, int) and 0 <= picked < len(options) else None
+        return 0 if ask.confirm(f"{question} {options[0]}?", detail) else None
+    except Exception:  # noqa: BLE001 - nobody to ask means stop, never guess
+        return None
+
+
+def _settle_requirements(ask: Asker, orchestrator: Orchestrator, tickets, cwd: str,
+                         checked: dict, requirements: str, *, first: bool) -> "tuple[bool, str]":
+    """Ask what to do about what is not installed: whether to go on, and what
+    is still missing ("" for nothing known).
+
+    Asked before the charter approval, and only when that approval is asked
+    too: it is the user's to settle — installing needs them, often `sudo` and
+    the network — and a flock that simply ran on would fail those tickets with
+    nothing to say why. "Installed now" checks again where checks can run,
+    and asks again with whatever is still missing.
+    """
+    checkable = requirements_checkable(orchestrator)
+    stop = ("Stop here — no Worker Birb has started" if first
+            else "Stop the flock here — the rounds so far stay as they are")
+    options = [
+        "Continue without them — the tickets that need them will not pass",
+        ("I have installed them — check again, then continue" if checkable
+         else "I have installed them — continue"),
+        stop,
+    ]
+    while True:
+        picked = _choose(ask, "Some of what this flock needs is not installed. How do you want to go on?",
+                         requirements, options)
+        if picked == 0:
+            return True, requirements
+        if picked != 1:
+            return False, requirements
+        if not checkable:
+            return True, ""  # taken at the user's word: nothing here can check it
+        requirements = describe_requirements(check_requirements(orchestrator, tickets, cwd, checked))
+        if not requirements:
+            ask.show("Everything the tickets need is installed now.")
+            return True, ""
 
 
 def _left_elsewhere(limits: str, left: list[str]) -> list[str]:

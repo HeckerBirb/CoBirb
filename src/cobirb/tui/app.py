@@ -59,6 +59,7 @@ from .panes import FlockPane, PluginsPane, SessionsPane
 from .screens import (
     ApprovalModal,
     CharterModal,
+    ChoiceModal,
     ConfirmModal,
     HelpModal,
     ModelPickerModal,
@@ -1151,6 +1152,10 @@ class CoBirbApp(App[None]):
         if isinstance(detail, CharterApproval):
             return await self.push_screen_wait(CharterModal(question, detail))
         return await self.push_screen_wait(ConfirmModal(question, detail))
+
+    async def request_choice(self, question: str, detail: str, options: list[str]) -> "int | None":
+        """Show a pick-one dialog and resolve to the index chosen, or None."""
+        return await self.push_screen_wait(ChoiceModal(question, detail, options))
 
     async def prepare_flock_panes(self, charter) -> None:
         """Lay out a pane per Worker Birb once the charter is approved."""

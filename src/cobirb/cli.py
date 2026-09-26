@@ -428,10 +428,25 @@ def _run_flock(objective: str, cwd: str, model_name: str | None, *, headless: bo
             print()
             return None
 
+    def choose(question: str, detail: str, options: list[str]) -> int | None:
+        if detail:
+            print(f"\n{detail}")
+        print(f"\n{question}")
+        for number, option in enumerate(options, 1):
+            print(f"  {number}. {option}")
+        print("Choose a number (anything else stops): ", end="", flush=True)
+        try:
+            answer = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        return int(answer) - 1 if answer.isdigit() and 1 <= int(answer) <= len(options) else None
+
     try:
         run = run_flock_session(
             orchestrator, objective, cwd,
-            ask=Asker(confirm=confirm, show=lambda text: print(f"\n{text}"), decide=decide),
+            ask=Asker(confirm=confirm, show=lambda text: print(f"\n{text}"), decide=decide,
+                      choose=choose),
         )
     except KeyboardInterrupt:
         print("\ncobirb: interrupted.", file=sys.stderr)

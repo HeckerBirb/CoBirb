@@ -180,6 +180,46 @@ class ModelPickerModal(PickerModal):
     TITLE_TEXT = "Select a model"
 
 
+class ChoiceModal(ModalScreen[Optional[int]]):
+    """One question, something to read, and a few answers to pick one from.
+
+    **An option list, not buttons**: each answer is a sentence ("Continue
+    without them — the tickets that need them will not pass"), and a row of
+    sentence-long buttons does not fit a dialog. **Nothing is highlighted at
+    first**, so an Enter meant for something else cannot pick an answer — move
+    to one, then choose it. Dismisses with the index, or ``None`` on escape.
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=True)]
+
+    def __init__(self, question: str, detail: str, options: list[str]) -> None:
+        super().__init__()
+        self._question = question
+        self._detail = detail
+        self._options = options
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="choice-dialog"):
+            yield Static(Text(self._question, style="bold"), id="choice-question")
+            if self._detail:
+                with VerticalScroll(id="choice-detail"):
+                    yield Static(Text(self._detail))
+            yield OptionList(*(Option(text, id=str(index)) for index, text in enumerate(self._options)),
+                             id="choice-options")
+
+    def on_mount(self) -> None:
+        options = self.query_one("#choice-options", OptionList)
+        options.focus()
+        options.highlighted = None
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(int(event.option_id or 0))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class TextPromptModal(ModalScreen[Optional[str]]):
     """A single-line text (or masked password) prompt.
 

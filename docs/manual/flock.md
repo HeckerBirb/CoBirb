@@ -386,12 +386,20 @@ told what is still left to do and where, rather than just that a ticket failed.
 
 **What a ticket needs installed is checked before you approve.** A ticket names each library,
 header or package it needs from outside the project, with a command that succeeds only if it is
-installed — `- requires: zlib headers for MinGW — check: echo '#include <zlib.h>' |
-x86_64-w64-mingw32-gcc -E -x c - >/dev/null`. Brainy Birb writes the check, so it works for any
-language. Before each charter approval CoBirb runs the checks, and anything not found is listed at
-the top of the dialog so you can install it first, or say no. They run only inside the sandbox, and
-only where contained commands already run without asking; anywhere else they're listed as "not
-checked". CoBirb never installs anything, and a worker can't either — the sandbox has no network.
+installed and the command that would install it here — `- requires: zlib headers for MinGW —
+check: echo '#include <zlib.h>' | x86_64-w64-mingw32-gcc -E -x c - >/dev/null — install: sudo apt
+install libz-mingw-w64-dev`. Brainy Birb writes both, so it works for any language. Before each
+charter approval CoBirb runs the checks — only inside the sandbox, and only where contained commands
+already run without asking; anywhere else they're "not checked". If anything isn't found, you're
+shown what and how to install it, and pick how to go on:
+
+- **Continue without them** — the tickets that need them won't pass.
+- **I have installed them** — CoBirb checks again (where it can) and asks again if something is
+  still missing.
+- **Stop** — no Worker Birb starts.
+
+Nothing is highlighted at first, so a stray Enter picks nothing. CoBirb never runs the install
+command, and a worker can't install anything either — the sandbox has no network.
 
 **So a ticket's `accept` is checked when Brainy Birb writes it.** Every program it names must be
 installed here, and it must be readable; otherwise the ticket list is sent back with the reason, as
