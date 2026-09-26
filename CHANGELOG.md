@@ -28,6 +28,11 @@ and its §17 decisions record for the ones that were designed and then deliberat
   never run by CoBirb. Before the charter approval you pick: continue without it, say you've just
   installed it (CoBirb checks again and asks again if it's still missing), or stop. It's a list to
   pick from, with nothing highlighted at first.
+- **A ticket whose `tests` line holds the command that runs them is no longer refused.** Brainy
+  Birb wrote `- tests: python -m pytest tests/test_x.py` on two tickets; every word was read as a
+  file, both tickets "owned" one called `python`, and the flock stopped on a file-ownership refusal
+  about the wrong problem. The test files the line names are now taken from it. A command or a
+  remark on a `writes` line is refused with the real reason, before file ownership is checked.
 
 ## [0.45.5]
 

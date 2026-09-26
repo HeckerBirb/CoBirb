@@ -341,6 +341,52 @@ def test_without_a_chooser_the_question_falls_back_to_confirm(monkeypatch, tmp_p
     assert "not installed" in questions[0] and "Continue without them" in questions[0]
 
 
+@pytest.mark.parametrize("line, tests", [
+    ("tests/test_a.py, tests/test_b.py", ("tests/test_a.py", "tests/test_b.py")),
+    # The command that runs the tests, where the files belong.
+    ("python -m pytest tests/test_a.py -q", ("tests/test_a.py",)),
+    ("`python -m pytest tests/test_a.py`", ("tests/test_a.py",)),
+    ("cd sub && pytest tests/test_a.py tests/test_b.py", ("tests/test_a.py", "tests/test_b.py")),
+    # A command naming its build output and the code under test keeps only the test.
+    ("cc -Wall -o /tmp/t a.c tests/test_a.c && /tmp/t", ("tests/test_a.c",)),
+    ("tests/test_a.py (unit tests for a)", ("tests/test_a.py",)),
+    # Test files of any language, not only pytest's names.
+    ("src/test/java/CaptureTest.java", ("src/test/java/CaptureTest.java",)),
+    # Nothing that is a file: the test files it writes, as with no line at all.
+    ("python -m pytest", ("tests/test_a.py",)),
+])
+def test_a_tests_line_yields_the_test_files_it_names(line, tests):
+    ticket = parse_tickets(f"### ticket: a\n- writes: a.py, tests/test_a.py\n- tests: {line}\n")[0]
+
+    assert ticket.tests == tests
+
+
+def test_two_tickets_with_the_command_on_their_tests_line_pass_the_check():
+    """A user's flock stopped here: both tickets "owned" a file called `python`."""
+    blocks = "".join(
+        f"### ticket: {t}\n- writes: {t}.py, tests/test_{t}.py\n- tests: python -m pytest tests/test_{t}.py\n"
+        f"- accept: true\n\n" for t in ("net", "parser"))
+
+    assert check_tickets(parse_tickets(blocks)) == ""
+
+
+@pytest.mark.parametrize("writes, word", [
+    ("a.py, python -m pytest tests/test_a.py", "`python`"),
+    ("a.py (new), tests/test_a.py", "`(new)`"),
+    ("a.py && tests/test_a.py", "`&&`"),
+])
+def test_a_writes_line_holding_something_other_than_files_is_refused(writes, word):
+    problem = check_tickets(parse_tickets(f"### ticket: a\n- writes: {writes}\n- tests: tests/test_a.py\n- accept: true"))
+
+    assert word in problem and "which is not a file" in problem
+
+
+def test_a_writes_line_of_files_without_extensions_passes():
+    blocks = "### ticket: a\n- writes: Makefile, Dockerfile, a.c, tests/test_a.c\n- tests: tests/test_a.c\n- accept: true"
+
+    assert check_tickets(parse_tickets(blocks)) == ""
+
+
 def test_good_ticket_blocks_pass_the_check():
     assert check_tickets(parse_tickets(_BLOCKS)) == ""
 

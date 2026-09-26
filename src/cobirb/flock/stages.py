@@ -215,6 +215,44 @@ def _paths(value: str) -> tuple[str, ...]:
     return tuple(os.path.normpath(p) for p in parts if p and p.lower() != "none")
 
 
+_SHELL_PUNCTUATION = frozenset("&|;<>()")
+
+
+def _command_word(word: str) -> bool:
+    """A word on a file list that is part of a command, not a file: an option,
+    shell punctuation, or a bare word naming an installed program."""
+    return (word.startswith("-") or set(word) <= _SHELL_PUNCTUATION
+            or ("/" not in word and "." not in word and shutil.which(word) is not None))
+
+
+def _test_paths(value: str) -> tuple[str, ...]:
+    """The test files a `tests` line names — even when it holds the command
+    that runs them, or a remark in parentheses.
+
+    **Models put the command here.** `- tests: python -m pytest tests/test_x.py`
+    was split into four "files", and two tickets written that way both owned
+    one called `python`: the flock stopped on a file-ownership refusal that
+    sent Brainy Birb reshuffling files three times over the wrong problem.
+    What was meant is plain, so the words that are not files are dropped: a
+    command word, or anything with neither a `.` nor a `/` (a test file has an
+    extension or a directory, in every language).
+
+    A command also names files that are not tests: `cc -o /tmp/t capture.c
+    tests/test_capture.c && /tmp/t` names the build output and the code under
+    test. So from a command only project files are kept, and of those the ones
+    named as tests (`test` or `spec` in the path) when there are any. Not
+    `_is_test_file`: that knows pytest's names, and `CaptureTest.java` is a
+    test file too.
+    """
+    words = _paths(re.sub(r"\([^)]*\)", " ", value))
+    files = [w for w in words if not _command_word(w) and ("." in w or "/" in w)]
+    if len(files) == len(words):
+        return tuple(files)  # a plain list of files
+    files = [w for w in dict.fromkeys(files) if not os.path.isabs(w)]
+    named = [w for w in files if re.search(r"test|spec", w, re.I)]
+    return tuple(named or files)
+
+
 def parse_tickets(text: str) -> list[TicketSpec]:
     """Every ticket block in ``text``; tolerant of spacing, backticks and case."""
     heads = list(_TICKET_HEADING.finditer(text))
@@ -222,7 +260,7 @@ def parse_tickets(text: str) -> list[TicketSpec]:
     for index, head in enumerate(heads):
         end = heads[index + 1].start() if index + 1 < len(heads) else len(text)
         fields: dict[str, str] = {}
-        requires: list[tuple[str, str]] = []
+        requires: list[tuple[str, str, str]] = []
         for line in text[head.end():end].splitlines():
             match = _FIELD.match(line)
             if match and match.group(1).strip().lower() == "requires":
@@ -238,7 +276,7 @@ def parse_tickets(text: str) -> list[TicketSpec]:
         # means them: the checklist says a ticket writes its own tests. A
         # user's flock stopped on a ticket listing
         # `tests/test_communication_protocol.py` under `writes` only.
-        tests = _paths(fields.get("tests", "")) or tuple(p for p in writes if _is_test_file(p))
+        tests = _test_paths(fields.get("tests", "")) or tuple(p for p in writes if _is_test_file(p))
         tickets.append(TicketSpec(
             id=head.group(1),
             writes=writes,
@@ -396,6 +434,17 @@ def check_tickets(tickets: list[TicketSpec]) -> str:
     """
     if not tickets:
         return "no ticket blocks were found — each needs a `### ticket: <id>` heading"
+    # Before ownership: a command on the `writes` line splits into words that
+    # every such ticket "owns", and the ownership refusal would send the model
+    # after the wrong problem. Refused rather than salvaged, unlike `tests`:
+    # a wrong guess here would give a worker the wrong files to write.
+    for ticket in tickets:
+        word = next((w for w in ticket.writes if _command_word(w) or "(" in w or ")" in w), "")
+        if word:
+            return (f"ticket {ticket.id!r}: its `writes` line has `{word}`, which is not a file. "
+                    "`writes` lists only the files this ticket creates or changes, comma-separated, "
+                    "e.g. `- writes: src/x.py, tests/test_x.py`; the command that runs its tests "
+                    "goes on `accept`")
     # A file in two tickets, said in the overview's own terms. The charter
     # moves' refusal ("call drop_worker…") names a tool no overview stage has,
     # and every model in the first overnight run that met it failed the same
