@@ -137,6 +137,8 @@ class WorkerReport:
     # worker saw at its own end.
     accepted_when_finished: bool | None = None
     rechecked: bool = False
+    # A static ticket: written, never built or tested (see WorkerBrief.static).
+    static: bool = False
 
     @property
     def complete(self) -> bool:
@@ -146,7 +148,7 @@ class WorkerReport:
         not the same as passing — it means nobody said what done looked like,
         so this cannot claim the work is finished.
         """
-        return self.ok and self.accepted is True
+        return self.ok and (self.static or self.accepted is True)
 
     def report_text(self) -> str:
         """The worker's own answer to the three questions, in one line or so.
@@ -172,7 +174,9 @@ class WorkerReport:
         """One block a person, or Brainy Birb, can read."""
         if not self.ok:
             return f"[{self.worker_id}] did not run — {self.error}"
-        if self.accepted is None:
+        if self.static:
+            verdict = "written, not verified (no machine here can build or test it)"
+        elif self.accepted is None:
             verdict = "no acceptance check was configured"
         elif self.accepted:
             verdict = "acceptance check passed"
@@ -342,6 +346,7 @@ def run_worker(
     canceller=None,
     grants=None,
     refuse: bool | Callable[[], bool] = False,
+    model=None,
 ) -> WorkerReport:
     """Run one brief to completion and report on it.
 
@@ -376,6 +381,7 @@ def run_worker(
         # "may I run this?" is only answerable if you know which of them is
         # asking.
         agent_id=worker.id,
+        model=model,
     )
     # Registered so a force-stop can reach this worker while it is blocked on
     # the model; a plain graceful stop never gets a chance to, because the

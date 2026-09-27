@@ -570,7 +570,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "subcommand",
         nargs="?",
-        choices=["help", "models", "commands", "flock", "plugin", "doctor", "setup"],
+        choices=["help", "models", "commands", "flock", "plugin", "doctor", "setup", "remote-worker"],
         help="'setup' to choose your model server and model, "
         "'help' for the overview, 'models' for how each role resolves, "
         "'commands' for the custom commands available here, 'doctor' to check "
@@ -597,6 +597,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--replace",
         action="store_true",
         help="With 'plugin install': overwrite an already-installed plugin of the same name.",
+    )
+    parser.add_argument(
+        "--listen",
+        metavar="HOST:PORT",
+        help="With 'remote-worker': the address to serve on (default 0.0.0.0:8443).",
     )
     parser.add_argument(
         "--doctor",
@@ -775,6 +780,15 @@ def main(argv: list[str] | None = None) -> int:
         from .runtime import setup
 
         return setup.run()
+    if args.subcommand == "remote-worker":
+        # Before the starter config is seeded: a remote worker takes every
+        # setting from the main machine and reads no config of its own.
+        from .remote.server import main as serve_remote
+
+        return serve_remote(args.listen or "0.0.0.0:8443")
+    if args.listen:
+        print("cobirb: --listen only means something with 'remote-worker'.", file=sys.stderr)
+        return EXIT_ERROR
     if args.force:
         # Said rather than ignored — see --branch-at's own check below for
         # why a flag that would otherwise silently do nothing gets a line.

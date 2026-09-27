@@ -1272,6 +1272,7 @@ class ShellTool(CobirbTool):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=(os.name == "posix"),
+                creationflags=0 if os.name == "posix" else getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
         except Exception as exc:  # noqa: BLE001 - defensive
             return ToolResult(ok=False, content=f"Command failed: {exc}", error=str(exc))
@@ -1311,17 +1312,22 @@ class ShellTool(CobirbTool):
 
     @staticmethod
     def _kill(process: Any) -> None:
-        """Kill ``process`` and, on POSIX, everything in its process group —
-        see the class docstring for why a plain ``process.kill()`` isn't
-        enough for a command that backgrounds or forks."""
+        """Kill ``process`` and everything it started — see the class docstring
+        for why a plain ``process.kill()`` isn't enough for a command that
+        backgrounds or forks. On Windows there is no process group to signal,
+        and killing ``cmd.exe`` alone leaves a compiler or test binary running
+        under a Remote Worker Birb, so ``taskkill /T`` takes the whole tree."""
         import signal
+        import subprocess
 
         try:
             if os.name == "posix":
                 os.killpg(os.getpgid(process.pid), signal.SIGKILL)
             else:
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                               capture_output=True, check=False)
                 process.kill()
-        except ProcessLookupError:
+        except (ProcessLookupError, OSError):
             pass  # already gone — nothing to do
 
     def cancel_running(self) -> bool:

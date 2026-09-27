@@ -157,6 +157,13 @@ class WorkerBrief:
     # work needs two rounds and a second trip through the user, which is a lot
     # of ceremony for "b reads what a writes".
     needs: tuple[str, ...] = ()
+    # The OS family this ticket must be built and tested on, when that is not
+    # this machine's: it runs as a Remote Worker Birb (see cobirb.remote).
+    runs_on: str = ""
+    # Written but never built or tested: no machine here can run its check, and
+    # the user chose to go on anyway. It has no `accept`, and is reported as
+    # "written, not verified" rather than as passing.
+    static: bool = False
 
     @property
     def implementation(self) -> tuple[str, ...]:
@@ -233,6 +240,10 @@ class Charter:
                 lines.append(f"      after  {', '.join(worker.needs)}")
             if worker.accept:
                 lines.append(f"      accept {worker.accept}")
+            if worker.runs_on:
+                lines.append(f"      runs on {worker.runs_on} — a Remote Worker Birb; its files are sent there")
+            if worker.static:
+                lines.append("      static — written, not built or tested (no machine here can run it)")
         return "\n".join(lines)
 
 

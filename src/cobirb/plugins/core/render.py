@@ -160,6 +160,14 @@ def build_charter(charter: Any, approved: Any = (), names: Any = None, requireme
             text.append(str(worker.accept), style=_CHARTER_ACCEPT)
             if approved and worker.accept not in commands:
                 text.append(" NEW", style=_CHARTER_NEW)
+        if getattr(worker, "runs_on", ""):
+            # Where the work runs is a capability too: its files go there.
+            text.append("\n    runs on ", style=FEATHER_GRAY)
+            text.append(f"{worker.runs_on} — a Remote Worker Birb; its files are sent there",
+                        style="bold yellow")
+        if getattr(worker, "static", False):
+            text.append("\n    static  ", style=FEATHER_GRAY)
+            text.append("written, not built or tested — no machine here can run it", style="yellow")
         text.append("\n")
 
     if names:

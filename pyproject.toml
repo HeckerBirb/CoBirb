@@ -33,10 +33,15 @@ classifiers = [
 # framework, not more `rich` polish. It shares `rich` (already required), adds
 # no compiled extension, and is imported lazily, so one-shot/programmatic mode
 # never loads it.
+# `websockets` carries the connection to a Remote Worker Birb (see cobirb/remote/):
+# a protocol parser that faces the network is where hand-written code grows
+# subtle bugs, so a vetted, pure-Python library was chosen over our own. It has
+# no dependencies of its own, and nothing imports it unless a remote is used.
 dependencies = [
     "rich>=13.7",
     "cryptography>=42.0",
     "textual>=1.0",
+    "websockets>=13.0",
 ]
 
 [project.optional-dependencies]

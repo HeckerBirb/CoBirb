@@ -880,8 +880,57 @@ class CoBirbApp(App[None]):
             if selected is not None:
                 self.call_from_thread(self._apply_selected_model, selected)
         finally:
+            if auto:
+                self._pair_remotes()
             self.call_from_thread(self.set_busy, "")
             self.call_from_thread(self._set_prompt_disabled, False)
+
+    def _pair_remotes(self) -> None:
+        """Pair every configured Remote Worker Birb that is not paired yet.
+
+        Right after model selection, and only here: a flock never prompts, so
+        this is where a remote gets trusted. The certificate's fingerprint is
+        shown to compare with the one the remote printed, and the 8-digit code
+        it prints is typed here. A remote already paired is left alone, and one
+        that cannot be reached is said and tried again next start. Runs on the
+        startup worker's thread; the questions are modals.
+        """
+        from ..remote.client import RemoteClient, RemoteError
+        from ..remote.settings import configured
+        from ..remote.trust import TrustStore
+
+        try:
+            specs, _ = configured(Config())
+        except Exception:  # noqa: BLE001 - an unreadable config is doctor's to report, not a reason to stop starting
+            return
+        store = TrustStore()
+        for spec in specs:
+            if store.token(spec.url):
+                continue
+
+            def trust(spec, fingerprint):
+                return bool(self.call_from_thread(
+                    self.request_confirmation,
+                    f"Trust the Remote Worker Birb at {spec.url}?",
+                    f"Its certificate fingerprint is:\n\n{fingerprint}\n\nCompare it with the one printed "
+                    "in the remote's terminal. Trust it only if they match.",
+                ))
+
+            def code(spec):
+                return self.call_from_thread(
+                    self.prompt_text, f"Pair with {spec.label()}",
+                    "Enter the 8-digit code shown in the remote's terminal:")
+
+            self.call_from_thread(self.set_busy, f"Pairing with {spec.label()}…")
+            client = RemoteClient(spec, store, ask_trust=trust, ask_code=code)
+            try:
+                client.connect()
+                message = f"Paired with the Remote Worker Birb {spec.label()}."
+            except RemoteError as exc:
+                message = f"Remote Worker Birb {spec.label()} not paired: {exc}"
+            finally:
+                client.close()
+            self.call_from_thread(self.write_transcript, render.build_notice(message))
 
     def _set_prompt_disabled(self, disabled: bool) -> None:
         prompt_input = self.query_one("#prompt-input", PromptInput)
@@ -1036,6 +1085,8 @@ class CoBirbApp(App[None]):
         if worker is not None:
             if kind == "started":
                 worker.set_state("running")
+            elif kind == "waiting_remote":
+                worker.set_state("waiting_remote")
             elif kind == "finished":
                 worker.set_state("done" if payload.complete else "failed")
                 worker.write(render.build_notice(payload.describe()))

@@ -257,6 +257,7 @@ def run_flock(
     canceller: "Canceller | None" = None,
     grants=None,
     refuse: bool | Callable[[], bool] = False,
+    remotes=None,
 ) -> FlockOutcome:
     """Run one round of a charter and report on it.
 
@@ -280,6 +281,12 @@ def run_flock(
     ``grants`` is the session's approval store, passed to each worker so an
     answer of "allow for the session" reaches the workers that have not
     started yet as well as the one that asked.
+
+    ``remotes`` (a ``cobirb.remote.pool.RemotePool``) runs each ticket with a
+    ``runs_on`` as a Remote Worker Birb: one task per remote, outside the
+    concurrency limit, on the first idle remote of its OS. Such a ticket's
+    re-check and review run on its remote too — a Windows test is judged on
+    Windows. Kind ``"waiting_remote"`` says a ticket is waiting for one.
     """
     config = config or Config()
     stop = stop or threading.Event()
@@ -307,6 +314,10 @@ def run_flock(
     finished = {worker.id: threading.Event() for worker in workers}
     reports: dict[str, WorkerReport] = {}
     reports_lock = threading.Lock()
+    # Remote tickets' runs, kept until after review: their workspaces are where
+    # their checks run.
+    remote_runs: dict = {}
+    refusing = refuse if callable(refuse) else (lambda: bool(refuse))
 
     def wait_for_dependencies(worker: WorkerBrief) -> str:
         """Block until this worker may start; return why it may not, if so.
@@ -334,6 +345,24 @@ def run_flock(
                 return f"did not run — its dependency '{need}' failed"
         return ""
 
+    def run_remote(worker: WorkerBrief) -> WorkerReport:
+        from ..remote.runner import RemoteRun
+
+        client = remotes.acquire(worker.runs_on, stop, on_wait=lambda: announce("waiting_remote", worker))
+        if client is None:
+            return WorkerReport(worker_id=worker.id, ok=False, error=(
+                "stopped while waiting for a remote" if stop.is_set()
+                else f"no {worker.runs_on} remote is available"))
+        announce("started", worker)
+        run = RemoteRun(client, worker, cwd, config=config,
+                        io=io_for(worker, None) if io_for else None,
+                        grants=grants, refuse=refusing)
+        with reports_lock:
+            remote_runs[worker.id] = run
+        report = run.execute(stop)
+        announce("finished", report)
+        return report
+
     def run_one(worker: WorkerBrief) -> WorkerReport:
         # Checked before waiting and before taking a slot: a stopped flock
         # should not queue up behind the workers still finishing just to
@@ -345,6 +374,8 @@ def run_flock(
         blocked = wait_for_dependencies(worker)
         if blocked:
             return WorkerReport(worker_id=worker.id, ok=False, error=blocked)
+        if worker.runs_on and not worker.static and remotes is not None:
+            return run_remote(worker)
         with slots:
             if stop.is_set():
                 return WorkerReport(
@@ -375,11 +406,21 @@ def run_flock(
         )
         try:
             report = run_one(worker)
+            report.static = worker.static
             return report
         finally:
             with reports_lock:
                 reports[worker.id] = report
+                running_remotes = [r for wid, r in remote_runs.items()
+                                   if wid != worker.id and wid not in reports]
             finished[worker.id].set()
+            # A remote worker reading this one's files gets them now, as a
+            # local one would on its next read of the shared tree.
+            if report.ok:
+                for run in running_remotes:
+                    shared = [p for p in run.worker.reads if p in set(worker.writes)]
+                    if shared:
+                        run.push(shared)
 
     logger.info("flock: %d worker(s), %d at a time", len(workers), limit)
     # Sized to the workers, with `slots` holding the real limit — a worker
@@ -390,9 +431,14 @@ def run_flock(
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(workers))) as pool:
         outcome.reports = list(pool.map(record, workers))
 
+    def remote_check(worker_id: str):
+        run = remote_runs.get(worker_id)
+        return None if run is None else (lambda command, seconds, overrides=None:
+                                         run.check(command, seconds, overrides))
+
     outcome.stopped = stop.is_set()
     if not outcome.stopped:
-        recheck(charter, outcome.reports, cwd, stop=stop, config=config)
+        recheck(charter, outcome.reports, cwd, stop=stop, config=config, run_check_for=remote_check)
 
     # After the join, never during it. Review puts an implementation back to
     # its stub for a moment, and a colleague still running could import it.
@@ -418,10 +464,13 @@ def run_flock(
         worker = charter.worker(report.worker_id)
         if worker is None:  # pragma: no cover - reports are built from workers
             continue
-        review = review_worker(worker, baseline, cwd)
+        review = review_worker(worker, baseline, cwd, run_check=remote_check(worker.id))
         outcome.reviews.append(review)
         announce("reviewed", review)
 
+    for run in remote_runs.values():
+        run.end()
+        remotes.release(run.client)
     outcome.elapsed = time.monotonic() - started_at
     return outcome
 
@@ -433,6 +482,7 @@ def recheck(
     *,
     stop: threading.Event | None = None,
     config: Config | None = None,
+    run_check_for: "Callable[[str], Callable | None] | None" = None,
 ) -> None:
     """Run every finished worker's acceptance check again, now that all are done.
 
@@ -457,7 +507,8 @@ def recheck(
         worker = charter.worker(report.worker_id)
         if worker is None or not report.ok or not worker.accept.strip():
             continue
-        result = run_verification(worker.accept, cwd, timeout)
+        remote = run_check_for(worker.id) if run_check_for is not None else None
+        result = remote(worker.accept, timeout) if remote is not None else run_verification(worker.accept, cwd, timeout)
         if result.error:
             # The check could not run at all; the worker's own verdict is the
             # better evidence than none.

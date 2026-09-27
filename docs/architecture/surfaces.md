@@ -9,7 +9,7 @@ how they are built.
 - **Subcommands**: `setup` (asks for the server and protocol, lists its models, saves the pick —
   atomic, 0600, every other key kept, an unparseable config refused; never probes), `doctor`,
   `help [topic]`, `models`, `commands`, `flock -p`, `plugin install <path> [--replace] | list |
-  remove <name>`.
+  remove <name>`, `remote-worker [--listen HOST:PORT]` (see [remote](remote.md)).
 - **Flags**: `-p/--prompt`, `--session`, `-w/--password`, `--model`, `--allow-tool`,
   `--plan-mode on|off`, `--autopilot` (with `-p`), `--system-prompt off|harness`, `--export PATH`,
   `--branch PATH`, `--branch-at N`, `--headless`, `--output text|json`, `--cwd`, `--upgrade [TAG]`,
@@ -55,7 +55,8 @@ One file, `~/.cobirb/config.json` (invariant 2). Keys: `models.*`, `system_promp
 or `{"mode", "hide"}`), `max_turns`, `verify_command`, `verify_timeout`, `verify_fix_attempts`,
 `redact_secrets`, `checkpoints`, `instructions`, `instructions_max_chars`, `repo_map`,
 `repo_map_max_chars`, `context_tokens`, `max_num_ctx`, `connect_timeout`, `request_timeout`,
-`plan_mode`, `audit_log`, `hooks`, `mcp_servers`, `flock` (`planning`, `autonomy`, `max_rounds`).
+`plan_mode`, `audit_log`, `hooks`, `mcp_servers`, `flock` (`planning`, `autonomy`, `max_rounds`),
+`remote_workers` (see [remote](remote.md)).
 `doctor.KNOWN_KEYS` is the list `doctor` checks against. Deprecated: `model`, `default_model`.
 Retired: `persona`. `ensure_home()` seeds a starter config on first run; `config.json.example` in the
 repository is the annotated example.

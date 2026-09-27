@@ -24,7 +24,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
 from ..config import Config
@@ -58,6 +58,7 @@ from .stages import (
     left_to_do,
     requirements_checkable,
 )
+from ..remote.osnames import local_os
 from .supervisor import Canceller, FlockOutcome, check_partition, run_flock
 
 logger = logging.getLogger("cobirb")
@@ -770,7 +771,62 @@ def _failing(outcome: FlockOutcome) -> tuple:
     return tuple(sorted((r.worker_id, bool(r.ok), r.accepted) for r in outcome.outstanding))
 
 
-def _drive_staged(
+def _open_remotes(config: Config, ask: Asker) -> Any:
+    """The flock's Remote Worker Birbs, connected with the pairings made when
+    CoBirb started; ``None`` when none are configured. Never prompts: a remote
+    that is not paired or not reachable is left out, and the user is told."""
+    from ..remote.pool import RemotePool
+    from ..remote.settings import configured
+
+    specs, problems = configured(config)
+    for problem in problems:
+        ask.show(problem)
+    if not specs:
+        return None
+    pool = RemotePool(specs).open()
+    for problem in pool.problems:
+        ask.show(problem)
+    if pool.machines():
+        ask.show("Remote Worker Birbs available: " + ", ".join(m["label"] for m in pool.machines()))
+    return pool
+
+
+def _static_or_stop(tickets: "list[TicketSpec]", pool: Any, ask: Asker) -> "tuple[list[TicketSpec], bool]":
+    """Tickets that must run on an OS no remote offers: the user decides.
+
+    Going on makes them static — written by a local Worker Birb, never built or
+    tested, and reported as "written, not verified". Declining stops the flock.
+    Returns the tickets and whether to stop.
+    """
+    here = local_os()
+    available = pool.oses() if pool is not None else set()
+    missing = [t for t in tickets if t.runs_on and t.runs_on != here
+               and t.runs_on not in available and not t.static]
+    if not missing:
+        return tickets, False
+    oses = ", ".join(sorted({t.runs_on for t in missing}))
+    ids = ", ".join(repr(t.id) for t in missing)
+    question = (f"Ticket(s) {ids} must be built and tested on {oses}, and no Remote Worker Birb for "
+                "it is available. Go on without building or testing them? They will be written "
+                "only, as static work, and reported as not verified.")
+    if not ask.confirm(question, ""):
+        return tickets, True
+    static = {t.id for t in missing}
+    return [replace(t, runs_on="", static=True) if t.id in static else t for t in tickets], False
+
+
+def _drive_staged(run: FlockRun, orchestrator: Orchestrator, objective: str, cwd: str, ask: Asker,
+                  config: Config, *args: Any) -> FlockRun:
+    """``_staged_rounds``, with the flock's remotes open for its whole length."""
+    pool = _open_remotes(config, ask)
+    try:
+        return _staged_rounds(run, orchestrator, objective, cwd, ask, config, *args, pool=pool)
+    finally:
+        if pool is not None:
+            pool.close()
+
+
+def _staged_rounds(
     run: FlockRun,
     orchestrator: Orchestrator,
     objective: str,
@@ -785,6 +841,8 @@ def _drive_staged(
     on_charter: Callable[[Charter], None] | None,
     canceller: Canceller | None,
     settings: "FlockSettings",
+    *,
+    pool: Any = None,
 ) -> FlockRun:
     """Staged planning, in rounds — see ``flock.stages``.
 
@@ -808,7 +866,7 @@ def _drive_staged(
     stager = Stager(
         orchestrator, cwd, objective, turns=plan_turns, trace=run.trace,
         decide=_unless_autopilot(ask.decide, orchestrator) if settings.autonomy == AUTONOMY_ASK else None,
-        show=ask.show, speaking=getattr(ask, "speaking", None),
+        show=ask.show, speaking=getattr(ask, "speaking", None), remotes=pool,
     )
     ask.show("Brainy Birb is writing the overview…")
     try:
@@ -845,7 +903,12 @@ def _drive_staged(
     if stager.design.names:
         ask.show("Names restated for Architect Birb and the Worker Birbs:\n" + stager.design.names.describe())
 
-    tickets = list(stager.design.tickets)
+    tickets, stopping = _static_or_stop(list(stager.design.tickets), pool, ask)
+    if stopping:
+        run.stopped_at = "remote"
+        run.report = "No flock ran: some tickets need an OS with no Remote Worker Birb available."
+        return run
+    stager.design.tickets = tickets
     previous: dict[str, str] = {}
     approved: list[Charter] = []
     last_failing: tuple | None = None
@@ -886,9 +949,9 @@ def _drive_staged(
 
         # ---- What the tickets need installed ------------------------------ #
         asking = not approved or _autonomy(settings, orchestrator) == AUTONOMY_ASK
-        requirements = describe_requirements(check_requirements(orchestrator, tickets, cwd, checked))
+        requirements = describe_requirements(check_requirements(orchestrator, tickets, cwd, checked, remotes=pool))
         if requirements and asking:
-            go, requirements = _settle_requirements(ask, orchestrator, tickets, cwd, checked, requirements,
+            go, requirements = _settle_requirements(ask, orchestrator, tickets, cwd, checked, requirements, pool,
                                                     first=not approved)
             if not go:
                 run.stopped_at = "requirements"
@@ -939,6 +1002,7 @@ def _drive_staged(
             on_event=on_event, io_for=io_for, canceller=canceller,
             grants=getattr(orchestrator, "grants", None),
             refuse=lambda: _autopilot(orchestrator),
+            remotes=pool,
         )
         run.outcome = outcome
         run.rounds.append(outcome)
@@ -967,7 +1031,11 @@ def _drive_staged(
         next_tickets, whys = _with_contradicted_tests(outcome, stager.design.tickets, next_tickets, whys)
         if not next_tickets:
             break
-        problem = check_tickets(next_tickets)
+        next_tickets, stopping = _static_or_stop(next_tickets, pool, ask)
+        if stopping:
+            run.stopped_at = "remote"
+            break
+        problem = check_tickets(next_tickets, stager.which_for)
         if problem:
             ask.show(f"Stopping: the next round's tickets could not be used — {problem}.")
             break
@@ -1018,7 +1086,8 @@ def _choose(ask: Asker, question: str, detail: str, options: list[str]) -> "int 
 
 
 def _settle_requirements(ask: Asker, orchestrator: Orchestrator, tickets, cwd: str,
-                         checked: dict, requirements: str, *, first: bool) -> "tuple[bool, str]":
+                         checked: dict, requirements: str, pool: Any = None, *,
+                         first: bool) -> "tuple[bool, str]":
     """Ask what to do about what is not installed: whether to go on, and what
     is still missing ("" for nothing known).
 
@@ -1046,7 +1115,7 @@ def _settle_requirements(ask: Asker, orchestrator: Orchestrator, tickets, cwd: s
             return False, requirements
         if not checkable:
             return True, ""  # taken at the user's word: nothing here can check it
-        requirements = describe_requirements(check_requirements(orchestrator, tickets, cwd, checked))
+        requirements = describe_requirements(check_requirements(orchestrator, tickets, cwd, checked, remotes=pool))
         if not requirements:
             ask.show("Everything the tickets need is installed now.")
             return True, ""

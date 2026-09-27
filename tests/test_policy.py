@@ -519,3 +519,16 @@ def test_a_cd_that_leaves_the_project_or_cannot_be_read_is_not_waved_through(tmp
     policy.allow("shell", "pytest")
 
     assert not policy.is_allowed("shell", {"command": f"{cd} && pytest -q"})
+
+
+@pytest.mark.parametrize("command, segments", [
+    (r"cl /W4 C:\src\cap.c tests\test_cap.c && .\test_cap.exe",
+     [["cl", "/W4", r"C:\src\cap.c", r"tests\test_cap.c"], [r".\test_cap.exe"]]),
+    (r'"C:\Program Files\LLVM\bin\clang.exe" -o t.exe a.c & t.exe',
+     [[r"C:\Program Files\LLVM\bin\clang.exe", "-o", "t.exe", "a.c"], ["t.exe"]]),
+    ('echo "a; b" | findstr a', [["echo", "a; b"], ["findstr", "a"]]),
+])
+def test_a_windows_command_is_read_the_windows_way(command, segments):
+    """Backslashes are path separators there, not escapes — a Remote Worker
+    Birb on Windows must be allowed its own `.\\test.exe`."""
+    assert _segments(command, windows=True) == segments

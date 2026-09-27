@@ -384,6 +384,10 @@ the design's **Limits on this machine** section, and an evaluation leaves a tick
 here out of the next round with a `left to do` note. Both end up in the flock's report, so you're
 told what is still left to do and where, rather than just that a ticket failed.
 
+**Or on another machine.** With [Remote Worker Birbs](remote-workers.md) configured, Brainy Birb
+also sees those machines, and a ticket that must be built and tested on another OS runs there —
+natively, re-checked and reviewed there too.
+
 **What a ticket needs installed is checked before you approve.** A ticket names each library,
 header or package it needs from outside the project, with a command that succeeds only if it is
 installed and the command that would install it here — `- requires: zlib headers for MinGW —

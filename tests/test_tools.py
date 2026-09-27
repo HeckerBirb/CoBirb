@@ -323,12 +323,17 @@ def test_shell_kill_swallows_a_process_that_is_already_gone():
     ShellTool._kill(SimpleNamespace(pid=2**30))  # not a real pid; must not raise
 
 
-def test_shell_kill_falls_back_to_a_plain_kill_off_posix(monkeypatch):
-    """No process groups outside POSIX — just kill the one process."""
+def test_shell_kill_takes_the_whole_tree_off_posix(monkeypatch):
+    """No process groups on Windows: taskkill /T ends the command's whole tree,
+    so a compiler or test binary started by cmd.exe does not keep running."""
+    ran, killed = [], []
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", lambda argv, **_: ran.append(argv))
     monkeypatch.setattr("cobirb.plugins.core.tools.os.name", "nt")
-    killed = []
     ShellTool._kill(SimpleNamespace(pid=123, kill=lambda: killed.append(1)))
-    assert killed == [1]
+    monkeypatch.undo()
+    assert ran == [["taskkill", "/T", "/F", "/PID", "123"]] and killed == [1]
 
 
 def test_registry_names_and_get():

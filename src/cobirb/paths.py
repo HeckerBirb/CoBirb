@@ -64,3 +64,15 @@ def memories_dir() -> str:
     """Where memory catalogues live — one file per catalogue: ``<name>.md``
     (plaintext, chmod 0600) or ``<name>.md.enc`` (password-protected)."""
     return os.path.join(cobirb_dir(), "memories")
+
+
+def remotes_path() -> str:
+    """The main machine's trust in each Remote Worker Birb: its pinned
+    certificate, its token and when it was last used (chmod 0600)."""
+    return os.path.join(cobirb_dir(), "remotes.json")
+
+
+def remote_worker_dir() -> str:
+    """A machine serving as a Remote Worker Birb keeps its certificate, its key
+    and the tokens it has issued here."""
+    return os.path.join(cobirb_dir(), "remote-worker")

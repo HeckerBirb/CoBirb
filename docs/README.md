@@ -16,6 +16,7 @@ Short pages. Start at the top.
 | [Memory](manual/memory.md) | Facts CoBirb remembers between conversations |
 | [Images](manual/images.md) | Showing the model a screenshot |
 | [The Flock](manual/flock.md) | Splitting work across several agents |
+| [Remote Worker Birbs](manual/remote-workers.md) | Worker Birbs on another machine and OS |
 | [Tools](manual/tools.md) | What the agent can do, and what `/undo` covers |
 | [Hooks](manual/hooks.md) | Your own commands at CoBirb's decision points |
 | [MCP](manual/mcp.md) | Tools from MCP servers, and writing your own |

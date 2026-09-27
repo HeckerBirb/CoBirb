@@ -287,11 +287,14 @@ class WorkerPane(Vertical):
             # has started, has asked the user for something, and is the only
             # state a person can clear — so it is the loudest colour here.
             "held": "bold magenta",
+            # A remote ticket whose OS's remotes are all busy.
+            "waiting_remote": "bold cyan",
             "done": "bold green",
             "failed": "bold red",
             "flagged": "bold yellow",
         }
-        label = "held — waiting for you" if state == "held" else state
+        label = {"held": "held — waiting for you",
+                 "waiting_remote": "Waiting for available worker"}.get(state, state)
         return Text(f"[{self._worker_id}] {label}", style=colours.get(state, "bold"))
 
     def set_state(self, state: str) -> None:
@@ -436,6 +439,10 @@ class FlockPane(Vertical):
             scope = "writes " + ", ".join(worker.writes)
             if worker.reads:
                 scope += "\nreads  " + ", ".join(worker.reads)
+            if getattr(worker, "runs_on", ""):
+                scope += f"\nruns on {worker.runs_on} (Remote Worker Birb)"
+            if getattr(worker, "static", False):
+                scope += "\nstatic — written, not built or tested"
             await row.mount(WorkerPane(worker.id, scope))
 
     def pane(self, worker_id: str) -> "WorkerPane | None":
@@ -456,7 +463,7 @@ class FlockPane(Vertical):
         # "held" first: it is the only state in this list that needs a person
         # to do something, and a roll-up that buries it under four running
         # workers is a roll-up nobody acts on.
-        order = {"held": 0, "running": 1, "waiting": 2, "flagged": 3, "failed": 4, "done": 5}
+        order = {"held": 0, "running": 1, "waiting_remote": 2, "waiting": 3, "flagged": 4, "failed": 5, "done": 6}
         panes = sorted(
             self.query(WorkerPane), key=lambda p: (order.get(p.state, 9), p._worker_id)
         )

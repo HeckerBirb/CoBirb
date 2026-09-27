@@ -166,6 +166,7 @@ If your endpoint serves one request at a time, the more direct fix is on its sid
 | `verify_fix_attempts` | `1` | Bounded retries when it fails |
 | `hooks` | `{}` | Your own commands at lifecycle points — see [Hooks](hooks.md) |
 | `mcp_servers` | `{}` | Local MCP servers — see [MCP](mcp.md) |
+| `remote_workers` | `[]` | Worker Birbs on other machines and operating systems — see [Remote Worker Birbs](remote-workers.md) |
 | `plugins` | core | Which implementation fills each slot |
 
 ## Example

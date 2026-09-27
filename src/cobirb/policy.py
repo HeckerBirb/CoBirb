@@ -123,7 +123,7 @@ class AuditLog:
             print(f"cobirb: could not write the audit log at {self.path} — {exc}", file=sys.stderr)
 
 
-def _tokenize(command: str) -> list[str] | None:
+def _tokenize(command: str, windows: bool | None = None) -> list[str] | None:
     """Tokenize a shell command, honouring quotes and returning operators
     (``;``, ``&&``, ``|``, ``>`` ...) as tokens of their own.
 
@@ -131,16 +131,28 @@ def _tokenize(command: str) -> list[str] | None:
     say). Callers must treat that as "not verifiable", and therefore deny:
     guessing at a command the policy can't read is how allow-lists get
     bypassed.
+
+    **Windows commands are read Windows' way** (``windows``, by default this
+    machine's OS). POSIX rules treat a backslash as an escape, so
+    ``.\\test.exe`` became ``.test.exe`` and ``C:\\src\\a.c`` lost its
+    separators — a Remote Worker Birb on Windows would have been refused its own
+    test binary. Surrounding double quotes are taken off each word, as the
+    POSIX reading does.
     """
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    if windows is None:
+        windows = os.name == "nt"
+    lexer = shlex.shlex(command, posix=not windows, punctuation_chars=True)
     lexer.whitespace_split = True
     try:
-        return list(lexer)
+        tokens = list(lexer)
     except ValueError:
         return None
+    if windows:
+        tokens = [t[1:-1] if len(t) >= 2 and t[0] == t[-1] == '"' else t for t in tokens]
+    return tokens
 
 
-def _segments(command: str) -> list[list[str]] | None:
+def _segments(command: str, windows: bool | None = None) -> list[list[str]] | None:
     """Split a shell command into its separately-executed segments.
 
     ``"git status; rm -rf /"`` becomes ``[["git", "status"], ["rm", "-rf", "/"]]``
@@ -155,7 +167,7 @@ def _segments(command: str) -> list[list[str]] | None:
     """
     if "`" in command:
         return None  # backtick substitution hides an arbitrary command
-    tokens = _tokenize(command)
+    tokens = _tokenize(command, windows)
     if tokens is None:
         return None
 
@@ -677,6 +689,12 @@ class SessionGrants:
             backlog = list(self._granted)
         for tool_name, arguments in backlog:
             policy.grant(tool_name, arguments)
+
+    def unregister(self, policy: "Policy") -> None:
+        """Stop pushing grants to ``policy`` — a Remote Worker Birb's relay whose
+        job has ended. A local policy needs no call: it is held weakly."""
+        with self._lock:
+            self._policies.discard(policy)
 
     def grant(self, tool_name: str, arguments: dict[str, Any] | None = None) -> None:
         """Record an approval and push it to every policy already registered.

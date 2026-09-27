@@ -317,7 +317,7 @@ def test_installed_now_checks_again_until_nothing_is_missing(monkeypatch, tmp_pa
     _project(tmp_path)
     found = iter([stages.MISSING, stages.MISSING, stages.INSTALLED])
     monkeypatch.setattr(flock_run, "requirements_checkable", lambda main: True)
-    monkeypatch.setattr(flock_run, "check_requirements", lambda main, tickets, cwd, cache=None:
+    monkeypatch.setattr(flock_run, "check_requirements", lambda main, tickets, cwd, cache=None, **_:
                         [("a", "zlib", next(found), "sudo apt install zlib1g-dev")])
     picks, approvals = [], []
     ask = Asker(confirm=lambda q, detail="": approvals.append(detail) or False,

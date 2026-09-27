@@ -31,9 +31,10 @@ network unless the user explicitly asks for it.
    repository may *describe* itself (`AGENTS.md`, repo map, `<project>/.cobirb/commands/`) but may
    never grant capability.
 3. **No outbound network by default.** Only the model provider opens a socket, to the endpoint the
-   user configured. Two exceptions, both explicitly invoked: `cobirb --upgrade` (a git remote for a
-   checkout; GitHub release assets plus PyPI for a managed install) and MCP servers the user
-   configured. CoBirb never probes or discovers endpoints — the config says what it may reach.
+   user configured. Three exceptions, all explicitly configured or invoked: `cobirb --upgrade` (a
+   git remote for a checkout; GitHub release assets plus PyPI for a managed install), MCP servers the
+   user configured, and the Remote Worker Birbs in `remote_workers` (CoBirb connects; it never
+   listens, except as `cobirb remote-worker` on the remote). CoBirb never probes or discovers endpoints — the config says what it may reach.
 4. **Sessions are encrypted at rest.** Plaintext conversation exists in RAM only.
 5. **Fail closed.** No I/O adapter, an adapter that cannot ask or raises, an unparseable shell command,
    a plugin that will not load, a target a permission check cannot pin down → deny or skip.
@@ -69,6 +70,7 @@ Code paths are under `src/cobirb/`; the rest are from the repository root.
 | `plugins/core/` | Built-ins: `tools`, `model` (Ollama), `openai`, `toolcalls`, `io`, `crypto`, `render`, `repomap`, `ignores`. | [tools](docs/architecture/tools.md), [providers](docs/architecture/providers.md) |
 | `runtime/` | Shared composition: `wiring`, `plugins`, `models`, `system_prompt`, `setup`, `commands`, `command_index`, `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues`, `mentions`, `doctor`. | [extending](docs/architecture/extending.md), [surfaces](docs/architecture/surfaces.md) |
 | `mcp/` | stdio MCP client and its tool adapter. | [extending](docs/architecture/extending.md) |
+| `remote/` | Remote Worker Birbs: `settings`, `osnames`, `trust`, `certs`, `protocol`, `client`, `server`, `job`, `relay`, `runner`, `pool`. | [remote](docs/architecture/remote.md) |
 | `flock/` | Multi-agent runs: `charter`, `plan`, `brainy`, `stages`, `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. | [flock](docs/architecture/flock.md) |
 | `tui/` | The Textual app: `app`, `slash_commands`, `transcript`, `attachments`, `mention_picker`, `command_picker`, `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. | [surfaces](docs/architecture/surfaces.md) |
 | `help_text.py` | `cobirb help` — the overview; `cobirb help <topic>` renders the manual. | [surfaces](docs/architecture/surfaces.md) |
@@ -177,6 +179,9 @@ Ideas not yet built, with why each waits, are in [`ROADMAP.md`](./ROADMAP.md).
 - **A configured MCP server can do what it likes with the arguments it receives.**
 - **An attached image grows its session file by about its size**, and every save rewrites the blob.
 - **`redact_secrets` matches formats, not names** — it misses bespoke credential formats.
+- **A Remote Worker Birb on Windows is not sandboxed**: the machine is the containment. On the
+  user's own Windows computer it acts as their Windows user. A remote's test results are as
+  trustworthy as the remote.
 - **A hang in Ollama's `/api/show` cannot be force-stopped**: it stays on plain `urllib`, outside
   `cancel()`'s tracked sockets, because moving it would rewrite every test that mocks that call. It is
   a fast metadata call that hangs only when the whole server is wedged.

@@ -102,6 +102,8 @@ def run_verification(
         # `subprocess.run("", shell=True)` exits 0, which would report a check
         # that never ran as a passing one — the worst possible answer.
         return VerifyResult(command, ok=False, output="", error="no command configured")
+    if os.name != "posix":
+        return _run_windows(command, cwd, timeout)
     try:
         process = subprocess.run(
             command,
@@ -110,7 +112,7 @@ def run_verification(
             text=True,
             capture_output=True,
             timeout=timeout,
-            start_new_session=(os.name == "posix"),
+            start_new_session=True,
         )
     except subprocess.TimeoutExpired:
         return VerifyResult(command, ok=False, output="", timed_out=True)
@@ -119,3 +121,25 @@ def run_verification(
 
     combined = _tail(f"{process.stdout}{process.stderr}")
     return VerifyResult(command, ok=process.returncode == 0, output=combined)
+
+
+def _run_windows(command: str, cwd: str, timeout: int) -> VerifyResult:
+    """``run_verification`` on Windows, where a timeout must take the whole tree.
+
+    ``subprocess.run`` kills only ``cmd.exe`` on a timeout, and the test binary
+    it started keeps running — under a Remote Worker Birb, on and on. So the
+    command is started in its own process group and ``taskkill /T`` ends it.
+    """
+    try:
+        process = subprocess.Popen(command, shell=True, cwd=cwd, text=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    except Exception as exc:  # noqa: BLE001 - a broken command is not a crash
+        return VerifyResult(command, ok=False, output="", error=str(exc))
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True, check=False)
+        process.communicate()
+        return VerifyResult(command, ok=False, output="", timed_out=True)
+    return VerifyResult(command, ok=process.returncode == 0, output=_tail(f"{stdout}{stderr}"))

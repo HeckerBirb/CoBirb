@@ -5,6 +5,20 @@ All notable changes to CoBirb are recorded here, newest first. See
 
 ## [Unreleased]
 
+- **Remote Worker Birbs: a Worker Birb on another machine and OS.** Configure remotes under
+  `remote_workers` (`remote_os`, `remote_url`, and optionally their own model), run
+  `cobirb remote-worker` on each, and pair them when CoBirb starts — trust the certificate, type the
+  8-digit code the remote shows; a pairing lasts 30 days from its last use. In a flock, Brainy Birb
+  gives a ticket that must be built and tested on another OS a `runs on` line, and it runs there
+  natively: it gets only its ticket's files, its pane and questions stay on your screen, its model
+  calls are relayed to your session unless it has its own, and its re-check and review run on the
+  remote. One ticket per remote, on top of your concurrency; with every remote busy it waits. A
+  ticket for an OS no remote offers is put to you: go on and it is written only, reported as not
+  verified. The connection is TLS, opened by your CoBirb, with heartbeats every 30 s; a remote that
+  hears nothing for 5 minutes stops its work hard. Adds the `websockets` dependency.
+- **Commands for Windows are read Windows' way**, and a timed-out or cancelled command on Windows
+  ends its whole process tree — prerequisites for a Remote Worker Birb on Windows.
+
 - **Steering no longer lands in the middle of the reply it interrupts.** Your message was printed
   the moment you sent it, while the reply kept streaming until the cut took effect, so its last
   words came after your message. Now the reply stops and is flushed, then your message appears,

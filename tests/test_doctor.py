@@ -397,3 +397,20 @@ def test_the_older_model_keys_are_deprecated_not_broken(tmp_path):
 
     assert report.ok
     assert "models.default.name" in _check(report, "deprecated config keys").detail
+
+
+def test_remote_workers_are_checked_without_connecting(tmp_path, monkeypatch):
+    from cobirb.remote import settings
+
+    monkeypatch.setattr(settings, "local_os", lambda: "Linux")
+    report = _run(tmp_path, {"remote_workers": [
+        {"remote_os": "wINdOwS", "remote_url": "https://10.0.0.5:8443/api"},
+        {"remote_os": "linux", "remote_url": "https://10.0.0.6:8443/api"},
+        {"remote_os": "plan9", "remote_url": "https://10.0.0.7:8443/api"},
+    ]})
+
+    details = [c.detail for c in report.checks if c.name == "remote worker"]
+    assert any("Windows" in d and "not paired" in d for d in details)
+    assert any("ignored" in d for d in details)
+    assert any("not an OS name" in d for d in details)
+    assert not report.ok  # the unknown OS is a failure

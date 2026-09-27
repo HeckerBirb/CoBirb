@@ -295,6 +295,7 @@ def build_subagent(
     io: cobirb_typing.I_OAdapter | None = None,
     grants: "SessionGrants | None" = None,
     agent_id: str = "",
+    model: "cobirb_typing.ModelProvider | None" = None,
 ) -> Orchestrator:
     """Wire an agent that takes its instructions from another agent.
 
@@ -346,7 +347,9 @@ def build_subagent(
     attach_sandbox(registry, config)
     policy.allow("todo")
     subagent = Orchestrator(
-        model=build_for_role(ROLE_WORKER, config),
+        # Handed in by a Remote Worker Birb: a relay to the main session's
+        # endpoint, or the remote's own. Otherwise the worker role's.
+        model=model if model is not None else build_for_role(ROLE_WORKER, config),
         tools=registry.tools,
         policy=policy,
         io=io or HeadlessIO(),

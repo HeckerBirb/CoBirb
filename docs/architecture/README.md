@@ -16,4 +16,5 @@ same change; the layout table in `AGENTS.md` says which page covers which module
 | [Model providers](providers.md) | Ollama and OpenAI-compatible servers, tool calls written as text, streaming, timeouts |
 | [Extending CoBirb](extending.md) | The plugin SPI, project grounding, hooks, verify, custom commands, MCP, model roles |
 | [The Flock](flock.md) | Brainy Birb, Architect Birb, Worker Birbs: planning, the charter, rounds, workers, review |
+| [Remote Worker Birbs](remote.md) | A Worker Birb on another machine and OS: pairing, the connection, jobs, and how the Flock uses them |
 | [Surfaces](surfaces.md) | The CLI, headless mode, the TUI, config keys, help, environment, install shapes |

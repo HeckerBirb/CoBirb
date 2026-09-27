@@ -59,6 +59,7 @@ from ..runtime.hooks import EVENT_BEFORE_TOOL, HookOutcome
 from .brainy import NEED_TO_KNOW_DIRECTIVE
 from .charter import Charter, CharterError
 from .plan import PlanDraft
+from ..remote.osnames import canonical_os, local_os
 
 AUTONOMY_ASK = "ask"
 AUTONOMY_AUTO = "auto"
@@ -83,8 +84,8 @@ _SHORTEN_FLOOR = 200
 LIMITS_HEADING = "Limits on this machine"
 
 
-def machine_block() -> str:
-    """The machine every build and check runs on, for the planning prompts.
+def machine_block(remotes: "list[dict[str, Any]] | tuple" = ()) -> str:
+    """The machines builds and checks run on, for the planning prompts.
 
     **Facts, not a list of tools.** Which compiler builds what, for which OS,
     is what the model knows and CoBirb should not: a table of toolchains would
@@ -102,8 +103,17 @@ def machine_block() -> str:
     lines.append(f"- CPU architecture: {platform.machine() or 'unknown'}")
     if "microsoft" in platform.release().lower():
         lines.append("- Linux under WSL, on a Windows computer")
-    return ("--- This machine ---\n\nEvery build and every ticket's check runs here, in the "
-            "project directory:\n\n" + "\n".join(lines))
+    text = ("--- This machine ---\n\nEvery build and every ticket's check runs here, in the "
+            "project directory, unless a ticket runs on a remote machine:\n\n" + "\n".join(lines))
+    if remotes:
+        rows = [f"- {m.get('os')}: {m.get('system', '')} {m.get('release', '')}, "
+                f"{m.get('machine', '')}, commands run by {m.get('shell', '')}".rstrip(", ")
+                for m in remotes]
+        text += ("\n\n--- Remote machines ---\n\nA ticket whose code must be built and tested on "
+                 "one of these operating systems runs there, as a Remote Worker Birb — give it "
+                 "`- runs on: <OS>` with the OS named as below, and write its `accept` for that "
+                 "machine's commands:\n\n" + "\n".join(rows))
+    return text
 
 
 SECTIONS: tuple[tuple[str, str], ...] = (
@@ -139,6 +149,7 @@ constants), or `(stub)` if a ticket implements it."""),
   - writes: <every file this ticket creates or changes, comma-separated>
   - tests: <its test files, comma-separated — at least one>
   - accept: <the command that runs this ticket's tests, e.g. python -m pytest tests/test_x.py -q>
+  - runs on: <only when this ticket must be built and tested on another OS: the OS named there>
   - needs: <ticket ids that must finish first, or none>
   - builds: <what it builds, one sentence>
   - done when: <one sentence>
@@ -190,6 +201,13 @@ class TicketSpec:
     needs: tuple[str, ...] = ()
     builds: str = ""
     done: str = ""
+    # The OS family this ticket is built and tested on, when not this machine's
+    # (a Remote Worker Birb). A name CoBirb does not know is kept as written, so
+    # check_tickets can say so.
+    runs_on: str = ""
+    # No machine here can build or test it and the user chose to go on: written
+    # only, with no check (see WorkerBrief.static).
+    static: bool = False
     # What must be installed on this machine: (what, check, install) — the
     # command that says whether it is, and the one that would install it.
     # CoBirb runs the check (see check_requirements) and only shows the install.
@@ -202,6 +220,7 @@ class TicketSpec:
             f"- writes: {', '.join(self.writes)}",
             f"- tests: {', '.join(self.tests)}",
             f"- accept: {self.accept}",
+            *([f"- runs on: {self.runs_on}"] if self.runs_on else []),
             *(f"- requires: {what} — check: {check}" + (f" — install: {install}" if install else "")
               for what, check, install in self.requires),
             f"- needs: {', '.join(self.needs) or 'none'}",
@@ -324,6 +343,7 @@ def parse_tickets(text: str) -> list[TicketSpec]:
             builds=fields.get("builds", ""),
             done=fields.get("done when", fields.get("done", "")),
             requires=tuple(requires),
+            runs_on=_runs_on(fields.get("runs on", "")),
         ))
     return tickets
 
@@ -349,11 +369,15 @@ def _requirement(value: str) -> tuple[str, str, str]:
 # Shell builtins with no program of their own on PATH. `cd` is the one an
 # acceptance command really uses (`cd sub && pytest`); the rest are here so a
 # plausible command is not refused for a word the shell answers itself.
-_BUILTINS = frozenset({"cd", "export", "set", "source", ".", "exit"})
+_BUILTINS = frozenset({"cd", "export", "set", "source", ".", "exit",
+                       # cmd.exe's own, for a Windows remote's checks
+                       "echo", "dir", "del", "copy", "type", "mkdir", "md", "rmdir", "rd",
+                       "move", "ren", "call", "start", "cls", "pushd", "popd"})
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
-def _accept_problem(command: str) -> str:
+def _accept_problem(command: str, which: "Callable[[str], Any]" = shutil.which,
+                    windows: bool = False) -> str:
     """Why ``command`` cannot run here, or "" if every program it names exists.
 
     **Checked when the overview is written, because nothing later would.** A
@@ -366,31 +390,43 @@ def _accept_problem(command: str) -> str:
     scan cannot read grants the worker nothing, so it could never be run. A
     program given as a path is not looked for — the command may build it
     (`cc -o /tmp/t … && /tmp/t`).
+
+    For a Remote Worker Birb's ticket, ``which`` asks its remote and
+    ``windows`` reads the command Windows' way.
     """
-    segments = _segments(command)
+    segments = _segments(command, windows=windows)
     if not segments:
         return ("cannot be read (command substitution, a subshell or unbalanced quotes), "
                 "so the Worker Birb could not be allowed to run it. Write it as plain commands "
                 "joined with `&&`")
     for words in segments:
         program = next((w for w in words if not _ASSIGNMENT.match(w)), "")
-        if not program or "/" in program or program in _BUILTINS:
+        if not program or "/" in program or "\\" in program or program.lower() in _BUILTINS:
             continue
-        if shutil.which(program) is None:
-            return (f"names `{program}`, which is not a program installed here. Name the real "
-                    "program that runs this ticket's tests")
+        if not which(program):
+            return (f"names `{program}`, which is not a program installed on the machine this "
+                    "ticket runs on. Name the real program that runs this ticket's tests")
     return ""
 
 
 def _keep_requirements(cleared: list[TicketSpec], raw: list[TicketSpec], names: NameMap) -> list[TicketSpec]:
-    """The cleared tickets, with any `requires` lines the restatement dropped.
+    """The cleared tickets, with any `requires` or `runs on` lines the
+    restatement dropped.
 
-    What must be installed is a fact about this machine, not wording to
+    What must be installed, and where a ticket runs, are facts, not wording to
     restate, and a restatement that lost the lines would lose the only warning
     the user gets before a worker hits a missing header.
     """
-    by_id = {names.forward(t.id): t.requires for t in raw}
-    return [t if t.requires else replace(t, requires=by_id.get(t.id, ())) for t in cleared]
+    by_id = {names.forward(t.id): t for t in raw}
+    kept = []
+    for ticket in cleared:
+        original = by_id.get(ticket.id)
+        if original is not None:
+            # The machine a ticket runs on is as much a fact as what it needs.
+            ticket = replace(ticket, requires=ticket.requires or original.requires,
+                             runs_on=ticket.runs_on or original.runs_on)
+        kept.append(ticket)
+    return kept
 
 
 REQUIREMENT_TIMEOUT = 30
@@ -398,7 +434,7 @@ INSTALLED, MISSING, UNCHECKED = "installed", "MISSING", "not checked"
 
 
 def check_requirements(main: Orchestrator, tickets: list[TicketSpec], cwd: str,
-                       cache: "dict[str, str] | None" = None) -> list[tuple[str, str, str, str]]:
+                       cache: "dict[str, str] | None" = None, remotes: Any = None) -> list[tuple[str, str, str, str]]:
     """Each ticket's requirements, run: ``(ticket id, what, status, install)``.
 
     **The checks are Brainy Birb's commands, so they run only where a
@@ -418,6 +454,11 @@ def check_requirements(main: Orchestrator, tickets: list[TicketSpec], cwd: str,
     cache = {} if cache is None else cache
     results = []
     for ticket in tickets:
+        if ticket.static:
+            continue  # nothing will build it, so nothing it needs is looked for
+        if ticket.runs_on and ticket.runs_on != local_os():
+            results += _remote_requirements(ticket, remotes, cache)
+            continue
         for what, check, install in ticket.requires:
             status = cache.get(check, UNCHECKED)
             if status != INSTALLED and runnable:
@@ -432,6 +473,29 @@ def check_requirements(main: Orchestrator, tickets: list[TicketSpec], cwd: str,
                 if status == INSTALLED:
                     cache[check] = status
             results.append((ticket.id, what, status, install))
+    return results
+
+
+def _remote_requirements(ticket: TicketSpec, remotes: Any, cache: "dict[str, str]") -> list[tuple[str, str, str, str]]:
+    """A Remote Worker Birb's ticket's requirements, checked on its remote.
+
+    The remote runs the check in a scratch directory of its own; it is the
+    machine the ticket will be built on, so it is the one that counts."""
+    client = remotes.any_for(ticket.runs_on) if remotes is not None else None
+    results = []
+    for what, check, install in ticket.requires:
+        key = f"{ticket.runs_on}:{check}"
+        status = cache.get(key, UNCHECKED)
+        if status != INSTALLED and client is not None:
+            try:
+                answer = client.request("run", command=check, seconds=REQUIREMENT_TIMEOUT,
+                                        timeout=REQUIREMENT_TIMEOUT + 30)
+                status = INSTALLED if answer.get("ok") else MISSING
+            except Exception:  # noqa: BLE001 - a remote that cannot answer leaves it unchecked
+                status = UNCHECKED
+            if status == INSTALLED:
+                cache[key] = status
+        results.append((ticket.id, what, status, install))
     return results
 
 
@@ -463,12 +527,31 @@ def describe_requirements(results: list[tuple[str, str, str, str]]) -> str:
     return "\n".join(lines)
 
 
-def check_tickets(tickets: list[TicketSpec]) -> str:
+# What `which_for` answers for an OS no remote can speak for: its programs
+# cannot be looked up anywhere, so they are not — the user decides about such a
+# ticket before anything is built (run._static_or_stop).
+UNCHECKABLE = object()
+
+
+def _runs_on(value: str) -> str:
+    """A `runs on` value as its OS family, or as written if CoBirb does not
+    know it (check_tickets then says so); "" for none."""
+    value = value.strip().strip("`").strip()
+    if not value or value.lower() == "none":
+        return ""
+    return canonical_os(value) or value
+
+
+def check_tickets(tickets: list[TicketSpec], which_for: "Callable[[str], Any] | None" = None) -> str:
     """Why these tickets cannot become a charter, or "" if they can.
 
     Run through a scratch ``PlanDraft`` — the same checks the charter moves
     apply — so a ticket table that overlaps is caught while the overview is
     still being written, with one path named, rather than after the skeleton.
+
+    ``which_for(os)`` says how to look up programs for a ticket that runs on
+    another OS: ``(which, windows)`` for a remote that can answer, or
+    ``UNCHECKABLE``. Without it, every ticket is checked against this machine.
     """
     if not tickets:
         return "no ticket blocks were found — each needs a `### ticket: <id>` heading"
@@ -504,16 +587,32 @@ def check_tickets(tickets: list[TicketSpec]) -> str:
         if not ticket.tests:
             return (f"ticket {ticket.id!r} has no test files: add a `- tests:` line naming them "
                     "(e.g. `- tests: tests/test_x.py`), and list them in `writes` too")
+        if ticket.runs_on and canonical_os(ticket.runs_on) is None:
+            return (f"ticket {ticket.id!r}: `runs on: {ticket.runs_on}` is not an OS name CoBirb knows "
+                    "— use the OS exactly as the machine facts name it, or leave the line out")
+        if ticket.static:
+            continue  # the user chose to go on without building or testing it
         if not ticket.accept:
             return f"ticket {ticket.id!r} has no `accept` command"
-        problem = _accept_problem(ticket.accept)
-        if problem:
-            return f"ticket {ticket.id!r}: its `accept` command `{ticket.accept}` {problem}"
+        which: "Callable[[str], Any] | None" = shutil.which
+        windows = False
+        if which_for is not None and ticket.runs_on and ticket.runs_on != local_os():
+            target = which_for(ticket.runs_on)
+            if target is UNCHECKABLE:
+                which = None  # nothing can look it up; the user decides about this ticket
+            else:
+                which, windows = target
+        if which is not None:
+            problem = _accept_problem(ticket.accept, which, windows)
+            if problem:
+                return f"ticket {ticket.id!r}: its `accept` command `{ticket.accept}` {problem}"
         for what, check, _install in ticket.requires:
             if not check:
                 return (f"ticket {ticket.id!r}: its requirement `{what}` has no check — write it as "
                         f"`- requires: {what} — check: <a command that succeeds only if it is installed>`")
-            problem = _accept_problem(check)
+            if which is None:
+                continue
+            problem = _accept_problem(check, which, windows)
             if problem:
                 return f"ticket {ticket.id!r}: the check for `{what}`, `{check}`, {problem}"
         try:
@@ -691,6 +790,7 @@ def _expected_blocks(raw: "list[TicketSpec]", names: NameMap) -> str:
         TicketSpec(id=names.forward(t.id), writes=tuple(path(p) for p in t.writes),
                    tests=tuple(path(p) for p in t.tests), accept=command(t.accept),
                    requires=tuple((what, command(check), install) for what, check, install in t.requires),
+                   runs_on=t.runs_on,
                    needs=tuple(names.forward(n) for n in t.needs),
                    builds="<one sentence, restated>", done="<one sentence, restated>").block()
         for t in raw
@@ -799,10 +899,11 @@ files in the project. You work in stages, and every stage gives you only what \
 it needs."""
 
 
-def section_prompt(design: Design, heading: str, checklist: str, problem: str = "") -> str:
+def section_prompt(design: Design, heading: str, checklist: str, problem: str = "",
+                   machine: str | None = None) -> str:
     written = design.document()
     lines = [
-        INTRO, "", machine_block(), "", written, "",
+        INTRO, "", machine if machine is not None else machine_block(), "", written, "",
         f"--- Write the next section: {heading} ---", "",
         f"Reply with the content of the \"{heading}\" section only, in Markdown. "
         "It must contain:", "", checklist, "",
@@ -1087,8 +1188,12 @@ class Stager:
     def __init__(self, main: Orchestrator, cwd: str, objective: str, *,
                  turns: int, trace: list[dict], decide: Callable[[str], "str | None"] | None = None,
                  show: Callable[[str], None] | None = None,
-                 speaking: Callable[[str], None] | None = None) -> None:
+                 speaking: Callable[[str], None] | None = None,
+                 remotes: Any = None) -> None:
         self.main = main
+        # The flock's Remote Worker Birbs (a remote.pool.RemotePool), or None.
+        self.remotes = remotes
+        self._found: dict[tuple[str, str], bool] = {}
         self.cwd = cwd
         self.design = Design(objective=objective)
         self.turns = turns
@@ -1101,6 +1206,29 @@ class Stager:
         self.speaking = speaking or (lambda label: None)
 
     # ------------------------------------------------------------------ #
+    def machine(self) -> str:
+        """This machine and every reachable remote, for a prompt."""
+        return machine_block(self.remotes.machines() if self.remotes is not None else ())
+
+    def which_for(self, os_family: str) -> Any:
+        """How to look up programs on the remote a ticket runs on (see
+        ``check_tickets``); answers are kept, since each asks over the network."""
+        client = self.remotes.any_for(os_family) if self.remotes is not None else None
+        if client is None:
+            return UNCHECKABLE
+
+        def which(program: str) -> bool:
+            key = (os_family, program)
+            if key not in self._found:
+                try:
+                    answer = client.request("which", programs=[program], timeout=30)
+                    self._found[key] = program in (answer.get("found") or [])
+                except Exception:  # noqa: BLE001 - a remote that cannot answer cannot vouch for it
+                    return True  # not refused over a dropped connection; the worker's run will tell
+            return self._found[key]
+
+        return which, os_family == "Windows"
+
     def _stage(self, tools: set[str], allowed: Callable[[str], bool] | None, why: str, *,
                architect: bool = False) -> Orchestrator:
         """A fresh stage. ``architect`` makes it Architect Birb's: no project
@@ -1159,7 +1287,7 @@ class Stager:
             problem = ""
             for _attempt in range(SECTION_ATTEMPTS):
                 text = self._run(reader, f"overview: {heading}",
-                                 section_prompt(self.design, heading, checklist, problem))
+                                 section_prompt(self.design, heading, checklist, problem, self.machine()))
                 problem = self._check_section(heading, text)
                 if not problem or problem.startswith("declined:"):
                     break
@@ -1183,7 +1311,7 @@ class Stager:
         if heading == "Tickets":
             if text.lstrip().upper().startswith("NO TICKETS"):
                 return "declined: " + text.lstrip()[len("NO TICKETS"):].strip(" .:—-")
-            return check_tickets(parse_tickets(text))
+            return check_tickets(parse_tickets(text), self.which_for)
         return ""
 
     def _put_decisions(self) -> None:
@@ -1313,7 +1441,7 @@ class Stager:
                 + ", ".join(f'"{literal}"' for literal in lost)
                 + " — copy every value the request gives exactly")
         tickets = parse_tickets(cleared["Tickets"])
-        problem = check_tickets(tickets)
+        problem = check_tickets(tickets, self.which_for)
         if problem:
             return {}, self.design.names, (
                 f"the restated tickets cannot be used: {problem}." + _expected_blocks(raw, names))
@@ -1344,7 +1472,7 @@ class Stager:
                             architect=True)
         blocks = "\n\n".join(ticket.block() for ticket in tickets)
         self._run(stage, "skeleton", SKELETON_PROMPT.format(
-            intro=ARCHITECT_INTRO, machine=machine_block(), document=self.design.cleared_document(),
+            intro=ARCHITECT_INTRO, machine=self.machine(), document=self.design.cleared_document(),
             blocks=blocks),
             label="Architect Birb")
 
@@ -1355,7 +1483,7 @@ class Stager:
                             f"this stage writes only the tests of ticket {ticket.id!r}: {', '.join(ticket.tests)}.",
                             architect=True)
         prior = f"\nThe last round's attempt at this ticket, and what happened:\n\n{previous}\n" if previous else ""
-        prompt = TICKET_PROMPT.format(intro=ARCHITECT_INTRO, machine=machine_block(),
+        prompt = TICKET_PROMPT.format(intro=ARCHITECT_INTRO, machine=self.machine(),
                                       document=self.design.cleared_document(),
                                       id=ticket.id, block=ticket.block(), previous=prior,
                                       tests=", ".join(ticket.tests))
@@ -1388,13 +1516,13 @@ class Stager:
         """
         reader = self._stage(set(READ_TOOLS), None, "")
         text = self._run(reader, f"evaluate round {round_number}", EVALUATE_PROMPT.format(
-            intro=INTRO, machine=machine_block(), document=self.design.document(),
+            intro=INTRO, machine=self.machine(), document=self.design.document(),
             round=round_number, verdict=verdict, limits=LIMITS_HEADING,
             names=self.design.names.describe() or "  (no names were restated)"))
         if text.lstrip().upper().startswith("NO TICKETS"):
             return [], {}, text
         tickets = parse_tickets(text)
-        if tickets and not check_tickets(tickets):
+        if tickets and not check_tickets(tickets, self.which_for):
             cleared, whys, problem = self.clear_round(text)
             if not problem:
                 return cleared, whys, text
@@ -1409,10 +1537,13 @@ class Stager:
         for ticket in tickets:
             draft.add_worker(
                 ticket.id, brief=briefs.get(ticket.id) or ticket.builds or ticket.id,
-                writes=list(ticket.writes), accept=ticket.accept, tests=list(ticket.tests),
+                writes=list(ticket.writes), accept="" if ticket.static else ticket.accept,
+                tests=list(ticket.tests),
                 # A dependency on a ticket already finished in an earlier round
                 # is satisfied; only ones in this round are waited for.
                 needs=[n for n in ticket.needs if n in known],
+                runs_on="" if ticket.static or ticket.runs_on == local_os() else ticket.runs_on,
+                static=ticket.static,
             )
         return draft.seal(self.design.objective)
 

@@ -54,6 +54,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
+from typing import Any, Callable
 
 from ..runtime.verify import DEFAULT_TIMEOUT_SECONDS, run_verification
 from .charter import Charter, WorkerBrief
@@ -257,6 +258,7 @@ def expect_red(
     *,
     label: str,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    run_check: "Callable[[str, int, dict[str, str]], Any] | None" = None,
 ) -> RedCheck:
     """Swap in broken content, run the check, and put everything back.
 
@@ -273,6 +275,13 @@ def expect_red(
     """
     if not accept.strip():
         return RedCheck(label=label, caught=False, error="no acceptance check to run")
+    if run_check is not None:
+        # A Remote Worker Birb's ticket: the swap, the run and the restore all
+        # happen on the remote, where its check can run.
+        result = run_check(accept, timeout, replacements)
+        if result.error:
+            return RedCheck(label=label, caught=False, error=result.error)
+        return RedCheck(label=label, caught=not result.ok, output=result.output)
 
     saved = {path: _read(os.path.join(cwd, path)) for path in replacements}
     try:
@@ -421,6 +430,7 @@ def review_worker(
     cwd: str,
     *,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    run_check: "Callable[[str, int, dict[str, str]], Any] | None" = None,
 ) -> Review:
     """Run both passes for this worker.
 
@@ -429,9 +439,13 @@ def review_worker(
     a finding. That was also what made the deleted mutation pass awkward — it
     needed Brainy Birb to write the mutants, so it could not live here, and
     nothing ever ended up passing them in.
+
+    ``run_check`` runs the stub pass somewhere else — on a Remote Worker Birb's
+    machine. A static ticket has no check to run, so it gets the diff pass only.
     """
     return Review(
         worker_id=worker.id,
         findings=read_the_diff(worker, baseline, cwd),
-        stub=put_the_stub_back(worker, baseline, cwd, timeout=timeout),
+        stub=None if worker.static else put_the_stub_back(
+            worker, baseline, cwd, timeout=timeout, run_check=run_check),
     )

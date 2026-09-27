@@ -210,6 +210,10 @@ ticket's stage rewrites them; the cap and the no-progress stop still bound it.
 - Workers wait **before** taking a slot; `record()` stores the report, then sets the event. A
   dependent is skipped only when its dependency did not run.
 
+**Remote Worker Birbs.** A ticket with `runs on` another OS runs on a remote (see
+[remote](remote.md)): its re-check and review run there, and a ticket for an OS with no remote is
+made static by the user's choice or stops the flock (`stopped_at="remote"`).
+
 ## Re-check and review (`flock/supervisor.py`, `flock/review.py`)
 
 - **Re-check.** After the join, `supervisor.recheck` runs every finished ticket's `accept` again on
@@ -240,6 +244,7 @@ Empty when the flock finished on its own (all green, or `NO TICKETS`). Otherwise
 | `stalled` | `MAX_SILENT_STEPS` nudges went unanswered (one-prompt planner) |
 | `partition` | The partition overlaps and the user chose not to run anyway (one-prompt planner) |
 | `restatement` | The design could not be restated (staged) |
+| `remote` | Tickets need an OS no Remote Worker Birb offers and the user chose not to go on |
 | `autonomy` | `auto` autonomy without an active sandbox (staged) |
 | `requirements` | The user stopped over what is not installed (staged) |
 | `approval` | A charter or a later round was not approved |

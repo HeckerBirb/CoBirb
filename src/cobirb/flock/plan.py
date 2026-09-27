@@ -157,6 +157,8 @@ class PlanDraft:
         accept: str = "",
         tests: "list[str] | None" = None,
         needs: "list[str] | None" = None,
+        runs_on: str = "",
+        static: bool = False,
     ) -> str:
         """Add one ticket, or say precisely why it cannot be added.
 
@@ -210,6 +212,7 @@ class PlanDraft:
             WorkerBrief(
                 id=worker_id, brief=brief, writes=write_paths, reads=read_paths,
                 accept=(accept or "").strip(), tests=test_paths, needs=need_ids,
+                runs_on=runs_on, static=static,
             )
         )
         note = f"Ticket {worker_id!r} added: writes {', '.join(write_paths)}."
@@ -221,7 +224,9 @@ class PlanDraft:
                 f" {', '.join(adopted)} was listed under tests but not writes, so it has "
                 "been added to writes — a worker's acceptance tests are files it owns."
             )
-        if not (accept or "").strip():
+        if static:
+            pass  # no check by the user's choice: reported "written, not verified"
+        elif not (accept or "").strip():
             # Said rather than refused: a ticket with no check is legal and
             # occasionally right, but it can never be reported as complete —
             # `WorkerReport.complete` requires the check to have passed — so a

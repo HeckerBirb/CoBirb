@@ -48,7 +48,7 @@ KNOWN_KEYS = frozenset({
     "repo_map", "repo_map_max_chars", "context_tokens", "max_num_ctx",
     "verify_command", "verify_timeout", "verify_fix_attempts",
     "hooks", "mcp_servers", "plugins", "max_turns", "sandbox",
-    "connect_timeout", "request_timeout", "flock",
+    "connect_timeout", "request_timeout", "flock", "remote_workers",
 })
 
 # What each key should look like, for the shape check. Only the keys whose
@@ -66,6 +66,7 @@ _EXPECTED_TYPES: dict[str, tuple[type, ...]] = {
     "max_num_ctx": (int, str),
     "sandbox": (str, dict),
     "flock": (dict,),
+    "remote_workers": (list,),
     "verify_timeout": (int,), "verify_fix_attempts": (int,), "max_turns": (int,),
     "system_prompt": (str,), "verify_command": (str,),
 }
@@ -352,6 +353,31 @@ def _check_install(report: Report) -> None:
 
 
 # --------------------------------------------------------------------------- #
+def _check_remotes(report: Report, config: Config) -> None:
+    """Each configured Remote Worker Birb: a valid entry, and paired or not.
+
+    Reads only the config and the trust file — it does not connect, so it
+    never starts a pairing or reaches a machine the user did not ask it to.
+    """
+    from ..remote.settings import configured
+    from ..remote.trust import TrustStore
+
+    specs, problems = configured(config)
+    for problem in problems:
+        report.add("remote worker", WARN if "is ignored" in problem else FAIL, problem)
+    store = TrustStore()
+    for spec in specs:
+        days = store.days_left(spec.url)
+        model = (f"its own model at {spec.openai_endpoint}" if spec.run_llms_locally
+                 else "your session's model, relayed")
+        if days is None:
+            report.add("remote worker", WARN, f"{spec.label()}: not paired — CoBirb pairs it when it "
+                                              f"starts in interactive mode; thinks with {model}")
+        else:
+            report.add("remote worker", OK, f"{spec.label()}: paired, {days} day(s) before the pairing "
+                                            f"lapses unless used; thinks with {model}")
+
+
 def _check_sandbox(report: Report, config: Config) -> None:
     """Whether shell commands are contained, and how."""
     from .. import sandbox
@@ -403,6 +429,7 @@ def run(
             report.add("config file", FAIL, f"{path} could not be read — {exc}")
             raw = None
     _check_config(report, config, raw)
+    _check_remotes(report, config)
 
     if check_environment:
         if build_provider is None:
