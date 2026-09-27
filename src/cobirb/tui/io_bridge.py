@@ -238,6 +238,12 @@ class TuiIO(I_OAdapter):
             return
         self._write(render.build_validation_panel(label, text))
 
+    def render_steer(self, message: str) -> None:
+        """A steering message, shown as the orchestrator applies it — after
+        everything that happened before it took effect (see
+        ``Orchestrator._drain_steer``)."""
+        self._write(render.build_steer_message(message))
+
     def render_notice(self, text: str) -> None:
         """A note about the session, into the transcript.
 

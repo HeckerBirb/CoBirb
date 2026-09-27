@@ -106,12 +106,15 @@ prompt → model call → tool calls (policy-gated) → results into history →
   and allows one bounded fix attempt.
 - **Mid-turn steering** (`steer()`, thread-safe) queues a message for the next boundary and, if the
   provider has `interrupt_current_reply()`, cuts the stream (`SteeringInterrupted`); the partial reply
-  is kept. `cancel()` is the one-way stop.
+  is kept. `cancel()` is the one-way stop. A message is shown when it is applied (`_drain_steer` →
+  the optional `render_steer` hook), never when typed — after what it interrupted, before
+  "redirected"; one that arrives after the last boundary is reported as not used (`_steer_lock`
+  closes the gap).
 - **Optional duck-typed hooks the loop probes for** (never on the ABC): model — `context_window()`,
   `cancel()`, `interrupt_current_reply()`, `malformed_tool_call()`; tools — `writes()`, `preview()`,
   `cancel_running()`; checkpoints — `end_turn()`, `close()`; I/O — `spinner`, `begin_stream`,
   `confirm_scoped`, `confirm_request`, `render_answer`, `render_plan`, `render_tool_call`,
-  `render_notice`, `write_error`. `render_through()` is the probe-with-fallback helper.
+  `render_notice`, `render_steer`, `write_error`. `render_through()` is the probe-with-fallback helper.
 
 ## 5. Permissions (`policy.py`, `sandbox.py`)
 

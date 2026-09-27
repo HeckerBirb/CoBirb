@@ -4,6 +4,14 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **Steering no longer lands in the middle of the reply it interrupts.** Your message was printed
+  the moment you sent it, while the reply kept streaming until the cut took effect, so its last
+  words came after your message. Now the reply stops and is flushed, then your message appears,
+  then "redirected by a new message", then the new reply. A message that arrives just as the reply
+  finishes is reported as not used, instead of being silently dropped.
+
 ## [0.45.8]
 
 - **A long reply keeps showing its newest text while it streams, without jumping.** Past twelve

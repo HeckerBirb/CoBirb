@@ -1584,6 +1584,59 @@ def test_steer_interrupts_a_streaming_reply_and_keeps_the_partial_content():
     assert session.summary == "acknowledged"
 
 
+class _EventIO(_RecordingIO):
+    """Records what is shown, in order, with the hooks steering uses."""
+
+    def __init__(self):
+        super().__init__()
+        self.events = []
+
+    def render(self, text):
+        self.events.append(("text", text))
+
+    def render_steer(self, message):
+        self.events.append(("steer", message))
+
+    def render_notice(self, text):
+        self.events.append(("notice", text))
+
+
+def test_a_steer_mid_reply_is_shown_after_what_it_cut_off_and_before_the_note():
+    """Cut-off text, then the message, then "redirected", then the new reply."""
+    holder: dict = {}
+    io = _EventIO()
+    orchestrator = Orchestrator(model=_SteerableStreamingModel(holder, "just a summary"), tools={},
+                                policy=Policy(), io=io)
+    holder["orch"] = orchestrator
+
+    orchestrator.run("write a report", "sys", cwd="/tmp")
+
+    kinds = [kind for kind, value in io.events if (kind, value) != ("text", "\n")]
+    shown = [value for kind, value in io.events if (kind, value) != ("text", "\n")]
+    assert kinds == ["text", "steer", "notice", "text"]
+    assert shown[0] == "partial " and shown[1] == "just a summary"
+    assert "redirected" in shown[2] and shown[3] == "acknowledged"
+
+
+def test_a_steer_that_arrives_after_the_last_step_is_reported_not_dropped():
+    io = _EventIO()
+
+    class _LateSteer(_DummyModel):
+        def chat(self, system, context, tools=None, *, stream=False):
+            holder["orch"].steer("too late")  # the reply is already the final one
+            return "done"
+
+    holder: dict = {}
+    orchestrator = Orchestrator(model=_LateSteer(reply="done"), tools={}, policy=Policy(), io=io)
+    holder["orch"] = orchestrator
+
+    orchestrator.run("hi", "sys", cwd="/tmp")
+
+    notices = [value for kind, value in io.events if kind == "notice"]
+    assert any("not used" in n and "too late" in n for n in notices)
+    assert not any(kind == "steer" for kind, _ in io.events)
+
+
 # --------------------------------------------------------------------------- #
 # Attached images
 # --------------------------------------------------------------------------- #

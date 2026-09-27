@@ -529,7 +529,9 @@ class CoBirbApp(App[None]):
                 render.build_notice("Nothing to steer — the turn just finished.")
             )
             return
-        self.write_transcript(render.build_steer_message(message))
+        # Not written here: the orchestrator shows it when it is applied
+        # (TuiIO.render_steer), after whatever it interrupted — written now,
+        # the rest of the interrupted reply streamed in after it.
 
     # ------------------------------------------------------------------ #
     # Slash commands

@@ -511,7 +511,9 @@ async def test_a_message_typed_mid_turn_steers_it_instead_of_starting_a_new_one(
 
         assert orchestrator.steer_calls == ["actually, stop and check the tests first"]
         assert len(orchestrator.calls) == 1  # no second, overlapping run() started
-        assert "actually, stop and check the tests first" in _transcript_text(app)
+        # Not printed yet: the orchestrator shows it when it applies it, after
+        # what it interrupted (see the render_steer test below).
+        assert "actually, stop and check the tests first" not in _transcript_text(app)
         # The box stayed usable throughout — never disabled by the steer.
         assert not app.query_one("#prompt-input", PromptInput).disabled
 
@@ -545,6 +547,20 @@ async def test_the_prompt_box_says_steering_while_a_turn_runs_and_something_is_t
         orchestrator._release.set()
         await _until(pilot, lambda: not app._turn_in_progress)
         assert box.border_title == ""
+
+
+async def test_a_steering_message_lands_after_the_reply_it_interrupted():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.io_bridge.render("This represents a radical break.")
+        app.io_bridge.render(" Existentialism declares")  # still held back by the bridge
+
+        app.io_bridge.render_steer("Actually just give me a summary")
+        await pilot.pause()
+
+        text = _transcript_text(app)
+        assert text.index("Existentialism declares") < text.index("Actually just give me a summary")
 
 
 async def test_steering_refused_by_the_orchestrator_is_reported_plainly(monkeypatch):

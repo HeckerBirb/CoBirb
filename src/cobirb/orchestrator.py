@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import threading
 from dataclasses import dataclass
 from difflib import get_close_matches
 from typing import Any, Callable, Iterable
@@ -373,6 +374,10 @@ class Orchestrator:
         # by _drain_steer. A plain queue.SimpleQueue rather than a list plus
         # a lock — nothing here needs more than thread-safe put/get.
         self._steer_queue: "queue.SimpleQueue[str]" = queue.SimpleQueue()
+        # Held while steer() checks the turn is live and queues, and while
+        # run() ends it and collects what was never applied: without it a
+        # message could be accepted in the gap and then silently dropped.
+        self._steer_lock = threading.Lock()
         # True only while run() is actually executing, so steer() can refuse
         # a message with no turn to redirect instead of queuing it for some
         # future, unrelated run.
@@ -450,7 +455,14 @@ class Orchestrator:
                 session=session,
             )
         finally:
-            self._turn_active = False
+            with self._steer_lock:
+                self._turn_active = False
+                unused = self._take_steer_queue()
+            for message in unused:
+                # Accepted while the turn was live, but after its last
+                # boundary: said so, rather than dropped without a word.
+                render_through(self.io, "render_notice",
+                               f"↳ not used — it arrived after the reply had finished: {message}")
             # Whole-tree checkpoints close the turn's snapshot here, so /undo
             # knows exactly what this turn changed (see TreeCheckpoints).
             end_turn = getattr(self.checkpoints, "end_turn", None)
@@ -623,10 +635,14 @@ class Orchestrator:
                 # max_turns) rather than treated as a finished answer or
                 # scanned for tool calls it never got to emit.
                 session.add(Turn(role="assistant", content=_materialize(reply), phase=phase))
+                # In the order it happened: what was cut off (already shown),
+                # the message that cut it off, then the note — applied here
+                # rather than at the top of the next pass so the note comes
+                # after the message it is about.
+                self._drain_steer(session)
                 # No fallback: an adapter with no `render_notice` hook simply
-                # doesn't show this. The steering message itself is already
-                # visible wherever the user typed it, so a plain-render
-                # fallback would be noise rather than information.
+                # doesn't show this, and it only means something next to the
+                # message, which such an adapter does not show either.
                 render_through(self.io, "render_notice", "↳ redirected by a new message")
                 continue
 
@@ -1355,9 +1371,10 @@ class Orchestrator:
         and queuing it here would let it apply to some unrelated future run
         instead of being sent as what it actually is.
         """
-        if not self._turn_active:
-            return False
-        self._steer_queue.put(message)
+        with self._steer_lock:
+            if not self._turn_active:
+                return False
+            self._steer_queue.put(message)
         interrupt = getattr(self.model, "interrupt_current_reply", None)
         if callable(interrupt):
             try:
@@ -1376,13 +1393,25 @@ class Orchestrator:
         before the next boundary: a person typing two quick corrections
         should see both taken into account, in order, not just the last one
         silently winning.
+
+        **Each message is shown here, as it is applied** (the optional
+        ``render_steer`` hook), not when it was typed. Shown when typed, it
+        landed in the middle of the reply it interrupted — the model streams on
+        until the cut takes effect, and those last words came after it. Shown
+        here, it follows everything that happened before it took effect.
         """
+        for message in self._take_steer_queue():
+            session.add(Turn(role="user", content=f"{_STEER_PREAMBLE}{message}"))
+            render_through(self.io, "render_steer", message)
+
+    def _take_steer_queue(self) -> list[str]:
+        """Everything queued so far, in order, leaving the queue empty."""
+        messages = []
         while True:
             try:
-                message = self._steer_queue.get_nowait()
+                messages.append(self._steer_queue.get_nowait())
             except queue.Empty:
-                return
-            session.add(Turn(role="user", content=f"{_STEER_PREAMBLE}{message}"))
+                return messages
 
     def _clear_steer_queue(self) -> None:
         """Discard anything left in the queue from a previous, finished run.
@@ -1391,11 +1420,7 @@ class Orchestrator:
         arrived too late for the run it was meant to steer must not silently
         reattach itself to an unrelated later one.
         """
-        while True:
-            try:
-                self._steer_queue.get_nowait()
-            except queue.Empty:
-                return
+        self._take_steer_queue()
 
     def cancel(self) -> None:
         """Interrupt whatever this orchestrator is doing right now.
