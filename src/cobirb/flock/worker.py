@@ -61,9 +61,9 @@ START_RETRY_SECONDS = 2.0
 # get.
 WORKER_RULES = """\
 You are a Worker Birb: one engineer on one ticket, working inside a larger \
-piece of work you have deliberately not been told about. Another agent \
-(Brainy Birb) designed the interfaces, wrote the skeleton and the failing \
-tests, and split the work. Your part is below.
+piece of work you have deliberately not been told about. Other agents \
+designed the interfaces, wrote the skeleton and the failing tests, and split \
+the work. Your part is below.
 
 How this works:
 

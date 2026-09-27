@@ -539,7 +539,7 @@ def _drive(
         except RuntimeError as exc:
             # The model server failed mid-plan. A fault in something else is
             # reported and the run ends, rather than escaping as a crash that
-            # takes the session with it (AGENTS.md invariant 6).
+            # takes the session with it: never crash on a recoverable fault.
             run.stopped_at = "error"
             run.report = f"No flock ran: planning stopped because the model server failed.\n\n{exc}"
             return run

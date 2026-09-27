@@ -4,10 +4,6 @@ Things that would be good for CoBirb but are not being worked on. **Nothing here
 this is a list of ideas with the reason each one waits, not a timeline or a promise. An idea moves
 out of this file when someone decides to build it, at which point it becomes a change like any other.
 
-For things that were considered and deliberately *rejected*, see "Decided" in [AGENTS.md](./AGENTS.md).
-The difference matters: those were costed and decided against; these are waiting for a reason to
-start.
-
 ## Self-hosted remote endpoints
 
 TLS, optional authentication headers, and a loud warning for plain HTTP to anything other than

@@ -5,7 +5,7 @@ is plaintext, ``<name>.md.enc`` if it is password-protected — holding a flat
 list of short, model-readable facts. There is no metadata, no timestamps, no
 source: this text is read straight into a system prompt, so every byte in it
 is a byte the model sees, and a catalogue should read like a list a person
-would actually write, the same house style ``AGENTS.md`` already commits to.
+would actually write.
 
 Unlike a session, a catalogue is never auto-created except for the one
 default: ``public.md``, the always-present, unencrypted catalogue every

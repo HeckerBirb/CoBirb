@@ -55,8 +55,8 @@ class StatusBar(Static):
             parts.insert(1 if self.autopilot else 0, f"checklist {self.checklist}")
         if self.session_path:
             # Just the file name: this is one line competing with a cwd
-            # that is often long already, and the full path is in the
-            # header panel at the top of the transcript.
+            # that is often long already, and the full path is on the
+            # Sessions tab.
             parts.append(f"session: {os.path.basename(self.session_path)}")
         line = Text(" · ".join(parts), style=render.FEATHER_GRAY)
         if self.busy:

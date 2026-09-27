@@ -489,8 +489,8 @@ class LocalModelProvider(ModelProvider):
         every ``chat()``, so a hang there is currently not force-stoppable —
         at the cost of rewriting every one of this file's ~30 existing tests,
         which all mock ``urllib.request.urlopen`` at this exact call. That is a
-        real trade, not an oversight: see AGENTS.md's Flock section for the
-        note this leaves for whoever picks it up. In practice this rarely
+        real trade, not an oversight, and it is recorded as a known gap for
+        whoever picks it up. In practice this rarely
         matters — every Worker Birb turn goes through ``_stream_chat`` (real
         streaming is on whenever an ``io`` adapter is attached and the
         provider supports it, which ``HeadlessIO`` plus this provider always

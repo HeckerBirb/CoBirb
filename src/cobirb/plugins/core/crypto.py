@@ -124,7 +124,7 @@ class AesGcmScryptSessionCrypto(SessionCrypto):
         """Import the ``cryptography`` backend if available. Returns None if unavailable."""
         try:
             return _Backend()
-        except Exception:
+        except Exception:  # noqa: BLE001 - no usable backend is said when a session is encrypted or decrypted, not a crash at startup
             return None
 
     def name(self) -> str:

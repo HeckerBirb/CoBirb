@@ -301,7 +301,7 @@ def build_subagent(
     A subagent — a Worker Birb, in the Flock — is **not a special kind of
     run**. It is an ordinary CoBirb agent that received its prompt from
     Brainy Birb instead of from a person, so this composes the same parts
-    ``build_orchestrator`` does and differs in exactly four places, each for a
+    ``build_orchestrator`` does and differs in exactly five places, each for a
     reason:
 
     - **Its policy is handed in, not read from config.** The charter's scopes
@@ -316,13 +316,17 @@ def build_subagent(
       outline knows the shape of everyone else's work. Conventions reach it
       instead through the skeleton it is filling in, which was already written
       in house style.
-    - **Its I/O is headless.** There is nobody to ask — the single approval
-      already happened, at the charter. ``HeadlessIO`` refuses anything not
-      pre-permitted rather than reaching for a prompt no one will answer, which
-      is also what stops concurrent workers racing for the same modal.
+    - **Its I/O is the caller's, and never a shared dialog.** ``HeadlessIO`` by
+      default, which refuses anything not pre-permitted rather than reaching
+      for a prompt no one will answer. The TUI passes the worker's own pane,
+      where a request is asked in that pane and nowhere else — never a modal,
+      so concurrent workers cannot race for one — and under auto-pilot a
+      ``RefusingIO`` that answers no without asking.
     - **Its verification is its own scoped check**, so it never runs the full
       suite and therefore never meets a colleague's failing test to helpfully
       fix.
+    - **Its model is the ``worker`` role's** (``models.worker``), which may be a
+      different model from the one planning.
 
     Everything else it inherits *because it is an ordinary run*: checkpoints,
     secret redaction, and the user's own lifecycle hooks. Those rules should
@@ -351,8 +355,8 @@ def build_subagent(
         context_tokens=config.get("context_tokens"),
         # No project context, and — separately — no memory catalogues either:
         # those are composed into `system` per turn by the TUI itself
-        # (CoBirbApp._memory_system_prompt), which a Worker Birb's run never
-        # goes through. Consistent with "nothing but its brief" above.
+        # (CoBirbApp._run_turn), which a Worker Birb's run never goes
+        # through. Consistent with "nothing but its brief" above.
         project_context="",
         redact_secrets=config.get("redact_secrets") is not False,
         verify=(

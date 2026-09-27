@@ -8,7 +8,8 @@ nothing you didn't ask for", a hundred lines of `json` and `subprocess` is a
 better trade than a dependency tree.
 
 **Environment is not inherited by default.** A server gets ``PATH``, ``HOME``,
-``LANG`` and whatever the user listed under ``env``, and nothing else. This is
+``LANG``, ``LC_ALL``, ``TMPDIR`` and ``SYSTEMROOT`` (``_SAFE_ENV_KEYS``) and
+whatever the user listed under ``env``, and nothing else. This is
 the one place where a subprocess CoBirb spawned could read the user's whole
 environment — cloud credentials, API keys, tokens for services CoBirb has
 nothing to do with — and hand them anywhere it likes. Servers that genuinely

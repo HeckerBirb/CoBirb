@@ -19,6 +19,9 @@ All notable changes to CoBirb are recorded here, newest first. See
   can stop, the installer's options, and the plugin loader's project directory (an open question).
   A test now checks that the docs' links and paths resolve. A stray screenshot committed in 0.45.8
   is removed.
+- **A Worker Birb is no longer told Brainy Birb wrote its skeleton and tests.** Under staged
+  planning Architect Birb writes them; the worker's rules now say only that other agents did. Stale
+  comments and docstrings were corrected alongside, and source no longer cites the docs.
 
 ## [0.45.8]
 

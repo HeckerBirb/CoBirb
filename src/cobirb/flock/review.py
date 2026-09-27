@@ -313,9 +313,9 @@ def put_the_stub_back(worker: WorkerBrief, baseline: Baseline, cwd: str, **kwarg
     "caught". It reported a pass for every worker in that shape, whatever the
     work was, and the charter template's own second ticket omits ``tests``.
 
-    Detected without a filename heuristic — the thing AGENTS.md rules out,
-    because a rule matching ``test_*.py`` and missing ``*_test.go`` would turn
-    the strongest check in the design into a silent no-op. Instead, two states
+    Detected without a filename heuristic, because a rule matching
+    ``test_*.py`` and missing ``*_test.go`` would turn the strongest check in
+    the design into a silent no-op. Instead, two states
     where this pass provably cannot discriminate:
 
     - **The worker changed nothing.** Removing its implementation removes

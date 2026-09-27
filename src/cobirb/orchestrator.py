@@ -34,7 +34,6 @@ from .runtime.verify import VerifySettings, run_verification
 from .session import (
     PHASE_ACT,
     PHASE_PLAN,
-    PHASE_VALIDATE,
     Session,
     SessionManager,
     Turn,
@@ -1308,27 +1307,18 @@ class Orchestrator:
         )
 
     def _render_phase(self, phase: str, label: str, text: str) -> None:
-        """Show a plan-mode phase's result (plan or validation report) live,
-        via ``io``'s ``render_plan``/``render_validation`` hook if it has
-        one (see ``TerminalIO``), else a plain fallback through
-        ``render()``. Not called when the phase's own reply already
-        streamed live (see ``run()``) — that would just duplicate it. The
-        act phase's own final answer is handled separately by the CLI (see
+        """Show plan mode's plan live, via ``io``'s ``render_plan`` hook if it
+        has one (see ``TerminalIO``), else a plain fallback through
+        ``render()``. Not called when the plan already streamed live (see
+        ``run()``) — that would just duplicate it. The act phase's own final
+        answer is handled separately by the CLI (see
         ``cli._render_final_answer``), not here.
         """
         if not text:
             return
-        # The plain fallback says "validation", not "validate": the phase
-        # constant names a stage of the run, and this is prose shown to a
-        # person. Keeping them separate is why the label is mapped rather
-        # than interpolated straight from `phase`.
-        heading = "validation" if phase == PHASE_VALIDATE else phase
         render_through(
-            self.io,
-            "render_plan" if phase == PHASE_PLAN else "render_validation",
-            label,
-            text,
-            fallback=lambda: self.io.render(f"\n[{heading}] {text}\n"),
+            self.io, "render_plan", label, text,
+            fallback=lambda: self.io.render(f"\n[{phase}] {text}\n"),
         )
 
     # ------------------------------------------------------------------ #

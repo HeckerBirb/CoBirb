@@ -35,10 +35,9 @@ for anyone who also commits to it: the next commit belongs to no branch and
 your branch, so the branch is fast-forwarded onto the tagged commit where it
 can be, and detaching is the reported fallback — see ``_move_to``.
 
-**Why tags, not branches or commits.** A release is a tag (see
-``AGENTS.md`` for the convention: every version bump gets a matching
-``vX.Y.Z``), so "the latest release" and "a specific release" both resolve to
-one. Moving to an arbitrary commit or branch is a different, riskier request
+**Why tags, not branches or commits.** A release is a tag — every version
+bump gets a matching ``vX.Y.Z`` (``scripts/release.sh`` makes both) — so "the
+latest release" and "a specific release" both resolve to one. Moving to an arbitrary commit or branch is a different, riskier request
 this deliberately doesn't offer — nothing here needs to guess what "latest"
 means beyond "the highest released version number".
 
@@ -57,9 +56,8 @@ refusing and naming the reason costs one command (``git stash`` or
 **Not a new trust boundary.** ``--upgrade`` is the one command in CoBirb that
 talks to a network by default, but only because a person typed it — the same
 justification ``cobirb plugin install`` already has for running arbitrary
-code. See AGENTS.md §2 for why that is still consistent with "no outbound
-network by default": the default is what happens without being asked, and
-this is never that. Which host it talks to depends on the install shape — a
+code. That is still consistent with "no outbound network by default": the
+default is what happens without being asked, and this is never that. Which host it talks to depends on the install shape — a
 git remote for a checkout, GitHub's release assets plus PyPI for the
 dependencies on a managed one — but not whether it talks at all.
 """
