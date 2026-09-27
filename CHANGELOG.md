@@ -3,7 +3,7 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
-## [Unreleased]
+## [0.46.1]
 - **Examples of Remote Worker Birb configuration.** This patch adds a couple of examples for how to
   use the new feature "Remote Worker Birbs".
 
