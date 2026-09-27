@@ -3,7 +3,7 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
-## [Unreleased]
+## [0.46.0]
 
 - **Remote Worker Birbs: a Worker Birb on another machine and OS.** Configure remotes under
   `remote_workers` (`remote_os`, `remote_url`, and optionally their own model), run
