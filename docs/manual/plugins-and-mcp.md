@@ -64,7 +64,7 @@ class MyTool(Tool):
 ```
 
 A plugin that fails to load, or whose tool name collides with an existing one, is reported and
-skipped, never fatal. See [`AGENTS.md`](../../AGENTS.md) for the full SPI.
+skipped, never fatal. See [`docs/architecture/extending.md`](../architecture/extending.md) for the full SPI.
 
 **Installing runs the plugin's code.** `pip` executes the package's own build backend before
 CoBirb has looked at a single class. No prompt can cover that — choosing to install *is* the

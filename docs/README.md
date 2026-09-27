@@ -22,4 +22,4 @@ Short pages. Start at the top.
 | [Plugins & MCP](manual/plugins-and-mcp.md) | Plugins, and adding tools |
 
 Every page is also `cobirb help <page>` in the terminal (`cobirb help` lists them). Deeper reference:
-[`AGENTS.md`](../AGENTS.md) for architecture and design.
+[`docs/architecture/`](architecture/README.md) for how each part works.

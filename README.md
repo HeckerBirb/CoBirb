@@ -190,8 +190,7 @@ Being straight about the edges, since the rest of this page makes strong claims:
   makes outbound requests on its own schedule. None of that is malicious; all of it is trust
   rather than enforcement. `llama-server`, LM Studio and vLLM have the same shape. **CoBirb will
   not close this itself** — it is a client of your model server's HTTP API and deliberately does
-  not run models (an embedded GGUF runtime was considered and dropped; see §17 of
-  [`AGENTS.md`](./AGENTS.md)). Where inference happens is yours to choose, including an endpoint
+  not run models (an embedded GGUF runtime was considered and dropped). Where inference happens is yours to choose, including an endpoint
   you wrote. If the endpoint's trustworthiness matters to you, that is a property to fix in the
   endpoint, and it is fixable — `llama-server` will bind a Unix socket instead of a port
   (`--host /path/to.sock`), which removes the port any local process can reach.
@@ -234,8 +233,8 @@ Being straight about the edges, since the rest of this page makes strong claims:
   [permissions](./docs/manual/permissions.md), [sessions](./docs/manual/sessions.md),
   [memory](./docs/manual/memory.md), [images](./docs/manual/images.md),
   [the Flock](./docs/manual/flock.md), [plugins & MCP](./docs/manual/plugins-and-mcp.md).
-- [AGENTS.md](./AGENTS.md) — the single source of truth: architecture, the plugin SPI,
-  the security design, and the working conventions.
+- [docs/architecture/](./docs/architecture/README.md) — how each part works, from the agent loop
+  and the security design to the plugin SPI and the Flock.
 - [examples/](./examples/) — configurations to start from, each focused on one combination
   of settings.
 - [CHANGELOG.md](./CHANGELOG.md) — release history.

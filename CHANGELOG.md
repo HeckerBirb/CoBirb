@@ -1,8 +1,7 @@
 # Changelog
 
 All notable changes to CoBirb are recorded here, newest first. See
-[`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
-and its §17 decisions record for the ones that were designed and then deliberately *not* built.
+[`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
 ## [Unreleased]
 
@@ -11,6 +10,15 @@ and its §17 decisions record for the ones that were designed and then deliberat
   words came after your message. Now the reply stops and is flushed, then your message appears,
   then "redirected by a new message", then the new reply. A message that arrives just as the reply
   finishes is reported as not used, instead of being silently dropped.
+- **The contributor docs are split, checked and cleaned.** How each part works moved from
+  `AGENTS.md` into `docs/architecture/`, one page per area; `AGENTS.md` keeps the rules and is a
+  quarter of its former size, so CoBirb no longer cuts it off when reading it as project
+  instructions. Every claim was checked against the code: stale descriptions of auto-pilot in the
+  Flock, of how a Worker Birb is built and of the environment variables were corrected, a dead
+  reference to a design document was removed, and missing details were added — every way a flock
+  can stop, the installer's options, and the plugin loader's project directory (an open question).
+  A test now checks that the docs' links and paths resolve. A stray screenshot committed in 0.45.8
+  is removed.
 
 ## [0.45.8]
 

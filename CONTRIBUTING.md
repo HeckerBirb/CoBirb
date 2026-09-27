@@ -19,8 +19,9 @@ No linter, formatter or type checker is configured — match the surrounding sty
 
 - **Behaviour changes need a matching `docs/` update in the same change.** If you add or rename a
   `/command`, a CLI flag or a config key, or change what one exists does, the relevant page under
-  [`docs/manual/`](./docs/manual/) is not optional. A stale doc is worse than no doc — it's the
-  first thing a user reads.
+  [`docs/manual/`](./docs/manual/) is not optional, and neither is the page for that part of the code
+  under [`docs/architecture/`](./docs/architecture/README.md). A stale doc is worse than no doc — it's
+  the first thing a user reads.
 - **Test the contract, not the internals.** Aim for tests that describe what a function promises
   to callers, not how it's currently written — if a later change preserves behaviour, its tests
   shouldn't need to change. Don't chase a coverage number; 85–90% is the target, not a floor.
