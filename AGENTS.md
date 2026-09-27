@@ -528,7 +528,10 @@ the command picker (descriptions from each handler's docstring; `_COMMAND_IN_PRO
 message, so a slash mid-sentence is prose). Anything else starting with `/` is tried as a custom command,
 then sent as typed. Keys: `f1`, `f2`, `f3` (auto-pilot; two bindings on one key, `check_action` shows the one matching
 the state, so the footer label is the indicator), `ctrl+q`, `ctrl+c` (copy, else cancel), `up`/`down` history. The
-prompt stays enabled during a turn — submitting steers. Approval is a modal (`y`/`a`/`n`) stating what
+prompt stays enabled during a turn — submitting steers, and the box is titled `STEER_LABEL`
+("Steering conversation:") once something is typed then. The streaming preview is a scrolling
+container kept at its end (newest text shown), under a rule titled from `begin_stream`'s label.
+Approval is a modal (`y`/`a`/`n`) stating what
 "always" grants. The status bar shows AUTOPILOT, checklist progress, model, plan mode, cwd, session.
 
 **Config keys** — `models.*`, `system_prompt`, `plugins.{model,io,crypto}`, `allow_tools`,

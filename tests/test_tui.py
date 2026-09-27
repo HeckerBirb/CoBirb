@@ -519,6 +519,34 @@ async def test_a_message_typed_mid_turn_steers_it_instead_of_starting_a_new_one(
         await _until(pilot, lambda: not app._turn_in_progress)
 
 
+async def test_the_prompt_box_says_steering_while_a_turn_runs_and_something_is_typed(monkeypatch):
+    from cobirb.tui.app import STEER_LABEL
+
+    orchestrator = _CancellableOrchestrator()
+    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
+
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        box, prompt = app.query_one("#prompt-box"), app.query_one("#prompt-input", PromptInput)
+
+        prompt.text = "a first message"
+        await pilot.pause()
+        assert box.border_title == ""  # nothing running: this starts a turn, it steers nothing
+
+        await _submit(pilot, app, "run the game")
+        await _until(pilot, lambda: app._turn_in_progress)
+        assert box.border_title == ""  # a turn, but nothing typed yet
+
+        prompt.text = "check the tests first"
+        await pilot.pause()
+        assert box.border_title == STEER_LABEL
+
+        orchestrator._release.set()
+        await _until(pilot, lambda: not app._turn_in_progress)
+        assert box.border_title == ""
+
+
 async def test_steering_refused_by_the_orchestrator_is_reported_plainly(monkeypatch):
     """A race between the keypress and the turn actually finishing —
     Orchestrator.steer() returning False must not be silently swallowed,
@@ -1997,6 +2025,26 @@ async def test_a_streamed_reply_is_marked_like_any_other(monkeypatch):
         await pilot.pause()
 
         assert (_marker_colour_name(render.ASSISTANT_MARKER_STYLE), "streamed reply") in _marker_colours(app)
+
+
+async def test_a_long_streamed_reply_shows_its_newest_text_under_a_labelled_rule():
+    """The preview used to keep showing a long reply's first rows."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.io_bridge.begin_stream("CoBirb")
+        app.io_bridge.render("".join(f"line {i}\n" for i in range(1, 41)))
+        app.io_bridge._push_stream()
+        await pilot.pause()
+        await pilot.pause()
+
+        preview = app.query_one("#streaming-preview", StreamPreview)
+        assert preview.border_title == "CoBirb is writing…"
+        assert preview.max_scroll_y > 0 and preview.scroll_y == preview.max_scroll_y
+
+        app._flush_stream()
+        await pilot.pause()
+        assert preview.display is False and preview.border_title == ""
 
 
 async def test_the_streaming_preview_is_marked_so_the_reply_does_not_shift(monkeypatch):

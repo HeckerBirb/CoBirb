@@ -183,7 +183,7 @@ class TuiIO(I_OAdapter):
             self._call(self._app.note_brainy_waiting, False)
 
     def begin_stream(self, label: str) -> None:
-        """Deliberately draws nothing.
+        """Draws nothing into the stream; names who is writing.
 
         The scrolling renderer writes a ``>`` marker here because it can only
         append. This one doesn't need to: ``StreamPreview`` re-renders its
@@ -193,9 +193,10 @@ class TuiIO(I_OAdapter):
 
         It exists so that the hook is answered rather than skipped, which is
         what keeps the reply label out of the stream (see
-        ``Orchestrator._chat``).
+        ``Orchestrator._chat``). The label goes on the rule above the preview
+        instead, naming who is writing.
         """
-        return None
+        self._call(self._app.set_stream_label, label)
 
     def render_answer(self, label: str, text: str) -> None:
         """The finished reply, as a marked message rather than a titled panel.

@@ -58,4 +58,12 @@ Nothing is pre-approved. See [Permissions](permissions.md).
 read src/main.py and tell me what the entry point does
 ```
 
+While it works, the reply being written appears just above the prompt, under a rule naming who is
+writing, and moves into the conversation when it's done.
+
+**You can steer it while it works.** Type into the prompt while a turn is running — the box is
+titled `Steering conversation:` — and press enter: your message joins the same conversation at the
+next step, and CoBirb carries on with it in mind, instead of starting a new turn. Use it to nudge
+work that is on the right track but drifting. (Not during a flock.)
+
 Then try `/diff` to see what it changed, and `/undo` to put it back.

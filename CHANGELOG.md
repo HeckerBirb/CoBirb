@@ -4,6 +4,16 @@ All notable changes to CoBirb are recorded here, newest first. See
 [`AGENTS.md`](./AGENTS.md) for the architecture and design reasoning behind these changes,
 and its §17 decisions record for the ones that were designed and then deliberately *not* built.
 
+## [Unreleased]
+
+- **A long reply keeps showing its newest text while it streams.** Past twelve rows, the preview
+  kept showing the reply's first rows and cut off everything newer, so a long reply looked stalled.
+- **The reply being written is set apart from the conversation.** A rule above it names who is
+  writing ("CoBirb is writing…"); before, only its `>` separated it from the text above.
+- **Steering is visible.** While a turn is running and you type into the prompt, the box is titled
+  "Steering conversation:" — sending then nudges the work in progress rather than starting a new
+  turn. The manual now describes steering.
+
 ## [0.45.7]
 
 - **A tool panel shows what the call was aimed at.** It showed only the result, so a refusal read

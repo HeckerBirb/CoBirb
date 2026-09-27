@@ -13,9 +13,20 @@
    empty preview never eats a row of transcript. */
 #streaming-preview {
     height: auto;
-    max-height: 12;
+    /* 12 rows of text under a one-row rule. */
+    max-height: 13;
     padding: 0 1;
     background: $surface;
+    /* The rule that sets the reply being written apart from the conversation
+       above it, titled with who is writing (StreamPreview.set_label). */
+    border-top: solid $text-muted;
+    border-title-color: $text-muted;
+    border-title-align: left;
+    scrollbar-size-vertical: 0;
+}
+
+#streaming-preview > .stream-text {
+    height: auto;
 }
 
 /* The boxed input from the design: a bordered container wrapping a
@@ -28,6 +39,9 @@
     max-height: 10;
     border: round $accent;
     background: $surface;
+    /* "Steering conversation:" while a turn runs and something is typed. */
+    border-title-align: left;
+    border-title-style: bold;
 }
 
 #prompt-input {

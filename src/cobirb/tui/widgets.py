@@ -19,6 +19,7 @@ from textual.reactive import reactive
 from textual.selection import Selection
 from textual.strip import Strip
 from textual.message import Message
+from textual.containers import VerticalScroll
 from textual.widgets import RichLog, Static, TextArea
 
 from ..plugins.core import render
@@ -132,7 +133,7 @@ class ActivityBar(Static):
         return line
 
 
-class StreamPreview(Static):
+class StreamPreview(VerticalScroll):
     """Buffers the model's reply while it is still streaming in.
 
     The finished transcript is a ``RichLog``, which appends each write as new
@@ -145,6 +146,15 @@ class StreamPreview(Static):
     It carries the same ``>`` marker a finished reply gets, so a reply
     doesn't visibly shift left when the stream ends and the text moves into
     the transcript.
+
+    **A scrolling container kept at its end, so the newest text is what shows.**
+    It was a ``Static`` capped at a few rows, which clips from the bottom: past
+    that height the preview kept showing the reply's first rows while
+    everything newer was cut off, and a long reply looked stalled.
+
+    **Headed by a rule naming who is writing** (``set_label``). Without it, the
+    reply being written ran straight on from the conversation above, with
+    only its ``>`` to say where one ended and the other began.
     """
 
     # While a reply streams, only its end is drawn. Redrawing a reply thousands
@@ -153,26 +163,41 @@ class StreamPreview(Static):
     TAIL_CHARS = 3000
 
     def __init__(self, **kwargs: object) -> None:
-        super().__init__("", **kwargs)  # type: ignore[arg-type]
+        super().__init__(**kwargs)  # type: ignore[arg-type]
         self._text = ""
+        self._label = ""
+
+    def compose(self):
+        yield Static("", classes="stream-text")
 
     @property
     def buffered(self) -> str:
         return self._text
+
+    def set_label(self, label: str) -> None:
+        """Name who is writing, on the rule above the preview."""
+        self._label = label
+        self.border_title = f"{label} is writing…" if label else "writing…"
 
     def append(self, text: str) -> None:
         self._text += text
         shown = self._text
         if len(shown) > self.TAIL_CHARS:
             shown = "…" + shown[-self.TAIL_CHARS:]
-        self.update(render.build_streamed_message(shown))
+        self.query_one(".stream-text", Static).update(render.build_streamed_message(shown))
+        if not self.border_title:
+            self.set_label(self._label)
         self.display = True
+        # After the refresh: the new text has to be laid out before its end is
+        # where the end is — scrolled at once, it stopped at the old end.
+        self.call_after_refresh(self.scroll_end, animate=False)
 
     def take(self) -> str:
         """Return everything buffered and reset to empty/hidden."""
         text = self._text
         self._text = ""
-        self.update("")
+        self.query_one(".stream-text", Static).update("")
+        self.border_title = ""
         self.display = False
         return text
 

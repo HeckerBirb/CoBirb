@@ -32,7 +32,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
 from textual.theme import Theme
-from textual.widgets import Footer, Header, TabbedContent, TabPane
+from textual.widgets import Footer, Header, TabbedContent, TabPane, TextArea
 
 from .. import memory, session
 from ..help_text import HELP_TEXT, HELP_TOPICS
@@ -125,6 +125,10 @@ def _session_turns(orchestrator: Any) -> list[Any]:
     manager = getattr(orchestrator, "session", None)
     session_data = getattr(manager, "session", None)
     return list(getattr(session_data, "turns", None) or [])
+
+
+# The prompt box's title while what is typed would steer the turn under way.
+STEER_LABEL = "Steering conversation:"
 
 
 class CoBirbApp(App[None]):
@@ -339,6 +343,10 @@ class CoBirbApp(App[None]):
     def append_stream(self, text: str) -> None:
         self.transcript.append_stream(text)
 
+    def set_stream_label(self, label: str) -> None:
+        """Who the reply streaming into the preview is from."""
+        self.query_one("#streaming-preview", StreamPreview).set_label(label)
+
     def _flush_stream(self) -> None:
         self.transcript.flush_stream()
 
@@ -420,6 +428,23 @@ class CoBirbApp(App[None]):
     # ------------------------------------------------------------------ #
     # Input handling
     # ------------------------------------------------------------------ #
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        if event.text_area.id == "prompt-input":
+            self._update_steer_label()
+
+    def _update_steer_label(self) -> None:
+        """Title the prompt box "Steering conversation:" while what is typed
+        would steer the turn under way rather than start a new one.
+
+        Steering had no sign on screen: the box looks the same during a turn as
+        between turns, so nothing said that sending now redirects the work in
+        progress (see ``_steer_current_turn``). Shown only once something is
+        typed, so an idle box during a long turn stays quiet.
+        """
+        prompt = self.query_one("#prompt-input", PromptInput)
+        steering = self._turn_in_progress and not prompt.disabled and bool(prompt.text.strip())
+        self.query_one("#prompt-box").border_title = STEER_LABEL if steering else ""
+
     def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
         """A prompt was submitted with enter.
 
@@ -481,6 +506,7 @@ class CoBirbApp(App[None]):
         # before this one finishes is routed above to _steer_current_turn
         # rather than piling up a second, overlapping run_turn.
         self._turn_in_progress = True
+        self._update_steer_label()
         self._run_turn(prompt)
 
     def _steer_current_turn(self, message: str) -> None:
@@ -615,6 +641,7 @@ class CoBirbApp(App[None]):
         prompt_input = self.query_one("#prompt-input", PromptInput)
         prompt_input.disabled = False
         prompt_input.focus()
+        self._update_steer_label()
         self.offer_pending_charter()
 
     # ------------------------------------------------------------------ #
@@ -1180,6 +1207,7 @@ class CoBirbApp(App[None]):
         self._flock_canceller = None
         self.set_activity("")
         self._turn_in_progress = False
+        self._update_steer_label()
         pane = self.query_one(FlockPane)
         if run is None:
             pane.set_status("The flock did not finish.", "bold red")
