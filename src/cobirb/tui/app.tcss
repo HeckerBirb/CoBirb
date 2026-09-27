@@ -12,9 +12,8 @@
 /* Hidden (display: none, set in code) until tokens actually arrive, so an
    empty preview never eats a row of transcript. */
 #streaming-preview {
+    /* As tall as the text, up to StreamPreview.ROWS: it draws only that many. */
     height: auto;
-    /* 12 rows of text under a one-row rule. */
-    max-height: 13;
     padding: 0 1;
     background: $surface;
     /* The rule that sets the reply being written apart from the conversation
@@ -22,11 +21,6 @@
     border-top: solid $text-muted;
     border-title-color: $text-muted;
     border-title-align: left;
-    scrollbar-size-vertical: 0;
-}
-
-#streaming-preview > .stream-text {
-    height: auto;
 }
 
 /* The boxed input from the design: a bordered container wrapping a

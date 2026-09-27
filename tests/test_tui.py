@@ -2039,12 +2039,43 @@ async def test_a_long_streamed_reply_shows_its_newest_text_under_a_labelled_rule
         await pilot.pause()
 
         preview = app.query_one("#streaming-preview", StreamPreview)
+        shown = [str(preview.render_line(y).text) for y in range(preview.size.height)]
         assert preview.border_title == "CoBirb is writing…"
-        assert preview.max_scroll_y > 0 and preview.scroll_y == preview.max_scroll_y
+        assert len(shown) == StreamPreview.ROWS
+        assert "line 40" in "\n".join(shown) and "line 20" not in "\n".join(shown)
 
         app._flush_stream()
         await pilot.pause()
         assert preview.display is False and preview.border_title == ""
+
+
+async def test_the_last_tokens_of_a_reply_reach_the_transcript_when_it_ends():
+    """Tokens still held back by the bridge used to surface in the next reply."""
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.io_bridge.render("not just possible,")  # sent at once: the first push is due
+        app.io_bridge.render(" but necessary.")     # held: the next push is not due yet
+
+        app._flush_stream()
+        await pilot.pause()
+
+        assert "not just possible, but necessary." in _transcript_text(app)
+        assert app.query_one("#streaming-preview", StreamPreview).buffered == ""
+        app.io_bridge.render("Hello!")
+        app.io_bridge._push_stream()
+        assert app.query_one("#streaming-preview", StreamPreview).buffered == "Hello!"
+
+
+async def test_a_short_streamed_reply_takes_only_the_rows_it_needs():
+    app = _make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.io_bridge.render("one\ntwo")
+        app.io_bridge._push_stream()
+        await pilot.pause()
+
+        assert app.query_one("#streaming-preview", StreamPreview).size.height == 2
 
 
 async def test_the_streaming_preview_is_marked_so_the_reply_does_not_shift(monkeypatch):

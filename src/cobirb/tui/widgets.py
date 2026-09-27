@@ -19,7 +19,6 @@ from textual.reactive import reactive
 from textual.selection import Selection
 from textual.strip import Strip
 from textual.message import Message
-from textual.containers import VerticalScroll
 from textual.widgets import RichLog, Static, TextArea
 
 from ..plugins.core import render
@@ -133,7 +132,30 @@ class ActivityBar(Static):
         return line
 
 
-class StreamPreview(VerticalScroll):
+class _LastRows:
+    """A renderable drawn at the width it is given, keeping only its last rows.
+
+    What lets the streaming preview show a reply's newest text without
+    scrolling: the wrapping happens at the real width, at render time, so
+    "the last twelve rows" is exact however the marker indents or the
+    terminal is sized.
+    """
+
+    def __init__(self, renderable: Any, rows: int) -> None:
+        self._renderable = renderable
+        self._rows = rows
+
+    def __rich_console__(self, console: Any, options: Any):
+        # Without a height: the widget passes its own, and render_lines keeps
+        # the *first* that many lines — exactly the rows this is here to drop.
+        lines = console.render_lines(self._renderable, options.update(height=None), pad=False)
+        new_line = Segment.line()
+        for line in lines[-self._rows:]:
+            yield from line
+            yield new_line
+
+
+class StreamPreview(Static):
     """Buffers the model's reply while it is still streaming in.
 
     The finished transcript is a ``RichLog``, which appends each write as new
@@ -147,28 +169,30 @@ class StreamPreview(VerticalScroll):
     doesn't visibly shift left when the stream ends and the text moves into
     the transcript.
 
-    **A scrolling container kept at its end, so the newest text is what shows.**
-    It was a ``Static`` capped at a few rows, which clips from the bottom: past
-    that height the preview kept showing the reply's first rows while
-    everything newer was cut off, and a long reply looked stalled.
+    **Only the last ``ROWS`` rows are drawn** (``_LastRows``), so the newest
+    text is what shows. It began as a capped box, which clipped from the
+    bottom and kept showing a long reply's first rows; then as a container
+    scrolled to its end, which jumped — every update drew the new text first
+    and scrolled to it a refresh later. Drawing just the last rows needs no
+    scrolling at all: one update, one draw.
 
     **Headed by a rule naming who is writing** (``set_label``). Without it, the
     reply being written ran straight on from the conversation above, with
     only its ``>`` to say where one ended and the other began.
     """
 
-    # While a reply streams, only its end is drawn. Redrawing a reply thousands
-    # of characters long on every update made each one cost as much as the
-    # whole reply; the full text still goes to the transcript when it ends.
+    ROWS = 12
+
+    # While a reply streams, only its end is rendered. Redrawing a reply
+    # thousands of characters long on every update made each one cost as much
+    # as the whole reply; the full text still goes to the transcript when it
+    # ends. See _tail for where the window starts.
     TAIL_CHARS = 3000
 
     def __init__(self, **kwargs: object) -> None:
-        super().__init__(**kwargs)  # type: ignore[arg-type]
+        super().__init__("", **kwargs)  # type: ignore[arg-type]
         self._text = ""
         self._label = ""
-
-    def compose(self):
-        yield Static("", classes="stream-text")
 
     @property
     def buffered(self) -> str:
@@ -181,22 +205,38 @@ class StreamPreview(VerticalScroll):
 
     def append(self, text: str) -> None:
         self._text += text
-        shown = self._text
-        if len(shown) > self.TAIL_CHARS:
-            shown = "…" + shown[-self.TAIL_CHARS:]
-        self.query_one(".stream-text", Static).update(render.build_streamed_message(shown))
+        self.update(_LastRows(render.build_streamed_message(self._tail()), self.ROWS))
         if not self.border_title:
             self.set_label(self._label)
         self.display = True
-        # After the refresh: the new text has to be laid out before its end is
-        # where the end is — scrolled at once, it stopped at the old end.
-        self.call_after_refresh(self.scroll_end, animate=False)
+
+    def _tail(self) -> str:
+        """The end of the reply to render: at least ``TAIL_CHARS``, starting
+        at the beginning of a line.
+
+        **Never mid-line.** A window cut a fixed number of characters from the
+        end starts somewhere new on every update, and the line it cuts into
+        re-wraps each time — changing the text's height and making the rows on
+        screen jump. Starting at a newline keeps every line in the window
+        wrapped the same way from one update to the next. Only when that would
+        keep more than four windows — one enormous line — is it cut mid-line,
+        since rendering all of it on every update is the cost the window
+        exists to avoid.
+        """
+        text = self._text
+        if len(text) <= self.TAIL_CHARS:
+            return text
+        cut = len(text) - self.TAIL_CHARS
+        start = text.rfind("\n", 0, cut) + 1
+        if len(text) - start > 4 * self.TAIL_CHARS:
+            return "…" + text[cut:]
+        return "…\n" + text[start:] if start else text
 
     def take(self) -> str:
         """Return everything buffered and reset to empty/hidden."""
         text = self._text
         self._text = ""
-        self.query_one(".stream-text", Static).update("")
+        self.update("")
         self.border_title = ""
         self.display = False
         return text

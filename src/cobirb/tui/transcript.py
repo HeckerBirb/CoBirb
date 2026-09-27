@@ -67,7 +67,16 @@ class TranscriptView:
         orchestrator sets ``last_turn_streamed`` precisely so it isn't shown
         twice), so if this didn't run the reply would vanish from the
         transcript when the preview cleared.
+
+        **Tokens the I/O bridge is still holding go in first** (``TuiIO.drain``).
+        It sends them to the preview at most every ``STREAM_INTERVAL``, so a
+        reply's last few tokens were often still held when the turn ended: the
+        reply went into the transcript without its end, and the end surfaced
+        at the top of the *next* reply.
         """
+        bridge = getattr(self._root, "io_bridge", None)
+        if bridge is not None:
+            bridge.drain()
         text = self._preview.take()
         if text.strip():
             # Marked the same way a non-streamed reply is, so the transcript

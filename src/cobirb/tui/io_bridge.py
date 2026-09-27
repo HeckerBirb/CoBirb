@@ -81,6 +81,15 @@ class TuiIO(I_OAdapter):
             return callback(*args)
         return self._app.call_from_thread(callback, *args)
 
+    def drain(self) -> None:
+        """Send any tokens still held back to the preview now.
+
+        For the transcript, before it moves the preview into the conversation
+        (see ``TranscriptView.flush_stream``); anything held back then would
+        otherwise wait for the next reply.
+        """
+        self._push_stream()
+
     def _push_stream(self) -> None:
         """Send every buffered token to the preview, in one trip."""
         with self._pending_lock:

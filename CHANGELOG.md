@@ -6,8 +6,13 @@ and its §17 decisions record for the ones that were designed and then deliberat
 
 ## [Unreleased]
 
-- **A long reply keeps showing its newest text while it streams.** Past twelve rows, the preview
-  kept showing the reply's first rows and cut off everything newer, so a long reply looked stalled.
+- **A long reply keeps showing its newest text while it streams, without jumping.** Past twelve
+  rows, the preview kept showing the reply's first rows and cut off everything newer, so a long
+  reply looked stalled. It now draws only its last twelve rows, in one step, from text that always
+  starts at a line, so rows no longer jump as new lines arrive.
+- **A reply's last words reach the conversation when it ends.** The last few tokens were often still
+  held back when a reply finished; the reply went into the conversation without its end, and the
+  end appeared at the top of the next reply.
 - **The reply being written is set apart from the conversation.** A rule above it names who is
   writing ("CoBirb is writing…"); before, only its `>` separated it from the text above.
 - **Steering is visible.** While a turn is running and you type into the prompt, the box is titled
