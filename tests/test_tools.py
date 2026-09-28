@@ -22,8 +22,8 @@ from cobirb.plugins.core.tools import (
     ToolRegistry,
     ToolResult,
     WriteFileTool,
-    _shell_timeout,
 )
+from cobirb.plugins.core.tools.shell import _shell_timeout
 from cobirb.policy import AuditLog, Policy
 from cobirb.typing.spi import ToolCall
 
@@ -324,7 +324,7 @@ def test_shell_kill_takes_the_whole_tree_off_posix(monkeypatch):
     import subprocess
 
     monkeypatch.setattr(subprocess, "run", lambda argv, **_: ran.append(argv))
-    monkeypatch.setattr("cobirb.plugins.core.tools.os.name", "nt")
+    monkeypatch.setattr("cobirb.plugins.core.tools.shell.os.name", "nt")
     ShellTool._kill(SimpleNamespace(pid=123, kill=lambda: killed.append(1)))
     monkeypatch.undo()
     assert ran == [["taskkill", "/T", "/F", "/PID", "123"]] and killed == [1]

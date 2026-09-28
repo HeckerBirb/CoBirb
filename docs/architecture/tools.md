@@ -1,6 +1,9 @@
 # Tools
 
-`plugins/core/tools.py`, `patches.py`.
+`plugins/core/tools/` — one module per family (`files`: read, write, delete; `edit`; `patch`;
+`search`: glob, grep, list_dir, repo_map; `shell`; `todo`) over `base`, which holds `CobirbTool` and
+the shared limits; `ToolRegistry` and `BUILTIN_TOOLS` are in the package's `__init__`. Also
+`patches.py`.
 
 Built-ins: `read_file`, `write_file`, `edit_file`, `apply_patch`, `delete_file`, `glob`, `grep`,
 `list_dir`, `repo_map`, `shell`, `todo`. Subclasses of `CobirbTool` declare `NAME: ClassVar[str]`;

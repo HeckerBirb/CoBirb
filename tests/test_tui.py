@@ -410,7 +410,7 @@ async def test_nothing_is_saved_when_no_session_path_was_given(monkeypatch):
 # timeout, nor block quitting for that same span, which it otherwise does
 # because Textual/
 # asyncio's shutdown waits for the worker thread to actually return. See
-# ShellTool.cancel_running() (tools.py) for the other half of the fix.
+# ShellTool.cancel_running() (plugins/core/tools/shell.py) for the other half of the fix.
 # --------------------------------------------------------------------------- #
 class _CancellableOrchestrator(_StubOrchestrator):
     """An orchestrator whose run() blocks until something calls
