@@ -19,6 +19,9 @@ Lint and format with ruff before sending a change — CI runs both:
 ruff check --fix && ruff format
 ```
 
+The whole tree was reformatted once when ruff was adopted; `git config blame.ignoreRevsFile
+.git-blame-ignore-revs` makes `git blame` look past that commit.
+
 No type checker is configured.
 
 ## Making a change

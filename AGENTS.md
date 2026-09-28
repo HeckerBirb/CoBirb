@@ -68,7 +68,7 @@ Code paths are under `src/cobirb/`; the rest are from the repository root.
 | `redaction.py` | Credential stripping for tool output and audit args. | — |
 | `config.py`, `paths.py` | The single config file; every `~/.cobirb` path, derived in one place. | [surfaces](docs/architecture/surfaces.md) |
 | `typing/spi.py`, `plugins/loader.py` | **The plugin contract**; discovery, fail-closed. | [extending](docs/architecture/extending.md) |
-| `plugins/core/` | Built-ins: `tools`, `model` (Ollama), `openai`, `toolcalls`, `io`, `crypto`, `render`, `repomap`, `ignores`. | [tools](docs/architecture/tools.md), [providers](docs/architecture/providers.md) |
+| `plugins/core/` | Built-ins: `tools/` (one module per tool family), `model` (Ollama), `openai`, `toolcalls`, `io`, `crypto`, `render`, `repomap`, `ignores`. | [tools](docs/architecture/tools.md), [providers](docs/architecture/providers.md) |
 | `runtime/` | Shared composition: `wiring`, `plugins`, `models`, `system_prompt`, `setup`, `commands`, `command_index`, `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues`, `mentions`, `doctor`. | [extending](docs/architecture/extending.md), [surfaces](docs/architecture/surfaces.md) |
 | `mcp/` | stdio MCP client and its tool adapter. | [extending](docs/architecture/extending.md) |
 | `remote/` | Remote Worker Birbs: `settings`, `osnames`, `trust`, `certs`, `protocol`, `client`, `server`, `job`, `relay`, `runner`, `pool`. | [remote](docs/architecture/remote.md) |
