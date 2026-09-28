@@ -70,7 +70,8 @@ to `SECTION_ATTEMPTS = 3` times with every rejected attempt kept in the trace.
 - **`check_tickets`** refuses, in overview terms: a command word or remark on a `writes` line; a file
   in two tickets; a ticket without tests or `accept`; an `accept` or a requirement check that names a
   program not on `PATH` or that `policy._segments` cannot read (`_accept_problem` — a worker may run
-  only what its check names); then whatever a scratch `PlanDraft` refuses.
+  only what its check names; a missing program's refusal lists which `_TOOLCHAINS` that machine
+  has); then whatever a scratch `PlanDraft` refuses.
 - `NO TICKETS` is a legitimate decline.
 
 ### 1. Restatement (Brainy Birb, no tools)

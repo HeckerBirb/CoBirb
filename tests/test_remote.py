@@ -122,6 +122,19 @@ def test_a_remote_tickets_check_is_looked_up_on_its_remote_the_windows_way():
         parse_tickets(_WIN.format(accept="gcc cap.c", os="Windows")), which_for)
 
 
+@pytest.mark.parametrize("installed, named", [({"gcc", "python"}, "installed there: gcc, python."),
+                                               (set(), "runs on. Name the real program")])
+def test_a_refusal_names_the_toolchains_the_tickets_machine_has(installed, named):
+    def which_for(os_family):
+        return (lambda program: program in installed), True
+
+    accept = r"x86_64-w64-mingw32-gcc -o t.exe cap.c && .\t.exe"
+    problem = check_tickets(parse_tickets(_WIN.format(accept=accept, os="Windows")), which_for)
+
+    assert "`x86_64-w64-mingw32-gcc`" in problem
+    assert named in problem
+
+
 def test_a_ticket_for_an_os_with_no_remote_is_not_refused_over_its_programs():
     tickets = parse_tickets(_WIN.format(accept="xcrun clang cap.c", os="Darwin"))
 

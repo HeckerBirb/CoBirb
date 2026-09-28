@@ -378,16 +378,19 @@ What it does **not** get is anything the check never named, and that's deliberat
 
 **Brainy Birb plans for the machine it runs on.** Every planning stage is told its OS, distribution
 and CPU, and Brainy Birb picks the tools the language and the target OS call for — CoBirb keeps no
-list of languages. Code for another OS is built with that OS's cross-compiler and only built: on
-Linux, a Windows binary with `x86_64-w64-mingw32-gcc`. What cannot be built or tested here goes in
+list of languages. Code for an OS that none of your machines runs is built with that OS's
+cross-compiler and only built: on Linux, a Windows binary with `x86_64-w64-mingw32-gcc`. What cannot
+be built or tested here goes in
 the design's **Limits on this machine** section, and an evaluation leaves a ticket that cannot pass
 here out of the next round with a `left to do` note. Both end up in the flock's report, so you're
 told what is still left to do and where, rather than just that a ticket failed.
 
 **Or on another machine.** With [Remote Worker Birbs](remote-workers.md) configured, Brainy Birb
 also sees those machines, and a ticket that must be built and tested on another OS runs there —
-natively, re-checked and reviewed there too. That holds for a charter proposed in the chat as
-well as for `/flock`.
+natively, with that machine's own compiler, re-checked and reviewed there too. That holds for a
+charter proposed in the chat as well as for `/flock`. A ticket whose check names a program its
+machine doesn't have is sent back to Brainy Birb with the compilers and test runners that machine
+does have.
 
 **What a ticket needs installed is checked before you approve.** A ticket names each library,
 header or package it needs from outside the project, with a command that succeeds only if it is

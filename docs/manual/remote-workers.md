@@ -42,6 +42,34 @@ nothing from its own config — every setting comes from your machine.
 A remote with the same OS as your machine is ignored. `cobirb doctor` checks every entry and says
 whether each is paired.
 
+## Build tools on the remote
+
+A remote worker builds and tests with **what is installed on the remote**, never with anything on
+your machine. So the compiler, the test runner and any libraries its tickets need have to be there,
+on the `PATH` of the shell you start `cobirb remote-worker` from. For C on Windows that means, say,
+MSYS2's `gcc` on `PATH`, or `cl` from a *Developer Command Prompt* for the MSVC Build Tools. A
+cross-compiler such as `x86_64-w64-mingw32-gcc` isn't used on a remote: code for its OS is built
+there natively.
+
+This is how your CoBirb finds out what a remote has:
+
+- **The machine.** When it connects, the remote reports its OS, version, CPU and the shell its
+  commands run in (`cmd.exe` on Windows). Brainy Birb plans with these facts, and writes a remote
+  ticket's check in that machine's commands.
+- **The programs.** Before you're shown the charter, CoBirb asks the remote to look up every program
+  a remote ticket's check names, and every program named in the checks for what the ticket
+  `requires`. The remote looks each one up on its own `PATH`, the way its shell would (on Windows,
+  `gcc` also finds `gcc.exe`). If one is missing, the ticket goes back to Brainy Birb, together with
+  the compilers and test runners the remote does have (`gcc`, `cl`, `clang`, `python`, `cargo`,
+  `dotnet` and similar).
+- **The libraries.** A ticket's `requires` checks run on the remote in a scratch directory. Anything
+  not found is listed with its install command before you approve. CoBirb never runs the install
+  command, so you install it on the remote yourself.
+
+If the remote has none of the programs a ticket needs, the plan can't be completed. Install them
+on the remote and restart `cobirb remote-worker` from a shell where they're on `PATH`: the worker
+only sees the `PATH` it was started with.
+
 ## Pairing
 
 The first time you start `cobirb` after adding a remote, right after the model is chosen:

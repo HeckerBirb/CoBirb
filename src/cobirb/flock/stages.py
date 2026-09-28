@@ -131,8 +131,9 @@ library, formats, limits, behaviour at the edges.
 - How data and control move between them, in two or three sentences.
 - Name every part exactly as it will appear in code (`engine.step`, not "the step function")."""),
     (LIMITS_HEADING, """\
-- Anything this work needs that cannot be built, run or tested on this machine (see \
-"This machine" above) — for example code calling the Windows API, when this machine runs Linux.
+- Anything this work needs that cannot be built, run or tested on this machine or on a remote \
+machine (see "This machine" above) — for example code calling the Windows API, when this machine \
+runs Linux and no remote runs Windows.
 - For each: what the tickets do instead (a build-only check with a cross-compiler, or the part \
 kept behind an interface that can be tested here), and what the user must still do, and where.
 - Write "none" if everything can be built and checked here."""),
@@ -167,14 +168,17 @@ machine>`, e.g. `- requires: zlib headers for MinGW — check: echo '#include <z
 x86_64-w64-mingw32-gcc -E -x c - >/dev/null — install: sudo apt install libz-mingw-w64-dev`. \
 CoBirb runs the checks and, before anything is built, shows the user what is missing and how \
 to install it. It never runs the install command.
-- `accept` is a real shell command, run on this machine in the project directory: it runs \
-this ticket's tests and exits non-zero if any fails. Use the tools that are standard for the \
-language and for the OS the code is built for, as they are used on this machine — \
-`python -m pytest …` for Python; for a compiled language, build the tests and run what was \
-built, e.g. `cc -Wall -o /tmp/test_x src/x.c tests/test_x.c && /tmp/test_x`. Code for another \
-OS is built with that OS's cross-compiler and only built, not run: on Linux, a Windows binary \
-is built with `x86_64-w64-mingw32-gcc`, never `cc`. A program not installed here is refused, \
-and you will be told which.
+- `accept` is a real shell command, run in the project directory on the machine the ticket \
+runs on — this machine, or the remote machine its `runs on` names: it runs this ticket's tests \
+and exits non-zero if any fails. Use the tools that are standard for the language and for the \
+OS the code is built for, as they are used on that machine — `python -m pytest …` for Python; \
+for a compiled language, build the tests and run what was built, e.g. \
+`cc -Wall -o /tmp/test_x src/x.c tests/test_x.c && /tmp/test_x`. Code for an OS that a remote \
+machine runs is built and tested there, natively, with that machine's own compiler — never a \
+cross-compiler. Only code for an OS no machine here runs is built with that OS's cross-compiler \
+and only built, not run: on Linux with no Windows remote, a Windows binary is built with \
+`x86_64-w64-mingw32-gcc`, never `cc`. A program not installed on the ticket's machine is \
+refused, and you will be told which.
 - A ticket's tests must pass with its own code and the skeleton alone.
 - If this work should not be divided at all, write exactly `NO TICKETS` and one \
 sentence saying why."""),
@@ -374,6 +378,12 @@ _BUILTINS = frozenset({"cd", "export", "set", "source", ".", "exit",
                        "echo", "dir", "del", "copy", "type", "mkdir", "md", "rmdir", "rd",
                        "move", "ren", "call", "start", "cls", "pushd", "popd"})
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# Named in a refusal when they are on the ticket's machine. Told only that its
+# cross-compiler was missing on a Windows remote, a model guessed a different
+# missing program on every retry and the overview failed; told what is there,
+# it has something real to choose from. A hint, not a list of what may be used.
+_TOOLCHAINS = ("cc", "gcc", "g++", "clang", "clang++", "cl", "zig", "make", "cmake", "cargo",
+               "go", "dotnet", "javac", "python", "python3", "py", "node", "npm")
 
 
 def _accept_problem(command: str, which: "Callable[[str], Any]" = shutil.which,
@@ -404,8 +414,11 @@ def _accept_problem(command: str, which: "Callable[[str], Any]" = shutil.which,
         if not program or "/" in program or "\\" in program or program.lower() in _BUILTINS:
             continue
         if not which(program):
+            present = [t for t in _TOOLCHAINS if t != program and which(t)]
+            there = (f" Programs for building and testing that are installed there: {', '.join(present)}."
+                     if present else "")
             return (f"names `{program}`, which is not a program installed on the machine this "
-                    "ticket runs on. Name the real program that runs this ticket's tests")
+                    f"ticket runs on.{there} Name the real program that runs this ticket's tests")
     return ""
 
 
@@ -1220,11 +1233,16 @@ class Stager:
         def which(program: str) -> bool:
             key = (os_family, program)
             if key not in self._found:
+                # The toolchains ride along, so a refusal can name them
+                # (_accept_problem) without a round trip each.
+                asked = [p for p in dict.fromkeys((program, *_TOOLCHAINS)) if (os_family, p) not in self._found]
                 try:
-                    answer = client.request("which", programs=[program], timeout=30)
-                    self._found[key] = program in (answer.get("found") or [])
+                    answer = client.request("which", programs=asked, timeout=30)
                 except Exception:  # noqa: BLE001 - a remote that cannot answer cannot vouch for it
                     return True  # not refused over a dropped connection; the worker's run will tell
+                found = answer.get("found") or []
+                for name in asked:
+                    self._found[(os_family, name)] = name in found
             return self._found[key]
 
         return which, os_family == "Windows"

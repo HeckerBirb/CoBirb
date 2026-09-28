@@ -10,6 +10,11 @@ All notable changes to CoBirb are recorded here, newest first. See
   and went looking for files that were never sent.
 - **Under auto-pilot, a refused command says what is allowed**: the programs the ticket's check
   names, each on its own. A worker told only "Permission denied" kept piping its check into `head`.
+- **A ticket for a Windows remote is built there with its own compiler**, not with the MinGW
+  cross-compiler, which the planning prompt prescribed for every Windows binary built from Linux —
+  remote or not — so the overview was refused three times over a program the remote never had. A
+  refused check now names the compilers and test runners its machine does have.
+- **The remote workers page says what a remote needs installed** and how CoBirb finds out what it has.
 
 ## [0.46.4]
 
