@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import re
 from typing import Any
 
@@ -198,8 +199,6 @@ def _common_extra_indent(have_lines: list[str], want_lines: list[str]) -> str | 
 
 def _miss_message(content: str, old: str) -> str:
     """ "Not found", plus the closest region so the model can copy it exactly."""
-    import difflib
-
     lines = content.splitlines()
     size = max(1, len(old.strip("\n").splitlines()))
     best, best_ratio = -1, 0.0

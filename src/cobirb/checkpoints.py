@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
 
@@ -306,8 +307,6 @@ class TreeCheckpoints:
 
     # -- plumbing ----------------------------------------------------------- #
     def _run(self, *args: str, check: bool = True) -> str:
-        import subprocess
-
         command = [
             self.git,
             f"--git-dir={self.store}",

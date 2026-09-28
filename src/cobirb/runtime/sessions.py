@@ -7,6 +7,7 @@ command that reopens it.
 
 from __future__ import annotations
 
+import getpass
 import os
 import time
 from typing import Any
@@ -23,8 +24,6 @@ def abbreviate_home(path: str) -> str:
 
 def read_password() -> str:
     """Read a password from stdin without echoing it."""
-    import getpass
-
     return getpass.getpass("CoBirb password: ")
 
 

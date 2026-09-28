@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from dataclasses import dataclass, field
 
 MODE_ASK = "ask"  # sandboxed, and still asked about
@@ -207,8 +208,6 @@ def find_bwrap() -> str | None:
     if path is None:
         return None
     if path not in _PROBED:
-        import subprocess
-
         try:
             probe = subprocess.run(
                 [

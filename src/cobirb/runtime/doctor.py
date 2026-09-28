@@ -22,6 +22,7 @@ different command with a different name, and a much larger promise.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from collections.abc import Callable
@@ -473,8 +474,6 @@ def run(
     raw: dict[str, Any] | None = None
     path = paths.config_path()
     if os.path.isfile(path):
-        import json
-
         try:
             with open(path, encoding="utf-8") as handle:
                 loaded = json.load(handle)

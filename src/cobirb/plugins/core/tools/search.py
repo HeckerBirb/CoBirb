@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import glob as glob_module
 import os
 import re
 from collections.abc import Iterator
@@ -141,8 +142,6 @@ class GlobTool(CobirbTool):
         }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        import glob as glob_module
-
         pattern = self._resolve(arguments["pattern"])
         include_ignored = arguments.get("include_ignored", False)
         try:

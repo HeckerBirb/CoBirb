@@ -3,7 +3,10 @@ helpers more than one tool family uses."""
 
 from __future__ import annotations
 
+import difflib
+import json
 import os
+import tomllib
 from typing import Any, ClassVar
 
 from ....typing.spi import Tool
@@ -108,12 +111,8 @@ def _syntax_note(path: str, content: str) -> str:
         if ext == ".py":
             compile(content, path, "exec", dont_inherit=True)
         elif ext == ".json":
-            import json
-
             json.loads(content)
         elif ext == ".toml":
-            import tomllib
-
             tomllib.loads(content)
         else:
             return ""
@@ -128,8 +127,6 @@ def _syntax_note(path: str, content: str) -> str:
 
 def _unified(path: str, old: str, new: str) -> str:
     """A unified diff of a pending change, for the approval prompt."""
-    import difflib
-
     diff = difflib.unified_diff(
         old.splitlines(keepends=True),
         new.splitlines(keepends=True),

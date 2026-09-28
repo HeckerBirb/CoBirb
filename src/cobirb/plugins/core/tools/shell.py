@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import shlex
+import signal
+import subprocess
 from typing import Any
 
 from ....typing.spi import ToolResult
@@ -70,8 +73,6 @@ def _changes_directory_only(command: str) -> bool:
     because it is deciding what is permitted — which is why the two do not
     share an implementation.
     """
-    import shlex
-
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     try:
@@ -180,8 +181,6 @@ class ShellTool(CobirbTool):
         return ""
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        import subprocess
-
         command = arguments["command"]
         timeout = _shell_timeout(arguments.get("timeout"))
 
@@ -258,9 +257,6 @@ class ShellTool(CobirbTool):
         backgrounds or forks. On Windows there is no process group to signal,
         and killing ``cmd.exe`` alone leaves a compiler or test binary running
         under a Remote Worker Birb, so ``taskkill /T`` takes the whole tree."""
-        import signal
-        import subprocess
-
         try:
             if os.name == "posix":
                 os.killpg(os.getpgid(process.pid), signal.SIGKILL)
