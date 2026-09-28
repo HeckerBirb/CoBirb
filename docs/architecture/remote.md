@@ -8,7 +8,8 @@ user-facing page is [`docs/manual/remote-workers.md`](../manual/remote-workers.m
 - **Two ends, one connection.** `remote/server.py` (`cobirb remote-worker`) serves a TLS WebSocket
   with a self-signed certificate (`certs.py`); `remote/client.py` on the main machine opens it. The
   main machine never listens (invariant 3 names configured remotes as an explicit exception).
-  `protocol.py` lists every message; `websockets`' synchronous API keeps it thread-based like the
+  `protocol.py` lists every message; the server sends no TLS session tickets (`num_tickets = 0`,
+  see `serve_forever`); `websockets`' synchronous API keeps it thread-based like the
   rest of CoBirb.
 - **A pure worker.** The remote reads nothing from its own config. Each job runs in its own process
   (`python -m cobirb.remote.job <workspace>`) with a temporary `COBIRB_HOME` holding the main

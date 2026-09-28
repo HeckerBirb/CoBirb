@@ -177,6 +177,13 @@ class RemoteWorkerServer:
 
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(self._cert, self._key)
+        # No TLS 1.3 session tickets. They arrive after the handshake, so the
+        # reader thread processes them — replacing the connection's session —
+        # while another thread sends, or reads the certificate to pin it. An
+        # OpenSSL connection is not safe for that: it crashed the process
+        # (segfault, abort) or stalled the handshake, about one run in five of
+        # the loopback tests. Nothing here resumes a session, so none is lost.
+        context.num_tickets = 0
         threading.Thread(target=self._watchdog, daemon=True, name="remote-watchdog").start()
         with serve(self._handle, self.host, self.port, ssl=context,
                    max_size=protocol.MAX_MESSAGE_BYTES) as server:
