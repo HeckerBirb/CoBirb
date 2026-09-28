@@ -5,6 +5,7 @@ carry those pages. They stay in `docs/manual/` — where the repository's own
 links and readers expect them — and are copied to `cobirb/manual/` at build
 time. Everything else about the build is in pyproject.toml.
 """
+
 import shutil
 from pathlib import Path
 
