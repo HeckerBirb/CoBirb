@@ -226,7 +226,7 @@ def test_notice_is_plain_text_not_a_panel():
 # Plugins tab view (the TUI's Plugins tab)
 # --------------------------------------------------------------------------- #
 def test_plugins_view_lists_the_slots_and_tools():
-    from cobirb.cli import PluginsSummary, ToolInfo
+    from cobirb.runtime.plugins import PluginsSummary, ToolInfo
 
     summary = PluginsSummary(
         slots={"model": "core", "io": "core", "crypto": "my-crypto"},
@@ -246,7 +246,7 @@ def test_plugins_view_lists_the_slots_and_tools():
 
 
 def test_plugins_view_shows_issues_only_when_there_are_any():
-    from cobirb.cli import PluginsSummary
+    from cobirb.runtime.plugins import PluginsSummary
 
     summary = PluginsSummary(issues={"tool:broken": "it exploded"})
 

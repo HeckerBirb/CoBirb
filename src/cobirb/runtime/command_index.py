@@ -1,8 +1,8 @@
 """Which slash commands exist here, and which one a half-typed ``/`` means.
 
-Paired with ``tui/command_picker.py`` exactly as ``runtime/mentions.py`` is
-paired with ``tui/mention_picker.py``: the listing and the ranking know
-nothing about terminals, so both can be tested without a running app.
+Paired with ``tui/pickers.CommandPicker`` exactly as ``runtime/mentions.py``
+is paired with ``tui/pickers.MentionPicker``: the listing and the ranking
+know nothing about terminals, so both can be tested without a running app.
 
 The built-in commands are passed *in* rather than imported. They live in
 ``tui/slash_commands.py``, and a module under ``runtime/`` reaching into the

@@ -151,6 +151,19 @@ def build_crypto(config: Config, discovered: dict[str, Any]) -> tuple[Any, str |
     return resolve_slot("crypto", discovered, config, AesGcmScryptSessionCrypto)
 
 
+def session_crypto(cwd: str, config: Config | None = None) -> Any:
+    """The crypto backend for opening a session file outside a run — exporting,
+    branching, resuming from the Sessions tab.
+
+    Discovers plugins because the backend may be a plugin's; a selection that
+    cannot be honoured falls back to the core default, as a run does.
+    """
+    config = config or Config()
+    _, discovered, _ = discover_plugins(cwd, config)
+    crypto, _ = build_crypto(config, discovered)
+    return crypto
+
+
 @dataclass
 class ToolInfo:
     """One registered tool, for display (the TUI's Plugins tab)."""

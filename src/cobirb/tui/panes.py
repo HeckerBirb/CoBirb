@@ -25,7 +25,7 @@ from ..plugins.core import render
 from .widgets import TranscriptLog
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, avoids an import cycle
-    from .. import cli
+    from ..runtime.plugins import PluginsSummary
     from .app import CoBirbApp
 
 
@@ -42,7 +42,7 @@ class PluginsPane(Vertical):
         with Horizontal(id="plugins-actions"):
             yield Button("Refresh", id="plugins-refresh")
 
-    def render_summary(self, summary: cli.PluginsSummary) -> None:
+    def render_summary(self, summary: PluginsSummary) -> None:
         log = self.query_one("#plugins-log", RichLog)
         log.clear()
         log.write(render.build_plugins_view(summary))

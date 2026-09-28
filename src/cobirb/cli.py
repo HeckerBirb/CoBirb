@@ -29,17 +29,14 @@ from .flock.run import Asker, run_flock_session
 from .help_text import HELP_TEXT, HELP_TOPICS
 from .orchestrator import REPLY_LABEL, RunStop, render_through
 from .plugins.core import TerminalIO, render
-from .runtime import doctor, plugins, sessions, wiring
+from .runtime import doctor, sessions, wiring
 from .runtime.bootstrap import ensure_home
 from .runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
 from .runtime.export import write_export
 from .runtime.headless import EXIT_DENIED, EXIT_ERROR, EXIT_OK, HeadlessIO, HeadlessResult, describe_context
 from .runtime.models import describe_roles
 from .runtime.plugin_install import PluginInstallError, install_plugin, list_installed, remove_plugin
-
-# Re-exported, not used here: tui.panes annotates with PluginsSummary and
-# test_render imports both through this module.
-from .runtime.plugins import PluginsSummary, ToolInfo, describe_plugins  # noqa: F401
+from .runtime.plugins import describe_plugins, session_crypto
 from .runtime.system_prompt import build_system_prompt
 from .runtime.upgrade import UpgradeError, upgrade
 from .session import SessionManager, fork_session
@@ -68,6 +65,16 @@ def _resolve_plan_mode(cli_value: str | None, config: Config) -> bool:
 
 def _render(text: str) -> None:
     print(text)
+
+
+def _could_not_open(session_path: str, exc: Exception) -> int:
+    """Say on stderr why a session file would not open, and fail.
+
+    Chiefly a wrong password: an unhandled traceback is a terrible way to be
+    told about the commonest mistake there is.
+    """
+    print(f"cobirb: could not open {session_path} — {sessions.session_open_error(exc)}", file=sys.stderr)
+    return EXIT_ERROR
 
 
 def _render_user_prompt(prompt: str) -> None:
@@ -142,7 +149,11 @@ def _run_one_shot(
         # Chiefly a session that wouldn't decrypt. An unhandled traceback is
         # a terrible way to be told about the commonest cause of that — a
         # mistyped password.
-        message = f"could not open {session_path} — {sessions.session_open_error(exc)}"
+        message = (
+            f"could not open {session_path} — {sessions.session_open_error(exc)}"
+            if session_path is not None
+            else f"could not start — {exc}"
+        )
         if as_json:
             report.error = message
             print(report.to_json())
@@ -250,16 +261,9 @@ def _run_export(destination: str, session_path: str | None, password: str | None
         print("cobirb: --export needs --session to say which one.", file=sys.stderr)
         return EXIT_ERROR
     try:
-        config = Config()
-        _, discovered, _ = plugins.discover_plugins(cwd, config)
-        crypto, _ = plugins.build_crypto(config, discovered)
-        manager = SessionManager.load(session_path, crypto, password, cwd)
+        manager = SessionManager.load(session_path, session_crypto(cwd), password, cwd)
     except Exception as exc:  # noqa: BLE001 - a wrong password is routine
-        print(
-            f"cobirb: could not open {session_path} — {sessions.session_open_error(exc)}",
-            file=sys.stderr,
-        )
-        return EXIT_ERROR
+        return _could_not_open(session_path, exc)
 
     written = write_export(manager.session, destination, title=os.path.basename(session_path))
     print(f"Exported {len(manager.session.turns)} turn(s) to {written}")
@@ -279,19 +283,14 @@ def _run_branch(
         print("cobirb: --branch needs --session to say which one to fork.", file=sys.stderr)
         return EXIT_ERROR
     try:
-        config = Config()
-        _, discovered, _ = plugins.discover_plugins(cwd, config)
-        crypto, _ = plugins.build_crypto(config, discovered)
-        branch = fork_session(session_path, crypto, password, up_to_turn=up_to_turn, out_path=destination)
+        branch = fork_session(
+            session_path, session_crypto(cwd), password, up_to_turn=up_to_turn, out_path=destination
+        )
     except ValueError as exc:
         print(f"cobirb: {exc}", file=sys.stderr)
         return EXIT_ERROR
     except Exception as exc:  # noqa: BLE001 - a wrong password is routine
-        print(
-            f"cobirb: could not open {session_path} — {sessions.session_open_error(exc)}",
-            file=sys.stderr,
-        )
-        return EXIT_ERROR
+        return _could_not_open(session_path, exc)
 
     print(
         f"Branched {len(branch.session.turns)} turn(s) from {session_path} to {branch.path}.\n"
@@ -325,7 +324,7 @@ def _run_tui(
             "Install it with 'pip install textual', or use one-shot mode: cobirb -p \"...\"",
             file=sys.stderr,
         )
-        return 1
+        return EXIT_ERROR
 
     app = CoBirbApp(
         system=system,
@@ -361,11 +360,7 @@ def _run_tui(
                 io_factory=lambda: app.io_bridge,
             )
         except Exception as exc:  # noqa: BLE001 - a bad password is routine, not a crash
-            print(
-                f"cobirb: could not open {session_path} — {sessions.session_open_error(exc)}",
-                file=sys.stderr,
-            )
-            return 1
+            return _could_not_open(session_path, exc)
 
     app.run()
 
@@ -376,7 +371,7 @@ def _run_tui(
     # the hint has to name the file that was actually written.
     if app.session_path is not None and os.path.isfile(app.session_path):
         print(sessions.resume_hint(app.session_path))
-    return 0
+    return EXIT_OK
 
 
 def _run_flock(objective: str, cwd: str, model_name: str | None, *, headless: bool) -> int:
@@ -576,8 +571,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="'setup' to choose your model server and model, "
         "'help' for the overview, 'models' for how each role resolves, "
         "'commands' for the custom commands available here, 'doctor' to check "
-        "a piece of work between several agents, 'plugin' to install/list/remove "
-        "a local plugin (see 'cobirb help flock'/'cobirb help plugin').",
+        "the install, 'flock' to divide a piece of work between several agents, "
+        "'plugin' to install/list/remove a local plugin, 'remote-worker' to serve "
+        "as a Remote Worker Birb (see 'cobirb help flock'/'cobirb help plugin').",
     )
     parser.add_argument(
         "topic",
@@ -748,9 +744,49 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_help(topic: str | None) -> int:
+    """``cobirb help [topic]`` — the overview, or one page of the manual."""
+    if topic and topic not in HELP_TOPICS:
+        print(
+            f"cobirb: no help topic {topic!r}. Topics: {', '.join(HELP_TOPICS.pages())}.",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    if not topic:
+        print(HELP_TEXT)
+    elif sys.stdout.isatty():
+        # A manual page is markdown; on a terminal it reads better rendered.
+        # Piped, it stays plain, so it greps and pages like any text.
+        from rich.console import Console
+        from rich.markdown import Markdown
+
+        Console().print(Markdown(HELP_TOPICS[topic]))
+    else:
+        print(HELP_TOPICS[topic])
+    return EXIT_OK
+
+
+def _misplaced_flag(args: argparse.Namespace) -> str:
+    """A flag given without the mode it belongs to, named; ``""`` if none.
+
+    Said rather than ignored: a flag someone typed that quietly does nothing
+    is the same failure as ``-w`` once being inert without ``--session``,
+    which this project has already fixed once (see sessions.resolve_session).
+    """
+    if args.listen or args.verbose:
+        flag = "--listen" if args.listen else "--verbose"
+        return f"{flag} only means something with 'remote-worker'."
+    if args.force:
+        return "--force only means something with --upgrade."
+    if args.branch_at is not None and not args.branch:
+        return "--branch-at only means something with --branch."
+    if args.autopilot and args.prompt is None and not (args.export or args.branch):
+        return "--autopilot goes with -p. In the interactive app, use /autopilot."
+    return ""
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
+    args = _build_parser().parse_args(argv)
     # Resolved once, to an absolute path, rather than passing the literal
     # string "." to every call site below. A bare "." reaches the status bar
     # verbatim (`CoBirb · model · .`) — technically correct, since every path
@@ -758,26 +794,9 @@ def main(argv: list[str] | None = None) -> int:
     # bug rather than as "here".
     cwd = os.path.abspath(args.cwd) if args.cwd else os.getcwd()
 
+    # ---- Modes that need no config of their own ------------------------- #
     if args.subcommand == "help":
-        if args.topic and args.topic not in HELP_TOPICS:
-            print(
-                f"cobirb: no help topic {args.topic!r}. Topics: {', '.join(HELP_TOPICS.pages())}.",
-                file=sys.stderr,
-            )
-            return EXIT_ERROR
-        if not args.topic:
-            print(HELP_TEXT)
-        elif sys.stdout.isatty():
-            # A manual page is markdown; on a terminal it reads better rendered.
-            # Piped, it stays plain, so it greps and pages like any text.
-            from rich.console import Console
-            from rich.markdown import Markdown
-
-            Console().print(Markdown(HELP_TOPICS[args.topic]))
-        else:
-            print(HELP_TOPICS[args.topic])
-        return 0
-
+        return _run_help(args.topic)
     if args.upgrade is not None:
         return _run_upgrade(args.upgrade or None, force=args.force)
     if args.doctor or args.subcommand == "doctor":
@@ -792,14 +811,9 @@ def main(argv: list[str] | None = None) -> int:
         from .remote.server import main as serve_remote
 
         return serve_remote(args.listen or "0.0.0.0:8443", verbose=args.verbose)
-    if args.listen or args.verbose:
-        flag = "--listen" if args.listen else "--verbose"
-        print(f"cobirb: {flag} only means something with 'remote-worker'.", file=sys.stderr)
-        return EXIT_ERROR
-    if args.force:
-        # Said rather than ignored — see --branch-at's own check below for
-        # why a flag that would otherwise silently do nothing gets a line.
-        print("cobirb: --force only means something with --upgrade.", file=sys.stderr)
+    misplaced = _misplaced_flag(args)
+    if misplaced:
+        print(f"cobirb: {misplaced}", file=sys.stderr)
         return EXIT_ERROR
 
     # Before the first Config() read, so a new user's very first run leaves a
@@ -809,9 +823,9 @@ def main(argv: list[str] | None = None) -> int:
     seeded = ensure_home()
     if seeded:
         print(f"cobirb: created a starter config at {seeded}", file=sys.stderr)
-
     config = Config()
 
+    # ---- Subcommands ---------------------------------------------------- #
     if args.subcommand == "models":
         return _run_models(config, args.model)
     if args.subcommand == "commands":
@@ -819,10 +833,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
     if args.subcommand == "flock":
         if not args.prompt:
-            print(
-                'cobirb flock needs an objective: cobirb flock -p "add CSV export"',
-                file=sys.stderr,
-            )
+            print('cobirb flock needs an objective: cobirb flock -p "add CSV export"', file=sys.stderr)
             return EXIT_ERROR
         return _run_flock(args.prompt, cwd, args.model, headless=args.headless)
     if args.subcommand == "plugin":
@@ -830,11 +841,7 @@ def main(argv: list[str] | None = None) -> int:
         # positional slot; see _build_parser.
         return _run_plugin(args.topic, args.target, replace=args.replace, cwd=cwd)
 
-    allow_overrides = wiring.parse_allow_tools(args.allow_tool)
-    harness = _resolve_harness_prompt(args.system_prompt, config)
-    system = build_system_prompt(harness=harness)
-    plan_mode = _resolve_plan_mode(args.plan_mode, config)
-
+    # ---- A session: export, branch, one-shot or interactive ------------- #
     # Either flag alone is enough to mean "this is a session": a path always
     # needs a password to encrypt to, and a password with no path gets a new
     # session under ~/.cobirb/sessions rather than being silently ignored.
@@ -845,52 +852,19 @@ def main(argv: list[str] | None = None) -> int:
     except sessions.NoSessionToContinue as exc:
         print(f"cobirb: {exc}", file=sys.stderr)
         return EXIT_ERROR
-
     if args.export:
         return _run_export(args.export, session_path, password, cwd)
-
     if args.branch:
         return _run_branch(args.branch, args.branch_at, session_path, password, cwd)
 
-    # Said rather than ignored: a flag someone typed that quietly does nothing
-    # is the same failure as `-w` once being inert without `--session`, which
-    # this project has already fixed once (see sessions.resolve_session).
-    if args.branch_at is not None:
-        print("cobirb: --branch-at only means something with --branch.", file=sys.stderr)
-        return EXIT_ERROR
-    if args.autopilot and args.prompt is None:
-        print("cobirb: --autopilot goes with -p. In the interactive app, use /autopilot.", file=sys.stderr)
-        return EXIT_ERROR
+    allow_overrides = wiring.parse_allow_tools(args.allow_tool)
+    system = build_system_prompt(harness=_resolve_harness_prompt(args.system_prompt, config))
+    plan_mode = _resolve_plan_mode(args.plan_mode, config)
+    if args.prompt is None:
+        return _run_tui(system, allow_overrides, session_path, password, cwd, args.model, plan_mode)
 
-    if args.prompt is not None:
-        status = _run_one_shot(
-            expand_custom_command(args.prompt, cwd),
-            system,
-            allow_overrides,
-            session_path,
-            password,
-            cwd,
-            args.model,
-            plan_mode,
-            headless=args.headless,
-            output=args.output,
-            autopilot=args.autopilot,
-        )
-        # Only on success: the hint is about a session this run actually
-        # wrote to. Printing it after a failure ("could not open …" followed
-        # by "Session saved") claims something that didn't happen.
-        if (
-            status == 0
-            and args.output != "json"
-            and session_path is not None
-            and os.path.isfile(session_path)
-        ):
-            # stderr, not stdout: one-shot mode is meant to pipe, and this
-            # hint is for the human, not for whatever is reading the output.
-            print(sessions.resume_hint(session_path), file=sys.stderr)
-        return status
-
-    return _run_tui(
+    status = _run_one_shot(
+        expand_custom_command(args.prompt, cwd),
         system,
         allow_overrides,
         session_path,
@@ -898,7 +872,17 @@ def main(argv: list[str] | None = None) -> int:
         cwd,
         args.model,
         plan_mode,
+        headless=args.headless,
+        output=args.output,
+        autopilot=args.autopilot,
     )
+    # Only on success: the hint is about a session this run actually wrote
+    # to. Printing it after a failure ("could not open …" followed by
+    # "Session saved") claims something that didn't happen. On stderr, not
+    # stdout: one-shot mode is meant to pipe, and this hint is for the human.
+    if status == EXIT_OK and args.output != "json" and session_path and os.path.isfile(session_path):
+        print(sessions.resume_hint(session_path), file=sys.stderr)
+    return status
 
 
 if __name__ == "__main__":

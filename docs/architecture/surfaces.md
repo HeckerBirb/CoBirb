@@ -30,9 +30,11 @@ something was refused — headless only, since a person who answered "no" got wh
   `/clear`, `/undo`, `/export`, `/diff`, `/commands`, `/flock`, `/charter`, `/memories`, `/remember`,
   `/image`; `?` is `/help`. Anything else starting with `/` is tried as a custom command, then sent as
   typed.
-- **Pickers.** `@path` opens a five-row fuzzy picker and sends the file with the message (expanded for
-  the model, never in the transcript). `/` opens the command picker (descriptions from each handler's
-  docstring; `_COMMAND_IN_PROGRESS` matches the whole message, so a slash mid-sentence is prose).
+- **Pickers** (`tui/pickers.py`: a `Picker` base with the rows and selection, and a subclass per kind
+  that ranks and draws). `@path` opens a five-row fuzzy picker and sends the file with the message
+  (expanded for the model, never in the transcript). `/` opens the command picker (descriptions from
+  each handler's docstring; `_COMMAND_IN_PROGRESS` matches the whole message, so a slash mid-sentence
+  is prose).
 - **Keys**: `f1`, `f2`, `f3` (auto-pilot; two bindings on one key, `check_action` shows the one
   matching the state, so the footer label is the indicator), `ctrl+q`, `ctrl+c` (copy, else cancel),
   `up`/`down` history.

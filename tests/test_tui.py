@@ -39,9 +39,8 @@ from cobirb.runtime import plugins, wiring
 from cobirb.tui import slash_commands
 from cobirb.tui.app import CoBirbApp
 from cobirb.tui.attachments import split_argument as _split_image_argument
-from cobirb.tui.command_picker import CommandPicker
-from cobirb.tui.mention_picker import MentionPicker
 from cobirb.tui.panes import FlockPane, PluginsPane, SessionsPane, WorkerRequest
+from cobirb.tui.pickers import CommandPicker, MentionPicker
 from cobirb.tui.screens import (
     ApprovalModal,
     HelpModal,

@@ -22,8 +22,8 @@ from rich.segment import Segment
 from rich.syntax import Syntax
 from rich.table import Table
 
-if TYPE_CHECKING:  # pragma: no cover - typing only, avoids a cli.py import cycle
-    from ...cli import PluginsSummary
+if TYPE_CHECKING:  # pragma: no cover - typing only; runtime imports this module
+    from ...runtime.plugins import PluginsSummary
 from rich.text import Text
 
 # The "Noah" palette (v0.9.0) — the parrot's own colours. Defined once here

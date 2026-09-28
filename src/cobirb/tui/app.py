@@ -50,11 +50,10 @@ from ..runtime.custom_commands import expand_custom_command
 from ..typing.spi import DECISION_DENY
 from . import slash_commands
 from .attachments import PendingAttachments
-from .command_picker import CommandPicker
 from .flock_bridge import TuiAsker, WorkerPaneIO
 from .io_bridge import TuiIO
-from .mention_picker import MentionPicker
 from .panes import FlockPane, PluginsPane, SessionsPane
+from .pickers import CommandPicker, MentionPicker
 from .screens import (
     ApprovalModal,
     CharterModal,
@@ -717,16 +716,7 @@ class CoBirbApp(App[None]):
         caught here and shown in the transcript the same way.
         """
         try:
-            if self.orchestrator is None:
-                self.orchestrator = wiring.build_orchestrator(
-                    self.cwd,
-                    self.allow_overrides,
-                    self.session_path,
-                    self.password,
-                    self.model_name,
-                    io_factory=lambda: self.io_bridge,
-                )
-                self._arm_charter_tool()
+            self.ensure_orchestrator()
             # Named `turn_result`, not `session`: this module also imports
             # `cobirb.session` (the Sessions-tab code below needs it), and a
             # same-named local here would shadow it for the rest of this
@@ -769,9 +759,12 @@ class CoBirbApp(App[None]):
         self.query_one(StatusBar).checklist = progress
 
     def ensure_orchestrator(self) -> Orchestrator:
-        """The session's orchestrator, built now if no turn has built it yet —
-        for a command like /autopilot that has to act on it before the first
-        message. The same construction the first turn would do."""
+        """The session's orchestrator, built on first use and reused after.
+
+        The one place it is built — by the first turn, the first flock, or a
+        command like /autopilot that acts on it before any message. Reusing
+        it is what keeps "always allow" approvals for the whole session.
+        """
         if self.orchestrator is None:
             self.orchestrator = wiring.build_orchestrator(
                 self.cwd,
@@ -1032,18 +1025,8 @@ class CoBirbApp(App[None]):
         from ..flock.run import run_flock_session
 
         try:
-            if self.orchestrator is None:
-                self.orchestrator = wiring.build_orchestrator(
-                    self.cwd,
-                    self.allow_overrides,
-                    self.session_path,
-                    self.password,
-                    self.model_name,
-                    io_factory=lambda: TuiIO(self),
-                )
-                self._arm_charter_tool()
             run = run_flock_session(
-                self.orchestrator,
+                self.ensure_orchestrator(),
                 objective,
                 self.cwd,
                 ask=TuiAsker(self),
@@ -1325,10 +1308,7 @@ class CoBirbApp(App[None]):
             return
         self.call_from_thread(self.query_one(SessionsPane).set_status, "Branching…")
         try:
-            config = Config()
-            _, discovered, _ = plugins.discover_plugins(self.cwd, config)
-            crypto, _ = plugins.build_crypto(config, discovered)
-            branch = session.fork_session(path, crypto, password)
+            branch = session.fork_session(path, plugins.session_crypto(self.cwd), password)
         except Exception as exc:  # noqa: BLE001 - wrong password/corruption is routine, not fatal
             self.call_from_thread(
                 self.query_one(SessionsPane).set_status, f"Could not branch that session — {exc}"
@@ -1347,10 +1327,7 @@ class CoBirbApp(App[None]):
             return
         self.call_from_thread(self.query_one(SessionsPane).set_status, "Unlocking…")
         try:
-            config = Config()
-            _, discovered, _ = plugins.discover_plugins(self.cwd, config)
-            crypto, _ = plugins.build_crypto(config, discovered)
-            manager = session.SessionManager.load(path, crypto, password, self.cwd)
+            manager = session.SessionManager.load(path, plugins.session_crypto(self.cwd), password, self.cwd)
         except Exception as exc:  # noqa: BLE001 - wrong password/corruption is routine, not fatal
             self.call_from_thread(
                 self.query_one(SessionsPane).set_status, f"Could not open that session — {exc}"
