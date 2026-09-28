@@ -86,6 +86,11 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _utc_now() -> str:
+    """Now, as the ISO-8601 UTC timestamp every turn and session carries."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
 def default_sessions_dir() -> str:
     """Where interactive mode looks for and offers to save session files.
 
@@ -174,7 +179,7 @@ class Turn:
     # has no business making. Deliberately *not* covered by digest() below —
     # see that method's docstring for why.
     images: list[dict[str, str]] | None = None
-    ts: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    ts: str = field(default_factory=_utc_now)
     _stored_hash: str | None = None
 
     @property
@@ -205,7 +210,7 @@ class Turn:
             tool_use=data.get("tool_use"),
             phase=data.get("phase"),
             images=data.get("images"),
-            ts=data.get("ts", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+            ts=data.get("ts", _utc_now()),
             _stored_hash=data.get("hash"),
         )
 
@@ -241,7 +246,7 @@ class Session:
     """An encrypted, persisted conversation."""
 
     schema: int = SCHEMA_VERSION
-    created_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    created_at: str = field(default_factory=_utc_now)
     working_dir: str = "."
     turns: list[Turn] = field(default_factory=list)
     summary: str | None = None
@@ -318,7 +323,7 @@ class Session:
         data = migrate(data)
         return cls(
             schema=data.get("schema", SCHEMA_VERSION),
-            created_at=data.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            created_at=data.get("created_at") or _utc_now(),
             working_dir=data.get("working_dir", "."),
             turns=[Turn.from_dict(t) for t in data.get("turns", [])],
             summary=data.get("summary"),
@@ -362,7 +367,7 @@ class SessionManager:
     ) -> SessionManager:
         manager = cls(path, crypto, working_dir, password)
         manager.session = Session(
-            created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            created_at=_utc_now(),
             working_dir=working_dir,
         )
         return manager
