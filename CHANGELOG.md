@@ -3,7 +3,7 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
-## [Unreleased]
+## [0.46.2]
 
 - **A charter proposed in the chat now uses your Remote Worker Birbs.** It used to skip them: a
   ticket for another OS ran here, and the remote sat idle. `add_worker` and the TOML take a
