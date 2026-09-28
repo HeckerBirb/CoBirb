@@ -3,6 +3,24 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
+## [Unreleased]
+
+- **`cobirb --help` describes every subcommand.** The line for `doctor` ran into the one for
+  `flock`, and `remote-worker` was missing.
+- **A misplaced flag is reported whatever else is on the line.** `--branch-at` without `--branch`,
+  and `--autopilot` without `-p`, used to be ignored in silence after a subcommand such as
+  `cobirb models`.
+- **One-shot mode says "could not start" when wiring fails outside a session**, rather than
+  "could not open None".
+- **The config written on first run no longer uses `default_model`**, a deprecated key `cobirb
+  doctor` warned about on every new install; the model goes under `models.default.name`.
+- For contributors: **`ruff check` and `ruff format` are the project's linter and formatter**, run by
+  CI (settings in `pyproject.toml`; `.git-blame-ignore-revs` skips the reformatting commit). Large
+  modules were split where it made them easier to find your way around — `plugins/core/tools/` is a
+  package, one module per tool family; `flock/tickets.py` holds ticket parsing and checking;
+  `tui/pickers.py` both pickers — and dead code was removed, among it the validate phase's unused
+  hooks and a `PermissionError` nothing raised. No behaviour changed beyond the lines above.
+
 ## [0.46.6]
 
 - **A ticket for a Windows remote is built there with its own compiler**, not with the MinGW
