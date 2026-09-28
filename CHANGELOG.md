@@ -3,7 +3,7 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
-## [Unreleased]
+## [0.46.3]
 
 - **A Remote Worker Birb connection could crash CoBirb.** The remote sent TLS 1.3 session tickets
   that one thread processed while another used the same connection, which crashed the process
