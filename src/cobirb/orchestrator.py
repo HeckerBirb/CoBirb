@@ -677,19 +677,14 @@ class Orchestrator:
                 failures = failures + len(outcomes) if failed else 0
 
                 if repeats >= _REPEAT_STOP_AT:
-                    self.last_stop = RunStop(
-                        STOP_NO_PROGRESS,
+                    return self._no_progress(
                         max_turns,
                         f"the model made the same {tool_calls[0].name} call {repeats} times in a row.",
                     )
-                    return "", False
                 if failures >= _FAILURE_STOP_AT:
-                    self.last_stop = RunStop(
-                        STOP_NO_PROGRESS,
-                        max_turns,
-                        f"{failures} tool calls in a row failed or were refused.",
+                    return self._no_progress(
+                        max_turns, f"{failures} tool calls in a row failed or were refused."
                     )
-                    return "", False
                 if repeats >= _REPEAT_NOTE_AT and session.turns and session.turns[-1].role == "tool":
                     session.turns[-1].content += _REPEAT_NOTE
                 continue
@@ -705,12 +700,9 @@ class Orchestrator:
                 session.add(Turn(role="user", content=_malformed_message(problem), phase=phase))
                 failures += 1
                 if failures >= _FAILURE_STOP_AT:
-                    self.last_stop = RunStop(
-                        STOP_NO_PROGRESS,
-                        max_turns,
-                        f"the model's last {failures} tool calls could not be read or failed.",
+                    return self._no_progress(
+                        max_turns, f"the model's last {failures} tool calls could not be read or failed."
                     )
-                    return "", False
                 continue
 
             # No tool calls: this is the model's final answer for this turn.
@@ -721,6 +713,11 @@ class Orchestrator:
         # No reply is invented to stand in for the missing answer: the summary
         # stays empty, and the stop is reported as a fact about the run.
         self.last_stop = RunStop(STOP_TURN_LIMIT, max_turns)
+        return "", False
+
+    def _no_progress(self, max_turns: int, detail: str) -> tuple[str, bool]:
+        """End the loop on a brake: no answer, and ``last_stop`` says why."""
+        self.last_stop = RunStop(STOP_NO_PROGRESS, max_turns, detail)
         return "", False
 
     def _malformed_tool_call(self, tools: list[cobirb_typing.Tool] | None) -> str:
@@ -1086,13 +1083,25 @@ class Orchestrator:
         # and watched it vanish.
         return decision, instruction if decision == cobirb_typing.DECISION_DENY else ""
 
+    def _answer(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        result: cobirb_typing.ToolResult,
+        phase: str | None,
+    ) -> None:
+        """Record a tool call's result in the session and show it.
+
+        Tagged with the call it answers, so a provider building a proper
+        messages array can label the "tool" message accordingly.
+        """
+        tool_use = [{"name": tool_name, "arguments": arguments}]
+        self.session.session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
+        self._render_tool_call(tool_name, arguments, result)
+
     def _execute_tool(self, call: cobirb_typing.ToolCall, phase: str | None = None) -> None:
         tool_name = call.name
         arguments = call.arguments
-        session = self.session.session
-        # Tags this result with the call it answers, so a provider building
-        # a proper messages array can label the "tool" message accordingly.
-        tool_use = [{"name": tool_name, "arguments": arguments}]
 
         # Existence before permission. Asking a human to approve a tool that
         # does not exist is a nonsense question, and the model gets "permission
@@ -1103,8 +1112,7 @@ class Orchestrator:
         if tool is None:
             self._record_call(tool_name, ok=False, denied=False)
             result = cobirb_typing.ToolResult(ok=False, content=self._unknown_tool_message(tool_name))
-            session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
-            self._render_tool_call(tool_name, arguments, result)
+            self._answer(tool_name, arguments, result, phase)
             return
 
         # The user's own rules, before the user's own judgement. A hook that
@@ -1119,8 +1127,7 @@ class Orchestrator:
                 content=f"Blocked by a before_tool hook: {gate.reason}",
                 error="blocked_by_hook",
             )
-            session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
-            self._render_tool_call(tool_name, arguments, result)
+            self._answer(tool_name, arguments, result, phase)
             return
 
         # Not already permitted: ask the user rather than silently denying,
@@ -1140,8 +1147,7 @@ class Orchestrator:
                     if self.autopilot
                     else _denial_message(tool_name, instruction),
                 )
-                session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
-                self._render_tool_call(tool_name, arguments, result)
+                self._answer(tool_name, arguments, result, phase)
                 return
             if decision == cobirb_typing.DECISION_ALWAYS:
                 # What "always" widens to is the policy's decision, not the
@@ -1167,13 +1173,11 @@ class Orchestrator:
             # tearing down the whole run over a recoverable mistake.
             self._record_call(tool_name, ok=False, denied=False)
             result = cobirb_typing.ToolResult(ok=False, content=_tool_failure_message(tool_name, tool, exc))
-            session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
-            self._render_tool_call(tool_name, arguments, result)
+            self._answer(tool_name, arguments, result, phase)
             return
         result = self._redacted(result)
         self._record_call(tool_name, ok=result.ok, denied=False)
-        session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
-        self._render_tool_call(tool_name, arguments, result)
+        self._answer(tool_name, arguments, result, phase)
         # Observation only: an after_tool hook has nothing left to prevent, so
         # its exit code is logged rather than acted on. It gets whether the
         # call succeeded, not the result body — a formatter needs to know a
