@@ -110,6 +110,8 @@ def run_verification(
             shell=True,
             cwd=cwd,
             text=True,
+            # See the shell tool: a check never gets CoBirb's stdin.
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=timeout,
             start_new_session=True,
@@ -131,7 +133,7 @@ def _run_windows(command: str, cwd: str, timeout: int) -> VerifyResult:
     command is started in its own process group and ``taskkill /T`` ends it.
     """
     try:
-        process = subprocess.Popen(command, shell=True, cwd=cwd, text=True,
+        process = subprocess.Popen(command, shell=True, cwd=cwd, text=True, stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     except Exception as exc:  # noqa: BLE001 - a broken command is not a crash
@@ -139,7 +141,8 @@ def _run_windows(command: str, cwd: str, timeout: int) -> VerifyResult:
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True, check=False)
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], stdin=subprocess.DEVNULL,
+                       capture_output=True, check=False)
         process.communicate()
         return VerifyResult(command, ok=False, output="", timed_out=True)
     return VerifyResult(command, ok=process.returncode == 0, output=_tail(f"{stdout}{stderr}"))

@@ -318,7 +318,7 @@ class TreeCheckpoints:
             "-c", "core.autocrlf=false", "-c", "core.quotepath=false",
             *args,
         ]
-        done = subprocess.run(command, cwd=self.cwd, capture_output=True, text=True,
+        done = subprocess.run(command, cwd=self.cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                               env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_PAGER": "cat"})
         if check and done.returncode != 0:
             raise RuntimeError(done.stderr.strip() or f"git {args[0]} failed")

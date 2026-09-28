@@ -78,7 +78,9 @@ user-facing page is [`docs/manual/remote-workers.md`](../manual/remote-workers.m
 
 ## Windows
 
-The worker side runs on Windows: `policy._tokenize` reads commands with non-POSIX `shlex` there
-(backslash paths, `.\test.exe`, quotes taken off), the shell tool and `run_verification` start
+The worker side runs on Windows. Every command CoBirb starts gets `stdin=DEVNULL`: the job reads
+its orders from a stdin pipe, and a child holding it blocks at start-up on Windows.
+`policy._tokenize` reads commands with non-POSIX `shlex` there (backslash paths, `.\test.exe`,
+quotes taken off), the shell tool and `run_verification` start
 commands in their own process group and end the whole tree with `taskkill /T`, and the job's shell is
 `cmd.exe`. There is no sandbox on Windows; the machine itself is the containment.

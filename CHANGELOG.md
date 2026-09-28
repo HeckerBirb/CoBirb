@@ -3,6 +3,13 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
+## [Unreleased]
+
+- **Commands no longer hang on a Windows Remote Worker Birb.** A command the worker ran — even
+  `python -c "print(1)"` — sat until its timeout, because it inherited the pipe the worker job reads
+  its orders from. Shell commands, checks and CoBirb's own git calls now get no stdin at all.
+  Update CoBirb on the remote machine.
+
 ## [0.46.3]
 
 - **A Remote Worker Birb connection could crash CoBirb.** The remote sent TLS 1.3 session tickets

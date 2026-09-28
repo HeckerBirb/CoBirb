@@ -1269,6 +1269,12 @@ class ShellTool(CobirbTool):
                 shell=not contained,
                 cwd=cwd,
                 text=True,
+                # Never CoBirb's own stdin. A Remote Worker Birb's job reads its
+                # orders from a pipe on stdin, and on Windows a child holding
+                # that pipe blocks at start-up while the job waits on it: every
+                # `python -c "print(1)"` hung until its timeout. A command has
+                # no one to type to here anyway.
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=(os.name == "posix"),
@@ -1325,7 +1331,7 @@ class ShellTool(CobirbTool):
                 os.killpg(os.getpgid(process.pid), signal.SIGKILL)
             else:
                 subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
-                               capture_output=True, check=False)
+                               stdin=subprocess.DEVNULL, capture_output=True, check=False)
                 process.kill()
         except (ProcessLookupError, OSError):
             pass  # already gone — nothing to do

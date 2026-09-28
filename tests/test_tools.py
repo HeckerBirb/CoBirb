@@ -1153,3 +1153,34 @@ def test_a_deleted_file_is_scoped_like_any_write_and_comes_back_on_undo(tmp_path
     assert not (tmp_path / "old.py").exists()
     checkpoints.undo_last()
     assert (tmp_path / "old.py").read_text() == "x = 1\n"
+
+
+@pytest.mark.parametrize("runner", [
+    "ShellTool(cwd).execute({'command': command}).content",
+    "run_verification(command, cwd).output",
+])
+def test_a_command_never_gets_cobirbs_own_stdin(tmp_path, runner):
+    """A Remote Worker Birb's job reads its orders from a pipe on stdin; a
+    command it started once held that pipe too, and hung until its timeout."""
+    import subprocess
+    import sys
+    import textwrap
+
+    script = textwrap.dedent(f"""
+        import sys
+        from cobirb.plugins.core.tools import ShellTool
+        from cobirb.runtime.verify import run_verification
+        cwd = {str(tmp_path)!r}
+        command = '"{sys.executable}" -c "import sys; print(repr(sys.stdin.read()))"'
+        print({runner})
+    """)
+    # Its stdin stays open and empty — as a remote job's does between orders.
+    parent = subprocess.Popen([sys.executable, "-c", script], stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, text=True)
+    out: list[str] = []
+    reader = threading.Thread(target=lambda: out.append(parent.stdout.read()), daemon=True)
+    reader.start()
+    reader.join(30)
+    parent.kill()
+
+    assert out and "''" in out[0]
