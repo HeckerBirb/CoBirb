@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from conftest import write_config
 
-from cobirb.flock.charter import parse_charter
+from cobirb.flock.charter import WorkerBrief, parse_charter
 from cobirb.flock.worker import WorkerReport, compose_brief, run_worker
 from cobirb.typing.spi import ToolCall
 
@@ -501,7 +503,7 @@ def test_a_refusing_front_end_says_no_and_still_shows_the_work():
     io = RefusingIO(_Pane())
 
     assert io.confirm("run ls?") is False
-    assert getattr(io, "confirm_request", None) is None
+    assert io.confirm_request(None).decision == "deny"  # the pane would raise if asked
     io.render("working")
     assert shown == ["working"]
 
@@ -525,4 +527,33 @@ def test_a_refusing_front_end_follows_autopilot_switched_on_and_off_mid_run():
 
     autopilot[0] = True
     assert io.confirm("run ls?") is False
-    assert getattr(io, "confirm_request", None) is None
+    assert io.confirm_request(None).decision == "deny"
+
+
+@pytest.mark.parametrize("accept, says", [
+    ("python -m pytest tests/test_windows.py -q", ["python", "pipe"]),
+    ("pytest -q && ruff check .", ["pytest, ruff"]),
+    ("", ["no commands"]),
+])
+def test_a_refusal_under_autopilot_says_what_the_worker_may_run(accept, says):
+    from cobirb.flock.worker import RefusingIO, refusal_note
+
+    worker = WorkerBrief(id="w", brief="b", writes=("a.py",), accept=accept)
+    outcome = RefusingIO(object(), why=refusal_note(worker)).confirm_request(None)
+
+    assert outcome.decision == "deny"
+    assert all(part in outcome.instruction for part in says)
+
+
+@pytest.mark.parametrize("runs_on, present, absent", [
+    ("Windows", ["Windows", "cmd.exe", "a.py, shared.py", "not on this machine"], ["read anything else"]),
+    ("", ["read anything else"], ["cmd.exe", "not on this machine"]),
+])
+def test_a_remote_worker_is_told_its_machine_and_that_only_its_files_are_there(runs_on, present, absent):
+    from cobirb.flock.worker import compose_brief
+
+    brief = compose_brief(WorkerBrief(id="w", brief="b", writes=("a.py",), reads=("shared.py",),
+                                      runs_on=runs_on), "/work")
+
+    assert all(p in brief for p in present)
+    assert not any(a in brief for a in absent)

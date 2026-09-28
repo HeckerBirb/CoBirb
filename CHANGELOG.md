@@ -3,6 +3,14 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
+## [Unreleased]
+
+- **A Remote Worker Birb is told where it is**: its OS, its shell (`cmd.exe` on Windows), and that
+  only its ticket's files are on that machine. It used to be told it could read the whole project,
+  and went looking for files that were never sent.
+- **Under auto-pilot, a refused command says what is allowed**: the programs the ticket's check
+  names, each on its own. A worker told only "Permission denied" kept piping its check into `head`.
+
 ## [0.46.4]
 
 - **Commands no longer hang on a Windows Remote Worker Birb.** A command the worker ran — even

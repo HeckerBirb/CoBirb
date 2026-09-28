@@ -204,7 +204,8 @@ ticket's stage rewrites them; the cap and the no-progress stop still bound it.
 - A worker ends by calling `report` (`worker.ReportTool`, permitted outright): tests pass, contract
   kept, what is missing and why, any test that contradicts the contract. Kept as
   `WorkerReport.structured`; `report_text()` marks a worker that never called it "unstructured".
-- **Asking.** Under auto-pilot a worker never asks (`RefusingIO`). Otherwise it may ask for what its
+- **Asking.** Under auto-pilot a worker never asks (`RefusingIO`); the refusal tells it which programs
+  it may run, alone (`refusal_note`). Otherwise it may ask for what its
   scope lacks (`WorkerPaneIO.confirm_request`) — **in its own pane, never a modal** (distinct
   positions, nothing focused by default, fail closed with no pane; buttons docked, body scrolls, so a
   tall request cannot push them off screen) — and releases its concurrency slot while it waits.

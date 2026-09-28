@@ -133,6 +133,7 @@ def run(order: dict[str, Any], workspace: str, messages, out) -> None:
     from ..flock.charter import WorkerBrief
     from ..flock.supervisor import Canceller
     from ..flock.worker import run_worker
+    from .osnames import local_os
 
     channel = _Channel(out)
     answers: "dict[int, queue.Queue]" = {}
@@ -182,6 +183,8 @@ def run(order: dict[str, Any], workspace: str, messages, out) -> None:
         reads=tuple(worker_order.get("reads") or ()),
         accept=str(worker_order.get("accept", "")),
         tests=tuple(worker_order.get("tests") or ()),
+        # Says in its brief which OS it is on and that only its files are here.
+        runs_on=local_os(),
     )
     _write_config(order.get("config") or {})
     report = run_worker(

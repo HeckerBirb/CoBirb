@@ -22,7 +22,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ..config import Config
-from ..typing.spi import Tool, ToolResult
+from ..policy import _segments
+from ..typing.spi import DECISION_DENY, ApprovalOutcome, Tool, ToolResult
 from ..runtime.headless import HeadlessIO
 from ..runtime.wiring import build_subagent
 from .charter import WorkerBrief, policy_for
@@ -275,14 +276,23 @@ class RefusingIO:
 
     _HIDDEN = frozenset({"confirm_scoped", "confirm_request"})
 
-    def __init__(self, base: Any, when: Callable[[], bool] = lambda: True) -> None:
+    def __init__(self, base: Any, when: Callable[[], bool] = lambda: True, why: str = "") -> None:
         self._base = base
         self._when = when
+        # What the worker is told alongside the refusal. A bare "Permission
+        # denied" left a worker piping its check into `head` again and again,
+        # never learning that the pipe was what it could not have.
+        self._why = why
 
     def confirm(self, *args: Any, **kwargs: Any) -> bool:
         if self._when():
             return False
         return bool(self._base.confirm(*args, **kwargs))
+
+    def confirm_request(self, request: Any) -> ApprovalOutcome:
+        if self._when():
+            return ApprovalOutcome(decision=DECISION_DENY, instruction=self._why)
+        return self._base.confirm_request(request)
 
     def __getattr__(self, name: str) -> Any:
         if name in self._HIDDEN and self._when():
@@ -295,6 +305,18 @@ AUTOPILOT_NOTE = (
     "for anything else is refused without asking anyone. Work within them, and report anything "
     "you could not do as missing."
 )
+
+
+def refusal_note(worker: WorkerBrief) -> str:
+    """What a worker refused under auto-pilot is told it may do instead."""
+    programs = sorted({words[0] for words in (_segments(worker.accept) or []) if words})
+    if not programs:
+        return ("Auto-pilot is on: nothing outside your files is granted and nobody is asked. "
+                "You may run no commands; work with your file tools.")
+    return (f"Auto-pilot is on: nothing outside your files and your check is granted, and nobody is "
+            f"asked. The only programs you may run are: {', '.join(programs)} — with any arguments, "
+            "but on their own: a pipe (`|`), `&&` or redirect into another program adds a program "
+            "you may not run.")
 
 
 def compose_brief(worker: WorkerBrief, cwd: str = "") -> str:
@@ -318,10 +340,22 @@ def compose_brief(worker: WorkerBrief, cwd: str = "") -> str:
         parts.append(f"You are working in: {cwd}")
         parts.append("Every path below is relative to it.")
     parts.append(f"Files you may change: {', '.join(worker.writes)}")
-    parts.append(
-        "You may read anything else in the project to understand it, but change "
-        "only the files above."
-    )
+    if worker.runs_on:
+        # A remote is sent only the ticket's files, and it is another OS. Left
+        # unsaid, a worker went looking for the rest of the project and piped
+        # its check into `head`, which Windows' cmd.exe does not have.
+        shell = "cmd.exe" if worker.runs_on == "Windows" else "/bin/sh"
+        here = ", ".join(dict.fromkeys([*worker.writes, *worker.reads]))
+        parts.append(
+            f"You are on a {worker.runs_on} machine, and commands run in {shell}. Only these "
+            f"files of the project are here: {here}. The rest is not on this machine — do not "
+            "look for it."
+        )
+    else:
+        parts.append(
+            "You may read anything else in the project to understand it, but change "
+            "only the files above."
+        )
     if worker.reads:
         parts.append(
             "Pay particular attention to these — they are the interfaces your work "
@@ -369,7 +403,7 @@ def run_worker(
     refusing = refuse if callable(refuse) else (lambda: bool(refuse))
     if refuse:
         # Under /autopilot: nothing asks the user (see RefusingIO).
-        io = RefusingIO(io if io is not None else HeadlessIO(), when=refusing)
+        io = RefusingIO(io if io is not None else HeadlessIO(), when=refusing, why=refusal_note(worker))
     policy = policy_for(worker, cwd, audit_log_enabled=bool(config.get("audit_log")))
     orchestrator = build_subagent(
         cwd, policy, accept=worker.accept, config=config, io=io,

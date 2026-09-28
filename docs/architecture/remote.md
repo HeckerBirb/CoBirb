@@ -45,6 +45,8 @@ user-facing page is [`docs/manual/remote-workers.md`](../manual/remote-workers.m
 
 - **Out:** a work order (the brief and scope, settings, session grants, auto-pilot, the model) and
   only the ticket's `writes` and `reads` files.
+- **The brief** says the machine's OS and shell and that only the ticket's files are there
+  (`compose_brief`, from the `runs_on` the job sets), not that the whole project may be read.
 - **During:** tool calls and notices render into the worker's pane; approvals are asked there (or
   refused under auto-pilot); relayed model calls are answered by a per-run worker-role provider
   (`relay.answer_model_request`; `RelayProvider` is the remote end); grants flow both ways
