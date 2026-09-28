@@ -7,7 +7,7 @@ session manager, and drives the agentic loop.
 The loop keeps the familiar agentic coding-assistant shape, but local and approval-gated:
 
     Prompt → understand → inspect → plan → act → observe → reason → iterate
-            → validate → report
+            → verify → report
 """
 
 from __future__ import annotations
@@ -598,11 +598,10 @@ class Orchestrator:
         tools: list[cobirb_typing.Tool] | None = None,
     ) -> tuple[str, bool]:
         """Drive one bounded model<->tool loop until the model gives a
-        plain final answer, or ``max_turns`` is exhausted (a synthetic
-        "stopped after" message is returned instead, matching the un-added,
-        summary-only behavior the plain loop always had — see
-        ``run()``'s history before plan mode existed). Used both for the
-        normal act loop and, in plan mode, the validate phase too.
+        plain final answer, or a brake stops it: ``max_turns`` spent, or no
+        progress (see ``DEFAULT_MAX_TURNS``). A stop returns ``""`` and
+        records why in ``last_stop`` — no answer is invented for it. Used for
+        the act loop, plan mode's planning pass and each verify-fix attempt.
 
         Mid-turn steering (see ``steer()``) is applied at two points: a
         queued message is drained into history at the top of every
@@ -757,10 +756,9 @@ class Orchestrator:
         """Get the model's reply for this turn, streaming it live to ``io``
         when the model supports streaming and an I/O adapter is attached.
 
-        ``tools`` defaults to every registered tool (``self.tools``); pass
-        an explicit ``[]`` to offer none — used by plan mode's planning
-        phase, which must not be able to act at all (see
-        ``Orchestrator._run_plan_phase``).
+        ``tools`` defaults to every registered tool (``self.tools``); plan
+        mode's planning pass passes the read-only subset (see
+        ``_run_plan_phase``), and an explicit ``[]`` offers none.
 
         A label (``run()``'s ``label``) is rendered
         once, right before the first non-empty chunk of *this* turn — we
@@ -1333,7 +1331,7 @@ class Orchestrator:
         )
 
     # ------------------------------------------------------------------ #
-    # Convenience: register a fresh session path
+    # State for callers, steering and stopping
     # ------------------------------------------------------------------ #
     @property
     def turns_exhausted(self) -> bool:

@@ -1415,6 +1415,9 @@ class Stager:
         hooks = main.hooks
         if allowed is not None:
             hooks = _GatedHooks(main.hooks, self.cwd, allowed, why)
+        # Under /autopilot a stage refuses rather than asks, like the main
+        # agent — and follows it being switched on or off mid-stage, because
+        # auto-pilot is read off the policy they share (Orchestrator.autopilot).
         return Orchestrator(
             model=main.model,
             tools={name: tool for name, tool in main.tools.items() if name in tools},
@@ -1431,9 +1434,6 @@ class Stager:
             grants=main.grants,
             max_turns=self.turns,
         )
-        # Under /autopilot a stage refuses rather than asks, like the main
-        # agent — and follows it being switched on or off mid-stage, because
-        # auto-pilot is read off the policy they share (Orchestrator.autopilot).
 
     def _run(self, orchestrator: Orchestrator, step: str, prompt: str, label: str = "Brainy Birb") -> str:
         self.speaking(label)

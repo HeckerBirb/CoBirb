@@ -725,17 +725,6 @@ def test_run_one_shot_reports_the_final_answer(monkeypatch, capsys):
     assert "ok" in out  # the stub session's summary
 
 
-def test_run_one_shot_returns_1_and_reports_a_permission_error(monkeypatch, capsys):
-    orchestrator = _StubOrchestrator(run_raises=cli.PermissionError("nope"))
-    monkeypatch.setattr(wiring, "build_orchestrator", lambda *a, **k: orchestrator)
-    system = build_system_prompt()
-
-    result = cli._run_one_shot("do something", system, {}, None, None, "/tmp")
-
-    assert result == 1
-    assert "blocked" in capsys.readouterr().out
-
-
 def test_run_one_shot_returns_1_and_reports_unexpected_errors_without_crashing(monkeypatch, capsys):
     """A provider/tool exception must produce a clean error message and
     exit code, not an unhandled traceback."""

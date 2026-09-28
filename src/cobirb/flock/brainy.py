@@ -1043,15 +1043,12 @@ def round_summary(outcome: FlockOutcome) -> str:
     defensive noise.** This runs on the same orchestrator and the same session
     as the planning phase, so ``BRAINY_RULES`` — which tells Brainy Birb to
     deliver a charter by calling that tool — is still in its context, along
-    with its own successful call from earlier. Meanwhile ``run._plan`` pops the
-    tool out of the registry as soon as planning ends. Ask for "an amended
-    charter" in those conditions and a round that went badly produces exactly
-    the obedient thing: a call to a tool that is no longer there, an "Unknown
-    tool" result the model cannot argue with, and the remaining review turns
-    spent failing to recover. Re-registering it would be worse rather than
-    better — nothing reads a second charter, because a round ends here by
-    design (``run.py``'s module docstring), so the call would succeed and be
-    silently discarded.
+    with its own successful call from earlier, and the tool is still
+    installed (``run.install_charter_tool``). Ask for "an amended charter" in
+    those conditions and a round that went badly produces exactly the obedient
+    thing: a call that succeeds and is then silently discarded, because a
+    round ends here by design (``run.py``'s module docstring) and nothing
+    reads a second charter.
     """
     lines = [
         "The round has finished. Here is what each Worker Birb reported, and what "

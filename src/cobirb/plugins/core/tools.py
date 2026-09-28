@@ -1396,7 +1396,6 @@ class ShellTool(CobirbTool):
         return True
 
 
-# Registry of built-in tools.
 class DeleteFileTool(CobirbTool):
     """Delete one file.
 
@@ -1558,7 +1557,7 @@ class ToolRegistry:
         tolerance is what let a bound method reach a JSON payload once
         already: a tool whose ``name`` isn't the method the SPI documents is
         rejected at the boundary with a message that says so, and the caller
-        (see ``cli._merge_tool_plugins``) reports and skips it rather than
+        (see ``runtime.plugins.discover_plugins``) reports and skips it rather than
         letting it break a turn much later.
         """
         if not callable(tool.name):

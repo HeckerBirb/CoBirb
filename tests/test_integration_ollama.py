@@ -149,8 +149,6 @@ def test_live_plan_mode_converges_through_all_three_phases(tmp_path):
     assert orchestrator.last_stop.finished, "act phase did not converge"
     assert "banana" in session.summary.lower()
 
-    assert session.validation, "validate phase produced no report"
-
 
 def test_live_multi_step_tool_calls_converge(tmp_path):
     """A sequential two-file task must also converge, not just a single

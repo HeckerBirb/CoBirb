@@ -172,11 +172,6 @@ class WorkerBrief:
         """The files a worker writes that are not its tests."""
         return tuple(path for path in self.writes if path not in set(self.tests))
 
-    @property
-    def touches(self) -> tuple[str, ...]:
-        """Every path this worker may open, for the conflict check."""
-        return tuple({*self.writes, *self.reads})
-
 
 @dataclass(frozen=True)
 class Charter:

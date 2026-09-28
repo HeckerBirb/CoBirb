@@ -131,13 +131,6 @@ class TerminalIO(I_OAdapter):
             return
         self._console.print(render.build_plan_panel(label, text))
 
-    def render_validation(self, label: str, text: str) -> None:
-        """Plan mode's validate-phase report (see ``Orchestrator.run``):
-        whether/how the request was actually fulfilled, with references."""
-        if not text:
-            return
-        self._console.print(render.build_validation_panel(label, text))
-
     def render_notice(self, text: str) -> None:
         """A one-line note about the session rather than content from the
         model — a verification result, say."""

@@ -19,7 +19,9 @@ from typing import Any
 from . import paths
 
 # Which stage of a plan-mode run produced a turn (Turn.phase). Compared in
-# three modules; a typo here renders wrong rather than failing.
+# three modules; a typo here renders wrong rather than failing. Nothing writes
+# "validate" any more: that phase was removed, and the name stays so sessions
+# saved before then still replay and export their validation turns.
 PHASE_PLAN = "plan"
 PHASE_ACT = "act"
 PHASE_VALIDATE = "validate"
@@ -159,9 +161,9 @@ class Turn:
     role: str
     content: str
     tool_use: list[dict[str, Any]] | None = None
-    # Which phase of a plan-mode run produced this turn ("plan", "act", or
-    # "validate" — see Orchestrator.run()), or None for a normal turn/run
-    # with plan mode off. Purely descriptive: never affects how a turn is
+    # Which phase of a plan-mode run produced this turn ("plan" or "act" — see
+    # Orchestrator.run(); "validate" in older files), or None for a normal
+    # turn/run with plan mode off. Purely descriptive: never affects how a turn is
     # replayed into context (see Orchestrator._build_context).
     phase: str | None = None
     # Images attached to this turn: [{"id": <content hash>, "filename": <original
@@ -243,9 +245,9 @@ class Session:
     working_dir: str = "."
     turns: list[Turn] = field(default_factory=list)
     summary: str | None = None
-    # Set only when a run used plan mode (Orchestrator.run(plan_mode=True)):
-    # the model's own validate-phase report on whether/how the request was
-    # actually fulfilled, with references. None for a normal run.
+    # The report of plan mode's validate phase, which no longer exists. Kept so
+    # a session saved before it was removed loads, exports and forks with it;
+    # nothing sets it now.
     validation: str | None = None
     # The flock this session *is*, when it is a flock session rather than a
     # main one. Pairs with a `flock_engaged` turn in the main session carrying

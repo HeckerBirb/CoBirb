@@ -30,7 +30,7 @@ from textual.selection import Selection
 from textual.widgets import Button, Footer, Input, OptionList, RichLog, Static, TabbedContent
 from textual.widgets.option_list import Option
 
-from cobirb import cli, memory, paths, session
+from cobirb import memory, paths, session
 from cobirb import session as session_mod
 from cobirb.plugins.core import render
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
@@ -339,20 +339,6 @@ async def test_the_tui_passes_its_own_io_bridge_into_the_orchestrator(monkeypatc
         await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         assert builds[0]["io_factory"]() is app.io_bridge
-
-
-async def test_a_permission_error_is_reported_and_the_input_comes_back(monkeypatch):
-    orchestrator = _StubOrchestrator(run_raises=cli.PermissionError("nope"))
-    monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(orchestrator))
-
-    app = _make_app()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        await _submit(pilot, app, "do it")
-        prompt_input = app.query_one("#prompt-input", PromptInput)
-        await _until(pilot, lambda: not prompt_input.disabled)
-
-        assert "blocked" in _transcript_text(app)
 
 
 async def test_an_unexpected_error_is_reported_and_the_input_comes_back(monkeypatch):
@@ -962,14 +948,13 @@ async def test_the_io_bridge_satisfies_the_adapter_contract_and_its_extras():
             "spinner",
             "render_answer",
             "render_plan",
-            "render_validation",
             "render_tool_call",
             "confirm",
         ):
             assert callable(getattr(bridge, hook))
 
 
-async def test_the_bridge_writes_plan_and_validation_panels():
+async def test_the_bridge_writes_plan_and_tool_panels():
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -977,13 +962,11 @@ async def test_the_bridge_writes_plan_and_validation_panels():
         # as markdown, which would turn that into a formatted list item and
         # drop the literal text being asserted on.
         app.io_bridge.render_plan("Noah", "First read the file")
-        app.io_bridge.render_validation("Noah", "Confirmed it was read")
         app.io_bridge.render_tool_call("read_file", {"path": "note.txt"}, _Result("banana"))
         await pilot.pause()
 
         text = _transcript_text(app)
         assert "plan" in text and "First read the file" in text
-        assert "validation" in text and "Confirmed it was read" in text
         assert "tool: read_file" in text and "banana" in text
 
 
@@ -1020,7 +1003,7 @@ async def test_the_status_bar_shows_the_busy_label_alongside_its_usual_context()
 
 
 async def test_empty_renderables_are_not_written_to_the_transcript():
-    """Matching ``TerminalIO``: an empty plan/validation/answer renders
+    """Matching ``TerminalIO``: an empty plan or answer renders
     nothing rather than an empty panel."""
     app = _make_app()
     async with app.run_test() as pilot:
@@ -1028,7 +1011,6 @@ async def test_empty_renderables_are_not_written_to_the_transcript():
         before = len(app.query_one("#transcript", RichLog).lines)
         app.io_bridge.render_answer("Noah", "")
         app.io_bridge.render_plan("Noah", "")
-        app.io_bridge.render_validation("Noah", "")
         await pilot.pause()
         assert len(app.query_one("#transcript", RichLog).lines) == before
 

@@ -190,8 +190,8 @@ def build_charter(charter: Any, approved: Any = (), names: Any = None, requireme
 
 
 def build_validation_panel(label: str, text: str) -> Panel:
-    """Plan mode's validate-phase report: whether/how the request was
-    actually fulfilled, with references."""
+    """A validate-phase turn from a session saved before that phase was
+    removed, as the transcript replays it."""
     return Panel(Markdown(text), title=f"{label} · validation", title_align="left", border_style="yellow")
 
 
@@ -307,8 +307,8 @@ def build_error_panel(label: str, text: str) -> Panel:
 def build_plugins_view(summary: PluginsSummary) -> Group:
     """The TUI's Plugins tab content: active providers, registered tools,
     and any discovery/merge problems — a live view over the same
-    ``cli.describe_plugins()`` snapshot ``_build_orchestrator`` itself uses
-    to wire a real run, so what's shown here is exactly what a turn would
+    ``runtime.plugins.describe_plugins()`` discovery ``wiring.build_orchestrator``
+    uses to wire a real run, so what's shown here is exactly what a turn would
     actually use.
     """
     slots_table = Table(title="Active providers", show_header=True, header_style="bold", expand=True)

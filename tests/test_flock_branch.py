@@ -112,18 +112,3 @@ def test_engaging_twice_mints_two_different_flocks(tmp_path):
     second = branch.engage(session, "another thing")
 
     assert first != second
-
-
-def test_the_branches_can_be_listed_back(tmp_path):
-    session = Session()
-    token = branch.engage(session, "x")
-    branch.rejoin(session, token, "done")
-
-    text = branch.describe_branches(session)
-
-    assert token[:8] in text
-    assert "engaged" in text and "returned" in text
-
-
-def test_a_session_with_no_flock_says_so(tmp_path):
-    assert "No flock" in branch.describe_branches(Session())

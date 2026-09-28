@@ -20,7 +20,7 @@ its instructions from another agent instead of from a person. It edits files
 the way any agent edits files and it fails the way any agent fails, so this
 package builds almost nothing of its own: a worker is ``HeadlessIO`` (already
 refuses anything not pre-approved and never prompts) wired by
-``build_orchestrator`` with a ``Policy`` derived from the charter, the
+``wiring.build_subagent`` with a ``Policy`` derived from the charter, the
 ``worker`` model role, and its brief as the prompt. What is genuinely new is
 the charter, the partition check, the fan-out, and the verification passes.
 """

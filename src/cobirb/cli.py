@@ -29,7 +29,6 @@ from .flock.run import Asker, run_flock_session
 from .help_text import HELP_TEXT, HELP_TOPICS
 from .orchestrator import REPLY_LABEL, RunStop, render_through
 from .plugins.core import TerminalIO, render
-from .policy import PermissionError
 from .runtime import doctor, plugins, sessions, wiring
 from .runtime.bootstrap import ensure_home
 from .runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
@@ -204,13 +203,6 @@ def _drive_one_shot(
         _render_user_prompt(prompt)
     try:
         session = orchestrator.run(prompt, system, cwd=cwd, session_path=session_path, plan_mode=plan_mode)
-    except PermissionError as exc:
-        report.error = f"blocked — {exc}"
-        if as_json:
-            print(report.to_json())
-            return report.exit_code(unattended=headless)
-        _render(f"{REPLY_LABEL}: blocked — {exc}\n")
-        return EXIT_ERROR
     except Exception as exc:  # noqa: BLE001 - surface provider/tool errors cleanly
         report.error = f"could not complete — {exc}"
         if as_json:

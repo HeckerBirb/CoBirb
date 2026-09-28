@@ -38,7 +38,7 @@ class TuiIO(I_OAdapter):
 
     Implements the ``I_OAdapter`` contract plus the same duck-typed extras
     ``TerminalIO`` exposes (``spinner``, ``render_answer``,
-    ``render_plan``, ``render_validation``, ``render_tool_call``), so the
+    ``render_plan``, ``render_tool_call``), so the
     orchestrator's ``getattr(io, "...", None)`` hooks all find what they look
     for and nothing falls back to plain text.
     """
@@ -232,11 +232,6 @@ class TuiIO(I_OAdapter):
         if not text:
             return
         self._write(render.build_plan_panel(label, text))
-
-    def render_validation(self, label: str, text: str) -> None:
-        if not text:
-            return
-        self._write(render.build_validation_panel(label, text))
 
     def render_steer(self, message: str) -> None:
         """A steering message, shown as the orchestrator applies it — after

@@ -183,9 +183,6 @@ class HookRunner:
     def __bool__(self) -> bool:
         return bool(self.hooks)
 
-    def has(self, event: str) -> bool:
-        return any(hook.event == event for hook in self.hooks)
-
     def fire(
         self,
         event: str,

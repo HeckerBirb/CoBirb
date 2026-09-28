@@ -241,10 +241,6 @@ class Slots:
             self._semaphore.acquire()
 
 
-class FlockStopped(Exception):
-    """Raised by nothing; reserved so callers can tell a stop from a failure."""
-
-
 def run_flock(
     charter: Charter,
     cwd: str,

@@ -210,7 +210,7 @@ def read_the_diff(worker: WorkerBrief, baseline: Baseline, cwd: str) -> list[Fin
 
 
 # --------------------------------------------------------------------------- #
-# Passes two and three — break it, confirm red
+# Pass two — break it, confirm red
 # --------------------------------------------------------------------------- #
 @dataclass
 class RedCheck:

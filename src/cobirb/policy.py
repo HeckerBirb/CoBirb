@@ -77,10 +77,6 @@ READ_TOOLS = frozenset({"read_file", "list_dir", "glob", "grep", "repo_map"})
 _GLOB_MAGIC = "*?["
 
 
-class PermissionError(Exception):
-    """Raised when a capability is not permitted."""
-
-
 class AuditLog:
     """Append-only local record of what ran (tool name, arguments, cwd,
     timestamp) — off by default.
@@ -440,12 +436,8 @@ class Policy:
         self._allowed_write_dirs.add(self._resolve(directory))
 
     @property
-    def allowed_read_dirs(self) -> set[str]:
-        """The approved read directories — a copy, for display and tests."""
-        return set(self._allowed_read_dirs)
-
-    @property
     def allowed_write_dirs(self) -> set[str]:
+        """The approved write directories — a copy, for display and tests."""
         return set(self._allowed_write_dirs)
 
     def _shell_allowed(self, arguments: dict[str, Any]) -> bool:

@@ -1,8 +1,8 @@
 """Running the project's own tests after the agent changes something.
 
-Plan mode's validate phase asks the *model* whether the work is right, which
-is worth something and is not evidence. This runs the command the user
-nominated and reads the exit code, which is.
+Asking the *model* whether the work is right is worth something and is not
+evidence. This runs the command the user nominated and reads the exit code,
+which is.
 
 **Off unless configured.** `"verify_command": "pytest -q"` turns it on. There
 is no guessing at a project's test command from its layout: guessing wrong

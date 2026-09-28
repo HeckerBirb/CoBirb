@@ -164,21 +164,6 @@ def test_render_plan_is_a_noop_for_empty_text():
     assert buf.getvalue() == ""
 
 
-def test_render_validation_shows_the_label_and_validation_text():
-    term, buf = _make_terminal_io()
-    term.render_validation("Noah", "Confirmed: the file was edited as intended, see line 12.")
-    out = buf.getvalue()
-    assert "Noah" in out
-    assert "validation" in out
-    assert "Confirmed" in out
-
-
-def test_render_validation_is_a_noop_for_empty_text():
-    term, buf = _make_terminal_io()
-    term.render_validation("Noah", "")
-    assert buf.getvalue() == ""
-
-
 def test_begin_stream_writes_the_reply_marker():
     """A scrolling renderer can't wrap a reply that hasn't arrived yet, so it
     writes the marker when the first token shows up."""

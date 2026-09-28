@@ -117,16 +117,3 @@ def open_flock_session(
         )
     )
     return manager
-
-
-def describe_branches(session: Session) -> str:
-    """Every flock this session has engaged, for ``/context`` and the log."""
-    engagements = [turn for turn in session.turns if turn.role in (ROLE_ENGAGED, ROLE_RETURNED)]
-    if not engagements:
-        return "No flock has been engaged in this session."
-    lines = []
-    for turn in engagements:
-        token = (turn.tool_use or [{}])[0].get("arguments", {}).get("token", "?")
-        verb = "engaged" if turn.role == ROLE_ENGAGED else "returned"
-        lines.append(f"  {token[:8]} {verb}")
-    return "Flock activity in this session:\n" + "\n".join(lines)

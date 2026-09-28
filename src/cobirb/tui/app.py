@@ -13,10 +13,10 @@ Textual thread worker and bridged back to the UI thread by ``TuiIO``.
 The ``Sessions`` and ``Plugins`` tabs (``tui/panes.py``) are live views, not
 placeholders: Sessions lists and can resume/start encrypted session files,
 Plugins shows exactly what got discovered/registered and any problems with
-it — the same information ``_build_orchestrator`` itself uses, surfaced
+it — the same information ``wiring.build_orchestrator`` itself uses, surfaced
 where a full-screen app's user can actually see it (unlike the plugin
-discovery warnings ``_build_orchestrator`` prints to stderr for the CLI
-modes, which a full-screen app's stderr is invisible to).
+discovery warnings it prints to stderr for the CLI modes, which a full-screen
+app's stderr is invisible to).
 """
 
 from __future__ import annotations
@@ -44,7 +44,6 @@ from ..flock.worker import AUTOPILOT_NOTE
 from ..help_text import HELP_TEXT, HELP_TOPICS
 from ..orchestrator import REPLY_LABEL, Orchestrator, render_through
 from ..plugins.core import render
-from ..policy import PermissionError
 from ..runtime import command_index, mentions, plugins, wiring
 from ..runtime.catalogues import CatalogueStore
 from ..runtime.custom_commands import expand_custom_command
@@ -224,8 +223,6 @@ class CoBirbApp(App[None]):
         # answered against the whole partition — a write into a file another
         # worker owns is refused without a dialog (`charter.writes_owner`).
         self.flock_charter: Any = None
-        # Worker id -> state, for the activity line's roll-up. Reset per
-        # engagement so a previous flock's workers do not linger in it.
         # Resolved once, for the status bar — the orchestrator that would
         # know the real name doesn't exist yet at mount time.
         self.resolved_model_name = wiring.resolve_model_name(model_name, cwd)
@@ -760,8 +757,6 @@ class CoBirbApp(App[None]):
                 self._render_final_answer(turn_result.summary)
             if self.session_path is not None and self.orchestrator.session is not None:
                 self.orchestrator.session.save(self.password)
-        except PermissionError as exc:
-            self.io_bridge.write_error(REPLY_LABEL, f"blocked — {exc}")
         except Exception as exc:  # noqa: BLE001 - surface provider/tool errors cleanly
             self.io_bridge.write_error(REPLY_LABEL, f"could not complete — {exc}")
         finally:
@@ -1370,7 +1365,7 @@ class CoBirbApp(App[None]):
         self.password = password
         # Discarded rather than live-swapped: the next message rebuilds it
         # bound to this session via the exact same load-if-exists path
-        # _build_orchestrator already uses for --session, so there is only
+        # wiring.build_orchestrator already uses for --session, so there is only
         # one code path that ever opens a session file, tested once.
         self._discard_orchestrator()
         status = self.query_one(StatusBar)

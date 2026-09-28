@@ -112,12 +112,6 @@ class TrustStore:
                 data[url]["last_used"] = self._now()
                 _write(self._path, data)
 
-    def forget(self, url: str) -> None:
-        with self._lock:
-            data = _read(self._path)
-            if data.pop(url, None) is not None:
-                _write(self._path, data)
-
 
 class IssuedTokens:
     """The remote's record of the tokens it issued: hashes and last use."""
