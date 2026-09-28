@@ -23,7 +23,7 @@ from typing import Any
 
 from .checkpoints import Checkpoints
 from .context import DEFAULT_CONTEXT_TOKENS, CompactionReport, compact, history_budget
-from .policy import READ_TOOLS, AuditLog, Policy, SessionGrants
+from .policy import READ_TOOLS, Policy, SessionGrants
 from .redaction import redact
 from .runtime.hooks import (
     EVENT_AFTER_TOOL,
@@ -1003,7 +1003,7 @@ class Orchestrator:
                 'whole-tree checkpoints are not active (git is needed, and "checkpoints" '
                 "must not be false), so what it changed could not be undone"
             )
-        root = self.policy._project_root()
+        root = self.policy.project_root()
         if root is None:
             return "the working directory is your home directory or /, which is too broad a project"
         self._before_autopilot = self.policy.sandbox_auto
@@ -1470,37 +1470,3 @@ class Orchestrator:
                 close()
             except Exception:  # nothing to do about it at this point
                 logger.debug("could not remove the checkpoint store", exc_info=True)
-
-
-def build_default_policy(
-    allowed: set[str] | None = None,
-    denied: set[str] | None = None,
-    audit_log_enabled: bool = False,
-    cwd: str | None = None,
-) -> Policy:
-    """Build the starting policy for a run, which allows **nothing**.
-
-    There is deliberately no pre-approved set. An earlier version of this
-    granted the seven file tools outright plus a handful of shell binaries
-    with any arguments, which made "default-deny" untrue in the one direction
-    that matters: ``git`` with any arguments included ``git push``, and
-    ``find`` with any arguments included ``-exec``. Every capability now
-    arrives from the user — an approval prompt, ``allow_tools`` in config, or
-    ``--allow-tool``.
-
-    ``cwd`` must match the working directory the tools resolve paths against,
-    or a directory-scoped read approval will be compared against the wrong
-    tree (see ``Policy._resolve``).
-
-    ``audit_log_enabled`` is off unless explicitly turned on (``"audit_log":
-    true`` in config — see ``cobirb help config`` and ``AuditLog``'s own
-    docstring for why): the audit trail would otherwise duplicate file
-    contents, diffs, and shell commands into an unencrypted log every run,
-    regardless of anyone ever asking for one.
-    """
-    return Policy(
-        allowed=allowed,
-        denied=denied,
-        audit=AuditLog(enabled=audit_log_enabled),
-        cwd=cwd,
-    )

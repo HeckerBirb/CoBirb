@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 
 from cobirb.context import DEFAULT_CONTEXT_TOKENS, history_budget
-from cobirb.orchestrator import Orchestrator, _materialize, build_default_policy
+from cobirb.orchestrator import Orchestrator, _materialize
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 from cobirb.plugins.core.tools import ReadFileTool, ShellTool, ToolRegistry
 from cobirb.policy import Policy
@@ -278,44 +277,6 @@ def test_policy_gates_tool_access():
     )
     session = orchestrator.run("unsafe op", "sys", cwd="/tmp")
     assert any(turn.role == "tool" for turn in session.turns)
-
-
-def test_default_policy_permits_nothing():
-    """The starting policy grants no capability at all: every tool has to be
-    approved by the user or named in their own config/--allow-tool."""
-    policy = build_default_policy()
-    assert isinstance(policy, Policy)
-    for name in ("read_file", "write_file", "edit_file", "apply_patch", "glob", "grep", "list_dir"):
-        assert not policy.is_allowed(name, {"path": "x", "pattern": "x"})
-    assert not policy.is_allowed("shell", {"command": "git status"})
-
-
-def test_build_default_policy_audit_log_is_off_unless_requested(tmp_path, monkeypatch):
-    """An always-on audit log would duplicate file contents, diffs and shell
-    commands into an unencrypted trail, at odds with sessions being encrypted
-    at rest. It stays opt-in end to end, including through this factory."""
-    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
-    policy = build_default_policy()
-    policy.log("write_file", {"path": "x", "content": "secret"}, cwd=str(tmp_path))
-    assert not policy.audit.enabled
-    assert not os.path.exists(policy.audit.path)
-
-
-def test_build_default_policy_audit_log_can_be_turned_on(tmp_path, monkeypatch):
-    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
-    policy = build_default_policy(audit_log_enabled=True)
-    policy.log("read_file", {"path": "x"}, cwd=str(tmp_path))
-    assert policy.audit.enabled
-    assert os.path.exists(policy.audit.path)
-
-
-def test_default_policy_accepts_user_supplied_rules():
-    """Nothing is pre-approved, but the user's own rules are honoured — this
-    is the escape hatch that makes a deny-everything default workable."""
-    policy = build_default_policy()
-    policy.allow("shell", "python -m pytest")
-    assert policy.is_allowed("shell", {"command": "python -m pytest tests/"})
-    assert not policy.is_allowed("shell", {"command": "python -c 'print(1)'"})
 
 
 def test_loader_registers_core_plugins():

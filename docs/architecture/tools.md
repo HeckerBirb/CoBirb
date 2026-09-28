@@ -25,7 +25,7 @@ Descriptions say when to use a tool and which neighbour fits better — small mo
   runs in the sandbox when active (see [permissions](permissions.md)). Each call is its own process,
   so a `cd` does not persist: `cwd` is the stateless way, and `_changes_directory_only()` notes a
   `cd`-only line. That detector is advisory and fail-open, so it must not share code with
-  `policy._segments`, which fails closed.
+  `policy.command_segments`, which fails closed.
 - **A tool panel names what the call was aimed at** (`render.build_tool_call_panel`): a `shell` panel
   is headed by its command (bounded), a `read_file`/`write_file`/`delete_file` panel by its path —
   refused or not. `edit_file` and `apply_patch` show their diff, which names the file.

@@ -31,10 +31,11 @@ import urllib.request
 
 import pytest
 
-from cobirb.orchestrator import Orchestrator, build_default_policy
+from cobirb.orchestrator import Orchestrator
 from cobirb.plugins.core.io import TerminalIO
 from cobirb.plugins.core.model import LocalModelProvider
 from cobirb.plugins.core.tools import ToolRegistry
+from cobirb.policy import build_default_policy
 
 OLLAMA_URL = os.environ.get("COBIRB_OLLAMA_URL", "http://localhost:11434")
 TEST_MODEL = os.environ.get("COBIRB_TEST_MODEL", "")

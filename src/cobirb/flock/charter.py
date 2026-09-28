@@ -53,8 +53,7 @@ import tomllib
 from dataclasses import dataclass
 from typing import Any
 
-from ..orchestrator import build_default_policy
-from ..policy import Policy
+from ..policy import Policy, build_default_policy
 from ..remote.osnames import canonical_os, local_os
 
 # A seam either has a compiler behind it or it does not, and which one decides

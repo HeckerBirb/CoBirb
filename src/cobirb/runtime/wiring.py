@@ -15,10 +15,10 @@ from ..checkpoints import Checkpoints
 from ..checkpoints import for_workspace as checkpoints_for
 from ..config import Config
 from ..mcp import connect_servers
-from ..orchestrator import DEFAULT_MAX_TURNS, Orchestrator, build_default_policy
+from ..orchestrator import DEFAULT_MAX_TURNS, Orchestrator
 from ..plugins.core import LocalModelProvider, TerminalIO, ToolRegistry
 from ..plugins.core.repomap import DEFAULT_BUDGET_CHARS, render_map
-from ..policy import Policy, SessionGrants
+from ..policy import Policy, SessionGrants, build_default_policy
 from ..session import SessionManager
 from ..typing import spi as cobirb_typing
 from .headless import HeadlessIO

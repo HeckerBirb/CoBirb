@@ -68,7 +68,7 @@ user-facing page is [`docs/manual/remote-workers.md`](../manual/remote-workers.m
   carry `- runs on: <OS>`, kept through the restatement (`_keep_requirements`).
 - `check_tickets(which_for=)`: a remote ticket's `accept` and `requires` programs are looked up on
   its remote in one `which` request that also asks for every `_TOOLCHAINS` name (for the refusal),
-  the command read Windows' way for a Windows remote (`policy._segments(windows=)`); for
+  the command read Windows' way for a Windows remote (`policy.command_segments(windows=)`); for
   an OS with no remote, `UNCHECKABLE` skips the lookup. `check_requirements(remotes=)` runs a remote
   ticket's requirement checks there.
 - `run._static_or_stop`: tickets for an OS no remote offers are put to the user; going on makes them

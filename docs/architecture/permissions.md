@@ -15,7 +15,7 @@
   both.
 - `shell` is checked **per segment** (`git status; rm -rf /` is two commands). Rules are a bare binary
   (any arguments) or an exact multi-word prefix. Refused as unverifiable: backticks, `$(...)`,
-  subshells, unbalanced quotes, `find -exec/-execdir/-ok/-okdir`. `_segments` fails closed; anything
+  subshells, unbalanced quotes, `find -exec/-execdir/-ok/-okdir`. `command_segments` fails closed; anything
   advisory that reads commands (`tools._changes_directory_only`) must not share code with it.
 - **A `*** Begin Patch` names its own file**, and `patch_target` (shared with the tool) is what is
   checked. Several files, a move, a delete, or a `path` that disagrees → no target → denied.
@@ -26,7 +26,7 @@
 ## What an answer grants
 
 - `grant()` decides what "always" widens to: a read inside the project → **the whole project** (one
-  question per project; `_project_root` refuses `/` and the home directory), any other read or a
+  question per project; `project_root` refuses `/` and the home directory), any other read or a
   write → its directory, a shell call → that invocation, anything else → the tool name.
   `describe_grant()` says so before the user agrees.
 - `SessionGrants` applies a `"session"` answer to **every agent in the session**, including Worker

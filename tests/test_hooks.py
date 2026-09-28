@@ -13,7 +13,8 @@ import pytest
 from conftest import write_config
 
 from cobirb.config import Config
-from cobirb.orchestrator import Orchestrator, build_default_policy
+from cobirb.orchestrator import Orchestrator
+from cobirb.policy import build_default_policy
 from cobirb.runtime.hooks import (
     EVENT_AFTER_TOOL,
     EVENT_BEFORE_TOOL,

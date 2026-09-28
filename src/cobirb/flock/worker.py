@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..config import Config
-from ..policy import _segments
+from ..policy import command_segments
 from ..runtime.headless import HeadlessIO
 from ..runtime.wiring import build_subagent
 from ..typing.spi import DECISION_DENY, ApprovalOutcome, Tool, ToolResult
@@ -318,7 +318,7 @@ AUTOPILOT_NOTE = (
 
 def refusal_note(worker: WorkerBrief) -> str:
     """What a worker refused under auto-pilot is told it may do instead."""
-    programs = sorted({words[0] for words in (_segments(worker.accept) or []) if words})
+    programs = sorted({words[0] for words in (command_segments(worker.accept) or []) if words})
     if not programs:
         return (
             "Auto-pilot is on: nothing outside your files is granted and nobody is asked. "

@@ -16,7 +16,7 @@ answering an approval prompt or by their own config/``--allow-tool``.
 - The ``shell`` tool's scope is narrowed per *command segment*: a shell
   command may chain several invocations (``git status; rm -rf /``), and the
   shell runs all of them, so **every** segment must be permitted — not just
-  the first. See ``_segments`` for the mechanics.
+  the first. See ``command_segments`` for the mechanics.
 - Redirection (``>``, ``>>``, ``<``) stays attached to the command it
   belongs to rather than starting a new one — ``git log > out.txt`` is one
   command, not two. Anything the policy still cannot verify (command
@@ -149,7 +149,7 @@ def _tokenize(command: str, windows: bool | None = None) -> list[str] | None:
     return tokens
 
 
-def _segments(command: str, windows: bool | None = None) -> list[list[str]] | None:
+def command_segments(command: str, windows: bool | None = None) -> list[list[str]] | None:
     """Split a shell command into its separately-executed segments.
 
     ``"git status; rm -rf /"`` becomes ``[["git", "status"], ["rm", "-rf", "/"]]``
@@ -402,7 +402,7 @@ class Policy:
         if target is None:
             return None
         resolved = self._resolve(target)
-        project = self._project_root()
+        project = self.project_root()
         if tool_name in READ_TOOLS and project and _within(resolved, project):
             # One question per project, not one per directory (decision D5):
             # agreeing that CoBirb may read *this project* is the decision the
@@ -414,7 +414,7 @@ class Policy:
             return os.path.dirname(resolved) or os.sep
         return resolved
 
-    def _project_root(self) -> str | None:
+    def project_root(self) -> str | None:
         """The working directory as the project, unless it is too broad to be
         one — the filesystem root or the home directory, where "read the
         project" would mean "read everything"."""
@@ -454,7 +454,7 @@ class Policy:
         if not isinstance(command, str) or not command.strip():
             return False
 
-        segments = _segments(command)
+        segments = command_segments(command)
         if not segments:  # unparseable/unverifiable (None) or nothing to run ([])
             return False
         return all(self._segment_allowed(words) for words in segments)
@@ -536,7 +536,7 @@ class Policy:
         the work. See ``flock.charter.policy_for``, which is the caller that
         needs it.
         """
-        segments = _segments(command or "")
+        segments = command_segments(command or "")
         if not segments:
             return False
         for words in segments:
@@ -626,6 +626,40 @@ class Policy:
             if directory is not None:
                 return f"change files in {directory} and its subdirectories"
         return f"use '{tool_name}'"
+
+
+def build_default_policy(
+    allowed: set[str] | None = None,
+    denied: set[str] | None = None,
+    audit_log_enabled: bool = False,
+    cwd: str | None = None,
+) -> Policy:
+    """Build the starting policy for a run, which allows **nothing**.
+
+    There is deliberately no pre-approved set. An earlier version of this
+    granted the seven file tools outright plus a handful of shell binaries
+    with any arguments, which made "default-deny" untrue in the one direction
+    that matters: ``git`` with any arguments included ``git push``, and
+    ``find`` with any arguments included ``-exec``. Every capability now
+    arrives from the user — an approval prompt, ``allow_tools`` in config, or
+    ``--allow-tool``.
+
+    ``cwd`` must match the working directory the tools resolve paths against,
+    or a directory-scoped read approval will be compared against the wrong
+    tree (see ``Policy._resolve``).
+
+    ``audit_log_enabled`` is off unless explicitly turned on (``"audit_log":
+    true`` in config — see ``cobirb help config`` and ``AuditLog``'s own
+    docstring for why): the audit trail would otherwise duplicate file
+    contents, diffs, and shell commands into an unencrypted log every run,
+    regardless of anyone ever asking for one.
+    """
+    return Policy(
+        allowed=allowed,
+        denied=denied,
+        audit=AuditLog(enabled=audit_log_enabled),
+        cwd=cwd,
+    )
 
 
 class SessionGrants:
@@ -721,11 +755,11 @@ def _within(path: str, directory: str) -> bool:
 def _first_segment_words(command: str) -> list[str]:
     """Words of the first segment of ``command``, for building allow rules.
 
-    Unlike ``_segments`` this never refuses: it describes a rule the user is
+    Unlike ``command_segments`` this never refuses: it describes a rule the user is
     writing, not a command about to run, and falls back to a naive split so
     an odd rule can't crash rule construction.
     """
-    segments = _segments(command)
+    segments = command_segments(command)
     if segments:
         return segments[0]
     return command.split()

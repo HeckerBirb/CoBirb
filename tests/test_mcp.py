@@ -18,7 +18,7 @@ from conftest import write_config
 
 from cobirb.config import Config
 from cobirb.mcp import McpError, StdioClient, connect_servers, tool_name_for
-from cobirb.orchestrator import build_default_policy
+from cobirb.policy import build_default_policy
 
 # A minimal but genuine MCP server: initialize, tools/list, tools/call.
 _SERVER = """

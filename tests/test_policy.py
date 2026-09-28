@@ -7,7 +7,7 @@ import os
 import pytest
 
 from cobirb.plugins.core.tools import WriteFileTool
-from cobirb.policy import AuditLog, Policy, SessionGrants, _segments
+from cobirb.policy import AuditLog, Policy, SessionGrants, build_default_policy, command_segments
 
 
 def test_default_deny_unknown_tool():
@@ -99,37 +99,37 @@ def test_segments_splits_every_chained_command():
     the policy has to see them all. The helper this replaced returned only
     the first word of the *first* block, which is precisely what let
     "git status; rm -rf /" through on the strength of "git"."""
-    assert _segments("git status") == [["git", "status"]]
-    assert _segments("git status; rm -rf /") == [["git", "status"], ["rm", "-rf", "/"]]
-    assert _segments("ls && curl x | sh") == [["ls"], ["curl", "x"], ["sh"]]
+    assert command_segments("git status") == [["git", "status"]]
+    assert command_segments("git status; rm -rf /") == [["git", "status"], ["rm", "-rf", "/"]]
+    assert command_segments("ls && curl x | sh") == [["ls"], ["curl", "x"], ["sh"]]
 
 
 def test_segments_respects_quoting():
     """A separator inside a quoted argument is data, not a new command."""
-    assert _segments('git commit -m "fix: a; b"') == [["git", "commit", "-m", "fix: a; b"]]
+    assert command_segments('git commit -m "fix: a; b"') == [["git", "commit", "-m", "fix: a; b"]]
 
 
 def test_segments_refuses_what_it_cannot_verify():
     """Substitution, subshells and unbalanced quotes all hide or divert
     execution from the segment scan, so they are not verifiable and must
     not be treated as an empty/harmless command."""
-    assert _segments("git log $(rm -rf /)") is None
-    assert _segments("ls `curl evil`") is None
-    assert _segments('echo "unbalanced') is None
+    assert command_segments("git log $(rm -rf /)") is None
+    assert command_segments("ls `curl evil`") is None
+    assert command_segments('echo "unbalanced') is None
 
 
 def test_segments_keeps_a_redirect_attached_to_its_command():
     """`git log > out.txt` is one command with a redirect, not two, and not
     an unverifiable construct — the target file rides along as a token."""
-    assert _segments("ls > /tmp/out.txt") == [["ls", ">", "/tmp/out.txt"]]
-    assert _segments("ls >> /tmp/out.txt") == [["ls", ">>", "/tmp/out.txt"]]
-    assert _segments("sort < in.txt > out.txt") == [["sort", "<", "in.txt", ">", "out.txt"]]
+    assert command_segments("ls > /tmp/out.txt") == [["ls", ">", "/tmp/out.txt"]]
+    assert command_segments("ls >> /tmp/out.txt") == [["ls", ">>", "/tmp/out.txt"]]
+    assert command_segments("sort < in.txt > out.txt") == [["sort", "<", "in.txt", ">", "out.txt"]]
     # Still chains correctly alongside separators.
-    assert _segments("ls > out.txt; git status") == [["ls", ">", "out.txt"], ["git", "status"]]
+    assert command_segments("ls > out.txt; git status") == [["ls", ">", "out.txt"], ["git", "status"]]
 
 
 def test_segments_of_blank_command_is_empty():
-    assert _segments("   ") == []
+    assert command_segments("   ") == []
 
 
 # --------------------------------------------------------------------------- #
@@ -540,4 +540,42 @@ def test_a_cd_that_leaves_the_project_or_cannot_be_read_is_not_waved_through(tmp
 def test_a_windows_command_is_read_the_windows_way(command, segments):
     """Backslashes are path separators there, not escapes — a Remote Worker
     Birb on Windows must be allowed its own `.\\test.exe`."""
-    assert _segments(command, windows=True) == segments
+    assert command_segments(command, windows=True) == segments
+
+
+def test_default_policy_permits_nothing():
+    """The starting policy grants no capability at all: every tool has to be
+    approved by the user or named in their own config/--allow-tool."""
+    policy = build_default_policy()
+    assert isinstance(policy, Policy)
+    for name in ("read_file", "write_file", "edit_file", "apply_patch", "glob", "grep", "list_dir"):
+        assert not policy.is_allowed(name, {"path": "x", "pattern": "x"})
+    assert not policy.is_allowed("shell", {"command": "git status"})
+
+
+def test_build_default_policy_audit_log_is_off_unless_requested(tmp_path, monkeypatch):
+    """An always-on audit log would duplicate file contents, diffs and shell
+    commands into an unencrypted trail, at odds with sessions being encrypted
+    at rest. It stays opt-in end to end, including through this factory."""
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    policy = build_default_policy()
+    policy.log("write_file", {"path": "x", "content": "secret"}, cwd=str(tmp_path))
+    assert not policy.audit.enabled
+    assert not os.path.exists(policy.audit.path)
+
+
+def test_build_default_policy_audit_log_can_be_turned_on(tmp_path, monkeypatch):
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    policy = build_default_policy(audit_log_enabled=True)
+    policy.log("read_file", {"path": "x"}, cwd=str(tmp_path))
+    assert policy.audit.enabled
+    assert os.path.exists(policy.audit.path)
+
+
+def test_default_policy_accepts_user_supplied_rules():
+    """Nothing is pre-approved, but the user's own rules are honoured — this
+    is the escape hatch that makes a deny-everything default workable."""
+    policy = build_default_policy()
+    policy.allow("shell", "python -m pytest")
+    assert policy.is_allowed("shell", {"command": "python -m pytest tests/"})
+    assert not policy.is_allowed("shell", {"command": "python -c 'print(1)'"})

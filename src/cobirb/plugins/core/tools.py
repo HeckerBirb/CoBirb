@@ -1169,7 +1169,7 @@ def _changes_directory_only(command: str) -> bool:
     Deliberately fail-open and advisory: this decides whether a result
     carries an explanatory note, never whether anything may run, so a line
     this cannot read confidently returns ``False`` and simply says nothing.
-    That is the opposite of ``policy._segments``, which must fail *closed*
+    That is the opposite of ``policy.command_segments``, which must fail *closed*
     because it is deciding what is permitted — which is why the two do not
     share an implementation.
     """

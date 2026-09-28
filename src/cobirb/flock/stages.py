@@ -56,7 +56,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ..orchestrator import Orchestrator
-from ..policy import READ_TOOLS, _segments, patch_target
+from ..policy import READ_TOOLS, command_segments, patch_target
 from ..remote.osnames import canonical_os, local_os
 from ..runtime.hooks import EVENT_BEFORE_TOOL, HookOutcome
 from .brainy import NEED_TO_KNOW_DIRECTIVE
@@ -474,7 +474,7 @@ def _accept_problem(command: str, which: Callable[[str], Any] = shutil.which, wi
     where the program goes. Its worker could run only the programs its check
     names, so it spent 43 turns refused and never wrote a line.
 
-    Read the way the worker's grant is (``policy._segments``): a command that
+    Read the way the worker's grant is (``policy.command_segments``): a command that
     scan cannot read grants the worker nothing, so it could never be run. A
     program given as a path is not looked for — the command may build it
     (`cc -o /tmp/t … && /tmp/t`).
@@ -482,7 +482,7 @@ def _accept_problem(command: str, which: Callable[[str], Any] = shutil.which, wi
     For a Remote Worker Birb's ticket, ``which`` asks its remote and
     ``windows`` reads the command Windows' way.
     """
-    segments = _segments(command, windows=windows)
+    segments = command_segments(command, windows=windows)
     if not segments:
         return (
             "cannot be read (command substitution, a subshell or unbalanced quotes), "
