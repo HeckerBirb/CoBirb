@@ -13,9 +13,12 @@ build (a compiler, a test runner). Then:
 ```bash
 cobirb remote-worker                      # serves on 0.0.0.0:8443
 cobirb remote-worker --listen 10.0.0.5:9000
+cobirb remote-worker --verbose            # a line for every message and everything the job does
 ```
 
-It prints its certificate fingerprint, and a pairing code when your CoBirb first connects. It reads
+It prints its certificate fingerprint, and a pairing code when your CoBirb first connects. Without
+`--verbose` it says little more than when a ticket starts and finishes; with it, each heartbeat,
+program lookup, check and tool call gets a timestamped line, so you can see it is working. It reads
 nothing from its own config — every setting comes from your machine.
 
 **On your machine** — add it to `~/.cobirb/config.json`:

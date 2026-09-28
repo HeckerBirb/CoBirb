@@ -4,12 +4,14 @@ from __future__ import annotations
 import pytest
 
 from cobirb.flock import run as flock_run
-from cobirb.flock.charter import Charter, WorkerBrief
+from cobirb.flock.brainy import AddWorkerTool, CharterDesk
+from cobirb.flock.charter import Charter, CharterError, WorkerBrief, runs_on_os
 from cobirb.flock.run import Asker
 from cobirb.flock.stages import UNCHECKABLE, TicketSpec, check_tickets, parse_tickets
 from cobirb.flock.worker import WorkerReport
 from cobirb.remote import settings
-from cobirb.remote.osnames import canonical_os
+from cobirb.remote.osnames import canonical_os, local_os
+from cobirb.remote.server import summarise
 from cobirb.remote.settings import parse_entry
 from cobirb.remote.trust import IssuedTokens, TrustStore
 
@@ -158,3 +160,101 @@ def test_the_charter_says_where_each_worker_runs():
 
     assert "runs on Windows" in text and "files are sent there" in text
     assert "static" in text
+
+
+@pytest.mark.parametrize("value, expected", [
+    ("windows", "Windows"), ("win32", "Windows"), (None, ""), ("None", ""), ("", ""),
+    (local_os(), ""),
+])
+def test_a_tickets_runs_on_is_its_family_and_empty_for_here(value, expected):
+    assert runs_on_os(value, "t") == expected
+
+
+def test_a_runs_on_naming_no_known_os_is_refused():
+    with pytest.raises(CharterError):
+        runs_on_os("Plan9", "t")
+
+
+def test_a_ticket_added_in_chat_can_run_on_another_os(tmp_path):
+    desk = CharterDesk(str(tmp_path))
+    AddWorkerTool(desk).execute({"id": "win", "brief": "b", "writes": ["cap.c"],
+                                 "accept": "cl cap.c", "runs_on": "win32", "reads": "None"})
+
+    worker = desk.draft.seal("o").workers[0]
+
+    assert worker.runs_on == "Windows"
+    assert worker.reads == ()
+
+
+class _QuietBrainy:
+    def name(self):
+        return "quiet"
+
+    def chat(self, system, context, tools=None, *, stream=False):
+        return "Done."
+
+    def parse_tool_calls(self, reply):
+        return []
+
+    def supports_tool_calling(self):
+        return True
+
+    def supports_streaming(self):
+        return False
+
+
+def _orchestrator_for(monkeypatch, tmp_path):
+    from cobirb.runtime import wiring
+
+    monkeypatch.setattr(wiring, "build_model", lambda *a, **k: _QuietBrainy())
+    return wiring.build_orchestrator(str(tmp_path), {})
+
+
+@pytest.mark.parametrize("answer, stopped_at, ran", [(False, "remote", []), (True, "", [("win", True, "")])])
+def test_a_charter_from_chat_puts_an_os_with_no_remote_to_the_user(monkeypatch, tmp_path, answer, stopped_at, ran):
+    from cobirb.flock import supervisor
+
+    monkeypatch.setattr("cobirb.flock.run.missing_models", lambda *a, **k: "")
+    monkeypatch.setattr("cobirb.flock.run.DEFAULT_PLANNING", "single")
+    started = []
+
+    def run_worker(worker, cwd, **kwargs):
+        started.append((worker.id, worker.static, worker.accept))
+        return WorkerReport(worker_id=worker.id, ok=True, accepted=None)
+
+    monkeypatch.setattr(supervisor, "run_worker", run_worker)
+    charter = Charter(objective="o", workers=(
+        WorkerBrief(id="win", brief="b", writes=("cap.c",), accept="cl cap.c", runs_on="Windows"),))
+    questions = []
+
+    def confirm(question, detail=""):
+        questions.append(question)
+        return answer if "Windows" in question else question.startswith("Approve")
+
+    run = flock_run.run_flock_session(
+        _orchestrator_for(monkeypatch, tmp_path), "o", str(tmp_path),
+        ask=Asker(confirm=confirm), charter=charter, probe=False)
+
+    assert "Windows" in questions[0]
+    assert run.stopped_at == stopped_at
+    assert started == ran
+
+
+@pytest.mark.parametrize("message, line", [
+    ({"type": "heartbeat", "id": 1}, "heartbeat"),
+    ({"type": "which", "programs": ["cl", "link"]}, "which cl link"),
+    ({"type": "job_start", "order": {"worker": {"id": "win"}}}, "job_start: ticket 'win'"),
+    ({"type": "event", "event": {"kind": "tool_call", "tool": "shell", "arguments": {"command": "cl a.c"}}},
+     "tool_call shell: cl a.c"),
+    ({"type": "event", "event": {"kind": "done"}}, "done"),
+    ({"type": "reply", "ok": False, "error": "busy"}, "reply: failed busy"),
+    ({"type": "model_chunk", "text": "x"}, None),
+])
+def test_verbose_says_what_each_message_is_in_one_line(message, line):
+    assert summarise(message) == line
+
+
+def test_verbose_lines_are_bounded():
+    line = summarise({"type": "run", "command": "x" * 500})
+
+    assert len(line) <= 100 and line.endswith("…")

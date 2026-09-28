@@ -527,7 +527,32 @@ def _drive(
     if charter is None and settings.planning == PLANNING_STAGED:
         return _drive_staged(run, orchestrator, objective, cwd, ask, config, stop, on_event,
                              plan_turns, probe, io_for, on_charter, canceller, settings)
+    with contextlib.ExitStack() as held:
+        return _drive_single(run, orchestrator, objective, cwd, ask, config, stop, on_event,
+                             plan_turns, probe, io_for, on_charter, canceller, charter, held)
 
+
+def _drive_single(
+    run: FlockRun,
+    orchestrator: Orchestrator,
+    objective: str,
+    cwd: str,
+    ask: Asker,
+    config: Config,
+    stop: threading.Event | None,
+    on_event: Callable[[str, Any], None] | None,
+    plan_turns: int,
+    probe: bool,
+    io_for: Callable[[Any, Any], Any] | None,
+    on_charter: Callable[[Charter], None] | None,
+    canceller: Canceller | None,
+    charter: Charter | None,
+    held: contextlib.ExitStack,
+) -> FlockRun:
+    """The one-prompt planner, or a charter proposed outside a flock.
+
+    ``held`` closes what this opens — the remotes — however it ends.
+    """
     # ---- 1. Plan and scaffold ------------------------------------------- #
     if charter is not None:
         # Already written, by a `propose_charter` call outside a planning turn.
@@ -629,6 +654,19 @@ def _drive(
             "one it proposed, but it stopped rather than finished — check the skeleton is "
             "complete before approving."
         )
+    # A ticket for another OS runs on a Remote Worker Birb, as it does under
+    # staged planning. This route once never opened the remotes at all, so such
+    # a ticket ran here, on the wrong OS, and the remote sat idle.
+    pool = None
+    if any(worker.runs_on for worker in charter.workers):
+        pool = _open_remotes(config, ask)
+        if pool is not None:
+            held.callback(pool.close)
+        charter, stopping = _charter_static_or_stop(charter, pool, ask)
+        if stopping:
+            run.stopped_at = "remote"
+            run.report = "No flock ran: some tickets need an OS with no Remote Worker Birb available."
+            return run
     run.charter = charter
     if on_charter is not None:
         # Before the partition check and before approval, so a front-end can
@@ -704,6 +742,7 @@ def _drive(
         # free to be the wrong one.
         grants=getattr(orchestrator, "grants", None),
         refuse=lambda: _autopilot(orchestrator),
+        remotes=pool,
     )
     run.outcome = outcome
     ask.show(outcome.describe())
@@ -813,6 +852,14 @@ def _static_or_stop(tickets: "list[TicketSpec]", pool: Any, ask: Asker) -> "tupl
         return tickets, True
     static = {t.id for t in missing}
     return [replace(t, runs_on="", static=True) if t.id in static else t for t in tickets], False
+
+
+def _charter_static_or_stop(charter: Charter, pool: Any, ask: Asker) -> "tuple[Charter, bool]":
+    """``_static_or_stop`` for a charter that arrived whole: a static worker
+    keeps no ``accept``, since nothing here can run it."""
+    workers, stopping = _static_or_stop(list(charter.workers), pool, ask)
+    workers = [replace(w, accept="") if w.static else w for w in workers]
+    return replace(charter, workers=tuple(workers)), stopping
 
 
 def _drive_staged(run: FlockRun, orchestrator: Orchestrator, objective: str, cwd: str, ask: Asker,

@@ -25,6 +25,8 @@ user-facing page is [`docs/manual/remote-workers.md`](../manual/remote-workers.m
   issued for the 8-digit pairing code (`paths.remotes_path()`); the remote keeps only token hashes
   (`paths.remote_worker_dir()`). Both 0600, written atomically; a pairing lapses after
   `PAIRING_DAYS = 30` without use, and every connection renews it.
+- `cobirb remote-worker --verbose` prints one timestamped line per message and job event
+  (`server.summarise`, bounded; a relayed model's streamed chunks are left out).
 - A changed certificate is refused (`Untrusted`) until trusted again, and trusting a new one drops
   the old token. Pairing prompts only in the TUI, after model selection (`CoBirbApp._pair_remotes`);
   `RemoteClient` without `ask_trust`/`ask_code` fails closed (`NotPaired`, `Untrusted`).
@@ -54,6 +56,10 @@ user-facing page is [`docs/manual/remote-workers.md`](../manual/remote-workers.m
 
 ## In the Flock
 
+- `run._drive_staged` opens a `pool.RemotePool`; a charter from the one-prompt planner or the chat
+  (`run._drive_single`) opens one only when a worker has `runs_on`, and puts an OS no remote offers
+  to the user the same way (`_charter_static_or_stop`). `add_worker` and the TOML take `runs_on`
+  (`charter.runs_on_os`: a family, empty for this machine's OS).
 - `run._drive_staged` opens a `pool.RemotePool` (existing pairings only, never prompting) for the
   flock's length. `Stager.machine()` adds each remote's facts to every planning prompt; tickets may
   carry `- runs on: <OS>`, kept through the restatement (`_keep_requirements`).

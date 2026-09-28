@@ -604,6 +604,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="With 'remote-worker': the address to serve on (default 0.0.0.0:8443).",
     )
     parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="With 'remote-worker': print a line for each message to and from the main "
+        "CoBirb, and for each thing the job does.",
+    )
+    parser.add_argument(
         "--doctor",
         action="store_true",
         help=(
@@ -785,9 +791,10 @@ def main(argv: list[str] | None = None) -> int:
         # setting from the main machine and reads no config of its own.
         from .remote.server import main as serve_remote
 
-        return serve_remote(args.listen or "0.0.0.0:8443")
-    if args.listen:
-        print("cobirb: --listen only means something with 'remote-worker'.", file=sys.stderr)
+        return serve_remote(args.listen or "0.0.0.0:8443", verbose=args.verbose)
+    if args.listen or args.verbose:
+        flag = "--listen" if args.listen else "--verbose"
+        print(f"cobirb: {flag} only means something with 'remote-worker'.", file=sys.stderr)
         return EXIT_ERROR
     if args.force:
         # Said rather than ignored — see --branch-at's own check below for

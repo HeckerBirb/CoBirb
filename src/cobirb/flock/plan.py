@@ -51,6 +51,7 @@ from .charter import (
     WorkerBrief,
     check_dependencies,
     find_conflicts,
+    is_path,
 )
 
 # Normalised the same way ``charter._paths`` normalises, so a draft compares
@@ -67,7 +68,7 @@ def _norm_all(paths: "list[str] | tuple[str, ...] | None", field: str) -> tuple[
         paths = [paths]
     if not isinstance(paths, (list, tuple)) or any(not isinstance(p, str) for p in paths):
         raise CharterError(f"{field} must be a list of paths")
-    cleaned = tuple(_norm(p) for p in paths if p.strip())
+    cleaned = tuple(_norm(p) for p in paths if is_path(p))
     if len(set(cleaned)) != len(cleaned):
         raise CharterError(f"{field} names the same path twice")
     return cleaned

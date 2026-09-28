@@ -1131,3 +1131,13 @@ def test_giving_the_file_to_a_ticket_answers_the_question(tmp_path):
     result = tool.execute({"objective": "kv store"})
 
     assert result.ok and desk.charter.worker("store").writes == ("store.py",)
+
+
+def test_how_many_run_at_once_is_not_the_models_choice(tmp_path):
+    from cobirb.flock.brainy import ProposeCharterTool
+    from cobirb.flock.charter import DEFAULT_CONCURRENCY
+
+    tool = ProposeCharterTool(str(tmp_path))
+    tool.execute({"toml": _charter_toml(tmp_path).replace("concurrency = 2", "concurrency = 4")})
+
+    assert tool.charter.concurrency == DEFAULT_CONCURRENCY

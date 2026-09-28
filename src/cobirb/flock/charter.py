@@ -54,6 +54,7 @@ from typing import Any
 
 from ..orchestrator import build_default_policy
 from ..policy import Policy
+from ..remote.osnames import canonical_os, local_os
 
 # A seam either has a compiler behind it or it does not, and which one decides
 # what is actually holding the agreement up.
@@ -260,6 +261,16 @@ def _text(value: Any, field: str, *, required: bool = True) -> str:
     return value.strip()
 
 
+# What a model writes for "no files" when it fills a list it had nothing for:
+# a worker's pane once read "reads  None". Never a path anyone means.
+NO_PATH = frozenset({"none", "null", "nil", "n/a", "-"})
+
+
+def is_path(entry: str) -> bool:
+    """Whether a list entry names a file, rather than being blank or a placeholder."""
+    return bool(entry.strip()) and entry.strip().lower() not in NO_PATH
+
+
 def _paths(value: Any, field: str) -> tuple[str, ...]:
     """A list of paths, normalised but *not* resolved.
 
@@ -273,7 +284,7 @@ def _paths(value: Any, field: str) -> tuple[str, ...]:
         value = [value]
     if not isinstance(value, list) or any(not isinstance(entry, str) for entry in value):
         raise CharterError(f"{field} must be a list of paths")
-    cleaned = tuple(os.path.normpath(entry.strip()) for entry in value if entry.strip())
+    cleaned = tuple(os.path.normpath(entry.strip()) for entry in value if is_path(entry))
     if len(set(cleaned)) != len(cleaned):
         raise CharterError(f"{field} names the same path twice")
     return cleaned
@@ -336,7 +347,22 @@ def _worker(entry: Any, index: int) -> WorkerBrief:
         accept=_text(entry.get("accept"), f"worker {worker_id!r} accept", required=False),
         tests=tests,
         needs=_needs(entry.get("needs"), worker_id),
+        runs_on=runs_on_os(entry.get("runs_on"), worker_id),
     )
+
+
+def runs_on_os(value: Any, worker_id: str) -> str:
+    """The OS family a ticket's ``runs_on`` names; empty for none, or for this
+    machine's own OS — a ticket for here simply runs here."""
+    if value is None or (isinstance(value, str) and not is_path(value)):
+        return ""
+    family = canonical_os(value)
+    if family is None:
+        raise CharterError(
+            f"worker {worker_id!r} runs_on {value!r} is not an OS CoBirb knows — "
+            "say Windows, Linux or Darwin, as Python names them, or leave it out to run here"
+        )
+    return "" if family == local_os() else family
 
 
 def _needs(value: Any, worker_id: str) -> tuple[str, ...]:

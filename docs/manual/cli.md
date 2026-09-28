@@ -45,7 +45,7 @@ cobirb doctor            # is everything ready to go?
 cobirb models            # how each role resolves
 cobirb commands          # your custom commands here
 cobirb flock -p "..."    # a flock run without the app
-cobirb remote-worker [--listen HOST:PORT]   # work for a CoBirb on another machine
+cobirb remote-worker [--listen HOST:PORT] [--verbose]   # work for a CoBirb on another machine
 cobirb plugin install <dir> [--replace]
 cobirb plugin list
 cobirb plugin remove <name>

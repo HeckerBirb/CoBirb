@@ -3,6 +3,17 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
+## [Unreleased]
+
+- **A charter proposed in the chat now uses your Remote Worker Birbs.** It used to skip them: a
+  ticket for another OS ran here, and the remote sat idle. `add_worker` and the TOML take a
+  `runs_on`, and a ticket for an OS no remote offers is put to you, as under `/flock`.
+- **Brainy Birb no longer chooses how many workers run at once** — it is always the default of
+  two. One sealed a charter with four.
+- **`None` is no longer read as a file name** in a ticket's `reads`, `writes` or `tests`.
+- **`cobirb remote-worker --verbose`** prints a line for every message to and from your CoBirb and
+  everything its job does, so you can see it is working.
+
 ## [0.46.1]
 - **Examples of Remote Worker Birb configuration.** This patch adds a couple of examples for how to
   use the new feature "Remote Worker Birbs".

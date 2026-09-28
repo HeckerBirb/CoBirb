@@ -29,17 +29,18 @@ actually run independently no matter how carefully their files are separated.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 from ..typing.spi import Tool, ToolResult
 from .charter import (
     DEFAULT_CONCURRENCY,
-    MAX_CONCURRENCY,
     SEAM_KINDS,
     Charter,
     CharterError,
     find_conflicts,
     parse_charter,
+    runs_on_os,
 )
 from .plan import PlanDraft, snapshot_project, written_since
 from .supervisor import FlockOutcome, check_partition
@@ -227,7 +228,6 @@ CHARTER_TEMPLATE = '''\
 objective = """
 One paragraph: what this round of work is for.
 """
-concurrency = 2
 
 [[seams]]
 at   = "path/to/module.py::ClassName"
@@ -256,6 +256,8 @@ needs  = ["a"]                   # OPTIONAL. Omit it unless b truly cannot
                                  # start until a has finished. Independent
                                  # tickets run at the same time; every `needs`
                                  # you add takes one away.
+# runs_on = "Windows"            # OPTIONAL. Only for a ticket that must be built
+                                 # and tested on another OS: a Remote Worker Birb.
 brief  = """
 Another ticket.
 """
@@ -389,6 +391,9 @@ class CharterDesk:
         display a charter must not turn an accepted one into a failed call.
         """
         self.last_error = ""
+        # How many run at once is not the model's to choose: one sealed "4 at
+        # a time" and four workers started where the user expected two.
+        charter = replace(charter, concurrency=DEFAULT_CONCURRENCY)
         self.charter, self.raw = charter, raw
         if self.on_proposed is not None:
             try:
@@ -667,6 +672,12 @@ class AddWorkerTool(_DeskTool):
                     "description": "Ticket ids that must finish first. Omit unless this "
                     "worker genuinely cannot start until another has finished.",
                 },
+                "runs_on": {
+                    "type": "string",
+                    "description": "The OS this ticket must be built and tested on, when it "
+                    "is not this machine's (e.g. 'Windows'). It runs as a Remote Worker Birb "
+                    "on that OS. Omit to run here.",
+                },
             },
             "required": ["id", "brief", "writes"],
         }
@@ -681,6 +692,7 @@ class AddWorkerTool(_DeskTool):
                 accept=str(arguments.get("accept") or ""),
                 tests=arguments.get("tests"),
                 needs=arguments.get("needs"),
+                runs_on=runs_on_os(arguments.get("runs_on"), str(arguments.get("id") or "")),
             )
         except CharterError as exc:
             return self._refuse(exc)
@@ -733,24 +745,15 @@ class SealCharterTool(_DeskTool):
                     "description": "One paragraph: what this round of work is for. The "
                     "first thing the person approving it reads.",
                 },
-                "concurrency": {
-                    "type": "integer",
-                    "description": f"How many workers may run at once. Default "
-                    f"{DEFAULT_CONCURRENCY}, max {MAX_CONCURRENCY}.",
-                },
             },
             "required": ["objective"],
         }
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
         self.desk.attempts += 1
-        concurrency = arguments.get("concurrency")
         try:
-            charter = self.desk.draft.seal(
-                str(arguments.get("objective") or ""),
-                None if concurrency in (None, "") else int(concurrency),
-            )
-        except (CharterError, TypeError, ValueError) as exc:
+            charter = self.desk.draft.seal(str(arguments.get("objective") or ""))
+        except CharterError as exc:
             self.desk.last_error = str(exc)
             return ToolResult(
                 ok=False,

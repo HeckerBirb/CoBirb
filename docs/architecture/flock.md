@@ -168,6 +168,11 @@ ticket's stage rewrites them; the cap and the no-progress stop still bound it.
   no sealed charter → `brainy.next_move_prompt` asks for exactly the missing move. Exits: a charter;
   no tool called and nothing built (a legitimate "do not divide"); `tool.exhausted`, the turn budget,
   or `STOP_NO_PROGRESS`; `MAX_SILENT_STEPS = 2` unanswered nudges.
+- **How many run at once is not the model's.** `CharterDesk.accept` sets `DEFAULT_CONCURRENCY` on
+  every charter from these tools; `seal_charter` takes no `concurrency`. A model once sealed "4 at a
+  time" where the user expected two.
+- A list entry of `None`, `null` and the like is no path (`charter.is_path`) — a pane once read
+  "reads  None".
 - **A refusal ends with the call to make** (`CharterDesk.refuse(retry=...)`), dropped at
   `MAX_REPEATED_REFUSALS = 3`. `tests ⊄ writes` is adopted, not refused, on the move route.
 - **`seal` asks once about skeleton files nobody owns** (`CharterDesk.ownership_question`, a project

@@ -38,7 +38,7 @@ The **Flock** tab shows one column per worker while it happens.
 
 ```toml
 objective = "add CSV export"
-concurrency = 2          # default 2, max 16
+concurrency = 2          # always 2 for a charter Brainy Birb writes
 
 [[workers]]
 id = "exporter"
@@ -386,7 +386,8 @@ told what is still left to do and where, rather than just that a ticket failed.
 
 **Or on another machine.** With [Remote Worker Birbs](remote-workers.md) configured, Brainy Birb
 also sees those machines, and a ticket that must be built and tested on another OS runs there —
-natively, re-checked and reviewed there too.
+natively, re-checked and reviewed there too. That holds for a charter proposed in the chat as
+well as for `/flock`.
 
 **What a ticket needs installed is checked before you approve.** A ticket names each library,
 header or package it needs from outside the project, with a command that succeeds only if it is

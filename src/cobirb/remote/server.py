@@ -106,14 +106,61 @@ class _Job:
         self.lock = threading.Lock()
 
 
+_TRACE_CHARS = 100
+
+
+def summarise(message: dict[str, Any]) -> str | None:
+    """One short line saying what ``message`` is, for ``--verbose``; ``None``
+    for what is too frequent to show (a relayed model's streamed chunks).
+
+    "Something is happening, and roughly what" — never the files or the prompt.
+    """
+    kind = str(message.get("type", "?"))
+    if kind == "model_chunk":
+        return None
+    if kind == "event":
+        event = message.get("event") or {}
+        what = str(event.get("kind", "?"))
+        if what == "tool_call":
+            arguments = event.get("arguments") or {}
+            target = arguments.get("command") or arguments.get("path") or ""
+            line = f"{what} {event.get('tool', '?')}" + (f": {target}" if target else "")
+        elif what == "notice":
+            line = f"notice: {event.get('text', '')}"
+        elif what in ("approval", "grant"):
+            line = f"{what} {event.get('tool', '?')}"
+        elif what == "model":
+            line = "model call"
+        else:
+            line = what
+    elif kind == "which":
+        line = "which " + " ".join(str(p) for p in message.get("programs") or [])
+    elif kind in ("run", "check"):
+        line = f"{kind}: {message.get('command', '')}"
+    elif kind == "job_start":
+        line = f"job_start: ticket '{(message.get('order') or {}).get('worker', {}).get('id', '?')}'"
+    elif kind in ("push", "fetch") and message.get("files") is not None:
+        line = f"{kind}: {len(message.get('files') or {})} file(s)"
+    elif kind == "answer":
+        line = f"answer: {message.get('decision', '')}"
+    elif kind == "reply":
+        line = "reply: " + ("ok" if message.get("ok", True) else f"failed {message.get('error', '')}".strip())
+    else:
+        line = kind
+    line = " ".join(line.split())
+    return line if len(line) <= _TRACE_CHARS else line[:_TRACE_CHARS - 1] + "…"
+
+
 class RemoteWorkerServer:
-    """The server. ``say`` is where it talks to the person at this machine."""
+    """The server. ``say`` is where it talks to the person at this machine;
+    ``verbose`` has it say a line for every message and job event too."""
 
     def __init__(self, host: str = "0.0.0.0", port: int = 8443, *, directory: str | None = None,
                  say: Callable[[str], None] = print, halt_after: float = protocol.HALT_AFTER_SECONDS,
-                 python: str = sys.executable) -> None:
+                 python: str = sys.executable, verbose: bool = False) -> None:
         self.host, self.port = host, port
         self._say = say
+        self._verbose = verbose
         self._halt_after = halt_after
         self._python = python
         self._tokens = IssuedTokens(os.path.join(directory, "tokens.json") if directory else None)
@@ -150,6 +197,14 @@ class RemoteWorkerServer:
         if self._server is not None:
             self._server.shutdown()
 
+    def _trace(self, direction: str, message: dict[str, Any]) -> None:
+        """``--verbose``: one timestamped line for a message or a job event."""
+        if not self._verbose:
+            return
+        line = summarise(message)
+        if line is not None:
+            self._say(f"{time.strftime('%H:%M:%S')}  {direction:<4} {line}")
+
     # ------------------------------------------------------------------ #
     def _state_for(self, owner: str) -> str:
         with self._lock:
@@ -162,6 +217,9 @@ class RemoteWorkerServer:
         send_lock = threading.Lock()
 
         def send(kind: str, **fields: Any) -> None:
+            # A heartbeat's answer would only double the line its arrival made.
+            if kind != "heartbeat":
+                self._trace("out", {"type": kind, **fields})
             with send_lock:
                 connection.send(protocol.encode(kind, **fields))
 
@@ -187,6 +245,9 @@ class RemoteWorkerServer:
                 return
         owner = hashlib.sha256(token.encode()).hexdigest()
         attached: list[_Job] = []
+        peer = getattr(connection, "remote_address", None)
+        peer = f"{peer[0]}:{peer[1]}" if isinstance(peer, tuple) and len(peer) >= 2 else "the main CoBirb"
+        self._trace("", {"type": f"connected: {peer}"})
 
         def sink(line: str) -> None:
             with send_lock:
@@ -199,10 +260,12 @@ class RemoteWorkerServer:
                 except protocol.ProtocolError as exc:
                     send("error", error=str(exc))
                     continue
+                self._trace("in", message)
                 self._dispatch(message, owner, send, reply, sink, attached)
         except Exception:  # noqa: BLE001 - a dropped connection; the job carries on until the watchdog decides
             pass
         finally:
+            self._trace("", {"type": f"disconnected: {peer}"})
             for job in attached:
                 with job.lock:
                     if job.sink is sink:
@@ -342,6 +405,7 @@ class RemoteWorkerServer:
                 sink = job.sink
                 if event.get("kind") == "done":
                     job.done = True
+            self._trace("job", {"type": "event", "event": event})
             if sink is not None:
                 try:
                     sink(protocol.encode("event", **record))
@@ -421,13 +485,13 @@ def _result(result) -> dict[str, Any]:
             "error": result.error or ""}
 
 
-def main(listen: str = "0.0.0.0:8443") -> int:
-    """``cobirb remote-worker [--listen HOST:PORT]``."""
+def main(listen: str = "0.0.0.0:8443", verbose: bool = False) -> int:
+    """``cobirb remote-worker [--listen HOST:PORT] [--verbose]``."""
     host, _, port = listen.rpartition(":")
     # Flushed line by line: the pairing code has to appear the moment it is
     # made, also when this runs under a service manager or a pipe.
     server = RemoteWorkerServer(host or "0.0.0.0", int(port or 8443),
-                                say=lambda line: print(line, flush=True))
+                                say=lambda line: print(line, flush=True), verbose=verbose)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
