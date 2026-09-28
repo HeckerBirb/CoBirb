@@ -36,9 +36,12 @@ approval inside the run is the only place it is approved.
   approved before it, the `NameMap` and what is not installed — drawn by `render.build_charter` in
   `tui.screens.CharterModal`; every other front-end prints its plain text.
 
-## Staged planning, in rounds (`flock/stages.py`, `run._drive_staged`)
+## Staged planning, in rounds (`flock/stages.py`, `flock/tickets.py`, `run._StagedRounds`)
 
-The default (`run.DEFAULT_PLANNING`).
+The default (`run.DEFAULT_PLANNING`). `stages` runs the stages and holds the prompts; `tickets` reads
+and checks the ticket blocks they write, and runs requirement checks — parsing with no stage in it.
+`run._StagedRounds` drives them: prepare (overview, restatement), then per round plan, approve, fan
+out and plan the next, then report.
 
 **Stages, each a fresh `Orchestrator`** built on the main one's model, policy, grants, front-end and
 checkpoints, with only that stage's tools and a `_GatedHooks` gate that refuses a write outside the
@@ -69,8 +72,8 @@ to `SECTION_ATTEMPTS = 3` times with every rejected attempt kept in the trace.
     what must be installed.
 - **`check_tickets`** refuses, in overview terms: a command word or remark on a `writes` line; a file
   in two tickets; a ticket without tests or `accept`; an `accept` or a requirement check that names a
-  program not on `PATH` or that `policy.command_segments` cannot read (`_accept_problem` — a worker may run
-  only what its check names; a missing program's refusal lists which `_TOOLCHAINS` that machine
+  program not on `PATH` or that `policy.command_segments` cannot read (`_accept_problem` — a worker may
+  run only what its check names; a missing program's refusal lists which `TOOLCHAINS` that machine
   has); then whatever a scratch `PlanDraft` refuses.
 - `NO TICKETS` is a legitimate decline.
 
@@ -183,7 +186,9 @@ ticket's stage rewrites them; the cap and the no-progress stop still bound it.
   asked for at `MAX_CHARTER_ATTEMPTS = 5` (template sent with the first rejection only; `_toml_hint`
   names the cause). A charter recovered from a reply is `PlanResult.recovered`.
 - The run then checks the partition, asks for the one approval, and may probe the endpoint's real
-  concurrency before fanning out (`run_flock_session`, steps 0–5).
+  concurrency before fanning out (`run._drive_single`, steps 1–5; `_plan_failure` names each way
+  planning can end without a charter). Both routes share `run._Flight`, which carries the engagement's
+  inputs and does what every route does the same way.
 
 ## Workers (`flock/worker.py`, `runtime/wiring.build_subagent`)
 
@@ -223,6 +228,9 @@ made static by the user's choice or stops the flock (`stopped_at="remote"`).
 
 ## Re-check and review (`flock/supervisor.py`, `flock/review.py`)
 
+- **One round is a `supervisor._Round`**: fan out on a pool sized to the workers, with `Slots` as
+  the real concurrency limit and each worker's dependents waiting on its `finished` event; then
+  re-check and review.
 - **Re-check.** After the join, `supervisor.recheck` runs every finished ticket's `accept` again on
   the final tree (no model) and updates `accepted`, keeping `accepted_when_finished`: a worker's own
   verdict is from the moment it finished, often before a colleague's code landed. A ticket that passed

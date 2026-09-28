@@ -8,7 +8,7 @@ from cobirb.flock import run as flock_run
 from cobirb.flock.brainy import AddWorkerTool, CharterDesk
 from cobirb.flock.charter import Charter, CharterError, WorkerBrief, runs_on_os
 from cobirb.flock.run import Asker
-from cobirb.flock.stages import UNCHECKABLE, TicketSpec, check_tickets, parse_tickets
+from cobirb.flock.tickets import UNCHECKABLE, TicketSpec, check_tickets, parse_tickets
 from cobirb.flock.worker import WorkerReport
 from cobirb.remote import settings
 from cobirb.remote.osnames import canonical_os, local_os

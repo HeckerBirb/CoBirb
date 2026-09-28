@@ -54,15 +54,17 @@ from .stages import (
     LIMITS_HEADING,
     CharterApproval,
     Stager,
-    TicketSpec,
     approval_changes,
+)
+from .supervisor import Canceller, FlockOutcome, check_partition, run_flock
+from .tickets import (
+    TicketSpec,
     check_requirements,
     check_tickets,
     describe_requirements,
     left_to_do,
     requirements_checkable,
 )
-from .supervisor import Canceller, FlockOutcome, check_partition, run_flock
 
 logger = logging.getLogger("cobirb")
 

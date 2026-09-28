@@ -71,7 +71,7 @@ Code paths are under `src/cobirb/`; the rest are from the repository root.
 | `runtime/` | Shared composition: `wiring`, `plugins`, `models`, `system_prompt`, `setup`, `commands`, `command_index`, `sessions`, `instructions`, `hooks`, `verify`, `custom_commands`, `headless`, `export`, `bootstrap`, `plugin_install`, `upgrade`, `catalogues`, `mentions`, `doctor`. | [extending](docs/architecture/extending.md), [surfaces](docs/architecture/surfaces.md) |
 | `mcp/` | stdio MCP client and its tool adapter. | [extending](docs/architecture/extending.md) |
 | `remote/` | Remote Worker Birbs: `settings`, `osnames`, `trust`, `certs`, `protocol`, `client`, `server`, `job`, `relay`, `runner`, `pool`. | [remote](docs/architecture/remote.md) |
-| `flock/` | Multi-agent runs: `charter`, `plan`, `brainy`, `stages`, `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. | [flock](docs/architecture/flock.md) |
+| `flock/` | Multi-agent runs: `charter`, `plan`, `brainy`, `stages`, `tickets`, `worker`, `supervisor`, `review`, `run`, `branch`, `probe`, `preflight`. | [flock](docs/architecture/flock.md) |
 | `tui/` | The Textual app: `app`, `slash_commands`, `transcript`, `attachments`, `pickers`, `widgets`, `screens`, `panes`, `io_bridge`, `flock_bridge`, `app.tcss`. | [surfaces](docs/architecture/surfaces.md) |
 | `help_text.py` | `cobirb help` — the overview; `cobirb help <topic>` renders the manual. | [surfaces](docs/architecture/surfaces.md) |
 | `install.sh` | Installer, upgrader and downgrader; shipped in the package and attached to each release. | [surfaces](docs/architecture/surfaces.md) |
