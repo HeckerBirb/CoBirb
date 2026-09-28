@@ -59,15 +59,15 @@ user-facing page is [`docs/manual/remote-workers.md`](../manual/remote-workers.m
 
 ## In the Flock
 
-- `run._drive_staged` opens a `pool.RemotePool`; a charter from the one-prompt planner or the chat
+- Staged planning (`run._drive` → `run._StagedRounds`) opens a `pool.RemotePool` (existing pairings
+  only, never prompting) for the flock's length; a charter from the one-prompt planner or the chat
   (`run._drive_single`) opens one only when a worker has `runs_on`, and puts an OS no remote offers
   to the user the same way (`_charter_static_or_stop`). `add_worker` and the TOML take `runs_on`
   (`charter.runs_on_os`: a family, empty for this machine's OS).
-- `run._drive_staged` opens a `pool.RemotePool` (existing pairings only, never prompting) for the
-  flock's length. `Stager.machine()` adds each remote's facts to every planning prompt; tickets may
-  carry `- runs on: <OS>`, kept through the restatement (`_keep_requirements`).
-- `check_tickets(which_for=)`: a remote ticket's `accept` and `requires` programs are looked up on
-  its remote in one `which` request that also asks for every `_TOOLCHAINS` name (for the refusal),
+- `Stager.machine()` adds each remote's facts to every planning prompt; tickets may carry
+  `- runs on: <OS>`, kept through the restatement (`_keep_requirements`).
+- `tickets.check_tickets(which_for=)`: a remote ticket's `accept` and `requires` programs are looked
+  up on its remote in one `which` request that also asks for every `TOOLCHAINS` name (for the refusal),
   the command read Windows' way for a Windows remote (`policy.command_segments(windows=)`); for
   an OS with no remote, `UNCHECKABLE` skips the lookup. `check_requirements(remotes=)` runs a remote
   ticket's requirement checks there.

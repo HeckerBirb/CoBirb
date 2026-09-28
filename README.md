@@ -226,13 +226,8 @@ Being straight about the edges, since the rest of this page makes strong claims:
 
 ## Documentation
 
-- [docs/](./docs/) — short how-to pages: [install](./docs/manual/install.md),
-  [models](./docs/manual/models.md),
-  [first run](./docs/manual/first-run.md), [commands](./docs/manual/commands.md),
-  [CLI](./docs/manual/cli.md), [config](./docs/manual/config.md),
-  [permissions](./docs/manual/permissions.md), [sessions](./docs/manual/sessions.md),
-  [memory](./docs/manual/memory.md), [images](./docs/manual/images.md),
-  [the Flock](./docs/manual/flock.md), [plugins & MCP](./docs/manual/plugins-and-mcp.md).
+- [docs/](./docs/README.md) — the user manual, short how-to pages from installing to the Flock
+  and Remote Worker Birbs. Every page is also `cobirb help <page>` in the terminal.
 - [docs/architecture/](./docs/architecture/README.md) — how each part works, from the agent loop
   and the security design to the plugin SPI and the Flock.
 - [examples/](./examples/) — configurations to start from, each focused on one combination

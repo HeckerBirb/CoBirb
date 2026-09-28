@@ -36,10 +36,7 @@ STARTER_CONFIG = """\
 {
   "// CoBirb configuration": "This is the only config file CoBirb reads. A cobirb.json in a project directory is ignored — see 'cobirb help config'.",
 
-  "// model": "The model to use. Include the tag: a bare name means ':latest' to Ollama, so 'mistral' will not find 'mistral:7b'. Check with 'ollama list'.",
-  "default_model": "",
-
-  "// models": "One model per role, for the Flock ('cobirb help flock'). Roles inherit from 'default', so a role naming only a model still gets the default's endpoint.",
+  "// models": "The model to use, under models.default.name. Include the tag: a bare name means ':latest' to Ollama, so 'mistral' will not find 'mistral:7b'. Check with 'ollama list', or run 'cobirb setup'. Other roles, for the Flock ('cobirb help flock'), inherit from 'default', so a role naming only a model still gets the default's endpoint.",
   "models": {
     "default": {
       "name": "",

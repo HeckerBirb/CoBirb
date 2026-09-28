@@ -49,6 +49,11 @@ something was refused — headless only, since a person who answered "no" got wh
   in its own pane instead (see [the Flock](flock.md)). A pick-one question with long answers is
   `ChoiceModal` (nothing highlighted at first).
 - **Status bar** shows AUTOPILOT, checklist progress, model, plan mode, cwd, session.
+- **One orchestrator per session**, built on first use by `CoBirbApp.ensure_orchestrator` — for the
+  first turn, the first flock, or a command such as `/autopilot` — and reused, which is what keeps an
+  "always" approval for the rest of the session. Switching or branching a session discards it
+  (`_discard_orchestrator`, which also stops its MCP servers). Session files opened outside a run
+  get their crypto from `runtime.plugins.session_crypto`, as the CLI's `--export` and `--branch` do.
 
 ## Config (`config.py`, `paths.py`)
 

@@ -34,7 +34,7 @@ No type checker is configured.
 - **Keep the core thin.** Feature logic belongs in a tool, a plugin, or `runtime/` — not bolted
   onto `orchestrator.py`.
 - Docstrings explain *why*, not what. If you fix a subtle bug, say why it was a bug.
-- The three runtime dependencies (`rich`, `cryptography`, `textual`) are each a deliberate
+- The four runtime dependencies (`rich`, `cryptography`, `textual`, `websockets`) are each a deliberate
   decision — prefer stdlib for anything new. A new dependency is a conversation, not a PR.
 
 ## Plugins

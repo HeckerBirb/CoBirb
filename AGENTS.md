@@ -14,7 +14,8 @@ network unless the user explicitly asks for it.
 
 - Version: `pyproject.toml` only (`cobirb.__version__` reads the installed metadata). Python ≥3.11,
   MIT. Entry point `cobirb = cobirb.cli:main`.
-- Runtime deps: `rich`, `cryptography`, `textual` (imported lazily; one-shot never loads it). Dev:
+- Runtime deps: `rich`, `cryptography`, `textual` (imported lazily; one-shot never loads it),
+  `websockets` (only for Remote Worker Birbs; imported only when one is used). Dev:
   `pytest`, `pytest-cov`, `pytest-asyncio`, `pytest-xdist`, `ruff`. Prefer stdlib; each dependency is a
   deliberate decision.
 - Ships **no models**. It talks to one model server the user configures — Ollama's API by default, or
