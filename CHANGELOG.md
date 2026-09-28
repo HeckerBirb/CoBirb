@@ -3,7 +3,7 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
-## [Unreleased]
+## [0.46.4]
 
 - **Commands no longer hang on a Windows Remote Worker Birb.** A command the worker ran — even
   `python -c "print(1)"` — sat until its timeout, because it inherited the pipe the worker job reads
