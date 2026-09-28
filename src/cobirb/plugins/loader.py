@@ -4,6 +4,7 @@ Discovers plugins from (in order): installed entry points, then local plugin
 directories. Loading is lazy, cached per run, and **fail-closed**: a broken plugin
 never bricks the core — the error is reported and the core continues.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -13,7 +14,6 @@ from typing import Any
 
 from .. import paths
 from ..typing import spi as cobirb_typing
-
 
 # Maps an SPI interface name to the base class it implements.
 _INTERFACES = {
@@ -72,7 +72,7 @@ def load_plugins(entry_points: im.EntryPoints | None = None) -> tuple[dict[str, 
             # `kind` after the fact — a variable that leaks out of a for
             # statement, filing every failure under whichever interface
             # happened to be tried first regardless of the real cause.
-            for kind, base in _INTERFACES.items():
+            for kind in _INTERFACES:
                 try:
                     obj = _load_local_plugin(path, kind)
                 except Exception as exc:  # noqa: BLE001 - fail-closed per plugin
@@ -111,7 +111,7 @@ def _load_local_plugin(path: str, kind: str) -> Any | None:
             continue
         try:
             obj = ep.load()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # any import failure is the plugin's, reported as such
             raise PluginError(f"failed loading plugin {os.path.basename(path)}: {exc}") from exc
         if not _is_subclass(obj, _INTERFACES[kind]):
             return None

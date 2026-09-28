@@ -8,9 +8,11 @@ with the literal string ``I_OAdapter.confirm()`` is contracted to return
 ``Orchestrator._execute_tool`` has to translate anything — and, like the
 terminal prompt, it fails closed: escape means deny.
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from rich.text import Text
 from textual.app import ComposeResult
@@ -102,9 +104,7 @@ class ApprovalModal(ModalScreen[str]):
         # below for what happens when a bubbled message *does* land on a
         # same-named handler that wasn't expecting it.
         event.stop()
-        self.dismiss(
-            {"approve-once": "once", "approve-always": "always"}.get(event.button.id or "", "deny")
-        )
+        self.dismiss({"approve-once": "once", "approve-always": "always"}.get(event.button.id or "", "deny"))
 
 
 class HelpModal(ModalScreen[None]):
@@ -132,7 +132,7 @@ class HelpModal(ModalScreen[None]):
         self.dismiss(None)
 
 
-class PickerModal(ModalScreen[Optional[str]]):
+class PickerModal(ModalScreen[str | None]):
     """Choose one name from a list, with the current one marked.
 
     A base rather than folded into ``ModelPickerModal`` so any later "pick one
@@ -154,8 +154,7 @@ class PickerModal(ModalScreen[Optional[str]]):
         with VerticalScroll(id="model-dialog"):
             yield Static(self.TITLE_TEXT, id="model-title")
             options = [
-                Option(f"{'> ' if name == self._current else '  '}{name}", id=name)
-                for name in self._choices
+                Option(f"{'> ' if name == self._current else '  '}{name}", id=name) for name in self._choices
             ]
             yield OptionList(*options, id="model-options")
 
@@ -180,7 +179,7 @@ class ModelPickerModal(PickerModal):
     TITLE_TEXT = "Select a model"
 
 
-class ChoiceModal(ModalScreen[Optional[int]]):
+class ChoiceModal(ModalScreen[int | None]):
     """One question, something to read, and a few answers to pick one from.
 
     **An option list, not buttons**: each answer is a sentence ("Continue
@@ -204,8 +203,10 @@ class ChoiceModal(ModalScreen[Optional[int]]):
             if self._detail:
                 with VerticalScroll(id="choice-detail"):
                     yield Static(Text(self._detail))
-            yield OptionList(*(Option(text, id=str(index)) for index, text in enumerate(self._options)),
-                             id="choice-options")
+            yield OptionList(
+                *(Option(text, id=str(index)) for index, text in enumerate(self._options)),
+                id="choice-options",
+            )
 
     def on_mount(self) -> None:
         options = self.query_one("#choice-options", OptionList)
@@ -220,7 +221,7 @@ class ChoiceModal(ModalScreen[Optional[int]]):
         self.dismiss(None)
 
 
-class TextPromptModal(ModalScreen[Optional[str]]):
+class TextPromptModal(ModalScreen[str | None]):
     """A single-line text (or masked password) prompt.
 
     Used by the Sessions tab wherever it needs to ask something a plain
@@ -343,9 +344,15 @@ class CharterModal(ConfirmModal):
         with Vertical(id="charter-box"):
             yield Static(Text(self._question, style="bold"), id="confirm-question")
             with VerticalScroll(id="charter-body"):
-                yield Static(render.build_charter(approval.charter, approval.approved, approval.names,
-                                                  getattr(approval, "requirements", "")),
-                             id="charter-detail")
+                yield Static(
+                    render.build_charter(
+                        approval.charter,
+                        approval.approved,
+                        approval.names,
+                        getattr(approval, "requirements", ""),
+                    ),
+                    id="charter-detail",
+                )
             with Horizontal(id="confirm-actions"):
                 yield Button(self._confirm_label, id="confirm-yes", variant="primary")
                 yield Button("No", id="confirm-no")
@@ -355,7 +362,7 @@ class CharterModal(ConfirmModal):
 # Memory catalogues
 # --------------------------------------------------------------------------- #
 def _ordered_catalogue_options(
-    rows: "list[memory.CatalogueFile]", loaded: "dict[str, memory.MemoryCatalogue]"
+    rows: list[memory.CatalogueFile], loaded: dict[str, memory.MemoryCatalogue]
 ) -> list[Option]:
     """Loaded catalogues first, a disabled separator, then the rest —
     alphabetical within each group. Shared by ``/memories`` and the
@@ -376,7 +383,7 @@ def _ordered_catalogue_options(
     return options
 
 
-class NewCatalogueModal(ModalScreen[Optional[tuple[str, str]]]):
+class NewCatalogueModal(ModalScreen[tuple[str, str] | None]):
     """Name + password + confirm-password. Dismisses with ``(name,
     password)`` — ``password`` is ``""`` for an unencrypted catalogue — or
     ``None`` on cancel. Mismatched non-blank passwords are an inline error,
@@ -451,7 +458,7 @@ class _CataloguePickerModal(ModalScreen[None]):
     OPTIONS_ID: ClassVar[str] = ""
     ERROR_ID: ClassVar[str] = ""
 
-    def _app(self) -> "CoBirbApp":
+    def _app(self) -> CoBirbApp:
         return cast("CoBirbApp", self.app)
 
     def on_mount(self) -> None:
@@ -466,20 +473,20 @@ class _CataloguePickerModal(ModalScreen[None]):
             options.add_option(option)
         self.query_one(self.ERROR_ID, Static).update(error)
 
-    def _row_for(self, name: str) -> "memory.CatalogueFile | None":
+    def _row_for(self, name: str) -> memory.CatalogueFile | None:
         return next((r for r in self._app().memory_catalogue_rows() if r.name == name), None)
 
-    def _chosen_name(self, event: OptionList.OptionSelected) -> "str | None":
+    def _chosen_name(self, event: OptionList.OptionSelected) -> str | None:
         """The catalogue a selection names, or ``None`` for the separator."""
         name = event.option_id
         return None if not name or name == _SEPARATOR_ID else name
 
-    def _unlock_then(self, row: "memory.CatalogueFile", then: "Callable[[], None]") -> None:
+    def _unlock_then(self, row: memory.CatalogueFile, then: Callable[[], None]) -> None:
         """Ask for ``row``'s password, load it, and continue — or re-show
         this picker with the error, which is what keeps a mistyped password
         from costing whatever the user had already typed."""
 
-        def unlock(password: "str | None") -> None:
+        def unlock(password: str | None) -> None:
             if not password:
                 return
             error = self._app().memory_load(row, password)
@@ -519,7 +526,7 @@ class MemoryCataloguesModal(_CataloguePickerModal):
                 yield Button("Delete", id="memory-delete", variant="error")
                 yield Button("Close", id="memory-close")
 
-    def _highlighted_name(self) -> "str | None":
+    def _highlighted_name(self) -> str | None:
         options = self.query_one("#memory-options", OptionList)
         if options.highlighted is None:
             return None
@@ -569,7 +576,7 @@ class MemoryCataloguesModal(_CataloguePickerModal):
                 TextPromptModal("Rename catalogue", "New name:", name), lambda new: self._on_rename(name, new)
             )
 
-    def _on_new(self, result: "tuple[str, str] | None") -> None:
+    def _on_new(self, result: tuple[str, str] | None) -> None:
         if result is None:
             return
         name, password = result
@@ -582,7 +589,7 @@ class MemoryCataloguesModal(_CataloguePickerModal):
         else:
             self._refresh()
 
-    def _on_rename(self, name: str, new_name: "str | None") -> None:
+    def _on_rename(self, name: str, new_name: str | None) -> None:
         if new_name and new_name != name:
             self._refresh(self._app().memory_rename(name, new_name))
         else:

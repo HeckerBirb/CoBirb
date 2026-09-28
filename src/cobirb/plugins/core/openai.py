@@ -23,13 +23,15 @@ calls a model wrote as text. What differs is only the wire format:
   applied by the server itself; CoBirb sends a system message only when it has
   something of its own to say, exactly as with Ollama.
 """
+
 from __future__ import annotations
 
 import base64
 import json
 import urllib.error
 import urllib.request
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
 from ...typing.spi import Tool, ToolCall
 from . import toolcalls
@@ -101,8 +103,13 @@ class OpenAICompatibleProvider(LocalModelProvider):
             if entry.get("id") != self._model:
                 continue
             meta = entry.get("meta") or {}
-            for value in (entry.get("max_model_len"), entry.get("context_length"),
-                          entry.get("max_context_length"), meta.get("n_ctx"), meta.get("n_ctx_train")):
+            for value in (
+                entry.get("max_model_len"),
+                entry.get("context_length"),
+                entry.get("max_context_length"),
+                meta.get("n_ctx"),
+                meta.get("n_ctx_train"),
+            ):
                 if isinstance(value, int) and value > 0:
                     return value
         return None
@@ -121,10 +128,10 @@ class OpenAICompatibleProvider(LocalModelProvider):
         self,
         system: str,
         context: str,
-        tools: Optional[list[Tool]] = None,
+        tools: list[Tool] | None = None,
         *,
         stream: bool = False,
-    ) -> "Iterable[str] | str":
+    ) -> Iterable[str] | str:
         if not self._model:
             raise RuntimeError(
                 "No model configured. Set --model, COBIRB_MODEL_NAME, or models.default.name "
@@ -166,10 +173,14 @@ class OpenAICompatibleProvider(LocalModelProvider):
         """
         pieces: dict[int, dict[str, str]] = {}
         for raw_line in self._stream_lines("/v1/chat/completions", payload):
-            line = raw_line.decode("utf-8", "replace").strip() if isinstance(raw_line, bytes) else raw_line.strip()
+            line = (
+                raw_line.decode("utf-8", "replace").strip()
+                if isinstance(raw_line, bytes)
+                else raw_line.strip()
+            )
             if not line.startswith("data:"):
                 continue
-            data = line[len("data:"):].strip()
+            data = line[len("data:") :].strip()
             if data == "[DONE]":
                 break
             chunk = json.loads(data)
@@ -184,14 +195,13 @@ class OpenAICompatibleProvider(LocalModelProvider):
                 if content:
                     yield content
                 for fragment in delta.get("tool_calls") or []:
-                    slot = pieces.setdefault(int(fragment.get("index", len(pieces))),
-                                             {"name": "", "arguments": ""})
+                    slot = pieces.setdefault(
+                        int(fragment.get("index", len(pieces))), {"name": "", "arguments": ""}
+                    )
                     function = fragment.get("function") or {}
                     slot["name"] += function.get("name") or ""
                     slot["arguments"] += function.get("arguments") or ""
-        self._last_tool_calls = _calls_from(
-            [{"function": pieces[i]} for i in sorted(pieces)]
-        )
+        self._last_tool_calls = _calls_from([{"function": pieces[i]} for i in sorted(pieces)])
 
 
 def _calls_from(raw_calls: list[dict[str, Any]]) -> list[ToolCall]:
@@ -252,26 +262,35 @@ def build_messages(system: str, context: str, *, include_images: bool = False) -
         if role == "assistant" and tool_use:
             ids = [f"call_{number}_{k}" for k in range(len(tool_use))]
             pending = list(ids)
-            messages.append({
-                "role": "assistant",
-                # "" rather than null: chat templates on the server side do
-                # string operations on it, and a None fails some of them.
-                "content": toolcalls.strip_markup(content),
-                "tool_calls": [
-                    {"id": call_id, "type": "function",
-                     "function": {"name": tu["name"], "arguments": json.dumps(tu.get("arguments", {}))}}
-                    for call_id, tu in zip(ids, tool_use)
-                ],
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    # "" rather than null: chat templates on the server side do
+                    # string operations on it, and a None fails some of them.
+                    "content": toolcalls.strip_markup(content),
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "name": tu["name"],
+                                "arguments": json.dumps(tu.get("arguments", {})),
+                            },
+                        }
+                        for call_id, tu in zip(ids, tool_use, strict=False)
+                    ],
+                }
+            )
         elif role == "tool":
             call_id = pending.pop(0) if pending else f"call_{number}_orphan"
             messages.append({"role": "tool", "tool_call_id": call_id, "content": content})
         else:
-            message: dict[str, Any] = {"role": "assistant" if role == "assistant" else "user",
-                                       "content": content}
+            message: dict[str, Any] = {
+                "role": "assistant" if role == "assistant" else "user",
+                "content": content,
+            }
             images = [img["data"] for img in (turn.get("images") or []) if img.get("data")]
             if images and include_images:
                 message["content"] = [{"type": "text", "text": content}] + [_image_part(d) for d in images]
             messages.append(message)
     return messages
-

@@ -25,6 +25,7 @@ answering an approval prompt or by their own config/``--allow-tool``.
   be checked can't run.
 - The audit log is append-only and never leaves the machine.
 """
+
 from __future__ import annotations
 
 import json
@@ -36,7 +37,7 @@ import time
 import weakref
 from typing import Any
 
-from . import paths, patches
+from . import patches, paths
 from .redaction import redact_arguments
 
 # Tokens made only of these characters are shell operators rather than words.
@@ -385,9 +386,7 @@ class Policy:
             path = os.path.join(self.cwd, path)
         return os.path.realpath(path)
 
-    def _scoped_allowed(
-        self, tool_name: str, arguments: dict[str, Any], approved: set[str]
-    ) -> bool:
+    def _scoped_allowed(self, tool_name: str, arguments: dict[str, Any], approved: set[str]) -> bool:
         """Whether a path-scoped call falls inside one of ``approved``."""
         target = _target_path(tool_name, arguments)
         if target is None:
@@ -673,10 +672,10 @@ class SessionGrants:
         # paths against the policy's own cwd, and pre-resolving here would
         # bake one agent's working directory into everyone's rules.
         self._granted: list[tuple[str, dict[str, Any]]] = []
-        self._policies: "weakref.WeakSet[Policy]" = weakref.WeakSet()
+        self._policies: weakref.WeakSet[Policy] = weakref.WeakSet()
         self._lock = threading.Lock()
 
-    def register(self, policy: "Policy") -> None:
+    def register(self, policy: Policy) -> None:
         """Put ``policy`` under this session's grants, backlog included.
 
         Called for every policy built in the session, so a Worker Birb that
@@ -690,7 +689,7 @@ class SessionGrants:
         for tool_name, arguments in backlog:
             policy.grant(tool_name, arguments)
 
-    def unregister(self, policy: "Policy") -> None:
+    def unregister(self, policy: Policy) -> None:
         """Stop pushing grants to ``policy`` — a Remote Worker Birb's relay whose
         job has ended. A local policy needs no call: it is held weakly."""
         with self._lock:

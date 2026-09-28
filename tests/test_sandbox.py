@@ -1,4 +1,5 @@
 """Tests for the shell sandbox."""
+
 from __future__ import annotations
 
 import os
@@ -60,7 +61,7 @@ def test_a_contained_command_can_write_the_project_but_nothing_else(tmp_path):
     tool = _shell(project)
 
     inside = tool.execute({"command": "echo hi > made.txt && cat made.txt"})
-    outside = tool.execute({"command": f"echo x > {tmp_path / 'escaped.txt'}"})
+    tool.execute({"command": f"echo x > {tmp_path / 'escaped.txt'}"})
 
     assert inside.content.startswith("exit=0") and (project / "made.txt").exists()
     assert not (tmp_path / "escaped.txt").exists()
@@ -101,8 +102,10 @@ _CMD_EXE = "/mnt/c/Windows/System32/cmd.exe"
 
 
 @needs_bwrap
-@pytest.mark.skipif(not (os.path.isdir(sandbox.WSL_INTEROP_DIR) and os.path.exists(_CMD_EXE)),
-                    reason="not WSL with Windows interop")
+@pytest.mark.skipif(
+    not (os.path.isdir(sandbox.WSL_INTEROP_DIR) and os.path.exists(_CMD_EXE)),
+    reason="not WSL with Windows interop",
+)
 def test_a_contained_command_cannot_start_a_windows_program(tmp_path):
     """On WSL a Windows program started from the sandbox ran outside it."""
     result = _shell(tmp_path).execute({"command": f"{_CMD_EXE} /c ver"})

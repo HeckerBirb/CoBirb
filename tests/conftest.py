@@ -4,6 +4,7 @@ All fixtures use a temp workspace so tests never touch real files or the real
 audit log. The crypto/session layers are exercised against a real AES-256-GCM
 backend (the vetted ``cryptography`` library) so the round-trip is genuine.
 """
+
 from __future__ import annotations
 
 import ipaddress

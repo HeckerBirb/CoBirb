@@ -9,10 +9,12 @@ The built-in commands are passed *in* rather than imported. They live in
 TUI would invert the dependency every other module here observes — front-ends
 use ``runtime``, never the other way round.
 """
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from .custom_commands import discover_commands
 from .mentions import subsequence_score
@@ -29,7 +31,7 @@ class CommandEntry:
     source: str = ""
 
 
-def _first_line(text: "str | None") -> str:
+def _first_line(text: str | None) -> str:
     """The opening line of a docstring, tidied.
 
     Built-in descriptions come from the handlers' own docstrings rather than a
@@ -48,9 +50,7 @@ def _first_line(text: "str | None") -> str:
     return ""
 
 
-def available_commands(
-    builtins: "dict[str, Callable[..., Any]]", cwd: str = "."
-) -> "list[CommandEntry]":
+def available_commands(builtins: dict[str, Callable[..., Any]], cwd: str = ".") -> list[CommandEntry]:
     """Every command that would actually run here, built-ins first.
 
     Built-ins keep their declaration order, which is already curated and
@@ -78,13 +78,11 @@ def available_commands(
         custom = {}
     for name, command in sorted(custom.items()):
         if name not in taken:
-            entries.append(
-                CommandEntry(name=name, description=command.description, source=command.source)
-            )
+            entries.append(CommandEntry(name=name, description=command.description, source=command.source))
     return entries
 
 
-def rank(query: str, entries: "list[CommandEntry]") -> "list[CommandEntry]":
+def rank(query: str, entries: list[CommandEntry]) -> list[CommandEntry]:
     """Every entry matching ``query``, best first.
 
     Returns *all* of them rather than a capped slice — unlike
@@ -100,7 +98,7 @@ def rank(query: str, entries: "list[CommandEntry]") -> "list[CommandEntry]":
     if not query:
         return list(entries)
 
-    scored: "list[tuple[int, CommandEntry]]" = []
+    scored: list[tuple[int, CommandEntry]] = []
     for entry in entries:
         score = subsequence_score(query, entry.name)
         if score is None:

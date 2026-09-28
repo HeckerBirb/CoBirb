@@ -13,6 +13,7 @@ observes mid-turn state (the approval modal appearing) or end-of-turn state
 assume a single ``await pilot.pause()`` is enough. Replacing those polls with
 a bare pause will pass locally and flake in CI.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,25 +23,24 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+from conftest import StubSession, StubSessionManager
 from rich.text import Text
 from textual.geometry import Offset
 from textual.selection import Selection
 from textual.widgets import Button, Footer, Input, OptionList, RichLog, Static, TabbedContent
 from textual.widgets.option_list import Option
 
-from conftest import StubSession, StubSessionManager
-
 from cobirb import cli, memory, paths, session
 from cobirb import session as session_mod
 from cobirb.plugins.core import render
-from cobirb.policy import Policy
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
+from cobirb.policy import Policy
 from cobirb.runtime import plugins, wiring
-from cobirb.tui.app import CoBirbApp
 from cobirb.tui import slash_commands
+from cobirb.tui.app import CoBirbApp
+from cobirb.tui.attachments import split_argument as _split_image_argument
 from cobirb.tui.command_picker import CommandPicker
 from cobirb.tui.mention_picker import MentionPicker
-from cobirb.tui.attachments import split_argument as _split_image_argument
 from cobirb.tui.panes import FlockPane, PluginsPane, SessionsPane, WorkerRequest
 from cobirb.tui.screens import (
     ApprovalModal,
@@ -117,9 +117,7 @@ class _StubOrchestrator:
         self.closed = True
 
     def run(self, prompt, system, *, cwd, label=None, session_path=None, plan_mode=False, images=None):
-        self.calls.append(
-            {"prompt": prompt, "system": system, "plan_mode": plan_mode, "images": images}
-        )
+        self.calls.append({"prompt": prompt, "system": system, "plan_mode": plan_mode, "images": images})
         if self._run_raises is not None:
             raise self._run_raises
         if self._on_run is not None:
@@ -136,8 +134,12 @@ def _stub_build(orchestrator=None, record=None):
     """
 
     def fake_build_orchestrator(
-        cwd, allow_overrides, session_path=None, password=None,
-        model_name=None, io_factory=None,
+        cwd,
+        allow_overrides,
+        session_path=None,
+        password=None,
+        model_name=None,
+        io_factory=None,
     ):
         target = orchestrator if orchestrator is not None else _StubOrchestrator()
         if io_factory is not None and target.io is None:
@@ -150,15 +152,15 @@ def _stub_build(orchestrator=None, record=None):
 
 
 def _make_app(**overrides) -> CoBirbApp:
-    kwargs = dict(
-        system="",
-        allow_overrides={},
-        session_path=None,
-        password=None,
-        cwd="/tmp",
-        model_name=None,
-        plan_mode=False,
-    )
+    kwargs = {
+        "system": "",
+        "allow_overrides": {},
+        "session_path": None,
+        "password": None,
+        "cwd": "/tmp",
+        "model_name": None,
+        "plan_mode": False,
+    }
     kwargs.update(overrides)
     return CoBirbApp(**kwargs)
 
@@ -199,7 +201,10 @@ async def test_app_boots_with_the_three_tabs_and_current_active():
         await pilot.pause()
         tabs = app.query_one(TabbedContent)
         assert [pane.id for pane in app.query("TabPane")] == [
-            "current", "flock", "sessions", "plugins",
+            "current",
+            "flock",
+            "sessions",
+            "plugins",
         ]
         assert tabs.active == "current"
 
@@ -779,9 +784,7 @@ def _confirming_orchestrator(decisions: list[str]):
     return _StubOrchestrator(on_run=on_run)
 
 
-@pytest.mark.parametrize(
-    "key,expected", [("y", "once"), ("a", "always"), ("n", "deny"), ("escape", "deny")]
-)
+@pytest.mark.parametrize("key,expected", [("y", "once"), ("a", "always"), ("n", "deny"), ("escape", "deny")])
 async def test_the_approval_modal_returns_the_decision_to_the_worker(monkeypatch, key, expected):
     decisions: list[str] = []
     monkeypatch.setattr(wiring, "build_orchestrator", _stub_build(_confirming_orchestrator(decisions)))
@@ -956,8 +959,12 @@ async def test_the_io_bridge_satisfies_the_adapter_contract_and_its_extras():
         assert bridge.listen() is None
         assert bridge.view(b"", "image/png") is None
         for hook in (
-            "spinner", "render_answer", "render_plan",
-            "render_validation", "render_tool_call", "confirm",
+            "spinner",
+            "render_answer",
+            "render_plan",
+            "render_validation",
+            "render_tool_call",
+            "confirm",
         ):
             assert callable(getattr(bridge, hook))
 
@@ -1090,7 +1097,8 @@ async def test_manual_model_command_opens_the_picker_with_the_fetched_list(monke
         await _until(pilot, lambda: isinstance(app.screen, ModelPickerModal))
         options = app.screen.query_one("#model-options", OptionList)
         assert {options.get_option_at_index(i).id for i in range(options.option_count)} == {
-            "llama3.1", "gemma4",
+            "llama3.1",
+            "gemma4",
         }
 
 
@@ -1918,9 +1926,7 @@ async def test_the_transcript_extracts_a_partial_selection_precisely():
         transcript.write(Text("second line"))
         await pilot.pause()
 
-        extracted, ending = transcript.get_selection(
-            Selection.from_offsets(Offset(6, 0), Offset(6, 1))
-        )
+        extracted, ending = transcript.get_selection(Selection.from_offsets(Offset(6, 0), Offset(6, 1)))
         assert extracted == "world\nsecond"
         assert ending == "\n"
 
@@ -1969,9 +1975,7 @@ async def test_a_selected_span_is_highlighted_in_the_transcript():
         await pilot.pause()
 
         plain = transcript.render_line(0)
-        app.screen.selections = {
-            transcript: Selection.from_offsets(Offset(2, 0), Offset(4, 0))
-        }
+        app.screen.selections = {transcript: Selection.from_offsets(Offset(2, 0), Offset(4, 0))}
         await pilot.pause()
         highlighted = transcript.render_line(0)
 
@@ -2071,7 +2075,7 @@ async def test_the_last_tokens_of_a_reply_reach_the_transcript_when_it_ends():
     async with app.run_test() as pilot:
         await pilot.pause()
         app.io_bridge.render("not just possible,")  # sent at once: the first push is due
-        app.io_bridge.render(" but necessary.")     # held: the next push is not due yet
+        app.io_bridge.render(" but necessary.")  # held: the next push is not due yet
 
         app._flush_stream()
         await pilot.pause()
@@ -2122,9 +2126,7 @@ async def test_selected_text_keeps_its_own_colour_and_only_the_background_change
         await pilot.pause()
 
         plain = {seg.text: seg.style for seg in transcript.render_line(0)}
-        app.screen.selections = {
-            transcript: Selection.from_offsets(Offset(0, 0), Offset(6, 0))
-        }
+        app.screen.selections = {transcript: Selection.from_offsets(Offset(0, 0), Offset(6, 0))}
         await pilot.pause()
         selected = [seg for seg in transcript.render_line(0) if seg.text == "abcdef"][0]
 
@@ -2136,6 +2138,7 @@ async def test_selected_text_keeps_its_own_colour_and_only_the_background_change
 async def test_a_streamed_reply_carries_no_reply_label(monkeypatch):
     """The bug this fixes: the orchestrator wrote "CoBirb: " into the stream
     itself, so the marked transcript read "> CoBirb: hello"."""
+
     class _StreamingOrchestrator(_StubOrchestrator):
         def run(self, prompt, system, **kwargs):
             begin = getattr(self.io, "begin_stream", None)
@@ -2257,9 +2260,7 @@ async def test_a_brand_new_session_is_not_announced_as_restored(tmp_path):
         assert "restored history" not in _transcript_text(app)
 
 
-async def test_resuming_from_the_sessions_tab_replays_and_returns_to_the_conversation(
-    tmp_path, monkeypatch
-):
+async def test_resuming_from_the_sessions_tab_replays_and_returns_to_the_conversation(tmp_path, monkeypatch):
     monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
     manager = _session_with_turns(_turn("user", "earlier question"), _turn("assistant", "earlier answer"))
 
@@ -2563,7 +2564,9 @@ async def test_remembering_into_a_locked_catalogue_prompts_for_a_password_first(
 
         app.screen.query_one("#prompt-value", Input).value = "hunter2"
         await pilot.press("enter")
-        await _until(pilot, lambda: not isinstance(app.screen, RememberModal) and "secret" in app.catalogues.loaded)
+        await _until(
+            pilot, lambda: not isinstance(app.screen, RememberModal) and "secret" in app.catalogues.loaded
+        )
 
         assert app.catalogues.loaded["secret"].facts == ["a private fact"]
 
@@ -2738,7 +2741,9 @@ async def test_an_image_on_a_later_turn_works_without_a_session(monkeypatch):
         await _until(pilot, lambda: bool(builds))
         await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
-        import tempfile, pathlib
+        import pathlib
+        import tempfile
+
         png = pathlib.Path(tempfile.mkdtemp()) / "shot.png"
         png.write_bytes(_PNG_BYTES)
 
@@ -2780,7 +2785,7 @@ async def test_a_corrected_image_after_a_typo_still_reaches_the_model_two_step(t
     app = _make_app(cwd=str(tmp_path))
     async with app.run_test() as pilot:
         await pilot.pause()
-        await _submit(pilot, app, "/image nope.png")            # a genuinely missing file
+        await _submit(pilot, app, "/image nope.png")  # a genuinely missing file
         assert "Could not read" in _transcript_text(app)
 
         await _submit(pilot, app, "/image cobirb.png")
@@ -2796,7 +2801,6 @@ async def test_switching_model_forgets_the_old_ones_context_window(monkeypatch):
     run, wrong across a /model switch, which swaps the provider under it. Left
     stale, a switch away from a small-window model kept compacting against the
     old budget for the rest of the session."""
-    from cobirb.context import history_budget
 
     orchestrator = _StubOrchestrator()
     orchestrator.context_tokens = 4096  # what a small-window model reported
@@ -2814,7 +2818,7 @@ async def test_switching_model_forgets_the_old_ones_context_window(monkeypatch):
 
 
 async def test_memories_creates_the_public_catalogue_on_first_use():
-    """"There is always a default public catalogue" was true only in the
+    """ "There is always a default public catalogue" was true only in the
     tests: nothing in the app ever called ensure_public_exists, so a fresh
     install opened /memories on an empty list."""
     app = _make_app()
@@ -2848,9 +2852,7 @@ def test_split_image_argument_takes_the_first_word_as_the_path(tmp_path):
     """`/image shot.png what is this?` is what people type. Reading the whole
     line as a filename reports "no such file: 'shot.png what is this?'",
     blaming the file for a parsing rule."""
-    assert _split_image_argument("shot.png what is this?", str(tmp_path)) == (
-        "shot.png", "what is this?"
-    )
+    assert _split_image_argument("shot.png what is this?", str(tmp_path)) == ("shot.png", "what is this?")
 
 
 def test_split_image_argument_keeps_a_bare_path_bare(tmp_path):
@@ -2866,7 +2868,8 @@ def test_split_image_argument_keeps_an_unquoted_path_with_spaces_working(tmp_pat
 
 def test_split_image_argument_honours_quotes(tmp_path):
     assert _split_image_argument('"my shot.png" what is this?', str(tmp_path)) == (
-        "my shot.png", "what is this?"
+        "my shot.png",
+        "what is this?",
     )
 
 
@@ -2937,7 +2940,7 @@ async def test_typing_an_at_sign_opens_the_picker(tmp_path):
         await _type(pilot, app, "@gba")
 
         assert picker.active
-        assert picker.rows[0] == "gba.py"   # the exact name wins
+        assert picker.rows[0] == "gba.py"  # the exact name wins
 
 
 async def test_the_picker_never_shows_more_than_five_rows(tmp_path):
@@ -3026,12 +3029,12 @@ async def test_the_model_gets_the_file_and_the_transcript_shows_the_mention(tmp_
         await _until(pilot, lambda: not app.query_one("#prompt-input", PromptInput).disabled)
 
         sent = builds[0]["built"].calls[0]["prompt"]
-        assert "contents of notes.md" in sent          # the model got the file
-        assert "@notes.md" in sent                      # and the sentence as written
+        assert "contents of notes.md" in sent  # the model got the file
+        assert "@notes.md" in sent  # and the sentence as written
 
         shown = _transcript_text(app)
         assert "@notes.md" in shown
-        assert "contents of notes.md" not in shown      # the transcript stays readable
+        assert "contents of notes.md" not in shown  # the transcript stays readable
 
 
 async def test_a_prompt_with_no_mention_reaches_the_model_unchanged(tmp_path, monkeypatch):
@@ -3075,9 +3078,7 @@ async def test_clear_marks_the_session_without_deleting_anything():
         await pilot.pause()
         real = session_mod.Session()
         real.add_text("user", "something earlier")
-        app.orchestrator = SimpleNamespace(
-            session=SimpleNamespace(session=real), close=lambda: None
-        )
+        app.orchestrator = SimpleNamespace(session=SimpleNamespace(session=real), close=lambda: None)
 
         await _submit(pilot, app, "/clear")
 
@@ -3342,8 +3343,8 @@ async def test_a_dismissed_charter_is_still_reachable_from_the_tool():
     """The app clears its own copy once it has put the dialog up, so without
     reading it back off the tool a dismissed dialog would strand a perfectly
     good charter in memory with nothing able to reach it."""
-    from cobirb.tui.slash_commands import _last_proposed_charter
     from cobirb.flock.run import install_charter_tool
+    from cobirb.tui.slash_commands import _last_proposed_charter
 
     app = _make_app()
     async with app.run_test() as pilot:
@@ -3511,13 +3512,13 @@ async def test_approving_a_charter_asks_exactly_once(monkeypatch):
 
     asked = []
     monkeypatch.setattr(
-        CoBirbApp, "_run_flock",
+        CoBirbApp,
+        "_run_flock",
         lambda self, objective, charter=None: asked.append(("flock", objective)),
     )
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        original_push = CoBirbApp.push_screen_wait
 
         async def _count(self, screen):
             asked.append(("dialog", getattr(screen, "question", "")))
@@ -3539,8 +3540,8 @@ async def test_approving_a_charter_asks_exactly_once(monkeypatch):
 async def test_a_charter_that_already_ran_is_not_offered_again():
     """Otherwise /charter after a finished flock silently offers to run the
     whole thing a second time."""
-    from cobirb.flock.run import install_charter_tool
     from cobirb.flock.charter import Charter, WorkerBrief
+    from cobirb.flock.run import install_charter_tool
     from cobirb.tui.slash_commands import _last_proposed_charter
 
     app = _make_app()
@@ -3548,9 +3549,7 @@ async def test_a_charter_that_already_ran_is_not_offered_again():
         await pilot.pause()
         app.orchestrator = _StubOrchestrator()
         tool = install_charter_tool(app.orchestrator, "/tmp")
-        tool.charter = Charter(
-            objective="x", workers=[WorkerBrief(id="a", brief="b", writes=["a.py"])]
-        )
+        tool.charter = Charter(objective="x", workers=[WorkerBrief(id="a", brief="b", writes=["a.py"])])
 
         app.forget_used_charter()
 
@@ -3588,9 +3587,7 @@ async def _worker_request(pilot, app, worker_id="exporter", **overrides):
     if flock.pane(worker_id) is None:
         await flock.begin(parse_charter(textwrap.dedent(_TWO_TICKETS)))
     pane = flock.pane(worker_id)
-    kwargs = dict(
-        tool_name="shell", detail="pytest -q", scope="run 'pytest' commands", preview=""
-    )
+    kwargs = {"tool_name": "shell", "detail": "pytest -q", "scope": "run 'pytest' commands", "preview": ""}
     kwargs.update(overrides)
     task = asyncio.create_task(pane.ask(**kwargs))
     # Waiting for the task alone is not enough: `ask` has to mount the widget
@@ -3629,9 +3626,7 @@ async def test_two_workers_asking_at_once_get_separate_places_to_answer():
     async with app.run_test() as pilot:
         await pilot.pause()
         first_task, first = await _worker_request(pilot, app, worker_id="exporter")
-        second_task, second = await _worker_request(
-            pilot, app, worker_id="cli", detail="ruff check ."
-        )
+        second_task, second = await _worker_request(pilot, app, worker_id="cli", detail="ruff check .")
 
         assert first.query(".worker-request") and second.query(".worker-request")
 
@@ -3666,9 +3661,7 @@ async def test_the_request_says_a_session_grant_reaches_other_agents():
         await pilot.pause()
         task, pane = await _worker_request(pilot, app)
 
-        assert "not yet started" in str(
-            pane.query_one(".worker-request-body", Static).content
-        )
+        assert "not yet started" in str(pane.query_one(".worker-request-body", Static).content)
 
         _press(pane, "worker-request-deny")
         await task
@@ -3771,9 +3764,7 @@ async def test_a_request_with_no_pane_to_ask_in_is_denied():
     async with app.run_test() as pilot:
         await pilot.pause()
 
-        decision, instruction = await app.request_worker_approval(
-            "nobody", "shell", {"command": "pytest -q"}
-        )
+        decision, instruction = await app.request_worker_approval("nobody", "shell", {"command": "pytest -q"})
 
         assert decision == "deny"
         assert instruction == ""
@@ -3798,7 +3789,8 @@ def test_a_write_into_another_workers_files_is_refused_without_asking():
         raise AssertionError("nobody may be asked about another worker's files")
 
     app = SimpleNamespace(
-        flock_charter=parse_charter(textwrap.dedent("""
+        flock_charter=parse_charter(
+            textwrap.dedent("""
             objective = "two tickets"
 
             [[workers]]
@@ -3810,7 +3802,8 @@ def test_a_write_into_another_workers_files_is_refused_without_asking():
             id     = "b"
             writes = ["b.py"]
             brief  = "Do b."
-        """)),
+        """)
+        ),
         flock_write_queue=collections.deque(),
         call_from_thread=ask,
     )
@@ -3833,19 +3826,24 @@ async def test_a_worker_may_still_ask_for_a_file_nobody_owns():
     app = _make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.flock_charter = parse_charter(textwrap.dedent("""
+        app.flock_charter = parse_charter(
+            textwrap.dedent("""
             objective = "one ticket"
 
             [[workers]]
             id     = "a"
             writes = ["a.py"]
             brief  = "Do a."
-        """))
+        """)
+        )
 
         adapter = WorkerPaneIO(app, "a")
-        assert adapter._blocked_owner(
-            ApprovalRequest(tool_name="write_file", arguments={"path": "new_helper.py"})
-        ) == ""
+        assert (
+            adapter._blocked_owner(
+                ApprovalRequest(tool_name="write_file", arguments={"path": "new_helper.py"})
+            )
+            == ""
+        )
 
 
 class _AutopilotStub(_StubOrchestrator):
@@ -3862,8 +3860,9 @@ class _AutopilotStub(_StubOrchestrator):
 
 
 def _footer_labels(app) -> list[str]:
-    return [b.binding.description for b in app.screen.active_bindings.values()
-            if b.binding.show and b.enabled]
+    return [
+        b.binding.description for b in app.screen.active_bindings.values() if b.binding.show and b.enabled
+    ]
 
 
 _ONE_TICKET = """
@@ -3944,8 +3943,9 @@ async def test_a_choice_is_only_made_by_moving_to_an_answer():
     async with app.run_test() as pilot:
         await pilot.pause()
         picked = []
-        app.push_screen(ChoiceModal("Go on?", "zlib is missing", ["without", "installed", "stop"]),
-                        picked.append)
+        app.push_screen(
+            ChoiceModal("Go on?", "zlib is missing", ["without", "installed", "stop"]), picked.append
+        )
         await pilot.pause()
 
         await pilot.press("enter")
@@ -3987,8 +3987,9 @@ async def test_a_configured_model_is_never_offered_for_saving(monkeypatch):
     from cobirb.tui.screens import ConfirmModal
 
     _stub_list_models(monkeypatch, models=["llama3.1", "gemma4"])
-    monkeypatch.setattr("cobirb.runtime.models.resolve_role",
-                        lambda *a, **k: type("S", (), {"configured": True})())
+    monkeypatch.setattr(
+        "cobirb.runtime.models.resolve_role", lambda *a, **k: type("S", (), {"configured": True})()
+    )
     app = _make_app(model_name="gemma4")
     async with app.run_test() as pilot:
         await pilot.pause()

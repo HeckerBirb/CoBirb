@@ -36,8 +36,10 @@ verification earns its cost only once a plugin can be *fetched* by this
 module rather than merely relocated, which is exactly the capability this
 module deliberately does not have.
 """
+
 from __future__ import annotations
 
+import contextlib
 import importlib
 import os
 import shutil
@@ -101,7 +103,11 @@ class RemoveResult:
     def describe(self) -> str:
         if not self.removed_directory:
             return f"{self.name!r} is not an installed local plugin — nothing to remove."
-        note = "" if self.pip_uninstalled else " (its pip package could not be uninstalled cleanly; the directory is gone, which is what matters for discovery)"
+        note = (
+            ""
+            if self.pip_uninstalled
+            else " (its pip package could not be uninstalled cleanly; the directory is gone, which is what matters for discovery)"
+        )
         return f"Removed {self.name!r}.{note}"
 
 
@@ -117,7 +123,7 @@ def _read_project_name(pyproject_path: str) -> str:
     entry_points = data.get("project", {}).get("entry-points", {}).get("cobirb.plugins")
     if not entry_points:
         raise PluginInstallError(
-            f"{pyproject_path} declares no [project.entry-points.\"cobirb.plugins\"] table — "
+            f'{pyproject_path} declares no [project.entry-points."cobirb.plugins"] table — '
             "nothing here is a CoBirb plugin as far as the loader is concerned"
         )
     return str(name)
@@ -210,7 +216,7 @@ def install_plugin(source_dir: str, *, replace: bool = False) -> InstallResult:
             f"whose package name starts with {_NAME_PREFIX!r} — see plugins/loader.py. "
             f"Rename it to {_NAME_PREFIX}<something> and try again."
         )
-    name = declared_name.replace("-", "_")[len(_NAME_PREFIX):]
+    name = declared_name.replace("-", "_")[len(_NAME_PREFIX) :]
     if not name:
         raise PluginInstallError(f"[project].name {declared_name!r} has nothing after the prefix")
 
@@ -270,10 +276,8 @@ def _run_pip_quietly(*args: str) -> None:
     raise it; a pip command that also fails here would only replace the
     interesting error with a less interesting one.
     """
-    try:
+    with contextlib.suppress(PluginInstallError):
         _run_pip(*args)
-    except PluginInstallError:
-        pass
 
 
 def remove_plugin(name: str) -> RemoveResult:

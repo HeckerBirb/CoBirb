@@ -7,6 +7,7 @@ is written. The help used to be its own copy of the same material, and the
 two drifted: the help still said `/undo` could not reverse a shell command
 releases after it could. A page changed is now the help changed.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping

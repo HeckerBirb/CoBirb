@@ -20,8 +20,10 @@ its tool calls into a pane on the way past. Watching a worker work and being
 asked to approve its calls are different things, and only the first is wanted
 here.
 """
+
 from __future__ import annotations
 
+import contextlib
 import threading
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
@@ -61,7 +63,7 @@ class TuiAsker:
     into the Flock tab's status line and the transcript.
     """
 
-    def __init__(self, app: "CoBirbApp") -> None:
+    def __init__(self, app: CoBirbApp) -> None:
         self._app = app
 
     def confirm(self, question: str, detail: str = "") -> bool:
@@ -83,14 +85,12 @@ class TuiAsker:
         has to draw and dismiss the modal.
         """
         try:
-            answer = self._app.call_from_thread(
-                self._app.request_confirmation, question, detail
-            )
+            answer = self._app.call_from_thread(self._app.request_confirmation, question, detail)
         except Exception:  # noqa: BLE001 - nobody to ask means no, never guess yes
             return False
         return bool(answer)
 
-    def decide(self, decisions: str) -> "str | None":
+    def decide(self, decisions: str) -> str | None:
         """Put Brainy Birb's design decisions to the user, in *ask* mode.
 
         The answer is free text naming the ones the user wants to settle; an
@@ -108,7 +108,7 @@ class TuiAsker:
         except Exception:  # noqa: BLE001 - nobody to ask means Brainy Birb decides
             return None
 
-    def choose(self, question: str, detail: str, options: list[str]) -> "int | None":
+    def choose(self, question: str, detail: str, options: list[str]) -> int | None:
         """One question, answered by picking from a list. None on cancel.
 
         Fails closed like ``confirm``: an app that cannot ask means stop.
@@ -173,7 +173,7 @@ class WorkerPaneIO(HeadlessIO):
     narrow columns at once is noise rather than progress.
     """
 
-    def __init__(self, app: "CoBirbApp", worker_id: str, slots: Any = None) -> None:
+    def __init__(self, app: CoBirbApp, worker_id: str, slots: Any = None) -> None:
         super().__init__()
         self._app = app
         self._worker_id = worker_id
@@ -201,9 +201,7 @@ class WorkerPaneIO(HeadlessIO):
             # Refused without asking, and the model is told why rather than
             # just "denied": a worker that does not know this boundary exists
             # will spend its next turn trying a neighbouring path.
-            self._announce(
-                f"refused: {request.tool_name} would write into {owner}'s files"
-            )
+            self._announce(f"refused: {request.tool_name} would write into {owner}'s files")
             return ApprovalOutcome(
                 decision=DECISION_DENY,
                 instruction=(
@@ -295,9 +293,7 @@ class WorkerPaneIO(HeadlessIO):
         """
         queue = getattr(self._app, "flock_write_queue", None)
         if queue is None:
-            try:
+            with contextlib.suppress(Exception):  # a pane that cannot be drawn is not a failed run
                 self._app.call_from_thread(self._app.flock_write, self._worker_id, renderable)
-            except Exception:  # noqa: BLE001 - a pane that cannot be drawn is not a failed run
-                pass
             return
         queue.append((self._worker_id, renderable))

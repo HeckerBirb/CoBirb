@@ -4,22 +4,22 @@ The contract is inheritance: a role that says nothing gets the default's
 answer, a role that says something gets its own, and a config that predates
 roles entirely keeps working unchanged.
 """
+
 from __future__ import annotations
 
 import json
 
 import pytest
-
 from conftest import write_config
 
 from cobirb.config import Config
 from cobirb.runtime.models import (
-    model_options,
     ROLE_DEFAULT,
     ROLE_ORCHESTRATOR,
     ROLE_WORKER,
     build_for_role,
     describe_roles,
+    model_options,
     parse_context_size,
     resolve_role,
 )
@@ -197,9 +197,7 @@ def test_max_num_ctx_caps_from_the_human_spelling_too(tmp_path, monkeypatch):
 def test_the_listing_says_where_each_answer_came_from(tmp_path):
     """`cobirb models` exists to answer "so which one actually runs?" — a list
     of names without their provenance answers half of that."""
-    config = _config(
-        tmp_path, {"models": {"default": {"name": "big"}, "worker": {"name": "small"}}}
-    )
+    config = _config(tmp_path, {"models": {"default": {"name": "big"}, "worker": {"name": "small"}}})
 
     listed = {spec.role: spec for spec in describe_roles(config)}
 
@@ -234,9 +232,7 @@ def test_the_two_timeouts_have_separate_defaults(tmp_path):
 
 
 def test_both_timeouts_can_be_configured(tmp_path):
-    provider = build_for_role(
-        "worker", _config(tmp_path, {"connect_timeout": 3, "request_timeout": 1200})
-    )
+    provider = build_for_role("worker", _config(tmp_path, {"connect_timeout": 3, "request_timeout": 1200}))
 
     assert provider._connect_timeout == 3
     assert provider._request_timeout == 1200
@@ -257,10 +253,15 @@ def test_an_unusable_timeout_costs_the_setting_not_the_run(tmp_path, value):
 # Sampling options
 # --------------------------------------------------------------------------- #
 def test_a_role_inherits_the_default_options_key_by_key(tmp_path):
-    write_config(tmp_path, {"models": {
-        "default": {"name": "m", "options": {"temperature": 0.7, "seed": 1}},
-        "worker": {"options": {"seed": 7}},
-    }})
+    write_config(
+        tmp_path,
+        {
+            "models": {
+                "default": {"name": "m", "options": {"temperature": 0.7, "seed": 1}},
+                "worker": {"options": {"seed": 7}},
+            }
+        },
+    )
 
     assert model_options("worker", Config()) == {"temperature": 0.7, "seed": 7}
     assert model_options("default", Config()) == {"temperature": 0.7, "seed": 1}

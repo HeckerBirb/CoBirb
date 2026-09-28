@@ -1,4 +1,5 @@
 """Tests for running the project's own check after the agent changes things."""
+
 from __future__ import annotations
 
 import json
@@ -36,8 +37,9 @@ def test_a_failing_command_carries_its_output_back(tmp_path):
 def test_a_hanging_command_times_out_rather_than_holding_the_turn(tmp_path):
     """A verification that outlives the attention span it was meant to serve
     is worse than none — the user is watching a turn not finish."""
-    result = run_verification(f'"{sys.executable}" -c "import time; time.sleep(30)"',
-                              str(tmp_path), timeout=1)
+    result = run_verification(
+        f'"{sys.executable}" -c "import time; time.sleep(30)"', str(tmp_path), timeout=1
+    )
 
     assert result.timed_out and not result.ok
     assert "timed out" in result.describe()
@@ -51,7 +53,7 @@ def test_a_command_that_cannot_run_is_reported_not_raised(tmp_path):
 
 def test_long_output_keeps_the_tail_where_the_summary_lives(tmp_path):
     script = 'for i in range(4000): print("noise", i)\nprint("SUMMARY LINE")\nraise SystemExit(1)'
-    result = run_verification(f'"{sys.executable}" -c \'{script}\'', str(tmp_path))
+    result = run_verification(f"\"{sys.executable}\" -c '{script}'", str(tmp_path))
 
     assert "SUMMARY LINE" in result.output
     assert "omitted" in result.output

@@ -1,4 +1,5 @@
 """Tests for memory catalogues: plaintext and encrypted round trips."""
+
 from __future__ import annotations
 
 import os

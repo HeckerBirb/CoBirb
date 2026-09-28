@@ -5,12 +5,12 @@ under a real ``Policy``, with only the model scripted. The claim being tested
 is that a Worker Birb is an ordinary agent run held in place by its policy, so
 a test that stubbed the policy would be testing nothing.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 
 import pytest
-
 from conftest import write_config
 
 from cobirb.flock.charter import WorkerBrief, parse_charter
@@ -76,13 +76,15 @@ def _scripted(monkeypatch, model):
 def test_the_brief_carries_the_one_rule_the_design_rests_on():
     """A worker that quietly widens a signature breaks colleagues it cannot
     see. That instruction has to be in front of it every time."""
-    text = compose_brief(_brief("""
+    text = compose_brief(
+        _brief("""
         objective = "x"
         [[workers]]
         id = "a"
         writes = ["a.py"]
         brief = "Implement parse()."
-    """))
+    """)
+    )
 
     assert "DO NOT CHANGE THE SIGNATURES" in text
     assert "Implement parse()." in text
@@ -91,7 +93,8 @@ def test_the_brief_carries_the_one_rule_the_design_rests_on():
 def test_the_brief_states_the_boundaries_the_policy_enforces():
     """Both, deliberately: the policy makes the isolation true, and saying so
     stops the worker spending turns discovering it by being refused."""
-    text = compose_brief(_brief("""
+    text = compose_brief(
+        _brief("""
         objective = "x"
         [[workers]]
         id = "a"
@@ -99,7 +102,8 @@ def test_the_brief_states_the_boundaries_the_policy_enforces():
         reads = ["types.py"]
         accept = "pytest -q"
         brief = "go"
-    """))
+    """)
+    )
 
     assert "may change: a.py" in text
     assert "read anything else" in text  # reads are open; writes are the boundary
@@ -111,9 +115,14 @@ def test_the_brief_states_the_boundaries_the_policy_enforces():
 # Running one
 # --------------------------------------------------------------------------- #
 def test_a_worker_writes_the_file_it_owns(monkeypatch, tmp_path):
-    model = _scripted(monkeypatch, _ScriptedWorker([
-        ToolCall(name="write_file", arguments={"path": "mine.py", "content": "def parse(): ...\n"}),
-    ]))
+    model = _scripted(
+        monkeypatch,
+        _ScriptedWorker(
+            [
+                ToolCall(name="write_file", arguments={"path": "mine.py", "content": "def parse(): ...\n"}),
+            ]
+        ),
+    )
     worker = _brief("""
         objective = "x"
         [[workers]]
@@ -133,9 +142,14 @@ def test_a_worker_writes_the_file_it_owns(monkeypatch, tmp_path):
 def test_a_worker_is_refused_a_file_outside_its_brief(monkeypatch, tmp_path):
     """The isolation is the policy. Nothing about this depends on the model
     choosing to respect the boundary it was told about."""
-    _scripted(monkeypatch, _ScriptedWorker([
-        ToolCall(name="write_file", arguments={"path": "theirs.py", "content": "sneaky"}),
-    ]))
+    _scripted(
+        monkeypatch,
+        _ScriptedWorker(
+            [
+                ToolCall(name="write_file", arguments={"path": "theirs.py", "content": "sneaky"}),
+            ]
+        ),
+    )
     worker = _brief("""
         objective = "x"
         [[workers]]
@@ -150,16 +164,19 @@ def test_a_worker_is_refused_a_file_outside_its_brief(monkeypatch, tmp_path):
     assert report.denied == ("write_file",)
 
 
-def test_trying_to_write_outside_scope_is_reported_as_a_finding_about_the_charter(
-    monkeypatch, tmp_path
-):
+def test_trying_to_write_outside_scope_is_reported_as_a_finding_about_the_charter(monkeypatch, tmp_path):
     """A worker that tried to *change* something it could not is usually
     telling you the brief was incomplete — a file it needs to write was left
     off its list — not misbehaving. (Reads are open now, so only a write can
     reach outside scope.)"""
-    _scripted(monkeypatch, _ScriptedWorker([
-        ToolCall(name="write_file", arguments={"path": "somewhere_else.py", "content": "x"}),
-    ]))
+    _scripted(
+        monkeypatch,
+        _ScriptedWorker(
+            [
+                ToolCall(name="write_file", arguments={"path": "somewhere_else.py", "content": "x"}),
+            ]
+        ),
+    )
     worker = _brief("""
         objective = "x"
         [[workers]]
@@ -177,9 +194,14 @@ def test_a_worker_may_read_a_sibling_without_being_denied(monkeypatch, tmp_path)
     """The fix for the flailing: reading to orient is normal work, not a
     boundary violation, so it must not show up as one."""
     (tmp_path / "elsewhere.py").write_text("x = 1\n")
-    _scripted(monkeypatch, _ScriptedWorker([
-        ToolCall(name="read_file", arguments={"path": "elsewhere.py"}),
-    ]))
+    _scripted(
+        monkeypatch,
+        _ScriptedWorker(
+            [
+                ToolCall(name="read_file", arguments={"path": "elsewhere.py"}),
+            ]
+        ),
+    )
     worker = _brief("""
         objective = "x"
         [[workers]]
@@ -194,7 +216,7 @@ def test_a_worker_may_read_a_sibling_without_being_denied(monkeypatch, tmp_path)
 
 
 def test_a_worker_is_told_nothing_about_the_project(monkeypatch, tmp_path):
-    """"Nothing but its brief" has to be true of what actually reaches the
+    """ "Nothing but its brief" has to be true of what actually reaches the
     model, not only of what the design says. AGENTS.md and the repo map are
     both on by default for a normal run."""
     (tmp_path / "AGENTS.md").write_text("SECRET HOUSE CONVENTIONS")
@@ -217,15 +239,20 @@ def test_a_worker_is_told_nothing_about_the_project(monkeypatch, tmp_path):
 
 
 def test_the_acceptance_check_decides_whether_the_work_is_done(monkeypatch, tmp_path):
-    _scripted(monkeypatch, _ScriptedWorker([
-        ToolCall(name="write_file", arguments={"path": "mine.py", "content": "ok\n"}),
-    ]))
+    _scripted(
+        monkeypatch,
+        _ScriptedWorker(
+            [
+                ToolCall(name="write_file", arguments={"path": "mine.py", "content": "ok\n"}),
+            ]
+        ),
+    )
     worker = _brief(f"""
         objective = "x"
         [[workers]]
         id = "a"
         writes = ["mine.py"]
-        accept = "test -f {tmp_path / 'mine.py'}"
+        accept = "test -f {tmp_path / "mine.py"}"
         brief = "go"
     """)
 
@@ -274,6 +301,7 @@ def test_no_acceptance_check_is_not_the_same_as_passing(monkeypatch, tmp_path):
 def test_a_worker_that_blows_up_is_a_report_not_an_exception(monkeypatch, tmp_path):
     """One failed ticket must not take down the flock — Brainy Birb needs the
     fact in order to plan the next round."""
+
     class _Exploding(_ScriptedWorker):
         def chat(self, *args, **kwargs):
             raise RuntimeError("the endpoint went away")
@@ -308,7 +336,8 @@ def test_a_worker_uses_the_worker_model_role(monkeypatch, tmp_path):
     # Record the role and hand back a scripted model: building the real
     # provider for it sent this test's requests to a live endpoint.
     monkeypatch.setattr(
-        wiring, "build_for_role",
+        wiring,
+        "build_for_role",
         lambda role, *a, **k: (chosen.append(role), _ScriptedWorker([]))[1],
     )
     worker = _brief("""
@@ -332,9 +361,14 @@ def test_a_worker_obeys_the_users_own_hooks(monkeypatch, tmp_path):
     guard.write_text("#!/bin/sh\necho 'not that file'\nexit 1\n")
     guard.chmod(0o755)
     write_config(tmp_path, {"hooks": {"before_tool": [{"command": str(guard)}]}})
-    _scripted(monkeypatch, _ScriptedWorker([
-        ToolCall(name="write_file", arguments={"path": "mine.py", "content": "x"}),
-    ]))
+    _scripted(
+        monkeypatch,
+        _ScriptedWorker(
+            [
+                ToolCall(name="write_file", arguments={"path": "mine.py", "content": "x"}),
+            ]
+        ),
+    )
     worker = _brief("""
         objective = "x"
         [[workers]]
@@ -530,11 +564,14 @@ def test_a_refusing_front_end_follows_autopilot_switched_on_and_off_mid_run():
     assert io.confirm_request(None).decision == "deny"
 
 
-@pytest.mark.parametrize("accept, says", [
-    ("python -m pytest tests/test_windows.py -q", ["python", "pipe"]),
-    ("pytest -q && ruff check .", ["pytest, ruff"]),
-    ("", ["no commands"]),
-])
+@pytest.mark.parametrize(
+    "accept, says",
+    [
+        ("python -m pytest tests/test_windows.py -q", ["python", "pipe"]),
+        ("pytest -q && ruff check .", ["pytest, ruff"]),
+        ("", ["no commands"]),
+    ],
+)
 def test_a_refusal_under_autopilot_says_what_the_worker_may_run(accept, says):
     from cobirb.flock.worker import RefusingIO, refusal_note
 
@@ -545,15 +582,19 @@ def test_a_refusal_under_autopilot_says_what_the_worker_may_run(accept, says):
     assert all(part in outcome.instruction for part in says)
 
 
-@pytest.mark.parametrize("runs_on, present, absent", [
-    ("Windows", ["Windows", "cmd.exe", "a.py, shared.py", "not on this machine"], ["read anything else"]),
-    ("", ["read anything else"], ["cmd.exe", "not on this machine"]),
-])
+@pytest.mark.parametrize(
+    "runs_on, present, absent",
+    [
+        ("Windows", ["Windows", "cmd.exe", "a.py, shared.py", "not on this machine"], ["read anything else"]),
+        ("", ["read anything else"], ["cmd.exe", "not on this machine"]),
+    ],
+)
 def test_a_remote_worker_is_told_its_machine_and_that_only_its_files_are_there(runs_on, present, absent):
     from cobirb.flock.worker import compose_brief
 
-    brief = compose_brief(WorkerBrief(id="w", brief="b", writes=("a.py",), reads=("shared.py",),
-                                      runs_on=runs_on), "/work")
+    brief = compose_brief(
+        WorkerBrief(id="w", brief="b", writes=("a.py",), reads=("shared.py",), runs_on=runs_on), "/work"
+    )
 
     assert all(p in brief for p in present)
     assert not any(a in brief for a in absent)

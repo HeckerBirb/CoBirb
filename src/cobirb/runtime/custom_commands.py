@@ -32,6 +32,7 @@ file in a repository, so the usual caution about running an agent inside code
 you have not read applies; what it cannot do is act on its own. Every tool call
 it leads to still goes through the permission layer.
 """
+
 from __future__ import annotations
 
 import os
@@ -116,7 +117,7 @@ def _parse(text: str) -> tuple[str, str]:
         key, _, value = line.partition(":")
         if key.strip().lower() == "description":
             description = value.strip()
-    return description, text[match.end():].strip()
+    return description, text[match.end() :].strip()
 
 
 def _load_dir(directory: str, source: str) -> dict[str, CustomCommand]:
@@ -129,7 +130,7 @@ def _load_dir(directory: str, source: str) -> dict[str, CustomCommand]:
         if not entry.is_file() or not entry.name.endswith(".md"):
             continue
         try:
-            with open(entry.path, "r", encoding="utf-8") as fh:
+            with open(entry.path, encoding="utf-8") as fh:
                 text = fh.read()
         except OSError:
             continue

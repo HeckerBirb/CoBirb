@@ -11,14 +11,17 @@ trying and says the job is lost.
 Thread-based, like the rest of CoBirb: a receiver thread, a heartbeat thread
 and an event thread, so a slow event handler never delays a heartbeat.
 """
+
 from __future__ import annotations
 
+import contextlib
 import itertools
 import queue
 import ssl
 import threading
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from . import protocol
 from .certs import fingerprint
@@ -46,12 +49,17 @@ class RemoteClient:
     remote is refused rather than guessed at (fail closed).
     """
 
-    def __init__(self, spec: RemoteSpec, store: TrustStore | None = None, *,
-                 ask_trust: "Callable[[RemoteSpec, str], bool] | None" = None,
-                 ask_code: "Callable[[RemoteSpec], str | None] | None" = None,
-                 heartbeat_seconds: float = protocol.HEARTBEAT_SECONDS,
-                 reconnect_for: float = protocol.HALT_AFTER_SECONDS,
-                 open_timeout: float = 10.0) -> None:
+    def __init__(
+        self,
+        spec: RemoteSpec,
+        store: TrustStore | None = None,
+        *,
+        ask_trust: Callable[[RemoteSpec, str], bool] | None = None,
+        ask_code: Callable[[RemoteSpec], str | None] | None = None,
+        heartbeat_seconds: float = protocol.HEARTBEAT_SECONDS,
+        reconnect_for: float = protocol.HALT_AFTER_SECONDS,
+        open_timeout: float = 10.0,
+    ) -> None:
         self.spec = spec
         self._store = store or TrustStore()
         self._ask_trust = ask_trust
@@ -60,7 +68,7 @@ class RemoteClient:
         self._reconnect_for = reconnect_for
         self._open_timeout = open_timeout
         self._ids = itertools.count(1)
-        self._pending: dict[Any, "queue.Queue[dict[str, Any]]"] = {}
+        self._pending: dict[Any, queue.Queue[dict[str, Any]]] = {}
         self._pending_lock = threading.Lock()
         self._send_lock = threading.Lock()
         self._connection = None
@@ -70,7 +78,7 @@ class RemoteClient:
         self.state = protocol.STATE_IDLE
         self.job_id = ""
         self.last_seq = 0
-        self._events: "queue.Queue[dict[str, Any] | None]" = queue.Queue()
+        self._events: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self._handler: Callable[[dict[str, Any]], None] | None = None
 
     # ------------------------------------------------------------------ #
@@ -92,9 +100,14 @@ class RemoteClient:
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
         try:
-            connection = connect(self.spec.websocket_url, ssl=context, open_timeout=self._open_timeout,
-                                 max_size=protocol.MAX_MESSAGE_BYTES, close_timeout=5)
-        except Exception as exc:  # noqa: BLE001 - every way of not connecting is "unreachable" to the user
+            connection = connect(
+                self.spec.websocket_url,
+                ssl=context,
+                open_timeout=self._open_timeout,
+                max_size=protocol.MAX_MESSAGE_BYTES,
+                close_timeout=5,
+            )
+        except Exception as exc:  # every way of not connecting is "unreachable" to the user
             raise RemoteError(f"could not reach the remote at {self.spec.url}: {exc}") from exc
         # The connection outlives any `with` block here (it is held for hours and
         # closed by close() or a drop), so it is entered directly — which is what
@@ -102,8 +115,11 @@ class RemoteClient:
         connection.__enter__()
         try:
             self._verify(connection, interactive)
-            connection.send(protocol.encode("hello", protocol=protocol.PROTOCOL_VERSION,
-                                            token=self._store.token(self.spec.url)))
+            connection.send(
+                protocol.encode(
+                    "hello", protocol=protocol.PROTOCOL_VERSION, token=self._store.token(self.spec.url)
+                )
+            )
             hello = protocol.decode(connection.recv(timeout=30))
             if hello.get("type") == "error":
                 raise RemoteError(str(hello.get("error")))
@@ -119,8 +135,9 @@ class RemoteClient:
             raise
         self._connection = connection
         self._connected.set()
-        threading.Thread(target=self._receive, args=(connection,), daemon=True,
-                         name="remote-receiver").start()
+        threading.Thread(
+            target=self._receive, args=(connection,), daemon=True, name="remote-receiver"
+        ).start()
 
     def _verify(self, connection, interactive: bool) -> None:
         der = connection.socket.getpeercert(binary_form=True)
@@ -131,7 +148,8 @@ class RemoteClient:
         if pinned:
             raise Untrusted(
                 f"the remote at {self.spec.url} presented a different certificate ({seen}) from the "
-                f"one you trusted ({pinned}); it is refused until you trust it again")
+                f"one you trusted ({pinned}); it is refused until you trust it again"
+            )
         if not interactive or self._ask_trust is None or not self._ask_trust(self.spec, seen):
             raise Untrusted(f"the certificate of {self.spec.url} is not trusted")
         self._store.trust(self.spec.url, seen)
@@ -203,8 +221,13 @@ class RemoteClient:
                     self._events.put({"kind": "lost", "error": "the remote no longer has this job"})
             return
         if self.job_id and not self._closing.is_set():
-            self._events.put({"kind": "lost", "error": f"the remote at {self.spec.url} could not be "
-                                                       "reached again before it halted the job"})
+            self._events.put(
+                {
+                    "kind": "lost",
+                    "error": f"the remote at {self.spec.url} could not be "
+                    "reached again before it halted the job",
+                }
+            )
 
     def _heartbeats(self) -> None:
         while not self._closing.wait(self._heartbeat_seconds):
@@ -214,7 +237,7 @@ class RemoteClient:
     def heartbeat(self, *, wait: bool = True, timeout: float = 10.0) -> str:
         """Send a heartbeat; with ``wait``, return the remote's state."""
         beat = f"hb-{next(self._ids)}"
-        waiting: "queue.Queue[dict[str, Any]]" = queue.Queue()
+        waiting: queue.Queue[dict[str, Any]] = queue.Queue()
         with self._pending_lock:
             self._pending[beat] = waiting
         try:
@@ -251,21 +274,19 @@ class RemoteClient:
         try:
             with self._send_lock:
                 connection.send(protocol.encode(kind, **fields))
-        except Exception as exc:  # noqa: BLE001 - a send on a dropped connection
+        except Exception as exc:  # a send on a dropped connection
             raise RemoteError(f"the connection to the remote dropped: {exc}") from exc
 
     def send(self, kind: str, **fields: Any) -> None:
         """Fire and forget; a message lost to a drop is the job's to notice."""
-        try:
+        with contextlib.suppress(RemoteError):
             self._send(kind, **fields)
-        except RemoteError:
-            pass
 
     def request(self, kind: str, *, timeout: float | None = None, **fields: Any) -> dict[str, Any]:
         """Send a request and wait for its reply. Raises ``RemoteError`` when the
         connection drops first."""
         request_id = next(self._ids)
-        waiting: "queue.Queue[dict[str, Any]]" = queue.Queue()
+        waiting: queue.Queue[dict[str, Any]] = queue.Queue()
         with self._pending_lock:
             self._pending[request_id] = waiting
         try:
@@ -290,17 +311,13 @@ class RemoteClient:
                 return
             handler = self._handler
             if handler is not None:
-                try:
+                with contextlib.suppress(Exception):  # a broken handler must not stop the heartbeats
                     handler(event)
-                except Exception:  # noqa: BLE001 - a broken handler must not stop the heartbeats
-                    pass
 
     def close(self) -> None:
         self._closing.set()
         self._events.put(None)
         connection = self._connection
         if connection is not None:
-            try:
+            with contextlib.suppress(Exception):  # already gone is closed enough
                 connection.close()
-            except Exception:  # noqa: BLE001 - already gone is closed enough
-                pass

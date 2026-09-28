@@ -19,6 +19,7 @@ Truncation is announced rather than silent, and the budget is configurable.
 up to a git root sounds helpful right up until a monorepo's top-level
 instructions silently override the ones next to the code you asked about.
 """
+
 from __future__ import annotations
 
 import os
@@ -54,7 +55,7 @@ def load_instructions(cwd: str, max_chars: int = DEFAULT_MAX_CHARS) -> str:
     if path is None:
         return ""
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             text = fh.read().strip()
     except OSError:
         return ""
@@ -64,8 +65,7 @@ def load_instructions(cwd: str, max_chars: int = DEFAULT_MAX_CHARS) -> str:
     name = os.path.basename(path)
     if len(text) > max_chars:
         text = (
-            text[:max_chars]
-            + f"\n[…truncated at {max_chars} characters; raise \"instructions_max_chars\" in "
+            text[:max_chars] + f'\n[…truncated at {max_chars} characters; raise "instructions_max_chars" in '
             "config to send more]"
         )
     return f"Project instructions, from {name} in the working directory:\n\n{text}"

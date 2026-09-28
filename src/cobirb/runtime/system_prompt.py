@@ -11,6 +11,7 @@ Whatever this does return is a supplement, not a replacement: the provider
 reads the model's own prompt back and places it first (see
 ``LocalModelProvider.compose_system``).
 """
+
 from __future__ import annotations
 
 # Measured, and off by default because of it: on cobirb-bench's harder tasks

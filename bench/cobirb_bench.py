@@ -22,6 +22,7 @@ Three decisions shape the numbers, and each is deliberate:
 Nothing here talks to anything but the endpoint named on the command line
 (default: the local Ollama). Results are files on disk under ``bench/results/``.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -61,8 +62,17 @@ _TEXT_TOOL_CALL = re.compile(
 )
 
 FAILURE_CLASSES = (
-    "pass", "turn_limit", "no_progress", "unparsed_tool_call", "edit_miss", "no_change",
-    "wrong_result", "no_flock", "error", "timeout", "crash",
+    "pass",
+    "turn_limit",
+    "no_progress",
+    "unparsed_tool_call",
+    "edit_miss",
+    "no_change",
+    "wrong_result",
+    "no_flock",
+    "error",
+    "timeout",
+    "crash",
 )
 
 
@@ -77,7 +87,7 @@ class Task:
     timeout: int = 900
 
     @classmethod
-    def load(cls, path: Path) -> "Task":
+    def load(cls, path: Path) -> Task:
         data = tomllib.loads((path / "task.toml").read_text(encoding="utf-8"))
         return cls(
             id=path.name,
@@ -120,8 +130,9 @@ class Result:
 # --------------------------------------------------------------------------- #
 # Running one task
 # --------------------------------------------------------------------------- #
-def _config(task: Task, work: Path, model: str, base_url: str, seed: int,
-            max_num_ctx: str, extra: dict[str, Any]) -> dict[str, Any]:
+def _config(
+    task: Task, work: Path, model: str, base_url: str, seed: int, max_num_ctx: str, extra: dict[str, Any]
+) -> dict[str, Any]:
     config: dict[str, Any] = {
         "models": {"default": {"name": model, "base_url": base_url, "options": {"seed": seed}}},
         "max_num_ctx": max_num_ctx,
@@ -179,15 +190,31 @@ def _check(task: Task, work: Path, scratch: Path, summary: str) -> tuple[bool, s
     if (task.path / "hidden").is_dir():
         shutil.copytree(task.path / "hidden", hidden)
         (hidden / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
-    env = dict(os.environ, BENCH_ANSWER=str(answer), BENCH_HIDDEN=str(hidden),
-               BENCH_TASK=str(task.path), PYTHONPATH=str(work))
+    env = dict(
+        os.environ,
+        BENCH_ANSWER=str(answer),
+        BENCH_HIDDEN=str(hidden),
+        BENCH_TASK=str(task.path),
+        PYTHONPATH=str(work),
+    )
     env["PATH"] = os.pathsep.join([str(Path(sys.executable).parent), env.get("PATH", "")])
     checker = task.path / "check.py"
     if checker.is_file():
         command = [sys.executable, str(checker)]
     else:
-        command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                   "-c", str(hidden / "pytest.ini"), "--rootdir", str(hidden), str(hidden)]
+        command = [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "-c",
+            str(hidden / "pytest.ini"),
+            "--rootdir",
+            str(hidden),
+            str(hidden),
+        ]
     try:
         done = subprocess.run(command, cwd=work, env=env, capture_output=True, text=True, timeout=180)
     except subprocess.TimeoutExpired:
@@ -196,8 +223,18 @@ def _check(task: Task, work: Path, scratch: Path, summary: str) -> tuple[bool, s
     return done.returncode == 0, output
 
 
-def run_one(task: Task, model: str, rep: int, seed: int, *, base_url: str, src: Path,
-            max_num_ctx: str, extra: dict[str, Any], flock: bool = False) -> Result:
+def run_one(
+    task: Task,
+    model: str,
+    rep: int,
+    seed: int,
+    *,
+    base_url: str,
+    src: Path,
+    max_num_ctx: str,
+    extra: dict[str, Any],
+    flock: bool = False,
+) -> Result:
     scratch = Path(tempfile.mkdtemp(prefix=f"bench-{task.id}-"))
     try:
         work = scratch / "work"
@@ -209,24 +246,45 @@ def run_one(task: Task, model: str, rep: int, seed: int, *, base_url: str, src: 
             encoding="utf-8",
         )
         command = (
-            [sys.executable, str(HERE / "flock_driver.py"), str(work), task.prompt] if flock
-            else [sys.executable, "-m", "cobirb.cli", "-p", task.prompt,
-                  "--headless", "--output", "json", "--cwd", str(work)]
+            [sys.executable, str(HERE / "flock_driver.py"), str(work), task.prompt]
+            if flock
+            else [
+                sys.executable,
+                "-m",
+                "cobirb.cli",
+                "-p",
+                task.prompt,
+                "--headless",
+                "--output",
+                "json",
+                "--cwd",
+                str(work),
+            ]
         )
         started = time.monotonic()
         report: dict[str, Any] | None = None
         error = ""
         try:
-            done = subprocess.run(command, env=_environment(home, src), capture_output=True,
-                                  text=True, timeout=task.timeout)
+            done = subprocess.run(
+                command, env=_environment(home, src), capture_output=True, text=True, timeout=task.timeout
+            )
             try:
                 report = json.loads(done.stdout)
             except json.JSONDecodeError:
                 error = (done.stderr or done.stdout)[-1500:]
         except subprocess.TimeoutExpired:
             elapsed = time.monotonic() - started
-            return Result(model, task.id, task.category, rep, seed, "timeout", False,
-                          elapsed=elapsed, error=f"no result within {task.timeout}s")
+            return Result(
+                model,
+                task.id,
+                task.category,
+                rep,
+                seed,
+                "timeout",
+                False,
+                elapsed=elapsed,
+                error=f"no result within {task.timeout}s",
+            )
         elapsed = time.monotonic() - started
 
         summary = (report or {}).get("summary") or ""
@@ -236,13 +294,19 @@ def run_one(task: Task, model: str, rep: int, seed: int, *, base_url: str, src: 
         # The checker only sees the finished tree, so a planner that wrote the
         # whole implementation itself and never sealed a charter passed — twice
         # in one run, with no Worker Birb ever started.
-        no_flock = flock and report is not None and not any(
-            w.get("ok") for w in report.get("worker_reports") or [])
+        no_flock = (
+            flock and report is not None and not any(w.get("ok") for w in report.get("worker_reports") or [])
+        )
         if no_flock:
             passed = False
         return Result(
-            model=model, task=task.id, category=task.category, rep=rep, seed=seed,
-            outcome="no_flock" if no_flock else _classify(task, report, passed), passed=passed,
+            model=model,
+            task=task.id,
+            category=task.category,
+            rep=rep,
+            seed=seed,
+            outcome="no_flock" if no_flock else _classify(task, report, passed),
+            passed=passed,
             turns=(report or {}).get("turns", 0),
             tool_calls=len(calls),
             failed_calls=sum(1 for c in calls if not c.get("ok")),
@@ -271,16 +335,22 @@ def run_one(task: Task, model: str, rep: int, seed: int, *, base_url: str, src: 
 # --------------------------------------------------------------------------- #
 def freeze_source(revision: str, into: Path) -> tuple[Path, str]:
     """Check ``revision`` out into its own worktree; return its ``src`` and full sha."""
-    sha = subprocess.run(["git", "-C", str(REPO), "rev-parse", revision],
-                         capture_output=True, text=True, check=True).stdout.strip()
-    subprocess.run(["git", "-C", str(REPO), "worktree", "add", "--detach", str(into), sha],
-                   capture_output=True, text=True, check=True)
+    sha = subprocess.run(
+        ["git", "-C", str(REPO), "rev-parse", revision], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "-C", str(REPO), "worktree", "add", "--detach", str(into), sha],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     return into / "src", sha
 
 
 def release_source(path: Path) -> None:
-    subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(path)],
-                   capture_output=True, text=True)
+    subprocess.run(
+        ["git", "-C", str(REPO), "worktree", "remove", "--force", str(path)], capture_output=True, text=True
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -290,11 +360,15 @@ def summarise(results: list[Result], meta: dict[str, Any]) -> str:
     by_model: dict[str, list[Result]] = defaultdict(list)
     for result in results:
         by_model[result.model].append(result)
-    lines = [f"# cobirb-bench — {meta['label']}", "",
-             f"- commit `{meta['sha'][:10]}`, {meta['tasks']} task(s) × {meta['reps']} rep(s)",
-             f"- max_num_ctx {meta['max_num_ctx']}; extra config {json.dumps(meta['extra'])}", "",
-             "| Model | Pass rate | Spread across reps | Median turns | Median time |",
-             "|---|---|---|---|---|"]
+    lines = [
+        f"# cobirb-bench — {meta['label']}",
+        "",
+        f"- commit `{meta['sha'][:10]}`, {meta['tasks']} task(s) × {meta['reps']} rep(s)",
+        f"- max_num_ctx {meta['max_num_ctx']}; extra config {json.dumps(meta['extra'])}",
+        "",
+        "| Model | Pass rate | Spread across reps | Median turns | Median time |",
+        "|---|---|---|---|---|",
+    ]
     for model, rows in by_model.items():
         per_rep = defaultdict(list)
         for row in rows:
@@ -306,13 +380,23 @@ def summarise(results: list[Result], meta: dict[str, Any]) -> str:
             f"{statistics.median(r.turns for r in rows):.0f} | "
             f"{statistics.median(r.elapsed for r in rows):.0f}s |"
         )
-    lines += ["", "## Outcomes", "", "| Model | " + " | ".join(FAILURE_CLASSES) + " |",
-              "|---|" + "---|" * len(FAILURE_CLASSES)]
+    lines += [
+        "",
+        "## Outcomes",
+        "",
+        "| Model | " + " | ".join(FAILURE_CLASSES) + " |",
+        "|---|" + "---|" * len(FAILURE_CLASSES),
+    ]
     for model, rows in by_model.items():
         counts = Counter(r.outcome for r in rows)
         lines.append(f"| {model} | " + " | ".join(str(counts.get(c, 0)) for c in FAILURE_CLASSES) + " |")
-    lines += ["", "## Per task", "", "| Task | " + " | ".join(by_model) + " |",
-              "|---|" + "---|" * len(by_model)]
+    lines += [
+        "",
+        "## Per task",
+        "",
+        "| Task | " + " | ".join(by_model) + " |",
+        "|---|" + "---|" * len(by_model),
+    ]
     for task in sorted({r.task for r in results}):
         cells = []
         for model in by_model:
@@ -336,24 +420,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=1000, help="seed of rep 1; rep n uses seed+n-1")
     parser.add_argument("--revision", default="HEAD", help="commit to measure (default: HEAD)")
     parser.add_argument("--base-url", default=os.environ.get("COBIRB_OLLAMA_URL", "http://localhost:11434"))
-    parser.add_argument("--max-num-ctx", default="32k",
-                        help="context ceiling for the run (default 32k; the fixtures are small)")
+    parser.add_argument(
+        "--max-num-ctx",
+        default="32k",
+        help="context ceiling for the run (default 32k; the fixtures are small)",
+    )
     parser.add_argument("--config", default="{}", help="extra config JSON merged over the run's own")
     parser.add_argument("--label", default="run")
-    parser.add_argument("--flock", action="store_true",
-                        help="run each task as a flock session (charter auto-approved) instead of one agent")
+    parser.add_argument(
+        "--flock",
+        action="store_true",
+        help="run each task as a flock session (charter auto-approved) instead of one agent",
+    )
     parser.add_argument("--out", type=Path, default=None)
-    parser.add_argument("--golden", action="store_true",
-                        help="include the golden test (category \"golden\"): hours of GPU time, the "
-                             "final confidence check only, and never without asking the user first")
+    parser.add_argument(
+        "--golden",
+        action="store_true",
+        help='include the golden test (category "golden"): hours of GPU time, the '
+        "final confidence check only, and never without asking the user first",
+    )
     args = parser.parse_args(argv)
 
     import fnmatch
 
     skipped = [g for g in args.skip.split(",") if g]
-    tasks = sorted((Task.load(p) for p in TASKS_DIR.glob(args.tasks)
-                    if (p / "task.toml").is_file() and not any(fnmatch.fnmatch(p.name, g) for g in skipped)),
-                   key=lambda t: t.id)
+    tasks = sorted(
+        (
+            Task.load(p)
+            for p in TASKS_DIR.glob(args.tasks)
+            if (p / "task.toml").is_file() and not any(fnmatch.fnmatch(p.name, g) for g in skipped)
+        ),
+        key=lambda t: t.id,
+    )
     # The golden test only ever runs when asked for by name. It takes hours
     # and costs the person whose machine this is real electricity; a glob that
     # happens to match it must not start it.
@@ -371,8 +469,16 @@ def main(argv: list[str] | None = None) -> int:
 
     tree = Path(tempfile.mkdtemp(prefix="bench-src-")) / "tree"
     src, sha = freeze_source(args.revision, tree)
-    meta = {"label": args.label, "sha": sha, "tasks": len(tasks), "reps": args.reps, "flock": args.flock,
-            "models": models, "max_num_ctx": args.max_num_ctx, "extra": extra}
+    meta = {
+        "label": args.label,
+        "sha": sha,
+        "tasks": len(tasks),
+        "reps": args.reps,
+        "flock": args.flock,
+        "models": models,
+        "max_num_ctx": args.max_num_ctx,
+        "extra": extra,
+    }
     (out / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     results: list[Result] = []
     try:
@@ -380,14 +486,25 @@ def main(argv: list[str] | None = None) -> int:
             for model in models:  # model-major: loading a model is the slow part
                 for rep in range(1, args.reps + 1):
                     for task in tasks:
-                        result = run_one(task, model, rep, args.seed + rep - 1, base_url=args.base_url,
-                                         src=src, max_num_ctx=args.max_num_ctx, extra=extra,
-                                         flock=args.flock)
+                        result = run_one(
+                            task,
+                            model,
+                            rep,
+                            args.seed + rep - 1,
+                            base_url=args.base_url,
+                            src=src,
+                            max_num_ctx=args.max_num_ctx,
+                            extra=extra,
+                            flock=args.flock,
+                        )
                         results.append(result)
                         sink.write(json.dumps(asdict(result)) + "\n")
                         sink.flush()
-                        print(f"[{model} r{rep}] {task.id:<28} {result.outcome:<18} "
-                              f"{result.turns:>3} turns {result.elapsed:>6.0f}s", flush=True)
+                        print(
+                            f"[{model} r{rep}] {task.id:<28} {result.outcome:<18} "
+                            f"{result.turns:>3} turns {result.elapsed:>6.0f}s",
+                            flush=True,
+                        )
     finally:
         release_source(tree)
     report = summarise(results, meta)

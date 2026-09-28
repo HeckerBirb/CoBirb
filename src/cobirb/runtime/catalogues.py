@@ -17,6 +17,7 @@ these are all user-driven actions whose failures (wrong password, name
 already taken) are ordinary and belong in front of the user as a sentence,
 not as a traceback. ``""`` means it worked.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -54,7 +55,7 @@ class CatalogueStore:
         """
         memory.ensure_public_exists()
 
-    def _row_for(self, name: str) -> "memory.CatalogueFile | None":
+    def _row_for(self, name: str) -> memory.CatalogueFile | None:
         return next((row for row in self.rows() if row.name == name), None)
 
     @property
@@ -70,7 +71,7 @@ class CatalogueStore:
     # ------------------------------------------------------------------ #
     # Changing what is open
     # ------------------------------------------------------------------ #
-    def load(self, row: memory.CatalogueFile, password: "str | None") -> str:
+    def load(self, row: memory.CatalogueFile, password: str | None) -> str:
         try:
             catalogue = memory.load(row.path, self.crypto, password)
         except memory.CatalogueError as exc:

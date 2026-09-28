@@ -4,6 +4,7 @@ Two fake servers: one that answers both callers at once, one that holds a lock
 so the second only begins when the first has finished. The probe has to tell
 them apart from timing alone, because that is all it ever gets.
 """
+
 from __future__ import annotations
 
 import threading
@@ -66,6 +67,7 @@ def test_the_model_load_is_not_counted_against_the_verdict():
     """A warm-up call pays for loading the model first. Without it a large
     model makes every endpoint look serial, because the first request carries
     a cost the second never pays."""
+
     class _SlowFirstCall(_Server):
         def chat(self, *args, **kwargs):
             first = self.calls == 0
@@ -84,6 +86,7 @@ def test_the_model_load_is_not_counted_against_the_verdict():
 def test_a_provider_that_cannot_stream_is_not_guessed_about():
     """Saying "your server is serial" when CoBirb simply could not check would
     be worse than saying so."""
+
     class _NoStreaming:
         def supports_streaming(self):
             return False
@@ -97,6 +100,7 @@ def test_a_provider_that_cannot_stream_is_not_guessed_about():
 def test_an_unreachable_endpoint_is_reported_not_raised():
     """A probe is a convenience before a flock run, never a reason to refuse
     one."""
+
     class _Broken:
         def supports_streaming(self):
             return True

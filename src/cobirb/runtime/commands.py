@@ -4,7 +4,9 @@ These return their message rather than printing it, so both renderers can
 use them: the TUI writes the text into its transcript, while anything
 text-based can just print it.
 """
+
 from __future__ import annotations
+
 
 def apply_plan_toggle(arg: str, plan_mode: bool) -> tuple[bool, str]:
     """Handle ``/plan [on|off]``: toggle plan mode, report its state, or

@@ -1,4 +1,5 @@
 """Tests for the undo snapshots taken before the agent changes a file."""
+
 from __future__ import annotations
 
 import os
@@ -31,7 +32,7 @@ def test_a_created_file_is_removed_again(tmp_path):
     checkpoints = _store(tmp_path)
 
     checkpoints.begin_turn()
-    checkpoints.record(str(target))   # nothing there yet
+    checkpoints.record(str(target))  # nothing there yet
     target.write_text("created by the agent\n")
 
     report = checkpoints.undo_last()
@@ -85,7 +86,7 @@ def test_turns_that_changed_nothing_are_skipped(tmp_path):
     checkpoints.record(str(target))
     target.write_text("edited\n")
     for _ in range(3):
-        checkpoints.begin_turn()   # three turns of conversation
+        checkpoints.begin_turn()  # three turns of conversation
 
     checkpoints.undo_last()
 
@@ -168,7 +169,7 @@ def test_the_session_diff_shows_what_the_agent_changed(tmp_path):
 
 
 def test_the_diff_is_against_the_start_of_the_session_not_the_last_turn(tmp_path):
-    """"What has this session done to my code" is asked against how things
+    """ "What has this session done to my code" is asked against how things
     looked when it started."""
     target = tmp_path / "a.py"
     target.write_text("v1\n")
@@ -255,7 +256,7 @@ def test_a_file_a_command_deleted_comes_back(tmp_path):
     project, cp = _tree(tmp_path)
     (project / "keep.py").write_text("x = 1\n")
     cp.begin_turn()
-    (project / "keep.py").unlink()          # what `rm keep.py` would do
+    (project / "keep.py").unlink()  # what `rm keep.py` would do
     (project / "made.txt").write_text("new")
     cp.end_turn()
 

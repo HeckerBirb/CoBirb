@@ -1,4 +1,5 @@
 """Tests for the encrypted session manager (tamper detection + round-trip)."""
+
 from __future__ import annotations
 
 import json
@@ -38,7 +39,7 @@ def test_save_writes_encrypted_not_plaintext(manager):
     blob = manager.save("pw")
     assert blob is not None
     # The file must be the opaque encrypted blob, not the JSON.
-    with open(manager.path, "r", encoding="utf-8") as fh:
+    with open(manager.path, encoding="utf-8") as fh:
         on_disk = fh.read()
     assert "hello" not in on_disk
     assert '{"role"' not in on_disk
@@ -103,7 +104,9 @@ def test_tamper_detected_when_only_tool_use_is_rewritten(tmp_path):
     path = str(tmp_path / "session.json")
     crypto = AesGcmScryptSessionCrypto()
     m = SessionManager.create(path, crypto, password="pw")
-    m.session.add(Turn(role="tool", content="ok", tool_use=[{"name": "read_file", "arguments": {"path": "safe.txt"}}]))
+    m.session.add(
+        Turn(role="tool", content="ok", tool_use=[{"name": "read_file", "arguments": {"path": "safe.txt"}}])
+    )
     m.save("pw")
 
     data = json.loads(crypto.decrypt(open(path, "rb").read(), "pw"))
@@ -118,8 +121,16 @@ def test_tamper_detected_when_only_tool_use_is_rewritten(tmp_path):
 def test_digest_is_stable_across_equivalent_tool_use_orderings():
     """The digest is serialized with sorted keys, so an unrelated key order
     change doesn't read as tampering."""
-    a = Turn(role="tool", content="x", tool_use=[{"name": "read_file", "arguments": {"path": "a", "encoding": "utf-8"}}])
-    b = Turn(role="tool", content="x", tool_use=[{"arguments": {"encoding": "utf-8", "path": "a"}, "name": "read_file"}])
+    a = Turn(
+        role="tool",
+        content="x",
+        tool_use=[{"name": "read_file", "arguments": {"path": "a", "encoding": "utf-8"}}],
+    )
+    b = Turn(
+        role="tool",
+        content="x",
+        tool_use=[{"arguments": {"encoding": "utf-8", "path": "a"}, "name": "read_file"}],
+    )
     assert a.digest() == b.digest()
 
 
@@ -438,7 +449,7 @@ def test_forking_a_branch_does_not_collide_with_the_original_branch_file(tmp_pat
 def test_fork_session_wrong_password_is_rejected(tmp_path):
     _, path = _seeded_manager(tmp_path)
 
-    with pytest.raises(Exception):  # noqa: B017 - the crypto library's own tamper/auth error
+    with pytest.raises(Exception):  # the crypto library's own tamper/auth error
         fork_session(path, AesGcmScryptSessionCrypto(), "wrong-password")
 
 

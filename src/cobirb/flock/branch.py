@@ -16,6 +16,7 @@ The file format is exactly the session format — same encryption, same schema,
 same reader. A flock session is a session that happens to carry a ``flock``
 token and to have been written by agents rather than typed by a person.
 """
+
 from __future__ import annotations
 
 import logging
@@ -101,9 +102,7 @@ def open_flock_session(
     if main is None or not getattr(main, "path", None):
         return None
     path = flock_path(main.path, token)
-    manager = SessionManager.create(
-        path, main.crypto, main.working_dir, password
-    )
+    manager = SessionManager.create(path, main.crypto, main.working_dir, password)
     manager.session.flock = token
     manager.session.add(
         Turn(
@@ -122,9 +121,7 @@ def open_flock_session(
 
 def describe_branches(session: Session) -> str:
     """Every flock this session has engaged, for ``/context`` and the log."""
-    engagements = [
-        turn for turn in session.turns if turn.role in (ROLE_ENGAGED, ROLE_RETURNED)
-    ]
+    engagements = [turn for turn in session.turns if turn.role in (ROLE_ENGAGED, ROLE_RETURNED)]
     if not engagements:
         return "No flock has been engaged in this session."
     lines = []

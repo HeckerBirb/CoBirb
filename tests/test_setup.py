@@ -1,4 +1,5 @@
 """Tests for `cobirb setup` and saving a default model."""
+
 from __future__ import annotations
 
 import json
@@ -23,19 +24,29 @@ def _fake_models(monkeypatch, models=("a:1", "b:2"), fail=None):
             raise RuntimeError(fail)
         return list(models)
 
-    for cls in ("cobirb.plugins.core.model.LocalModelProvider",
-                "cobirb.plugins.core.openai.OpenAICompatibleProvider"):
+    for cls in (
+        "cobirb.plugins.core.model.LocalModelProvider",
+        "cobirb.plugins.core.openai.OpenAICompatibleProvider",
+    ):
         monkeypatch.setattr(f"{cls}.list_models", list_models)
-    monkeypatch.setattr("cobirb.runtime.doctor.run", lambda: type("R", (), {"ok": True, "describe": lambda s: "ready"})())
+    monkeypatch.setattr(
+        "cobirb.runtime.doctor.run", lambda: type("R", (), {"ok": True, "describe": lambda s: "ready"})()
+    )
 
 
 def test_saving_keeps_every_other_setting(tmp_path):
-    write_config(tmp_path, {"allow_tools": ["read_file"], "model": "old", "models": {"worker": {"name": "w"}}})
+    write_config(
+        tmp_path, {"allow_tools": ["read_file"], "model": "old", "models": {"worker": {"name": "w"}}}
+    )
 
     setup.save_default_model("new:1", base_url="http://localhost:11434", api="ollama")
 
     data = json.load(open(paths.config_path()))
-    assert data["models"]["default"] == {"name": "new:1", "base_url": "http://localhost:11434", "api": "ollama"}
+    assert data["models"]["default"] == {
+        "name": "new:1",
+        "base_url": "http://localhost:11434",
+        "api": "ollama",
+    }
     assert data["models"]["worker"] == {"name": "w"}
     assert data["allow_tools"] == ["read_file"]
     assert "model" not in data  # it would outrank the choice just made
@@ -79,7 +90,7 @@ def test_an_unreachable_server_changes_nothing(monkeypatch):
 
     assert code == 1
     assert "Nothing was changed" in " ".join(said)
-    assert not os.path.exists(paths.config_path()) or "name\": \"a" not in open(paths.config_path()).read()
+    assert not os.path.exists(paths.config_path()) or 'name": "a' not in open(paths.config_path()).read()
 
 
 def test_setup_refuses_without_a_terminal():

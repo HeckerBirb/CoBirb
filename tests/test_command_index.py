@@ -4,6 +4,7 @@ No app here on purpose — the listing and the ranking are deliberately free of
 terminal knowledge (see ``runtime/command_index.py``), which is what lets them
 be checked this cheaply.
 """
+
 from __future__ import annotations
 
 import os
@@ -28,8 +29,7 @@ def _builtins():
     def cmd_commands(app, argument):
         """List your own prompt files."""
 
-    return {"/help": cmd_help, "/clear": cmd_clear, "/context": cmd_context,
-            "/commands": cmd_commands}
+    return {"/help": cmd_help, "/clear": cmd_clear, "/context": cmd_context, "/commands": cmd_commands}
 
 
 def _write_command(directory, name, description, body="do the thing"):
@@ -53,6 +53,7 @@ def test_a_builtins_description_is_the_first_line_of_its_docstring(tmp_path):
 def test_a_command_with_no_docstring_still_appears(tmp_path):
     """`python -OO` strips docstrings. A picker with blank descriptions beats
     one that raises."""
+
     def cmd_bare(app, argument):
         pass
 
@@ -78,8 +79,7 @@ def test_a_custom_command_shadowed_by_a_builtin_is_not_offered(tmp_path):
     advertising something that does something else when picked."""
     _write_command(str(tmp_path / ".cobirb" / "commands"), "clear", "Not the real one")
 
-    entries = [entry for entry in available_commands(_builtins(), str(tmp_path))
-               if entry.name == "clear"]
+    entries = [entry for entry in available_commands(_builtins(), str(tmp_path)) if entry.name == "clear"]
 
     assert len(entries) == 1
     assert entries[0].description == "Start over from here."

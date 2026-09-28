@@ -14,18 +14,20 @@ and they carry the one invariant the whole design rests on: **a Worker Birb
 never changes its contract.** Everything it cannot do inside the contract comes
 back as a written shortcoming for the next round.
 """
+
 from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from ..config import Config
 from ..policy import _segments
-from ..typing.spi import DECISION_DENY, ApprovalOutcome, Tool, ToolResult
 from ..runtime.headless import HeadlessIO
 from ..runtime.wiring import build_subagent
+from ..typing.spi import DECISION_DENY, ApprovalOutcome, Tool, ToolResult
 from .charter import WorkerBrief, policy_for
 
 logger = logging.getLogger("cobirb")
@@ -166,8 +168,9 @@ class WorkerReport:
             if data.get("missing"):
                 parts.append("missing: " + "; ".join(str(m) for m in data["missing"]))
             if data.get("test_contradicts"):
-                parts.append("test contradicts the contract: "
-                             + "; ".join(str(m) for m in data["test_contradicts"]))
+                parts.append(
+                    "test contradicts the contract: " + "; ".join(str(m) for m in data["test_contradicts"])
+                )
             return ", ".join(parts)
         return f"unstructured: {self.summary.strip()[:600]}" if self.summary.strip() else ""
 
@@ -196,9 +199,7 @@ class WorkerReport:
                 )
         lines = [f"[{self.worker_id}] {verdict}, {self.turns} turn(s)"]
         if self.denied:
-            lines.append(
-                f"    tried to reach outside its scope: {', '.join(sorted(set(self.denied)))}"
-            )
+            lines.append(f"    tried to reach outside its scope: {', '.join(sorted(set(self.denied)))}")
         if self.structured:
             lines.append(f"    reported — {self.report_text()}")
         if self.summary:
@@ -226,9 +227,11 @@ class ReportTool(Tool):
         return self.NAME
 
     def description(self) -> str:
-        return ("Report how your ticket went, once, when you have finished: whether your tests "
-                "pass, whether you kept the contract, what is missing and why, and any test that "
-                "contradicts the contract it tests.")
+        return (
+            "Report how your ticket went, once, when you have finished: whether your tests "
+            "pass, whether you kept the contract, what is missing and why, and any test that "
+            "contradicts the contract it tests."
+        )
 
     def parameters(self) -> dict[str, Any]:
         items = {"type": "array", "items": {"type": "string"}}
@@ -236,12 +239,18 @@ class ReportTool(Tool):
             "type": "object",
             "properties": {
                 "tests_pass": {"type": "boolean", "description": "Do all your tests pass now?"},
-                "contract_kept": {"type": "boolean",
-                                  "description": "Did you keep every signature and data shape unchanged?"},
-                "missing": {**items, "description": "Anything not done or deliberately left out, "
-                                                    "each as 'what — why'."},
-                "test_contradicts": {**items, "description": "Any given test that contradicts the "
-                                                             "contract, each as 'test — why'."},
+                "contract_kept": {
+                    "type": "boolean",
+                    "description": "Did you keep every signature and data shape unchanged?",
+                },
+                "missing": {
+                    **items,
+                    "description": "Anything not done or deliberately left out, each as 'what — why'.",
+                },
+                "test_contradicts": {
+                    **items,
+                    "description": "Any given test that contradicts the contract, each as 'test — why'.",
+                },
             },
             "required": ["tests_pass", "contract_kept"],
         }
@@ -311,12 +320,16 @@ def refusal_note(worker: WorkerBrief) -> str:
     """What a worker refused under auto-pilot is told it may do instead."""
     programs = sorted({words[0] for words in (_segments(worker.accept) or []) if words})
     if not programs:
-        return ("Auto-pilot is on: nothing outside your files is granted and nobody is asked. "
-                "You may run no commands; work with your file tools.")
-    return (f"Auto-pilot is on: nothing outside your files and your check is granted, and nobody is "
-            f"asked. The only programs you may run are: {', '.join(programs)} — with any arguments, "
-            "but on their own: a pipe (`|`), `&&` or redirect into another program adds a program "
-            "you may not run.")
+        return (
+            "Auto-pilot is on: nothing outside your files is granted and nobody is asked. "
+            "You may run no commands; work with your file tools."
+        )
+    return (
+        f"Auto-pilot is on: nothing outside your files and your check is granted, and nobody is "
+        f"asked. The only programs you may run are: {', '.join(programs)} — with any arguments, "
+        "but on their own: a pipe (`|`), `&&` or redirect into another program adds a program "
+        "you may not run."
+    )
 
 
 def compose_brief(worker: WorkerBrief, cwd: str = "") -> str:
@@ -353,8 +366,7 @@ def compose_brief(worker: WorkerBrief, cwd: str = "") -> str:
         )
     else:
         parts.append(
-            "You may read anything else in the project to understand it, but change "
-            "only the files above."
+            "You may read anything else in the project to understand it, but change only the files above."
         )
     if worker.reads:
         parts.append(
@@ -406,7 +418,11 @@ def run_worker(
         io = RefusingIO(io if io is not None else HeadlessIO(), when=refusing, why=refusal_note(worker))
     policy = policy_for(worker, cwd, audit_log_enabled=bool(config.get("audit_log")))
     orchestrator = build_subagent(
-        cwd, policy, accept=worker.accept, config=config, io=io,
+        cwd,
+        policy,
+        accept=worker.accept,
+        config=config,
+        io=io,
         # Joins this worker to the session's approvals, so one granted before
         # it started applies to it without asking again — and so one it asks
         # for itself reaches the workers after it.
@@ -464,7 +480,10 @@ def run_worker(
                     )
                 logger.warning(
                     "worker %s could not start (attempt %d/%d): %s",
-                    worker.id, attempt, START_ATTEMPTS, exc,
+                    worker.id,
+                    attempt,
+                    START_ATTEMPTS,
+                    exc,
                 )
                 time.sleep(START_RETRY_SECONDS)
     finally:

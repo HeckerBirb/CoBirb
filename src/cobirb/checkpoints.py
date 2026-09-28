@@ -21,6 +21,7 @@ hold the conversation. A copy of `src/app.py` exposes nothing that
 encrypting it would be ceremony. The directory is created 0700 all the same,
 and old checkpoints are pruned.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -201,9 +202,7 @@ class Checkpoints:
             for original, saved in checkpoint.files.items():
                 if original in first:
                     continue
-                first[original] = (
-                    os.path.join(checkpoint.directory, saved) if saved is not None else None
-                )
+                first[original] = os.path.join(checkpoint.directory, saved) if saved is not None else None
         return first
 
     def session_diff(self) -> str:
@@ -220,12 +219,12 @@ class Checkpoints:
             before = ""
             if original is not None:
                 try:
-                    with open(original, "r", encoding="utf-8", errors="replace") as fh:
+                    with open(original, encoding="utf-8", errors="replace") as fh:
                         before = fh.read()
                 except OSError:
                     continue
             try:
-                with open(current, "r", encoding="utf-8", errors="replace") as fh:
+                with open(current, encoding="utf-8", errors="replace") as fh:
                     after = fh.read()
             except OSError:
                 after = ""  # deleted since, or never created
@@ -310,16 +309,33 @@ class TreeCheckpoints:
         import subprocess
 
         command = [
-            self.git, f"--git-dir={self.store}", f"--work-tree={self.cwd}",
+            self.git,
+            f"--git-dir={self.store}",
+            f"--work-tree={self.cwd}",
             # The user's own git configuration must not reach this: no hooks,
             # no signing, no pager, a fixed identity.
-            "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
-            "-c", "user.name=CoBirb", "-c", "user.email=cobirb@localhost",
-            "-c", "core.autocrlf=false", "-c", "core.quotepath=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=CoBirb",
+            "-c",
+            "user.email=cobirb@localhost",
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.quotepath=false",
             *args,
         ]
-        done = subprocess.run(command, cwd=self.cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                              env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_PAGER": "cat"})
+        done = subprocess.run(
+            command,
+            cwd=self.cwd,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_PAGER": "cat"},
+        )
         if check and done.returncode != 0:
             raise RuntimeError(done.stderr.strip() or f"git {args[0]} failed")
         return done.stdout
@@ -348,7 +364,7 @@ class TreeCheckpoints:
     def _changed(self, before: str, after: str) -> list[tuple[str, str]]:
         out = self._run("diff", "--no-renames", "--name-status", "-z", before, after)
         fields = [f for f in out.split("\0") if f]
-        return list(zip(fields[0::2], fields[1::2]))
+        return list(zip(fields[0::2], fields[1::2], strict=False))
 
     def _blob(self, commit: str, path: str) -> str | None:
         out = self._run("rev-parse", "--verify", "-q", f"{commit}:{path}", check=False).strip()
@@ -364,7 +380,7 @@ class TreeCheckpoints:
     def begin_turn(self) -> None:
         try:
             before = self._snapshot(f"before turn {len(self._turns) + 1}")
-        except Exception:  # noqa: BLE001 - undo is a convenience; never cost a turn
+        except Exception:  # undo is a convenience; never cost a turn
             logger.debug("could not snapshot the tree", exc_info=True)
             return
         self._first = self._first or before
@@ -375,7 +391,7 @@ class TreeCheckpoints:
             return
         try:
             after = self._snapshot(f"after turn {len(self._turns)}")
-        except Exception:  # noqa: BLE001
+        except Exception:  # a failed snapshot only narrows /undo
             logger.debug("could not snapshot the tree", exc_info=True)
             return
         self._turns[-1] = (self._turns[-1][0], after)
@@ -417,7 +433,7 @@ class TreeCheckpoints:
         try:
             self._run("add", "-A", "--", ".")
             return self._run("diff", "--cached", "--no-color", "--no-renames", self._first)
-        except Exception:  # noqa: BLE001
+        except Exception:  # a failed diff shows nothing, never fails /diff
             logger.debug("could not diff the tree", exc_info=True)
             return ""
 
@@ -432,7 +448,7 @@ def _sweep_dead_stores(parent: str) -> None:
     except OSError:
         return
     for name in names:
-        head, sep, pid = name.rpartition("-tree-")
+        _head, sep, pid = name.rpartition("-tree-")
         if not sep or not pid.isdigit() or int(pid) == os.getpid():
             continue
         try:
@@ -443,7 +459,7 @@ def _sweep_dead_stores(parent: str) -> None:
             pass
 
 
-def for_workspace(cwd: str) -> "Checkpoints | TreeCheckpoints":
+def for_workspace(cwd: str) -> Checkpoints | TreeCheckpoints:
     """Whole-tree checkpoints when git is installed, else per-file ones."""
     git = shutil.which("git")
     return TreeCheckpoints(cwd, git) if git else Checkpoints(cwd)

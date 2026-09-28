@@ -9,6 +9,7 @@ socket rather than trusted from its mock. It costs a couple of seconds
 (pip building an editable wheel) and is fully offline — the fixture plugin
 declares no dependencies.
 """
+
 from __future__ import annotations
 
 import textwrap
@@ -39,7 +40,8 @@ def _fixture_plugin(tmp_path, name="cobirb_plugins_greeter", entry_points=True):
         if entry_points
         else ""
     )
-    (source / "pyproject.toml").write_text(textwrap.dedent(f"""\
+    (source / "pyproject.toml").write_text(
+        textwrap.dedent(f"""\
         [build-system]
         requires = ["setuptools>=61"]
         build-backend = "setuptools.build_meta"
@@ -51,8 +53,10 @@ def _fixture_plugin(tmp_path, name="cobirb_plugins_greeter", entry_points=True):
         {entry_point_block}
         [tool.setuptools]
         py-modules = ["greeter_plugin"]
-    """))
-    (source / "greeter_plugin.py").write_text(textwrap.dedent("""\
+    """)
+    )
+    (source / "greeter_plugin.py").write_text(
+        textwrap.dedent("""\
         from cobirb.typing.spi import Tool, ToolResult
 
         class GreeterTool(Tool):
@@ -64,7 +68,8 @@ def _fixture_plugin(tmp_path, name="cobirb_plugins_greeter", entry_points=True):
                 return {"type": "object", "properties": {}}
             def execute(self, arguments):
                 return ToolResult(ok=True, content="hello")
-    """))
+    """)
+    )
     return source
 
 
@@ -138,9 +143,7 @@ def test_a_pyproject_declaring_no_cobirb_entry_point_is_refused(tmp_path):
     later from a confusing "not found" after the fact."""
     source = tmp_path / "bad"
     source.mkdir()
-    (source / "pyproject.toml").write_text(
-        '[project]\nname = "cobirb_plugins_bad"\nversion = "0.0.1"\n'
-    )
+    (source / "pyproject.toml").write_text('[project]\nname = "cobirb_plugins_bad"\nversion = "0.0.1"\n')
 
     with pytest.raises(PluginInstallError, match="entry-points"):
         install_plugin(str(source))
@@ -153,12 +156,14 @@ def test_a_name_not_matching_the_loaders_convention_is_refused(tmp_path):
     silently never be found, which must be caught here instead."""
     source = tmp_path / "bad"
     source.mkdir()
-    (source / "pyproject.toml").write_text(textwrap.dedent("""\
+    (source / "pyproject.toml").write_text(
+        textwrap.dedent("""\
         [project]
         name = "totally-unrelated-name"
         [project.entry-points."cobirb.plugins"]
         tool = "x:Y"
-    """))
+    """)
+    )
 
     with pytest.raises(PluginInstallError, match="cobirb_plugins_"):
         install_plugin(str(source))
@@ -187,7 +192,8 @@ def test_a_failed_replace_puts_the_working_plugin_back(monkeypatch, tmp_path):
 
     broken = tmp_path / "broken-source"
     broken.mkdir()
-    (broken / "pyproject.toml").write_text(textwrap.dedent("""\
+    (broken / "pyproject.toml").write_text(
+        textwrap.dedent("""\
         [build-system]
         requires = ["setuptools>=61"]
         build-backend = "setuptools.build_meta"
@@ -198,7 +204,8 @@ def test_a_failed_replace_puts_the_working_plugin_back(monkeypatch, tmp_path):
         tool = "greeter_plugin:NOT_A_TOOL"
         [tool.setuptools]
         py-modules = ["greeter_plugin"]
-    """))
+    """)
+    )
     (broken / "greeter_plugin.py").write_text("NOT_A_TOOL = object()\n")
 
     try:
@@ -221,7 +228,8 @@ def test_a_failed_install_leaves_no_directory_behind(monkeypatch, tmp_path):
     # declare an entry point to get this far in the first place, so instead
     # force pip itself to "succeed" while discovery still fails, by pointing
     # the entry point at something that isn't a Tool subclass.
-    (source / "pyproject.toml").write_text(textwrap.dedent("""\
+    (source / "pyproject.toml").write_text(
+        textwrap.dedent("""\
         [build-system]
         requires = ["setuptools>=61"]
         build-backend = "setuptools.build_meta"
@@ -232,7 +240,8 @@ def test_a_failed_install_leaves_no_directory_behind(monkeypatch, tmp_path):
         tool = "greeter_plugin:NOT_A_TOOL"
         [tool.setuptools]
         py-modules = ["greeter_plugin"]
-    """))
+    """)
+    )
     (source / "greeter_plugin.py").write_text("NOT_A_TOOL = object()\n")
 
     with pytest.raises(PluginInstallError, match="not discovered"):

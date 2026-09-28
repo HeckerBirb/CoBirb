@@ -12,12 +12,13 @@ It is a *check*, not a gate: an endpoint that cannot answer it gets the benefit
 of the doubt, because being unable to list models is not evidence that a model
 is absent.
 """
+
 from __future__ import annotations
 
 import logging
 
-from ..runtime.models import ROLE_ORCHESTRATOR, ROLE_WORKER, build_for_role, resolve_role
 from ..config import Config
+from ..runtime.models import ROLE_ORCHESTRATOR, ROLE_WORKER, build_for_role, resolve_role
 
 logger = logging.getLogger("cobirb")
 

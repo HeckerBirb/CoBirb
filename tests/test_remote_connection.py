@@ -5,6 +5,7 @@ certificate pinning, a Worker Birb job with its model relayed to the main side,
 checks run on the remote, the hard halt, resuming after a drop, and a flock
 round with one remote ticket.
 """
+
 from __future__ import annotations
 
 import os
@@ -88,7 +89,10 @@ class _ScriptedModel:
         self.calls += 1
         names = [t.name() for t in tools or []]
         if self.calls == 1:
-            self._last, text = [ToolCall("write_file", {"path": "a.txt", "content": self._content})], "writing"
+            self._last, text = (
+                [ToolCall("write_file", {"path": "a.txt", "content": self._content})],
+                "writing",
+            )
         elif self.calls == 2 and "report" in names:
             self._last = [ToolCall("report", {"tests_pass": True, "contract_kept": True, "missing": []})]
             text = "reporting"
@@ -112,7 +116,9 @@ def test_pairing_once_lets_later_connections_in_without_asking(remote):
     first.close()
 
     asked = []
-    again = remote.client(ask_trust=lambda s, f: asked.append("trust"), ask_code=lambda s: asked.append("code"))
+    again = remote.client(
+        ask_trust=lambda s, f: asked.append("trust"), ask_code=lambda s: asked.append("code")
+    )
     again.connect()
     again.close()
 
@@ -158,8 +164,15 @@ def test_a_remote_worker_writes_its_file_and_its_checks_run_on_the_remote(remote
             shown.append(tool)
 
     worker = WorkerBrief(id="win", brief="Write done into a.txt", writes=("a.txt",), accept=_CHECK)
-    run = RemoteRun(client, worker, str(cwd), config=Config(), io=_Pane(), grants=SessionGrants(),
-                    provider=_ScriptedModel())
+    run = RemoteRun(
+        client,
+        worker,
+        str(cwd),
+        config=Config(),
+        io=_Pane(),
+        grants=SessionGrants(),
+        provider=_ScriptedModel(),
+    )
     report = run.execute()
 
     assert report.ok and report.accepted is True
@@ -179,14 +192,17 @@ def test_a_finished_colleagues_file_pushed_mid_round_is_what_the_remote_runs_aga
     client = remote.client()
     client.connect()
     worker = WorkerBrief(id="win", brief="b", writes=("a.txt",), reads=("lib.txt",), accept=_CHECK)
-    run = RemoteRun(client, worker, str(cwd), config=Config(), grants=SessionGrants(),
-                    provider=_ScriptedModel())
+    run = RemoteRun(
+        client, worker, str(cwd), config=Config(), grants=SessionGrants(), provider=_ScriptedModel()
+    )
     run.execute()
 
     (cwd / "lib.txt").write_text("from the colleague")
     run.push(["lib.txt"])
 
-    assert run.check("""python3 -c "import sys; sys.exit(0 if open('lib.txt').read()=='from the colleague' else 1)\"""").ok
+    assert run.check(
+        """python3 -c "import sys; sys.exit(0 if open('lib.txt').read()=='from the colleague' else 1)\""""
+    ).ok
     run.end()
     client.close()
 
@@ -245,7 +261,9 @@ def test_a_busy_remote_makes_the_next_ticket_wait_until_it_is_free(remote):
     first = pool.acquire("Windows", stop)
     waited, got = [], []
 
-    thread = threading.Thread(target=lambda: got.append(pool.acquire("Windows", stop, on_wait=lambda: waited.append(1))))
+    thread = threading.Thread(
+        target=lambda: got.append(pool.acquire("Windows", stop, on_wait=lambda: waited.append(1)))
+    )
     thread.start()
     time.sleep(0.5)
     assert waited == [1] and got == []
@@ -265,14 +283,20 @@ def test_a_flock_round_runs_a_remote_ticket_and_judges_it_on_the_remote(remote, 
     cwd = tmp_path / "project"
     cwd.mkdir()
     (cwd / "a.txt").write_text("stub")
-    charter = Charter(objective="o", workers=(
-        WorkerBrief(id="win", brief="Write done into a.txt", writes=("a.txt",), accept=_CHECK,
-                    runs_on="Windows"),))
+    charter = Charter(
+        objective="o",
+        workers=(
+            WorkerBrief(
+                id="win", brief="Write done into a.txt", writes=("a.txt",), accept=_CHECK, runs_on="Windows"
+            ),
+        ),
+    )
     pool = RemotePool([remote.spec], TrustStore()).open()
     events = []
 
-    outcome = run_flock(charter, str(cwd), config=Config(), remotes=pool,
-                        on_event=lambda kind, payload: events.append(kind))
+    outcome = run_flock(
+        charter, str(cwd), config=Config(), remotes=pool, on_event=lambda kind, payload: events.append(kind)
+    )
     pool.close()
 
     report = outcome.reports[0]

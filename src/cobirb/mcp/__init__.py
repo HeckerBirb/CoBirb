@@ -13,6 +13,7 @@ shape of this that keeps CoBirb's founding promise intact. HTTP/SSE transports
 point at a URL, and a URL is a network call CoBirb did not make and cannot see
 inside. See ``cobirb help mcp`` for what a configured server can and cannot do.
 """
+
 from __future__ import annotations
 
 from .client import McpError, StdioClient

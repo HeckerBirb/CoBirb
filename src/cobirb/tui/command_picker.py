@@ -9,9 +9,10 @@ One thing this has that the mention picker does not: a count of what it is
 it someone who typed ``/`` would reasonably conclude those five are all there
 is — which is the opposite of what a discovery aid is for.
 """
+
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from rich.text import Text
 from textual.widgets import Static
@@ -28,12 +29,12 @@ MAX_ROWS = 5
 class CommandPicker(Static):
     """Commands matching what has been typed after the ``/``, best first."""
 
-    def __init__(self, entries: Callable[[], "list[CommandEntry]"], **kwargs: object) -> None:
+    def __init__(self, entries: Callable[[], list[CommandEntry]], **kwargs: object) -> None:
         super().__init__("", **kwargs)
         # A callable for the same reason the mention picker takes one: command
         # files can be added while the app is open.
         self._entries = entries
-        self._rows: "list[CommandEntry]" = []
+        self._rows: list[CommandEntry] = []
         self._total = 0
         self._selected = 0
         self.display = False
@@ -47,12 +48,12 @@ class CommandPicker(Static):
         return bool(self._rows)
 
     @property
-    def current(self) -> "str | None":
+    def current(self) -> str | None:
         """The highlighted command's name, without its slash."""
         return self._rows[self._selected].name if self._rows else None
 
     @property
-    def rows(self) -> "list[str]":
+    def rows(self) -> list[str]:
         """The names on screen, for tests and for the app."""
         return [entry.name for entry in self._rows]
 

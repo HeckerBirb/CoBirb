@@ -7,6 +7,7 @@ builds the very same panels from ``render.py`` and writes them into a
 ``RichLog`` rather than printing them. Speech and vision adapters are
 I_OAdapter implementations that can be added later without touching core.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -52,7 +53,7 @@ class TerminalIO(I_OAdapter):
 
     def view(self, data: bytes, mime: str | None = None) -> None:
         """No-op in v0.1.0. Vision rendering will be added in v0.2.0."""
-        return None
+        return
 
     def confirm(self, tool_name: str, arguments: dict[str, Any]) -> str:
         return self._ask(tool_name, arguments, None)

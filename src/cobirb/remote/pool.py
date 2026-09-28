@@ -10,10 +10,12 @@ one remote worker run at once under a limit of two. A ticket goes to the first
 idle remote of its OS; with none idle it waits, polling on the heartbeat until
 one reports itself idle.
 """
+
 from __future__ import annotations
 
 import threading
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from . import protocol
 from .client import RemoteClient, RemoteError
@@ -22,9 +24,14 @@ from .trust import TrustStore
 
 
 class RemotePool:
-    def __init__(self, specs: "list[RemoteSpec]", store: TrustStore | None = None, *,
-                 client_factory: Callable[..., RemoteClient] = RemoteClient,
-                 poll_seconds: float = protocol.HEARTBEAT_SECONDS) -> None:
+    def __init__(
+        self,
+        specs: list[RemoteSpec],
+        store: TrustStore | None = None,
+        *,
+        client_factory: Callable[..., RemoteClient] = RemoteClient,
+        poll_seconds: float = protocol.HEARTBEAT_SECONDS,
+    ) -> None:
         self._specs = list(specs)
         self._store = store or TrustStore()
         self._factory = client_factory
@@ -35,7 +42,7 @@ class RemotePool:
         self._freed = threading.Condition(self._lock)
         self.problems: list[str] = []
 
-    def open(self) -> "RemotePool":
+    def open(self) -> RemotePool:
         for spec in self._specs:
             client = self._factory(spec, self._store)
             try:
@@ -58,8 +65,9 @@ class RemotePool:
         (``which``, a requirement check)."""
         return next((c for c in self._clients if c.spec.os == os_family), None)
 
-    def acquire(self, os_family: str, stop: threading.Event,
-                on_wait: "Callable[[], None] | None" = None) -> RemoteClient | None:
+    def acquire(
+        self, os_family: str, stop: threading.Event, on_wait: Callable[[], None] | None = None
+    ) -> RemoteClient | None:
         """The first idle remote of ``os_family``; waits while none is.
 
         Idle means both "not running one of ours" and "the remote says idle" —

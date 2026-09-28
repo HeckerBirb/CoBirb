@@ -19,16 +19,19 @@ The approval and the two questions (an overlapping partition, an endpoint that
 serialises) are asked through a small protocol rather than ``input()``, so the
 same flow works from the terminal and from the full-screen app.
 """
+
 from __future__ import annotations
 
 import contextlib
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable
+from typing import Any
 
 from ..config import Config
 from ..orchestrator import STOP_NO_PROGRESS, Orchestrator
+from ..remote.osnames import local_os
 from . import branch
 from .brainy import (
     PROPOSE_CHARTER,
@@ -51,6 +54,7 @@ from .stages import (
     LIMITS_HEADING,
     CharterApproval,
     Stager,
+    TicketSpec,
     approval_changes,
     check_requirements,
     check_tickets,
@@ -58,7 +62,6 @@ from .stages import (
     left_to_do,
     requirements_checkable,
 )
-from ..remote.osnames import local_os
 from .supervisor import Canceller, FlockOutcome, check_partition, run_flock
 
 logger = logging.getLogger("cobirb")
@@ -104,11 +107,11 @@ class Asker:
     # to leave every decision to Brainy Birb. The default leaves them to it —
     # a decision about the design is not a capability, so "nobody answered"
     # safely means "use your judgement", unlike a charter approval.
-    decide: Callable[[str], "str | None"] = lambda decisions: None
+    decide: Callable[[str], str | None] = lambda decisions: None
     # One question with a few long answers (``options``), returning the index
     # picked or None for cancel. Optional: without it the question falls back
     # to ``confirm`` on the first option (see _choose).
-    choose: "Callable[[str, str, list[str]], int | None] | None" = None
+    choose: Callable[[str, str, list[str]], int | None] | None = None
     # Which agent is working now — "Brainy Birb" or "Architect Birb" — told at
     # the start of every planning stage, so a front-end can name the one it is
     # showing. Nothing to do by default.
@@ -182,7 +185,7 @@ class PlanResult:
 
 
 def install_charter_tool(
-    orchestrator: Orchestrator, cwd: str, on_proposed: "Callable[[Charter], None] | None" = None
+    orchestrator: Orchestrator, cwd: str, on_proposed: Callable[[Charter], None] | None = None
 ) -> ProposeCharterTool:
     """Put the charter tool on ``orchestrator`` and leave it there.
 
@@ -301,7 +304,7 @@ class FlockSettings:
     max_rounds: int = DEFAULT_MAX_ROUNDS
 
     @classmethod
-    def from_config(cls, config: Config) -> "FlockSettings":
+    def from_config(cls, config: Config) -> FlockSettings:
         block = config.get("flock") or {}
         if not isinstance(block, dict):
             block = {}
@@ -340,8 +343,9 @@ def _unless_autopilot(decide, orchestrator: Orchestrator):
     return lambda text: "" if _autopilot(orchestrator) else decide(text)
 
 
-def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int,
-          trace: "list | None" = None) -> PlanResult:
+def _plan(
+    orchestrator: Orchestrator, objective: str, cwd: str, turns: int, trace: list | None = None
+) -> PlanResult:
     """Let Brainy Birb plan and scaffold, and take the charter it proposes.
 
     **A driven loop with a completion predicate, rather than one turn plus a
@@ -383,12 +387,14 @@ def _plan(orchestrator: Orchestrator, objective: str, cwd: str, turns: int,
     with _without_project_verification(orchestrator):
         prompt = plan_prompt(objective)
         for _ in range(MAX_PLAN_STEPS):
-            session = orchestrator.run(
-                prompt, system="", cwd=cwd, label="Brainy Birb", max_turns=turns
-            )
+            session = orchestrator.run(prompt, system="", cwd=cwd, label="Brainy Birb", max_turns=turns)
             if trace is not None:
-                trace.append({"step": f"plan pass {len(trace) + 1}", "calls": [
-                    c["name"] for c in getattr(orchestrator, "last_run_tool_calls", [])]})
+                trace.append(
+                    {
+                        "step": f"plan pass {len(trace) + 1}",
+                        "calls": [c["name"] for c in getattr(orchestrator, "last_run_tool_calls", [])],
+                    }
+                )
             narration = session.summary or narration
             called = bool(getattr(orchestrator, "last_run_tool_calls", None))
             touched = touched or called
@@ -485,8 +491,22 @@ def run_flock_session(
         flock_session = branch.open_flock_session(main, run.token, objective, password)
 
     try:
-        return _drive(run, orchestrator, objective, cwd, ask, config, stop, on_event,
-                      plan_turns, probe, io_for, on_charter, canceller, charter)
+        return _drive(
+            run,
+            orchestrator,
+            objective,
+            cwd,
+            ask,
+            config,
+            stop,
+            on_event,
+            plan_turns,
+            probe,
+            io_for,
+            on_charter,
+            canceller,
+            charter,
+        )
     finally:
         _close_branch(main, flock_session, run, password)
 
@@ -525,11 +545,40 @@ def _drive(
 
     settings = FlockSettings.from_config(config)
     if charter is None and settings.planning == PLANNING_STAGED:
-        return _drive_staged(run, orchestrator, objective, cwd, ask, config, stop, on_event,
-                             plan_turns, probe, io_for, on_charter, canceller, settings)
+        return _drive_staged(
+            run,
+            orchestrator,
+            objective,
+            cwd,
+            ask,
+            config,
+            stop,
+            on_event,
+            plan_turns,
+            probe,
+            io_for,
+            on_charter,
+            canceller,
+            settings,
+        )
     with contextlib.ExitStack() as held:
-        return _drive_single(run, orchestrator, objective, cwd, ask, config, stop, on_event,
-                             plan_turns, probe, io_for, on_charter, canceller, charter, held)
+        return _drive_single(
+            run,
+            orchestrator,
+            objective,
+            cwd,
+            ask,
+            config,
+            stop,
+            on_event,
+            plan_turns,
+            probe,
+            io_for,
+            on_charter,
+            canceller,
+            charter,
+            held,
+        )
 
 
 def _drive_single(
@@ -675,7 +724,7 @@ def _drive_single(
         # what is waiting to run.
         try:
             on_charter(charter)
-        except Exception:  # noqa: BLE001 - a display is not worth the run
+        except Exception:  # a display is not worth the run
             logger.debug("a charter handler raised", exc_info=True)
 
     # ---- 2. Does the partition hold together? --------------------------- #
@@ -715,27 +764,33 @@ def _drive_single(
         return run
 
     # ---- 4. Can the endpoint actually do two at once? ------------------- #
-    if probe and concurrency > 1:
-        if ask.confirm(
+    if (
+        probe
+        and concurrency > 1
+        and ask.confirm(
             "Check whether your model endpoint serves two requests at once?",
             "It takes a few seconds. A server that queues them would make a concurrent "
             "flock quietly sequential — two panes, one of them stalled, for reasons "
             "nothing tells you.",
-        ):
-            run.probe = probe_concurrency(orchestrator.model)
-            ask.show(run.probe.describe())
-            if run.probe.concurrent is False and not ask.confirm(
-                "Run the Worker Birbs one at a time instead?"
-            ):
-                pass  # they chose to carry on as configured
-            elif run.probe.concurrent is False:
-                concurrency = 1
+        )
+    ):
+        run.probe = probe_concurrency(orchestrator.model)
+        ask.show(run.probe.describe())
+        # Declining carries on as configured.
+        if run.probe.concurrent is False and ask.confirm("Run the Worker Birbs one at a time instead?"):
+            concurrency = 1
 
     # ---- 5. Fan out, review, report ------------------------------------- #
     ask.show(f"Fanning out {len(charter.workers)} ticket(s), {concurrency} at a time…")
     outcome = run_flock(
-        charter, cwd, config=config, concurrency=concurrency, stop=stop,
-        on_event=on_event, io_for=io_for, canceller=canceller,
+        charter,
+        cwd,
+        config=config,
+        concurrency=concurrency,
+        stop=stop,
+        on_event=on_event,
+        io_for=io_for,
+        canceller=canceller,
         # Read off the orchestrator rather than passed in: Brainy Birb's
         # agent already holds the session's approvals, and threading a second
         # copy through every caller would be the same object in two places,
@@ -773,8 +828,9 @@ def _round_verdict(outcome: FlockOutcome) -> str:
     return "\n".join(lines)
 
 
-def _with_contradicted_tests(outcome: FlockOutcome, known: list, tickets: list,
-                             whys: dict[str, str]) -> "tuple[list, dict[str, str]]":
+def _with_contradicted_tests(
+    outcome: FlockOutcome, known: list, tickets: list, whys: dict[str, str]
+) -> tuple[list, dict[str, str]]:
     """Add every ticket whose worker reported a test contradicting the contract.
 
     **A reported contradiction always leads to that test being rewritten.**
@@ -796,12 +852,17 @@ def _with_contradicted_tests(outcome: FlockOutcome, known: list, tickets: list,
         if report.worker_id not in present:
             tickets.append(by_id[report.worker_id])
             present.add(report.worker_id)
-        whys[report.worker_id] = " ".join(filter(None, [
-            whys.get(report.worker_id, ""),
-            "REWRITE these tests, which the worker reported as contradicting the contract "
-            "(check each against the contract; if the worker is right, fix the test): "
-            + "; ".join(contradicted),
-        ]))
+        whys[report.worker_id] = " ".join(
+            filter(
+                None,
+                [
+                    whys.get(report.worker_id, ""),
+                    "REWRITE these tests, which the worker reported as contradicting the contract "
+                    "(check each against the contract; if the worker is right, fix the test): "
+                    + "; ".join(contradicted),
+                ],
+            )
+        )
     return tickets, whys
 
 
@@ -830,7 +891,7 @@ def _open_remotes(config: Config, ask: Asker) -> Any:
     return pool
 
 
-def _static_or_stop(tickets: "list[TicketSpec]", pool: Any, ask: Asker) -> "tuple[list[TicketSpec], bool]":
+def _static_or_stop(tickets: list[TicketSpec], pool: Any, ask: Asker) -> tuple[list[TicketSpec], bool]:
     """Tickets that must run on an OS no remote offers: the user decides.
 
     Going on makes them static — written by a local Worker Birb, never built or
@@ -839,22 +900,25 @@ def _static_or_stop(tickets: "list[TicketSpec]", pool: Any, ask: Asker) -> "tupl
     """
     here = local_os()
     available = pool.oses() if pool is not None else set()
-    missing = [t for t in tickets if t.runs_on and t.runs_on != here
-               and t.runs_on not in available and not t.static]
+    missing = [
+        t for t in tickets if t.runs_on and t.runs_on != here and t.runs_on not in available and not t.static
+    ]
     if not missing:
         return tickets, False
     oses = ", ".join(sorted({t.runs_on for t in missing}))
     ids = ", ".join(repr(t.id) for t in missing)
-    question = (f"Ticket(s) {ids} must be built and tested on {oses}, and no Remote Worker Birb for "
-                "it is available. Go on without building or testing them? They will be written "
-                "only, as static work, and reported as not verified.")
+    question = (
+        f"Ticket(s) {ids} must be built and tested on {oses}, and no Remote Worker Birb for "
+        "it is available. Go on without building or testing them? They will be written "
+        "only, as static work, and reported as not verified."
+    )
     if not ask.confirm(question, ""):
         return tickets, True
     static = {t.id for t in missing}
     return [replace(t, runs_on="", static=True) if t.id in static else t for t in tickets], False
 
 
-def _charter_static_or_stop(charter: Charter, pool: Any, ask: Asker) -> "tuple[Charter, bool]":
+def _charter_static_or_stop(charter: Charter, pool: Any, ask: Asker) -> tuple[Charter, bool]:
     """``_static_or_stop`` for a charter that arrived whole: a static worker
     keeps no ``accept``, since nothing here can run it."""
     workers, stopping = _static_or_stop(list(charter.workers), pool, ask)
@@ -862,8 +926,15 @@ def _charter_static_or_stop(charter: Charter, pool: Any, ask: Asker) -> "tuple[C
     return replace(charter, workers=tuple(workers)), stopping
 
 
-def _drive_staged(run: FlockRun, orchestrator: Orchestrator, objective: str, cwd: str, ask: Asker,
-                  config: Config, *args: Any) -> FlockRun:
+def _drive_staged(
+    run: FlockRun,
+    orchestrator: Orchestrator,
+    objective: str,
+    cwd: str,
+    ask: Asker,
+    config: Config,
+    *args: Any,
+) -> FlockRun:
     """``_staged_rounds``, with the flock's remotes open for its whole length."""
     pool = _open_remotes(config, ask)
     try:
@@ -887,7 +958,7 @@ def _staged_rounds(
     io_for: Callable[[Any, Any], Any] | None,
     on_charter: Callable[[Charter], None] | None,
     canceller: Canceller | None,
-    settings: "FlockSettings",
+    settings: FlockSettings,
     *,
     pool: Any = None,
 ) -> FlockRun:
@@ -906,14 +977,20 @@ def _staged_rounds(
             run.report = (
                 "No flock ran. Auto mode approves later rounds without asking, so it only runs "
                 "inside the shell sandbox, and the sandbox is not active here (bubblewrap is "
-                "needed — see 'cobirb doctor'). Use \"autonomy\": \"ask\", or install bubblewrap."
+                'needed — see \'cobirb doctor\'). Use "autonomy": "ask", or install bubblewrap.'
             )
             return run
 
     stager = Stager(
-        orchestrator, cwd, objective, turns=plan_turns, trace=run.trace,
+        orchestrator,
+        cwd,
+        objective,
+        turns=plan_turns,
+        trace=run.trace,
         decide=_unless_autopilot(ask.decide, orchestrator) if settings.autonomy == AUTONOMY_ASK else None,
-        show=ask.show, speaking=getattr(ask, "speaking", None), remotes=pool,
+        show=ask.show,
+        speaking=getattr(ask, "speaking", None),
+        remotes=pool,
     )
     ask.show("Brainy Birb is writing the overview…")
     try:
@@ -926,7 +1003,9 @@ def _staged_rounds(
     run.design = stager.design.document()
     if problem.startswith("declined:"):
         run.stopped_at = "planning"
-        run.report = "Brainy Birb decided this work should not be divided: " + problem[len("declined:"):].strip()
+        run.report = (
+            "Brainy Birb decided this work should not be divided: " + problem[len("declined:") :].strip()
+        )
         return run
     if problem:
         run.stopped_at = "charter"
@@ -983,29 +1062,35 @@ def _staged_rounds(
             charter = stager.charter(tickets, briefs)
         except RuntimeError as exc:
             run.stopped_at = "error"
-            run.report = (f"Stopped in round {round_number}: planning failed because the model "
-                          f"server failed.\n\n{exc}")
+            run.report = (
+                f"Stopped in round {round_number}: planning failed because the model server failed.\n\n{exc}"
+            )
             return run
         run.charter = charter
         run.design = stager.design.record()
         if on_charter is not None:
             try:
                 on_charter(charter)
-            except Exception:  # noqa: BLE001 - a display is not worth the run
+            except Exception:  # a display is not worth the run
                 logger.debug("a charter handler raised", exc_info=True)
 
         # ---- What the tickets need installed ------------------------------ #
         asking = not approved or _autonomy(settings, orchestrator) == AUTONOMY_ASK
-        requirements = describe_requirements(check_requirements(orchestrator, tickets, cwd, checked, remotes=pool))
+        requirements = describe_requirements(
+            check_requirements(orchestrator, tickets, cwd, checked, remotes=pool)
+        )
         if requirements and asking:
-            go, requirements = _settle_requirements(ask, orchestrator, tickets, cwd, checked, requirements, pool,
-                                                    first=not approved)
+            go, requirements = _settle_requirements(
+                ask, orchestrator, tickets, cwd, checked, requirements, pool, first=not approved
+            )
             if not go:
                 run.stopped_at = "requirements"
-                run.report = (("Charter not approved: what the tickets need is not installed."
-                               if not approved else
-                               f"Stopped after round {round_number - 1}: what the next round needs "
-                               "is not installed.") + f"\n\n{requirements}")
+                run.report = (
+                    "Charter not approved: what the tickets need is not installed."
+                    if not approved
+                    else f"Stopped after round {round_number - 1}: what the next round needs "
+                    "is not installed."
+                ) + f"\n\n{requirements}"
                 break
         if requirements:
             missing_notes[round_number] = requirements
@@ -1016,37 +1101,54 @@ def _staged_rounds(
             question = (
                 f"Approve this charter? {len(charter.workers)} Worker Birb(s) will run "
                 "unattended inside exactly these scopes, with no further prompts."
-                if not approved else
-                f"Approve round {round_number}? {len(charter.workers)} ticket(s) to try again or add."
+                if not approved
+                else f"Approve round {round_number}? {len(charter.workers)} ticket(s) to try again or add."
             )
             ask.show(detail)
             if not ask.confirm(question, detail):
                 run.stopped_at = "approval"
-                run.report = ("Charter not approved; nothing ran." if not approved else
-                              f"Round {round_number} not approved; stopped after round {round_number - 1}.")
+                run.report = (
+                    "Charter not approved; nothing ran."
+                    if not approved
+                    else f"Round {round_number} not approved; stopped after round {round_number - 1}."
+                )
                 break
         else:
-            ask.show(f"Round {round_number} approved automatically (auto mode, inside the sandbox).\n"
-                     + approval_changes(charter, approved)
-                     + (f"\n\n{requirements}" if requirements else ""))
+            ask.show(
+                f"Round {round_number} approved automatically (auto mode, inside the sandbox).\n"
+                + approval_changes(charter, approved)
+                + (f"\n\n{requirements}" if requirements else "")
+            )
         approved.append(charter)
 
         # ---- Fan out ------------------------------------------------------ #
         concurrency = charter.effective_concurrency
-        if probe and concurrency > 1 and round_number == 1 and ask.confirm(
-            "Check whether your model endpoint serves two requests at once?",
-            "It takes a few seconds. A server that queues them would make a concurrent "
-            "flock quietly sequential.",
+        if (
+            probe
+            and concurrency > 1
+            and round_number == 1
+            and ask.confirm(
+                "Check whether your model endpoint serves two requests at once?",
+                "It takes a few seconds. A server that queues them would make a concurrent "
+                "flock quietly sequential.",
+            )
         ):
             run.probe = probe_concurrency(orchestrator.model)
             ask.show(run.probe.describe())
             if run.probe.concurrent is False:
                 concurrency = 1
-        ask.show(f"Round {round_number}: fanning out {len(charter.workers)} ticket(s), "
-                 f"{concurrency} at a time…")
+        ask.show(
+            f"Round {round_number}: fanning out {len(charter.workers)} ticket(s), {concurrency} at a time…"
+        )
         outcome = run_flock(
-            charter, cwd, config=config, concurrency=concurrency, stop=stop,
-            on_event=on_event, io_for=io_for, canceller=canceller,
+            charter,
+            cwd,
+            config=config,
+            concurrency=concurrency,
+            stop=stop,
+            on_event=on_event,
+            io_for=io_for,
+            canceller=canceller,
             grants=getattr(orchestrator, "grants", None),
             refuse=lambda: _autopilot(orchestrator),
             remotes=pool,
@@ -1069,8 +1171,8 @@ def _staged_rounds(
             break
         try:
             next_tickets, whys, evaluation = stager.evaluate(
-                round_number, _round_verdict(outcome),
-                outstanding=[r.worker_id for r in outcome.outstanding])
+                round_number, _round_verdict(outcome), outstanding=[r.worker_id for r in outcome.outstanding]
+            )
             left += [line for line in left_to_do(evaluation) if line not in left]
         except RuntimeError as exc:
             ask.show(f"Stopping: the evaluation failed because the model server failed ({exc}).")
@@ -1088,11 +1190,16 @@ def _staged_rounds(
             break
         reports = {r.worker_id: r for r in outcome.reports}
         previous = {
-            t.id: "\n".join(filter(None, [
-                f"What must change: {whys.get(t.id, '')}",
-                f"Last plan:\n{stager.design.plans.get(t.id, '')}",
-                f"Report: {reports[t.id].report_text()}" if t.id in reports else "",
-            ]))
+            t.id: "\n".join(
+                filter(
+                    None,
+                    [
+                        f"What must change: {whys.get(t.id, '')}",
+                        f"Last plan:\n{stager.design.plans.get(t.id, '')}",
+                        f"Report: {reports[t.id].report_text()}" if t.id in reports else "",
+                    ],
+                )
+            )
             for t in next_tickets
         }
         by_id = {t.id: t for t in stager.design.tickets}
@@ -1116,7 +1223,7 @@ def _staged_rounds(
     return run
 
 
-def _choose(ask: Asker, question: str, detail: str, options: list[str]) -> "int | None":
+def _choose(ask: Asker, question: str, detail: str, options: list[str]) -> int | None:
     """``ask.choose``, or ``confirm`` on the first option where there is none.
 
     Fails closed: an asker that raises, or answers with anything but an index
@@ -1132,9 +1239,17 @@ def _choose(ask: Asker, question: str, detail: str, options: list[str]) -> "int 
         return None
 
 
-def _settle_requirements(ask: Asker, orchestrator: Orchestrator, tickets, cwd: str,
-                         checked: dict, requirements: str, pool: Any = None, *,
-                         first: bool) -> "tuple[bool, str]":
+def _settle_requirements(
+    ask: Asker,
+    orchestrator: Orchestrator,
+    tickets,
+    cwd: str,
+    checked: dict,
+    requirements: str,
+    pool: Any = None,
+    *,
+    first: bool,
+) -> tuple[bool, str]:
     """Ask what to do about what is not installed: whether to go on, and what
     is still missing ("" for nothing known).
 
@@ -1145,24 +1260,36 @@ def _settle_requirements(ask: Asker, orchestrator: Orchestrator, tickets, cwd: s
     and asks again with whatever is still missing.
     """
     checkable = requirements_checkable(orchestrator)
-    stop = ("Stop here — no Worker Birb has started" if first
-            else "Stop the flock here — the rounds so far stay as they are")
+    stop = (
+        "Stop here — no Worker Birb has started"
+        if first
+        else "Stop the flock here — the rounds so far stay as they are"
+    )
     options = [
         "Continue without them — the tickets that need them will not pass",
-        ("I have installed them — check again, then continue" if checkable
-         else "I have installed them — continue"),
+        (
+            "I have installed them — check again, then continue"
+            if checkable
+            else "I have installed them — continue"
+        ),
         stop,
     ]
     while True:
-        picked = _choose(ask, "Some of what this flock needs is not installed. How do you want to go on?",
-                         requirements, options)
+        picked = _choose(
+            ask,
+            "Some of what this flock needs is not installed. How do you want to go on?",
+            requirements,
+            options,
+        )
         if picked == 0:
             return True, requirements
         if picked != 1:
             return False, requirements
         if not checkable:
             return True, ""  # taken at the user's word: nothing here can check it
-        requirements = describe_requirements(check_requirements(orchestrator, tickets, cwd, checked, remotes=pool))
+        requirements = describe_requirements(
+            check_requirements(orchestrator, tickets, cwd, checked, remotes=pool)
+        )
         if not requirements:
             ask.show("Everything the tickets need is installed now.")
             return True, ""
@@ -1209,5 +1336,5 @@ def _close_branch(main, flock_session, run: FlockRun, password: str | None) -> N
                 flock_session.session.add_text(f"{prefix}review:{review.worker_id}", review.describe())
         flock_session.session.summary = run.report
         flock_session.save(password)
-    except Exception:  # noqa: BLE001 - a lost record must not cost the round
+    except Exception:  # a lost record must not cost the round
         logger.warning("could not write the flock session file", exc_info=True)

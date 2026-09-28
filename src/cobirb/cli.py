@@ -16,6 +16,7 @@ exactly the same wiring and neither front-end should reach into the other's
 private functions to get it.
 
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,27 +25,25 @@ import sys
 from typing import Any
 
 from .config import Config
+from .flock.run import Asker, run_flock_session
 from .help_text import HELP_TEXT, HELP_TOPICS
 from .orchestrator import REPLY_LABEL, RunStop, render_through
+from .plugins.core import TerminalIO, render
 from .policy import PermissionError
-from .plugins.core import render
-from .runtime import plugins, sessions, wiring
-from .runtime.system_prompt import build_system_prompt
-from .plugins.core import TerminalIO
-from .runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
-from .runtime.plugin_install import PluginInstallError, install_plugin, list_installed, remove_plugin
-from .runtime import doctor
-from .runtime.upgrade import UpgradeError, upgrade
-from .runtime.export import write_export
-from .flock.run import Asker, run_flock_session
+from .runtime import doctor, plugins, sessions, wiring
 from .runtime.bootstrap import ensure_home
-from .runtime.models import describe_roles
-from .session import SessionManager, fork_session
+from .runtime.custom_commands import describe_commands, discover_commands, expand_custom_command
+from .runtime.export import write_export
 from .runtime.headless import EXIT_DENIED, EXIT_ERROR, EXIT_OK, HeadlessIO, HeadlessResult, describe_context
-from .runtime.plugins import describe_plugins
+from .runtime.models import describe_roles
+from .runtime.plugin_install import PluginInstallError, install_plugin, list_installed, remove_plugin
+
 # Re-exported, not used here: tui.panes annotates with PluginsSummary and
 # test_render imports both through this module.
-from .runtime.plugins import PluginsSummary, ToolInfo  # noqa: F401
+from .runtime.plugins import PluginsSummary, ToolInfo, describe_plugins  # noqa: F401
+from .runtime.system_prompt import build_system_prompt
+from .runtime.upgrade import UpgradeError, upgrade
+from .session import SessionManager, fork_session
 
 
 def _resolve_harness_prompt(cli_value: str | None, config: Config) -> bool:
@@ -133,7 +132,11 @@ def _run_one_shot(
     # open reads as though the task was attempted, when nothing ran at all.
     try:
         orchestrator = wiring.build_orchestrator(
-            cwd, allow_overrides, session_path, password, model_name,
+            cwd,
+            allow_overrides,
+            session_path,
+            password,
+            model_name,
             io_factory=io_factory,
         )
     except Exception as exc:  # noqa: BLE001 - a bad password must not traceback
@@ -161,8 +164,15 @@ def _run_one_shot(
             return EXIT_ERROR
     try:
         return _drive_one_shot(
-            orchestrator, prompt, system, session_path, password, cwd,
-            plan_mode, headless, as_json,
+            orchestrator,
+            prompt,
+            system,
+            session_path,
+            password,
+            cwd,
+            plan_mode,
+            headless,
+            as_json,
         )
     finally:
         # Whatever happened, don't leave MCP servers running behind a process
@@ -193,9 +203,7 @@ def _drive_one_shot(
     if not as_json:
         _render_user_prompt(prompt)
     try:
-        session = orchestrator.run(
-            prompt, system, cwd=cwd, session_path=session_path, plan_mode=plan_mode
-        )
+        session = orchestrator.run(prompt, system, cwd=cwd, session_path=session_path, plan_mode=plan_mode)
     except PermissionError as exc:
         report.error = f"blocked — {exc}"
         if as_json:
@@ -282,9 +290,7 @@ def _run_branch(
         config = Config()
         _, discovered, _ = plugins.discover_plugins(cwd, config)
         crypto, _ = plugins.build_crypto(config, discovered)
-        branch = fork_session(
-            session_path, crypto, password, up_to_turn=up_to_turn, out_path=destination
-        )
+        branch = fork_session(session_path, crypto, password, up_to_turn=up_to_turn, out_path=destination)
     except ValueError as exc:
         print(f"cobirb: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -420,8 +426,11 @@ def _run_flock(objective: str, cwd: str, model_name: str | None, *, headless: bo
 
     def decide(decisions: str) -> str | None:
         print(f"\nBrainy Birb's design decisions:\n{decisions}")
-        print("\nAnswer any by number (e.g. '2: use curses'), or press enter to let "
-              "Brainy Birb decide: ", end="", flush=True)
+        print(
+            "\nAnswer any by number (e.g. '2: use curses'), or press enter to let Brainy Birb decide: ",
+            end="",
+            flush=True,
+        )
         try:
             return input().strip() or None
         except (EOFError, KeyboardInterrupt):
@@ -444,9 +453,10 @@ def _run_flock(objective: str, cwd: str, model_name: str | None, *, headless: bo
 
     try:
         run = run_flock_session(
-            orchestrator, objective, cwd,
-            ask=Asker(confirm=confirm, show=lambda text: print(f"\n{text}"), decide=decide,
-                      choose=choose),
+            orchestrator,
+            objective,
+            cwd,
+            ask=Asker(confirm=confirm, show=lambda text: print(f"\n{text}"), decide=decide, choose=choose),
         )
     except KeyboardInterrupt:
         print("\ncobirb: interrupted.", file=sys.stderr)
@@ -641,7 +651,7 @@ def _build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--session", metavar="PATH", help="Resume/continue an encrypted session at PATH.")
     mode.add_argument(
         "--continue",
-        dest="continue_last",   # "continue" is a keyword, so it cannot be the attribute name
+        dest="continue_last",  # "continue" is a keyword, so it cannot be the attribute name
         action="store_true",
         help=(
             "Reopen the session you were last in, under ~/.cobirb/sessions. Implies "
@@ -663,9 +673,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     opts = parser.add_argument_group("options")
-    opts.add_argument(
-        "--model", help="Ollama model name, e.g. 'llama3.1' (or use config/COBIRB_MODEL_NAME)."
-    )
+    opts.add_argument("--model", help="Ollama model name, e.g. 'llama3.1' (or use config/COBIRB_MODEL_NAME).")
     opts.add_argument(
         "--allow-tool",
         action="append",
@@ -820,7 +828,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand == "flock":
         if not args.prompt:
             print(
-                "cobirb flock needs an objective: cobirb flock -p \"add CSV export\"",
+                'cobirb flock needs an objective: cobirb flock -p "add CSV export"',
                 file=sys.stderr,
             )
             return EXIT_ERROR
@@ -828,9 +836,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand == "plugin":
         # args.topic holds the verb here, not a help topic — the two share a
         # positional slot; see _build_parser.
-        return _run_plugin(
-            args.topic, args.target, replace=args.replace, cwd=cwd
-        )
+        return _run_plugin(args.topic, args.target, replace=args.replace, cwd=cwd)
 
     allow_overrides = wiring.parse_allow_tools(args.allow_tool)
     harness = _resolve_harness_prompt(args.system_prompt, config)

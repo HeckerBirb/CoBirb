@@ -16,11 +16,13 @@ that an unknown ``/thing`` is prose rather than a typo, and expanding a custom
 command are routing decisions about input, not the behaviour of any one
 command.
 """
+
 from __future__ import annotations
 
 import threading
 import time
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from textual.widgets import TabbedContent
 
@@ -40,22 +42,20 @@ if TYPE_CHECKING:
     from .app import CoBirbApp
 
 
-def cmd_help(app: "CoBirbApp", argument: str) -> None:
+def cmd_help(app: CoBirbApp, argument: str) -> None:
     """The help screen. `/help <topic>` for one topic."""
     app.action_help(argument)
 
 
-def cmd_model(app: "CoBirbApp", argument: str) -> None:
+def cmd_model(app: CoBirbApp, argument: str) -> None:
     """Pick a model from what your endpoint offers."""
     if argument:
-        app.write_transcript(
-            render.build_notice("Usage: /model — lists available models to choose from.")
-        )
+        app.write_transcript(render.build_notice("Usage: /model — lists available models to choose from."))
         return
     app._select_model_worker(auto=False)
 
 
-def cmd_context(app: "CoBirbApp", argument: str) -> None:
+def cmd_context(app: CoBirbApp, argument: str) -> None:
     """How much of the model's window this session is using.
 
     Worth surfacing rather than leaving in the log: on a local model the
@@ -73,7 +73,7 @@ def cmd_context(app: "CoBirbApp", argument: str) -> None:
     )
 
 
-def cmd_undo(app: "CoBirbApp", argument: str) -> None:
+def cmd_undo(app: CoBirbApp, argument: str) -> None:
     """Put back the files the last changing turn altered.
 
     Reports what it actually restored rather than saying "done": `shell`
@@ -83,14 +83,12 @@ def cmd_undo(app: "CoBirbApp", argument: str) -> None:
     """
     checkpoints = getattr(app.orchestrator, "checkpoints", None)
     if checkpoints is None:
-        app.write_transcript(
-            render.build_notice("Undo is off for this session (\"checkpoints\": false).")
-        )
+        app.write_transcript(render.build_notice('Undo is off for this session ("checkpoints": false).'))
         return
     app.write_transcript(render.build_notice(checkpoints.undo_last().describe()))
 
 
-def cmd_diff(app: "CoBirbApp", argument: str) -> None:
+def cmd_diff(app: CoBirbApp, argument: str) -> None:
     """Everything the agent has changed this session, as one diff.
 
     Built from the undo snapshots, not from git: it works in a directory
@@ -99,9 +97,7 @@ def cmd_diff(app: "CoBirbApp", argument: str) -> None:
     """
     checkpoints = getattr(app.orchestrator, "checkpoints", None)
     if checkpoints is None:
-        app.write_transcript(
-            render.build_notice("No change tracking this session (\"checkpoints\": false).")
-        )
+        app.write_transcript(render.build_notice('No change tracking this session ("checkpoints": false).'))
         return
     diff = checkpoints.session_diff()
     if not diff.strip():
@@ -110,7 +106,7 @@ def cmd_diff(app: "CoBirbApp", argument: str) -> None:
     app.write_transcript(render.build_preview_panel("this session", diff))
 
 
-def cmd_clear(app: "CoBirbApp", argument: str) -> None:
+def cmd_clear(app: CoBirbApp, argument: str) -> None:
     """Start over from here: clear the screen, and the model's context with it.
 
     **Not a deletion.** The turns before this stay in the session file exactly
@@ -140,7 +136,7 @@ def cmd_clear(app: "CoBirbApp", argument: str) -> None:
     )
 
 
-def cmd_export(app: "CoBirbApp", argument: str) -> None:
+def cmd_export(app: CoBirbApp, argument: str) -> None:
     """Write this session out as markdown.
 
     Says plainly that the result is plaintext. The session stays
@@ -169,7 +165,7 @@ def cmd_export(app: "CoBirbApp", argument: str) -> None:
 # --------------------------------------------------------------------------- #
 # Memory catalogues
 # --------------------------------------------------------------------------- #
-def _ensure_public_catalogue(app: "CoBirbApp") -> None:
+def _ensure_public_catalogue(app: CoBirbApp) -> None:
     """Create the always-present Public catalogue if it isn't there yet.
 
     "Lazily, on first use" is what ``memory.ensure_public_exists``
@@ -183,17 +179,17 @@ def _ensure_public_catalogue(app: "CoBirbApp") -> None:
     """
     try:
         app.catalogues.ensure_public()
-    except OSError as exc:  # noqa: BLE001 - reported, never fatal
+    except OSError as exc:  # reported, never fatal
         app.write_transcript(render.build_notice(f"Could not create the public catalogue — {exc}"))
 
 
-def cmd_memories(app: "CoBirbApp", argument: str) -> None:
+def cmd_memories(app: CoBirbApp, argument: str) -> None:
     """Load, create, rename or delete memory catalogues."""
     _ensure_public_catalogue(app)
     app.push_screen(MemoryCataloguesModal())
 
 
-def cmd_remember(app: "CoBirbApp", argument: str) -> None:
+def cmd_remember(app: CoBirbApp, argument: str) -> None:
     """Save a fact into a catalogue of the user's choosing.
 
     ``/remember <fact>``.
@@ -215,7 +211,7 @@ def cmd_remember(app: "CoBirbApp", argument: str) -> None:
 # --------------------------------------------------------------------------- #
 # Images
 # --------------------------------------------------------------------------- #
-def cmd_image(app: "CoBirbApp", argument: str) -> None:
+def cmd_image(app: CoBirbApp, argument: str) -> None:
     """Attach an image to your next message.
 
     ``/image <path> [message]``.
@@ -247,20 +243,22 @@ def cmd_image(app: "CoBirbApp", argument: str) -> None:
         )
     elif not message:
         app.write_transcript(
-            render.build_notice(f"\U0001f4ce {filename} queued — attach more with /image, or send your message.")
+            render.build_notice(
+                f"\U0001f4ce {filename} queued — attach more with /image, or send your message."
+            )
         )
     if message:
         app._send_prompt(message)
 
 
-def cmd_plan(app: "CoBirbApp", argument: str) -> None:
+def cmd_plan(app: CoBirbApp, argument: str) -> None:
     """Plan, act and validate as three phases. `/plan on|off` toggles it."""
     app.plan_mode, message = command_helpers.apply_plan_toggle(argument, app.plan_mode)
     app.query_one(StatusBar).plan_mode = app.plan_mode
     app.write_transcript(render.build_notice(message))
 
 
-def cmd_autopilot(app: "CoBirbApp", argument: str) -> None:
+def cmd_autopilot(app: CoBirbApp, argument: str) -> None:
     """Work unattended in this project. `/autopilot on|off`, or F3.
 
     Inside auto-pilot the agent reads and changes files in the project and
@@ -281,7 +279,9 @@ def cmd_autopilot(app: "CoBirbApp", argument: str) -> None:
     if not turn_on:
         orchestrator.disable_autopilot()
         app.show_autopilot(False)
-        app.write_transcript(render.build_notice("Auto-pilot off. Changes outside the sandbox ask first again."))
+        app.write_transcript(
+            render.build_notice("Auto-pilot off. Changes outside the sandbox ask first again.")
+        )
         return
     problem = orchestrator.enable_autopilot()
     if problem:
@@ -293,15 +293,17 @@ def cmd_autopilot(app: "CoBirbApp", argument: str) -> None:
     # auto-pilot on is how to get out from under a request whose buttons are
     # out of reach, so leaving it open would defeat the point.
     refused = app.query_one(FlockPane).refuse_pending(AUTOPILOT_NOTE)
-    app.write_transcript(render.build_notice(
-        "Auto-pilot on. The agent will read and change files in this project and run commands in "
-        "the sandbox without asking, and refuse anything else instead of stopping for you. "
-        "/diff shows what it did; /undo takes back a turn; /autopilot off (or F3) to stop."
-        + (f" Refused {refused} waiting worker request(s)." if refused else "")
-    ))
+    app.write_transcript(
+        render.build_notice(
+            "Auto-pilot on. The agent will read and change files in this project and run commands in "
+            "the sandbox without asking, and refuse anything else instead of stopping for you. "
+            "/diff shows what it did; /undo takes back a turn; /autopilot off (or F3) to stop."
+            + (f" Refused {refused} waiting worker request(s)." if refused else "")
+        )
+    )
 
 
-def cmd_flock(app: "CoBirbApp", argument: str) -> None:
+def cmd_flock(app: CoBirbApp, argument: str) -> None:
     """Divide a piece of work between several agents.
 
     ``/flock <objective>``.
@@ -345,7 +347,7 @@ def cmd_flock(app: "CoBirbApp", argument: str) -> None:
     app._run_flock(argument.strip())
 
 
-def cmd_charter(app: "CoBirbApp", argument: str, *, quiet: bool = False) -> bool:
+def cmd_charter(app: CoBirbApp, argument: str, *, quiet: bool = False) -> bool:
     """Review the charter Brainy Birb last proposed, and run it if you approve.
 
     The manual way back to the approval dialog. A charter normally puts itself
@@ -362,23 +364,19 @@ def cmd_charter(app: "CoBirbApp", argument: str, *, quiet: bool = False) -> bool
     if charter is None:
         if not quiet:
             app.write_transcript(
-                render.build_notice(
-                    "No charter has been proposed yet. '/flock <objective>' starts one."
-                )
+                render.build_notice("No charter has been proposed yet. '/flock <objective>' starts one.")
             )
         return False
     if app._turn_in_progress or app._flock_stop is not None:
         if not quiet:
-            app.write_transcript(
-                render.build_notice("Wait for the current turn to finish first.")
-            )
+            app.write_transcript(render.build_notice("Wait for the current turn to finish first."))
         return True
     app._pending_charter = charter
     app.offer_pending_charter()
     return True
 
 
-def _last_proposed_charter(app: "CoBirbApp"):
+def _last_proposed_charter(app: CoBirbApp):
     """The charter still held by the orchestrator's `propose_charter` tool.
 
     Separate from ``app._pending_charter`` because the two go stale at
@@ -392,7 +390,7 @@ def _last_proposed_charter(app: "CoBirbApp"):
     return getattr(tools.get(PROPOSE_CHARTER), "charter", None)
 
 
-def cmd_commands(app: "CoBirbApp", argument: str) -> None:
+def cmd_commands(app: CoBirbApp, argument: str) -> None:
     """List the prompt files that are available as commands here."""
     app.write_transcript(render.build_notice(describe_commands(discover_commands(app.cwd))))
 
@@ -400,7 +398,7 @@ def cmd_commands(app: "CoBirbApp", argument: str) -> None:
 # The built-in commands, by the exact first word that invokes them. Anything
 # else starting with "/" is tried as a custom command and then sent to the
 # model unchanged — see CoBirbApp._dispatch_command.
-COMMANDS: "dict[str, Callable[[CoBirbApp, str], None]]" = {
+COMMANDS: dict[str, Callable[[CoBirbApp, str], None]] = {
     "/help": cmd_help,
     "/model": cmd_model,
     "/plan": cmd_plan,

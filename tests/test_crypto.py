@@ -1,4 +1,5 @@
 """Tests for the core AES-256-GCM + scrypt session crypto backend."""
+
 from __future__ import annotations
 
 import pytest
@@ -133,7 +134,7 @@ def test_a_new_blob_records_the_parameters_it_was_written_with():
     blob = crypto.encrypt('{"x": 1}', "pw")
 
     assert blob.startswith(crypto_module._MAGIC)
-    header = json.loads(base64.b64decode(blob[len(crypto_module._MAGIC):].split(b"\n")[0]))
+    header = json.loads(base64.b64decode(blob[len(crypto_module._MAGIC) :].split(b"\n")[0]))
     assert header["kdf"] == "scrypt"
     assert header["n"] == crypto_module._SCRYPT_N
 
@@ -177,4 +178,3 @@ def test_a_file_that_is_not_a_session_says_so_rather_than_looking_like_a_bad_pas
 
     with pytest.raises(ValueError, match=expected):
         crypto.decrypt(blob, "pw")
-

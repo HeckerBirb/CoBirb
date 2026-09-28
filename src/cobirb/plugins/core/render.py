@@ -8,6 +8,7 @@ and the Textual TUI's ``TuiIO`` (interactive mode, which writes the very same
 objects into a ``RichLog``). Keeping the panel/diff construction here means
 the chrome is defined once instead of drifting between the two.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -63,9 +64,7 @@ def unified_diff(path: str, old_str: str, new_str: str) -> str:
 def build_plan_panel(label: str, text: str) -> Panel:
     """Plan mode's planning-phase reply — the plan the model is about to
     follow, shown before any tool runs."""
-    return Panel(
-        Markdown(text), title=f"{label} · plan", title_align="left", border_style="cyan"
-    )
+    return Panel(Markdown(text), title=f"{label} · plan", title_align="left", border_style="cyan")
 
 
 # The charter approval's colours, each borrowed from what it already means in
@@ -113,11 +112,14 @@ def build_charter(charter: Any, approved: Any = (), names: Any = None, requireme
     commands = {w.accept for c in approved for w in c.workers}
     if approved:
         fresh = any(p not in files for w in charter.workers for p in w.writes) or any(
-            w.accept and w.accept not in commands for w in charter.workers)
+            w.accept and w.accept not in commands for w in charter.workers
+        )
         text.append("\n")
         if fresh:
-            text.append("This round asks for files or commands you have not approved before — marked ",
-                        style="bold yellow")
+            text.append(
+                "This round asks for files or commands you have not approved before — marked ",
+                style="bold yellow",
+            )
             text.append("NEW", style=_CHARTER_NEW)
             text.append(".\n", style="bold yellow")
         else:
@@ -163,8 +165,9 @@ def build_charter(charter: Any, approved: Any = (), names: Any = None, requireme
         if getattr(worker, "runs_on", ""):
             # Where the work runs is a capability too: its files go there.
             text.append("\n    runs on ", style=FEATHER_GRAY)
-            text.append(f"{worker.runs_on} — a Remote Worker Birb; its files are sent there",
-                        style="bold yellow")
+            text.append(
+                f"{worker.runs_on} — a Remote Worker Birb; its files are sent there", style="bold yellow"
+            )
         if getattr(worker, "static", False):
             text.append("\n    static  ", style=FEATHER_GRAY)
             text.append("written, not built or tested — no machine here can run it", style="yellow")
@@ -189,9 +192,7 @@ def build_charter(charter: Any, approved: Any = (), names: Any = None, requireme
 def build_validation_panel(label: str, text: str) -> Panel:
     """Plan mode's validate-phase report: whether/how the request was
     actually fulfilled, with references."""
-    return Panel(
-        Markdown(text), title=f"{label} · validation", title_align="left", border_style="yellow"
-    )
+    return Panel(Markdown(text), title=f"{label} · validation", title_align="left", border_style="yellow")
 
 
 def build_history_divider(text: str) -> Rule:
@@ -303,7 +304,7 @@ def build_error_panel(label: str, text: str) -> Panel:
     )
 
 
-def build_plugins_view(summary: "PluginsSummary") -> Group:
+def build_plugins_view(summary: PluginsSummary) -> Group:
     """The TUI's Plugins tab content: active providers, registered tools,
     and any discovery/merge problems — a live view over the same
     ``cli.describe_plugins()`` snapshot ``_build_orchestrator`` itself uses
@@ -486,7 +487,7 @@ class ExchangeRule:
     FRACTION = 0.8
     STYLE = FEATHER_GRAY
 
-    def __rich_console__(self, console: "Console", options: "ConsoleOptions") -> "RenderResult":
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         available = max(options.max_width - self.INDENT, 1)
         width = max(int(available * self.FRACTION), 8)
         yield Segment(" " * self.INDENT)

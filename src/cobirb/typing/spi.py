@@ -27,11 +27,13 @@ the number and refuses, *non-fatally*, anything it cannot honestly support:
 a plugin from the future would be calling into methods this core does not
 have, and loading it to fail later at a worse moment helps nobody.
 """
+
 from __future__ import annotations
 
 import abc
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Optional
+from typing import Any
 
 # The SPI revision this core implements, and the oldest it still accepts.
 # Both are 1: the interface is being frozen at its first stable shape rather
@@ -70,9 +72,7 @@ def check_spi_version(plugin: Any) -> None:
     """
     declared = getattr(plugin, SPI_VERSION_ATTRIBUTE, MIN_SUPPORTED_SPI_VERSION)
     if isinstance(declared, bool) or not isinstance(declared, int):
-        raise IncompatiblePlugin(
-            f"{SPI_VERSION_ATTRIBUTE} must be an integer, not {declared!r}"
-        )
+        raise IncompatiblePlugin(f"{SPI_VERSION_ATTRIBUTE} must be an integer, not {declared!r}")
     if declared > SPI_VERSION:
         raise IncompatiblePlugin(
             f"needs CoBirb SPI v{declared}, but this CoBirb implements v{SPI_VERSION} — "
@@ -154,6 +154,8 @@ class ApprovalOutcome:
     decision: str
     # Only meaningful alongside DECISION_DENY. Empty means a plain refusal.
     instruction: str = ""
+
+
 @dataclass
 class ToolCall:
     """A structured tool invocation emitted by the model.
@@ -190,7 +192,7 @@ class Tool(abc.ABC):
         """Parameter schema in a simple JSON-schema-like shape."""
 
     @abc.abstractmethod
-    def execute(self, arguments: dict[str, Any]) -> "ToolResult":
+    def execute(self, arguments: dict[str, Any]) -> ToolResult:
         """Run the tool. Implement the actual logic here."""
 
 
@@ -200,7 +202,7 @@ class ToolResult:
 
     ok: bool
     content: str
-    error: Optional[str] = None
+    error: str | None = None
     meta: dict[str, Any] = field(default_factory=dict)
 
 
@@ -238,10 +240,10 @@ class ModelProvider(abc.ABC):
         self,
         system: str,
         context: str,
-        tools: Optional[list[Tool]] = None,
+        tools: list[Tool] | None = None,
         *,
         stream: bool = False,
-    ) -> "Iterable[str] | str":
+    ) -> Iterable[str] | str:
         """Return the assistant's reply.
 
         When ``stream=True`` yield tokens incrementally; when ``stream=False``
@@ -294,7 +296,7 @@ class I_OAdapter(abc.ABC):
         """Render text to the user (override the default terminal print)."""
 
     @abc.abstractmethod
-    def listen(self) -> Optional[str]:
+    def listen(self) -> str | None:
         """Return user input captured from a non-text channel. None if none."""
 
     @abc.abstractmethod
@@ -387,7 +389,7 @@ class Persona:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Persona":
+    def from_dict(cls, data: dict[str, Any]) -> Persona:
         """Deserialize from a persona data dict."""
         return cls(
             name=data.get("name", "Noah"),

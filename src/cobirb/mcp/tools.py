@@ -18,6 +18,7 @@ directory-scoped read grant — which exists because reading a project's files i
 one decision, not a thousand — would be an unsafe generalisation. Approving an
 MCP tool with "always" grants that one tool, and only for the session.
 """
+
 from __future__ import annotations
 
 import logging

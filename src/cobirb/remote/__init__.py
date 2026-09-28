@@ -6,3 +6,5 @@ the work, its files, its settings, and by default its model — from the main
 machine. See ``protocol`` for the conversation, ``client`` and ``server`` for
 the two ends, and ``pool`` for how a flock uses them.
 """
+
+from __future__ import annotations

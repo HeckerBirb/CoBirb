@@ -1,4 +1,5 @@
 """Tests for reading tool calls a model wrote as text."""
+
 from __future__ import annotations
 
 import pytest
@@ -6,10 +7,14 @@ import pytest
 from cobirb.plugins.core import toolcalls
 
 SCHEMAS = {
-    "read_file": {"type": "object", "properties": {"path": {"type": "string"},
-                                                   "offset": {"type": "integer"}}},
-    "write_file": {"type": "object", "properties": {"path": {"type": "string"},
-                                                    "content": {"type": "string"}}},
+    "read_file": {
+        "type": "object",
+        "properties": {"path": {"type": "string"}, "offset": {"type": "integer"}},
+    },
+    "write_file": {
+        "type": "object",
+        "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+    },
 }
 
 
@@ -31,7 +36,9 @@ def test_qwen_xml_keeps_file_contents_verbatim_and_types_numbers():
     calls, _ = _calls(text)
     assert calls == [("write_file", {"path": "x.py", "content": "def f():\n    return '<b>'"})]
 
-    calls, _ = _calls("<function=read_file><parameter=path>a</parameter><parameter=offset>40</parameter></function>")
+    calls, _ = _calls(
+        "<function=read_file><parameter=path>a</parameter><parameter=offset>40</parameter></function>"
+    )
     assert calls == [("read_file", {"path": "a", "offset": 40})]
 
 
@@ -42,8 +49,10 @@ def test_qwen_xml_missing_closing_tags_is_still_read():
 
 
 def test_several_calls_in_one_reply():
-    text = ('<tool_call>{"name": "read_file", "arguments": {"path": "a"}}</tool_call>'
-            '<tool_call>{"name": "read_file", "arguments": {"path": "b"}}</tool_call>')
+    text = (
+        '<tool_call>{"name": "read_file", "arguments": {"path": "a"}}</tool_call>'
+        '<tool_call>{"name": "read_file", "arguments": {"path": "b"}}</tool_call>'
+    )
     assert [a["path"] for _, a in _calls(text)[0]] == ["a", "b"]
 
 
@@ -52,19 +61,24 @@ def test_leaked_harmony_channel_markup():
     assert _calls(text)[0] == [("read_file", {"path": "c.py"})]
 
 
-@pytest.mark.parametrize("text", [
-    '{"name": "read_file", "arguments": {"path": "d.py"}}',
-    '```json\n{"name": "read_file", "parameters": {"path": "d.py"}}\n```',
-    '{"function": {"name": "read_file", "arguments": "{\\"path\\": \\"d.py\\"}"}}',
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"name": "read_file", "arguments": {"path": "d.py"}}',
+        '```json\n{"name": "read_file", "parameters": {"path": "d.py"}}\n```',
+        '{"function": {"name": "read_file", "arguments": "{\\"path\\": \\"d.py\\"}"}}',
+    ],
+)
 def test_a_reply_that_is_only_a_json_call(text):
     assert _calls(text)[0] == [("read_file", {"path": "d.py"})]
 
 
 def test_json_inside_an_explanation_is_not_a_call():
-    text = ("Here is how you would configure it — the request body looks like this:\n\n"
-            '```json\n{"name": "read_file", "arguments": {"path": "x"}}\n```\n\n'
-            "and the server answers with the file's contents. " * 3)
+    text = (
+        "Here is how you would configure it — the request body looks like this:\n\n"
+        '```json\n{"name": "read_file", "arguments": {"path": "x"}}\n```\n\n'
+        "and the server answers with the file's contents. " * 3
+    )
     assert _calls(text) == ([], "")
 
 
@@ -98,6 +112,5 @@ def test_an_invalid_tool_call_error_from_the_server_is_a_parse_failure():
     """Streamed by llama-server-backed endpoints; unrecognised, it ended a
     Worker Birb's ticket instead of going back to the model to correct."""
     assert toolcalls.looks_like_server_parse_error(
-        'llama-server returned invalid tool call arguments for "write_file": '
-        "unexpected end of JSON input"
+        'llama-server returned invalid tool call arguments for "write_file": unexpected end of JSON input'
     )

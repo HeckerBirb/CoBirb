@@ -11,6 +11,7 @@ them in ``Session.images`` and saves them encrypted with the rest of the
 session (see ``session.Session.images`` for why they live there and not
 beside it).
 """
+
 from __future__ import annotations
 
 import base64
@@ -113,7 +114,7 @@ class PendingAttachments:
         self.pending.append(Attachment(filename=filename, data=data))
         return filename
 
-    def take(self) -> "list[dict[str, Any]] | None":
+    def take(self) -> list[dict[str, Any]] | None:
         """Empty the queue and shape it for ``Orchestrator.run(images=...)``:
         content-hash id, filename, base64.
 

@@ -44,6 +44,7 @@ way to build one is ``plan.PlanDraft``, which accumulates the same structures a
 validated move at a time; the checks they share live here, as
 ``check_dependencies``.
 """
+
 from __future__ import annotations
 
 import os
@@ -228,10 +229,7 @@ class Charter:
             lines.append("")
         headline = f"{len(self.workers)} Worker Birb(s), {self.concurrency} at a time"
         if self.effective_concurrency < self.concurrency:
-            headline += (
-                f" — but {self.effective_concurrency} in practice, because some wait "
-                "for others"
-            )
+            headline += f" — but {self.effective_concurrency} in practice, because some wait for others"
         lines.append(headline + ":")
         for worker in self.workers:
             lines.append(f"  [{worker.id}] writes {', '.join(worker.writes)}")
@@ -242,7 +240,9 @@ class Charter:
             if worker.accept:
                 lines.append(f"      accept {worker.accept}")
             if worker.runs_on:
-                lines.append(f"      runs on {worker.runs_on} — a Remote Worker Birb; its files are sent there")
+                lines.append(
+                    f"      runs on {worker.runs_on} — a Remote Worker Birb; its files are sent there"
+                )
             if worker.static:
                 lines.append("      static — written, not built or tested (no machine here can run it)")
         return "\n".join(lines)
@@ -379,9 +379,7 @@ def _needs(value: Any, worker_id: str) -> tuple[str, ...]:
         raise CharterError(f"worker {worker_id!r} needs must be a list of worker ids")
     cleaned = tuple(entry.strip() for entry in value if entry.strip())
     if worker_id in cleaned:
-        raise CharterError(
-            f"worker {worker_id!r} needs itself, which can never be satisfied"
-        )
+        raise CharterError(f"worker {worker_id!r} needs itself, which can never be satisfied")
     if len(set(cleaned)) != len(cleaned):
         raise CharterError(f"worker {worker_id!r} names the same dependency twice")
     return cleaned
@@ -402,7 +400,7 @@ _UNQUOTED_VALUE = re.compile(r"^\s*[A-Za-z_][\w-]*\s*=\s*(?![\"'\[{\d]|true\b|fa
 _FENCED = re.compile(r"```(?:[A-Za-z0-9_+-]*)\s*\n(.*?)```", re.S)
 
 
-def recover_charter(text: str) -> "Charter | None":
+def recover_charter(text: str) -> Charter | None:
     """A charter the model wrote into its reply instead of proposing it.
 
     Nothing about a reply makes a charter — the only thing that proposes one is
@@ -521,8 +519,7 @@ def check_dependencies(workers: tuple[WorkerBrief, ...]) -> None:
     cycle = _find_cycle(workers)
     if cycle:
         raise CharterError(
-            "these workers wait on each other in a circle and none could ever "
-            f"start: {' -> '.join(cycle)}"
+            f"these workers wait on each other in a circle and none could ever start: {' -> '.join(cycle)}"
         )
 
 
@@ -672,9 +669,7 @@ def describe_conflicts(conflicts: list[Conflict]) -> str:
 # --------------------------------------------------------------------------- #
 # Scopes become policy
 # --------------------------------------------------------------------------- #
-def policy_for(
-    worker: WorkerBrief, cwd: str, *, audit_log_enabled: bool = False
-) -> Policy:
+def policy_for(worker: WorkerBrief, cwd: str, *, audit_log_enabled: bool = False) -> Policy:
     """The ``Policy`` a Worker Birb runs under.
 
     **Writes are strict; reads are open across the project.** A worker may

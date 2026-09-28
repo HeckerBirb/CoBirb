@@ -44,6 +44,7 @@ Exit 0 means proceed. Anything else means "refused" for ``before_tool`` and
 "this hook failed" everywhere else. Output is read but never handed to the
 model except as that refusal reason: a hook is not a way to inject a prompt.
 """
+
 from __future__ import annotations
 
 import fnmatch
@@ -125,7 +126,7 @@ def load_hooks(config: Config) -> list[Hook]:
     """
     block = config.get("hooks", default={}) or {}
     if not isinstance(block, dict):
-        logger.warning("ignoring \"hooks\": expected an object of event -> list")
+        logger.warning('ignoring "hooks": expected an object of event -> list')
         return []
 
     hooks: list[Hook] = []
@@ -176,7 +177,7 @@ class HookRunner:
         self.cwd = cwd
 
     @classmethod
-    def from_config(cls, config: Config, cwd: str = ".") -> "HookRunner":
+    def from_config(cls, config: Config, cwd: str = ".") -> HookRunner:
         return cls(load_hooks(config), cwd)
 
     def __bool__(self) -> bool:

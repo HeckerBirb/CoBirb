@@ -3,6 +3,7 @@
 The ordering is what matters here: workers concurrently, reviews afterwards,
 and an honest account at the end of what is still outstanding.
 """
+
 from __future__ import annotations
 
 import sys
@@ -10,10 +11,10 @@ import textwrap
 import threading
 import time
 
-from cobirb.flock.charter import parse_charter
 import pytest
 
 from cobirb.flock import supervisor
+from cobirb.flock.charter import parse_charter
 from cobirb.flock.review import Review
 from cobirb.flock.supervisor import Canceller, Slots, check_partition, run_flock
 from cobirb.flock.worker import WorkerReport
@@ -67,6 +68,7 @@ def _fake_workers(monkeypatch, behaviour):
 
 def _honest_worker(delay=0.0):
     """A worker that actually implements its stub, as a good one would."""
+
     def run(worker, cwd, **kwargs):
         if delay:
             time.sleep(delay)
@@ -175,14 +177,13 @@ def test_asking_to_stop_means_no_further_workers_start(monkeypatch, tmp_path):
     assert "NotImplementedError" in (tmp_path / "a.py").read_text()  # untouched
 
 
-def test_progress_is_announced_without_the_supervisor_knowing_what_a_pane_is(
-    monkeypatch, tmp_path
-):
+def test_progress_is_announced_without_the_supervisor_knowing_what_a_pane_is(monkeypatch, tmp_path):
     _fake_workers(monkeypatch, _honest_worker())
     seen = []
 
     run_flock(
-        _charter(_two_ticket_project(tmp_path)), str(tmp_path),
+        _charter(_two_ticket_project(tmp_path)),
+        str(tmp_path),
         on_event=lambda kind, payload: seen.append(kind),
     )
 
@@ -219,7 +220,8 @@ def test_reviews_run_after_every_worker_has_finished(monkeypatch, tmp_path):
     _fake_workers(monkeypatch, run)
 
     run_flock(
-        _charter(_two_ticket_project(tmp_path)), str(tmp_path),
+        _charter(_two_ticket_project(tmp_path)),
+        str(tmp_path),
         on_event=lambda kind, payload: order.append(kind) if kind == "reviewed" else None,
     )
 
@@ -336,7 +338,8 @@ def test_a_disjoint_partition_passes_the_check(tmp_path):
 
 
 def test_an_overlapping_partition_is_explained_rather_than_refused():
-    ok, message = check_partition(_charter("""
+    ok, message = check_partition(
+        _charter("""
         objective = "x"
         [[workers]]
         id = "a"
@@ -346,7 +349,8 @@ def test_an_overlapping_partition_is_explained_rather_than_refused():
         id = "b"
         writes = ["shared.py"]
         brief = "go"
-    """))
+    """)
+    )
 
     assert not ok
     assert "shared.py" in message
@@ -415,6 +419,7 @@ def test_unregistering_stops_further_force_calls_reaching_it():
 
 def test_a_worker_whose_cancel_raises_does_not_block_the_others():
     """One worker that will not die is not worth losing the rest."""
+
     class _Exploding(_FakeOrchestrator):
         def cancel(self):
             raise RuntimeError("boom")
@@ -446,9 +451,7 @@ def test_force_is_reflected_in_a_worker_started_and_reported_from_run_flock(monk
     monkeypatch.setattr(supervisor, "run_worker", fake_run_worker)
     canceller = Canceller()
 
-    run_flock(
-        _charter(_two_ticket_project(tmp_path)), str(tmp_path), canceller=canceller
-    )
+    run_flock(_charter(_two_ticket_project(tmp_path)), str(tmp_path), canceller=canceller)
 
     assert all(c is canceller for c in seen_cancellers)
 
@@ -466,7 +469,7 @@ def test_a_worker_waiting_on_the_user_lets_another_one_run(monkeypatch, tmp_path
     def run(worker, cwd, *, io=None, **kwargs):
         if worker.id == "a":
             order.append("a-asks")
-            with io.released():        # parked on a question
+            with io.released():  # parked on a question
                 parked.set()
                 time.sleep(0.2)
             order.append("a-resumes")
@@ -478,7 +481,9 @@ def test_a_worker_waiting_on_the_user_lets_another_one_run(monkeypatch, tmp_path
     _fake_workers(monkeypatch, run)
 
     run_flock(
-        _charter(_two_ticket_project(tmp_path)), str(tmp_path), concurrency=1,
+        _charter(_two_ticket_project(tmp_path)),
+        str(tmp_path),
+        concurrency=1,
         io_for=lambda worker, slots: slots,
     )
 
@@ -490,9 +495,8 @@ def test_a_parked_worker_gives_the_slot_back_even_if_it_blows_up(monkeypatch, tm
     flock's concurrency for the rest of the round."""
     slots = Slots(1)
 
-    with pytest.raises(RuntimeError):
-        with slots.released():
-            raise RuntimeError("cancelled while parked")
+    with pytest.raises(RuntimeError), slots.released():
+        raise RuntimeError("cancelled while parked")
 
     # The count is intact: something can still take the only slot.
     with slots:
@@ -544,9 +548,7 @@ def _dependent_project(tmp_path):
     """)
 
 
-def test_a_dependent_worker_does_not_start_until_its_dependency_finishes(
-    monkeypatch, tmp_path
-):
+def test_a_dependent_worker_does_not_start_until_its_dependency_finishes(monkeypatch, tmp_path):
     """The one thing independence cannot express: b's whole job is to build on
     something a has to exist first."""
     order = []
@@ -567,6 +569,7 @@ def test_a_dependent_worker_does_not_start_until_its_dependency_finishes(
 def test_a_worker_whose_dependency_failed_is_skipped_and_says_why(monkeypatch, tmp_path):
     """Building against a seam nobody built produces work that cannot be
     reviewed and a report nobody can act on."""
+
     def run(worker, cwd, **kwargs):
         if worker.id == "a":
             return WorkerReport(worker_id="a", ok=False, error="it fell over")
@@ -582,12 +585,11 @@ def test_a_worker_whose_dependency_failed_is_skipped_and_says_why(monkeypatch, t
     assert {r.worker_id for r in outcome.outstanding} == {"a", "b"}
 
 
-def test_a_dependency_whose_acceptance_check_failed_still_lets_the_next_one_run(
-    monkeypatch, tmp_path
-):
+def test_a_dependency_whose_acceptance_check_failed_still_lets_the_next_one_run(monkeypatch, tmp_path):
     """Gated on whether it ran, not on whether its check passed: a failing
     check is common and often has nothing to do with what the dependent
     needs, and one flaky test should not kill a whole subtree."""
+
     def run(worker, cwd, **kwargs):
         if worker.id == "a":
             return WorkerReport(worker_id="a", ok=True, accepted=False)
@@ -607,9 +609,7 @@ def test_waiting_for_a_dependency_does_not_hold_a_concurrency_slot(monkeypatch, 
     chain. The proof is simply that this run terminates."""
     _fake_workers(monkeypatch, _honest_worker())
 
-    outcome = run_flock(
-        _charter(_dependent_project(tmp_path)), str(tmp_path), concurrency=1
-    )
+    outcome = run_flock(_charter(_dependent_project(tmp_path)), str(tmp_path), concurrency=1)
 
     assert len(outcome.reports) == 2
     assert all(r.ok for r in outcome.reports)
@@ -620,7 +620,7 @@ def test_stopping_releases_workers_waiting_on_a_dependency(monkeypatch, tmp_path
     stop = threading.Event()
 
     def run(worker, cwd, **kwargs):
-        stop.set()      # a finishes, and the flock is stopped while b waits
+        stop.set()  # a finishes, and the flock is stopped while b waits
         return WorkerReport(worker_id=worker.id, ok=True, accepted=True)
 
     _fake_workers(monkeypatch, run)
@@ -655,7 +655,8 @@ def test_asking_to_stop_also_stops_the_review_passes(monkeypatch, tmp_path):
 
     _fake_workers(monkeypatch, run)
     monkeypatch.setattr(
-        supervisor, "review_worker",
+        supervisor,
+        "review_worker",
         lambda worker, baseline, cwd, **k: reviewed.append(worker.id) or Review(worker.id),
     )
 

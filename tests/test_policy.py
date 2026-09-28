@@ -1,4 +1,5 @@
 """Tests for the default-deny permission layer and audit log."""
+
 from __future__ import annotations
 
 import os
@@ -66,7 +67,7 @@ def test_audit_log_append_only(tmp_path):
     audit = AuditLog(log_path, enabled=True)
     policy = Policy(audit=audit)
     policy.log("read_file", {"path": "x.py"}, cwd="/tmp")
-    with open(log_path, "r", encoding="utf-8") as fh:
+    with open(log_path, encoding="utf-8") as fh:
         line = fh.read().strip()
     assert '"tool": "read_file"' in line
     assert '"cwd": "/tmp"' in line
@@ -226,7 +227,7 @@ def test_describe_grant_says_what_always_would_permit(tmp_path):
     assert "subdirectories" in policy.describe_grant("read_file", {"path": "docs/a.txt"})
     assert "git" in policy.describe_grant("shell", {"command": "git status"})
     assert "change files in" in policy.describe_grant("write_file", {"path": "a.txt"})
-    assert "use 'some_plugin_tool'" == policy.describe_grant("some_plugin_tool", {})
+    assert policy.describe_grant("some_plugin_tool", {}) == "use 'some_plugin_tool'"
 
 
 # --------------------------------------------------------------------------- #
@@ -476,7 +477,8 @@ def _patch(*files):
 
 def test_a_begin_patch_is_checked_against_the_file_it_names(tmp_path):
     inside, outside = tmp_path / "proj", tmp_path / "elsewhere"
-    inside.mkdir(); outside.mkdir()
+    inside.mkdir()
+    outside.mkdir()
     policy = Policy(cwd=str(inside))
     policy.allow_write_dir(str(inside))
 
@@ -521,13 +523,20 @@ def test_a_cd_that_leaves_the_project_or_cannot_be_read_is_not_waved_through(tmp
     assert not policy.is_allowed("shell", {"command": f"{cd} && pytest -q"})
 
 
-@pytest.mark.parametrize("command, segments", [
-    (r"cl /W4 C:\src\cap.c tests\test_cap.c && .\test_cap.exe",
-     [["cl", "/W4", r"C:\src\cap.c", r"tests\test_cap.c"], [r".\test_cap.exe"]]),
-    (r'"C:\Program Files\LLVM\bin\clang.exe" -o t.exe a.c & t.exe',
-     [[r"C:\Program Files\LLVM\bin\clang.exe", "-o", "t.exe", "a.c"], ["t.exe"]]),
-    ('echo "a; b" | findstr a', [["echo", "a; b"], ["findstr", "a"]]),
-])
+@pytest.mark.parametrize(
+    "command, segments",
+    [
+        (
+            r"cl /W4 C:\src\cap.c tests\test_cap.c && .\test_cap.exe",
+            [["cl", "/W4", r"C:\src\cap.c", r"tests\test_cap.c"], [r".\test_cap.exe"]],
+        ),
+        (
+            r'"C:\Program Files\LLVM\bin\clang.exe" -o t.exe a.c & t.exe',
+            [[r"C:\Program Files\LLVM\bin\clang.exe", "-o", "t.exe", "a.c"], ["t.exe"]],
+        ),
+        ('echo "a; b" | findstr a', [["echo", "a; b"], ["findstr", "a"]]),
+    ],
+)
 def test_a_windows_command_is_read_the_windows_way(command, segments):
     """Backslashes are path separators there, not escapes — a Remote Worker
     Birb on Windows must be allowed its own `.\\test.exe`."""

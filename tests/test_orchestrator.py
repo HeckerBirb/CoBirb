@@ -1,4 +1,5 @@
 """Tests for the orchestrator and the agent loop."""
+
 from __future__ import annotations
 
 import json
@@ -239,7 +240,7 @@ def test_run_tool_dispatch_denied(tmp_path):
 
 
 def test_a_refused_call_records_what_it_was_aimed_at(tmp_path):
-    """"shell was denied" cannot say whether the agent needed `ls` or the
+    """ "shell was denied" cannot say whether the agent needed `ls` or the
     network; the flock benchmark reads this to tell which."""
     policy = Policy()
     policy.deny("shell")
@@ -742,9 +743,7 @@ def test_no_tool_call_rendering_without_an_io_adapter():
     """No io attached: nothing to render to, and nothing must crash."""
     policy = Policy()
     policy.allow("read_file")
-    orchestrator = Orchestrator(
-        model=_ToolCallModel("read_file", {"path": "x"}), tools={}, policy=policy
-    )
+    orchestrator = Orchestrator(model=_ToolCallModel("read_file", {"path": "x"}), tools={}, policy=policy)
 
     session = orchestrator.run("read file", "sys", cwd="/tmp")
 
@@ -800,6 +799,7 @@ def test_plan_mode_plans_with_read_only_tools_then_acts_with_all(tmp_path):
     session = orchestrator.run("read the file", "sys", cwd=str(tmp_path), label="noah", plan_mode=True)
 
     from cobirb.policy import READ_TOOLS
+
     assert model.tool_counts[0] == len(READ_TOOLS | {"todo"})  # it may look, not touch
     assert model.tool_counts[1] == len(registry.tools)
     assistant_turns = [t for t in session.turns if t.role == "assistant"]
@@ -951,9 +951,7 @@ class _StreamAwareIO(_RecordingIO):
 
 def test_streaming_announces_the_reply_through_the_hook_not_the_content():
     io = _StreamAwareIO()
-    orchestrator = Orchestrator(
-        model=_StreamingModel(["Hel", "lo"]), tools={}, policy=Policy(), io=io
-    )
+    orchestrator = Orchestrator(model=_StreamingModel(["Hel", "lo"]), tools={}, policy=Policy(), io=io)
 
     orchestrator.run("hi", "sys", cwd="/tmp", label="noah")
 
@@ -963,9 +961,7 @@ def test_streaming_announces_the_reply_through_the_hook_not_the_content():
 
 def test_the_hook_fires_once_per_reply_not_once_per_chunk():
     io = _StreamAwareIO()
-    orchestrator = Orchestrator(
-        model=_StreamingModel(["a", "b", "c", "d"]), tools={}, policy=Policy(), io=io
-    )
+    orchestrator = Orchestrator(model=_StreamingModel(["a", "b", "c", "d"]), tools={}, policy=Policy(), io=io)
 
     orchestrator.run("hi", "sys", cwd="/tmp", label="noah")
 
@@ -985,9 +981,7 @@ def test_streaming_still_works_for_an_adapter_without_the_hook():
     """Duck-typed like every other chrome hook: an adapter that doesn't
     implement it still gets the content."""
     io = _RecordingIO()  # no begin_stream at all
-    orchestrator = Orchestrator(
-        model=_StreamingModel(["Hel", "lo"]), tools={}, policy=Policy(), io=io
-    )
+    orchestrator = Orchestrator(model=_StreamingModel(["Hel", "lo"]), tools={}, policy=Policy(), io=io)
 
     session = orchestrator.run("hi", "sys", cwd="/tmp", label="noah")
 
@@ -1077,9 +1071,7 @@ def test_project_context_reaches_the_model_with_no_system_prompt():
     """The empty-system-prompt rule is about not *inventing* a system message,
     not about withholding what the project explicitly asked to be told."""
     model = _WindowedModel(window=8192)
-    orchestrator = Orchestrator(
-        model=model, tools={}, policy=Policy(), project_context="Always run pytest."
-    )
+    orchestrator = Orchestrator(model=model, tools={}, policy=Policy(), project_context="Always run pytest.")
 
     orchestrator.run("hello", "", cwd="/tmp")
 
@@ -1109,14 +1101,12 @@ def test_an_unknown_tool_name_comes_back_with_the_real_ones(tmp_path):
     session = orchestrator.run("read it", "sys", cwd=str(tmp_path))
 
     content = _tool_turn(session).content
-    assert "read_file" in content       # the near-miss is offered
+    assert "read_file" in content  # the near-miss is offered
     assert "Available tools" in content
 
 
 def test_an_unknown_tool_with_no_tools_registered_says_so_plainly(tmp_path):
-    orchestrator = Orchestrator(
-        model=_ToolCallModel("anything", {}), tools={}, policy=Policy()
-    )
+    orchestrator = Orchestrator(model=_ToolCallModel("anything", {}), tools={}, policy=Policy())
 
     session = orchestrator.run("go", "sys", cwd=str(tmp_path))
 
@@ -1148,6 +1138,7 @@ def test_the_approval_request_carries_the_diff_the_call_would_make(tmp_path):
 def test_a_broken_preview_does_not_cost_the_user_the_prompt(tmp_path):
     """Fail-closed applies to chrome too: no diff is a worse outcome than no
     question, so the question survives."""
+
     class _Exploding(ReadFileTool):
         def preview(self, arguments):
             raise RuntimeError("boom")
@@ -1170,7 +1161,7 @@ def test_a_broken_preview_does_not_cost_the_user_the_prompt(tmp_path):
 
 
 def test_a_refusal_can_carry_an_instruction_the_model_reads(tmp_path):
-    """"No" on its own leaves an agent with nothing to do but retry or give
+    """ "No" on its own leaves an agent with nothing to do but retry or give
     up. What the user wants instead is the useful half of the answer, so it
     goes into the result the model actually reads."""
     from cobirb.typing.spi import ApprovalOutcome
@@ -1237,6 +1228,7 @@ def test_approving_for_the_session_widens_every_agent_not_just_this_one(tmp_path
 def test_an_adapter_answering_with_nonsense_is_a_refusal(tmp_path):
     """Fail closed reaches the new hook too: a plugin returning something
     unrecognised must not open access."""
+
     class _NonsenseIO(_RecordingIO):
         def confirm_request(self, request):
             return "yes please"
@@ -1308,7 +1300,7 @@ def test_a_denied_edit_leaves_no_snapshot(tmp_path):
     Orchestrator(
         model=_ToolCallModel("edit_file", {"path": "a.py", "old_str": "a", "new_str": "b"}),
         tools=ToolRegistry(str(tmp_path)).tools,
-        policy=Policy(),   # default-deny, no io to ask
+        policy=Policy(),  # default-deny, no io to ask
         checkpoints=checkpoints,
     ).run("edit it", "sys", cwd=str(tmp_path))
 
@@ -1345,9 +1337,9 @@ def test_a_credential_in_a_tool_result_never_reaches_the_model(tmp_path):
             return [ToolCall("read_file", {"path": ".env"})]
 
     used = _Once()
-    session = Orchestrator(
-        model=used, tools=ToolRegistry(str(tmp_path)).tools, policy=policy
-    ).run("read the env file", "sys", cwd=str(tmp_path))
+    session = Orchestrator(model=used, tools=ToolRegistry(str(tmp_path)).tools, policy=policy).run(
+        "read the env file", "sys", cwd=str(tmp_path)
+    )
 
     tool_turn = _tool_turn(session)
     assert "AKIAIOSFODNN7EXAMPLE" not in tool_turn.content
@@ -1421,9 +1413,7 @@ def test_cancel_reaches_a_cancellable_model(tmp_path):
 
 def test_cancel_reaches_a_running_shell_command(tmp_path):
     shell = ShellTool(str(tmp_path))
-    orchestrator = Orchestrator(
-        model=_DummyModel(), tools={"shell": shell}, policy=Policy()
-    )
+    orchestrator = Orchestrator(model=_DummyModel(), tools={"shell": shell}, policy=Policy())
     stopped = []
     shell.cancel_running = lambda: stopped.append(True) or True
 
@@ -1444,9 +1434,7 @@ def test_cancel_is_a_no_op_with_neither_a_shell_tool_nor_a_cancellable_model(tmp
 def test_cancel_survives_a_shell_cancel_that_raises(tmp_path):
     shell = ShellTool(str(tmp_path))
     shell.cancel_running = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
-    orchestrator = Orchestrator(
-        model=_CancellableModel(), tools={"shell": shell}, policy=Policy()
-    )
+    orchestrator = Orchestrator(model=_CancellableModel(), tools={"shell": shell}, policy=Policy())
 
     orchestrator.cancel()  # must not raise, and must still reach the model
 
@@ -1462,9 +1450,7 @@ def test_cancel_survives_a_model_cancel_that_raises(tmp_path):
         def cancel(self):
             raise RuntimeError("boom")
 
-    orchestrator = Orchestrator(
-        model=_Exploding(), tools={"shell": shell}, policy=Policy()
-    )
+    orchestrator = Orchestrator(model=_Exploding(), tools={"shell": shell}, policy=Policy())
 
     orchestrator.cancel()  # must not raise, and must still reach the shell
 
@@ -1605,8 +1591,9 @@ def test_a_steer_mid_reply_is_shown_after_what_it_cut_off_and_before_the_note():
     """Cut-off text, then the message, then "redirected", then the new reply."""
     holder: dict = {}
     io = _EventIO()
-    orchestrator = Orchestrator(model=_SteerableStreamingModel(holder, "just a summary"), tools={},
-                                policy=Policy(), io=io)
+    orchestrator = Orchestrator(
+        model=_SteerableStreamingModel(holder, "just a summary"), tools={}, policy=Policy(), io=io
+    )
     holder["orch"] = orchestrator
 
     orchestrator.run("write a report", "sys", cwd="/tmp")
@@ -1690,15 +1677,20 @@ def test_an_image_survives_saving_and_resuming_the_session(tmp_path):
     path = str(tmp_path / "s.json")
     crypto = AesGcmScryptSessionCrypto()
     manager = SessionManager.create(path, crypto, ".", "pw")
-    first = Orchestrator(model=_WindowedModel(window=8192), tools={}, policy=Policy(),
-                         session=manager, crypto=crypto)
-    first.run("what is this?", "sys", cwd="/tmp",
-              images=[{"id": "a", "filename": "one.png", "data": "AAAA"}])
+    first = Orchestrator(
+        model=_WindowedModel(window=8192), tools={}, policy=Policy(), session=manager, crypto=crypto
+    )
+    first.run("what is this?", "sys", cwd="/tmp", images=[{"id": "a", "filename": "one.png", "data": "AAAA"}])
     manager.save("pw")
 
     resumed_model = _WindowedModel(window=8192)
-    resumed = Orchestrator(model=resumed_model, tools={}, policy=Policy(),
-                           session=SessionManager.load(path, crypto, "pw", "."), crypto=crypto)
+    resumed = Orchestrator(
+        model=resumed_model,
+        tools={},
+        policy=Policy(),
+        session=SessionManager.load(path, crypto, "pw", "."),
+        crypto=crypto,
+    )
     resumed.run("and now?", "sys", cwd="/tmp")
 
     sent = json.loads(resumed_model.contexts[0])
@@ -1711,8 +1703,9 @@ def test_the_same_image_attached_twice_is_stored_once():
     orchestrator = Orchestrator(model=model, tools={}, policy=Policy())
 
     for _ in range(2):
-        orchestrator.run("again", "sys", cwd="/tmp",
-                         images=[{"id": "a", "filename": "one.png", "data": "AAAA"}])
+        orchestrator.run(
+            "again", "sys", cwd="/tmp", images=[{"id": "a", "filename": "one.png", "data": "AAAA"}]
+        )
 
     assert list(orchestrator.session.session.images) == ["a"]
 
@@ -1912,8 +1905,12 @@ class _Tree:
 def _autopilot_orchestrator(tmp_path, calls, box=_Box(), checkpoints=_Tree()):
     registry = ToolRegistry(cwd=str(tmp_path))
     registry.tools["shell"].sandbox = box
-    return Orchestrator(model=_ScriptedCalls(calls), tools=registry.tools,
-                        policy=Policy(cwd=str(tmp_path)), checkpoints=checkpoints)
+    return Orchestrator(
+        model=_ScriptedCalls(calls),
+        tools=registry.tools,
+        policy=Policy(cwd=str(tmp_path)),
+        checkpoints=checkpoints,
+    )
 
 
 def test_autopilot_needs_the_sandbox_and_whole_tree_undo(tmp_path):

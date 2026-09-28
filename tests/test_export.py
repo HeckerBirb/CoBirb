@@ -1,4 +1,5 @@
 """Tests for exporting a decrypted session as readable markdown."""
+
 from __future__ import annotations
 
 import os
@@ -12,10 +13,20 @@ from cobirb.session import Session, SessionManager, Turn
 def _session() -> Session:
     session = Session(working_dir="/proj")
     session.add(Turn(role="user", content="add rate limiting"))
-    session.add(Turn(role="assistant", content="Reading the router.",
-                     tool_use=[{"name": "read_file", "arguments": {"path": "r.py"}}]))
-    session.add(Turn(role="tool", content="def route():\n    pass",
-                     tool_use=[{"name": "read_file", "arguments": {"path": "r.py"}}]))
+    session.add(
+        Turn(
+            role="assistant",
+            content="Reading the router.",
+            tool_use=[{"name": "read_file", "arguments": {"path": "r.py"}}],
+        )
+    )
+    session.add(
+        Turn(
+            role="tool",
+            content="def route():\n    pass",
+            tool_use=[{"name": "read_file", "arguments": {"path": "r.py"}}],
+        )
+    )
     session.summary = "Added a limiter."
     return session
 
@@ -86,7 +97,9 @@ def test_a_real_encrypted_session_round_trips_to_markdown(tmp_path):
 
 
 def test_an_attached_image_shows_as_a_marker_never_as_bytes():
-    session = Session(turns=[Turn(role="user", content="see attached", images=[{"id": "a", "filename": "shot.png"}])])
+    session = Session(
+        turns=[Turn(role="user", content="see attached", images=[{"id": "a", "filename": "shot.png"}])]
+    )
     markdown = session_to_markdown(session)
     assert "shot.png" in markdown
     assert "📎" in markdown

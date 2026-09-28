@@ -19,6 +19,7 @@ those are not documentation, they are a broken hook on every tool call and a
 failed server start on every run. What gets written is the small safe subset,
 with the rest pointed at rather than pasted.
 """
+
 from __future__ import annotations
 
 import logging

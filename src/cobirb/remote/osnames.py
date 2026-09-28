@@ -6,6 +6,7 @@ A remote is configured by the name its own Python would give: either
 same machine to CoBirb, so each is mapped to one family, named as
 ``platform.system()`` names it. ``ACCEPTED`` is the documented list.
 """
+
 from __future__ import annotations
 
 import platform

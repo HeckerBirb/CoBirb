@@ -4,13 +4,13 @@ The approval gate is the important one. It is the only place a person sees
 what a flock is about to be allowed to touch, so every path that reaches a
 Worker Birb has to go through it.
 """
+
 from __future__ import annotations
 
 import sys
 import textwrap
 
 import pytest
-from conftest import write_config
 
 from cobirb import cli
 from cobirb.flock.brainy import PROPOSE_CHARTER
@@ -118,14 +118,18 @@ def test_nothing_runs_until_the_charter_is_approved(monkeypatch, tmp_path):
     from cobirb.flock import supervisor
 
     monkeypatch.setattr(
-        supervisor, "run_worker",
+        supervisor,
+        "run_worker",
         lambda worker, cwd, **k: ran.append(worker.id) or WorkerReport(worker.id, True),
     )
     orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_charter_toml(tmp_path)))
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail='': False), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": False),
+        probe=False,
     )
 
     assert ran == []
@@ -141,7 +145,8 @@ def test_a_run_with_nobody_to_ask_approves_nothing(monkeypatch, tmp_path):
     from cobirb.flock import supervisor
 
     monkeypatch.setattr(
-        supervisor, "run_worker",
+        supervisor,
+        "run_worker",
         lambda worker, cwd, **k: ran.append(worker.id) or WorkerReport(worker.id, True),
     )
     orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_charter_toml(tmp_path)))
@@ -157,8 +162,11 @@ def test_approving_the_charter_fans_the_work_out(monkeypatch, tmp_path):
     orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_charter_toml(tmp_path)))
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail='': True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert run.ran
@@ -174,8 +182,11 @@ def test_the_user_is_shown_the_scopes_before_being_asked(monkeypatch, tmp_path):
     orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_charter_toml(tmp_path)))
 
     run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail='': shown.append(detail) or True, show=shown.append), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": shown.append(detail) or True, show=shown.append),
+        probe=False,
     )
 
     everything = "\n".join(shown)
@@ -187,15 +198,16 @@ def test_the_user_is_shown_the_scopes_before_being_asked(monkeypatch, tmp_path):
 # When Brainy Birb declines to divide the work
 # --------------------------------------------------------------------------- #
 def test_no_charter_is_a_legitimate_answer_not_a_failure(monkeypatch, tmp_path):
-    """"This is a single person's job, do not fan it out" is the right answer
+    """ "This is a single person's job, do not fan it out" is the right answer
     for plenty of work, and the narration is where it says so."""
-    orchestrator = _orchestrator(
-        monkeypatch, tmp_path, _ScriptedBrainy("", propose=False)
-    )
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy("", propose=False))
 
     run = run_flock_session(
-        orchestrator, "rename one variable", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail='': True), probe=False,
+        orchestrator,
+        "rename one variable",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert run.charter is None
@@ -223,8 +235,11 @@ def test_an_overlapping_partition_stops_unless_the_user_says_otherwise(monkeypat
     orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_OVERLAPPING))
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail='': False), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": False),
+        probe=False,
     )
 
     assert run.stopped_at == "partition"
@@ -236,7 +251,6 @@ def test_carrying_on_past_an_overlap_drops_to_one_worker_at_a_time(monkeypatch, 
     Overlapping scopes plus concurrency is the one combination with no
     defensible behaviour."""
     seen = {}
-    from cobirb.flock import supervisor
 
     def fake_run_flock(charter, cwd, **kwargs):
         seen.update(kwargs)
@@ -248,8 +262,11 @@ def test_carrying_on_past_an_overlap_drops_to_one_worker_at_a_time(monkeypatch, 
     orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_OVERLAPPING))
 
     run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail='': True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert seen["concurrency"] == 1
@@ -290,8 +307,11 @@ def test_the_charter_tool_outlives_the_planning_turn(monkeypatch, tmp_path):
     orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_charter_toml(tmp_path)))
 
     run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": False), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": False),
+        probe=False,
     )
 
     assert PROPOSE_CHARTER in orchestrator.tools
@@ -394,8 +414,11 @@ def test_a_rejected_charter_is_reported_as_a_failure_not_a_decision(monkeypatch,
     orchestrator = _orchestrator(monkeypatch, tmp_path, _BadCharterBrainy(attempts_before_giving_up=1))
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert run.stopped_at == "charter"
@@ -413,8 +436,11 @@ def test_a_charter_that_was_never_attempted_is_still_a_legitimate_answer(monkeyp
     orchestrator = _orchestrator(monkeypatch, tmp_path, model)
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert run.stopped_at == "planning"
@@ -438,8 +464,11 @@ def test_a_rejected_charter_gets_one_more_try_with_the_reason_quoted(monkeypatch
     monkeypatch.setattr(orchestrator, "run", record)
 
     run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": False), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": False),
+        probe=False,
     )
 
     assert any("was NOT accepted" in p for p in prompts)
@@ -473,7 +502,7 @@ brief  = "go"
 
 
 def test_an_overlapping_charter_is_held_rather_than_called_accepted(tmp_path):
-    """"Charter accepted, but propose a corrected charter" is two states at
+    """ "Charter accepted, but propose a corrected charter" is two states at
     once, and the model acts on the second one forever."""
     from cobirb.flock.brainy import ProposeCharterTool
 
@@ -537,13 +566,17 @@ def test_planning_does_not_retry_once_the_attempts_are_spent(monkeypatch, tmp_pa
     )
     original = orchestrator.run
     monkeypatch.setattr(
-        orchestrator, "run",
+        orchestrator,
+        "run",
         lambda prompt, *a, **k: (prompts.append(prompt), original(prompt, *a, **k))[1],
     )
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": False), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": False),
+        probe=False,
     )
 
     assert not any("was NOT accepted" in p for p in prompts)
@@ -580,7 +613,8 @@ class _ProseCharterBrainy:
     def __init__(self, toml, fenced=True):
         self._reply = (
             f"Here is the charter:\n\n```toml\n{toml}```\n\nReady for the workers."
-            if fenced else f"Here is the charter:\n\n{toml}"
+            if fenced
+            else f"Here is the charter:\n\n{toml}"
         )
 
     def name(self):
@@ -604,13 +638,14 @@ def test_a_charter_written_into_the_reply_is_read_from_there(monkeypatch, tmp_pa
     while the charter sits on screen in front of them."""
     _skeleton(tmp_path)
     _honest_workers(monkeypatch, tmp_path)
-    orchestrator = _orchestrator(
-        monkeypatch, tmp_path, _ProseCharterBrainy(_charter_toml(tmp_path))
-    )
+    orchestrator = _orchestrator(monkeypatch, tmp_path, _ProseCharterBrainy(_charter_toml(tmp_path)))
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert run.charter is not None
@@ -632,18 +667,30 @@ def test_running_out_of_planning_turns_is_its_own_outcome(monkeypatch, tmp_path)
     _skeleton(tmp_path)
 
     class _NeverFinishes:
-        def name(self): return "busy"
-        def chat(self, system, context, tools=None, *, stream=False): return "working"
+        def name(self):
+            return "busy"
+
+        def chat(self, system, context, tools=None, *, stream=False):
+            return "working"
+
         def parse_tool_calls(self, reply):
             return [ToolCall(name="read_file", arguments={"path": "a.py"})]
-        def supports_tool_calling(self): return True
-        def supports_streaming(self): return False
+
+        def supports_tool_calling(self):
+            return True
+
+        def supports_streaming(self):
+            return False
 
     orchestrator = _orchestrator(monkeypatch, tmp_path, _NeverFinishes())
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False, plan_turns=3,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
+        plan_turns=3,
     )
 
     assert run.stopped_at == "turns"
@@ -691,16 +738,28 @@ def _builder_calls(tmp_path):
 
     return [
         (DECLARE_SEAM, {"at": "types.py", "kind": "formal", "what": "the shared vocabulary"}),
-        (ADD_WORKER, {
-            "id": "a", "brief": "Implement a.", "writes": ["a.py", "test_a.py"],
-            "tests": ["test_a.py"], "reads": ["types.py"],
-            "accept": f'"{sys.executable}" -m pytest test_a.py -q',
-        }),
-        (ADD_WORKER, {
-            "id": "b", "brief": "Implement b.", "writes": ["b.py", "test_b.py"],
-            "tests": ["test_b.py"], "reads": ["types.py"],
-            "accept": f'"{sys.executable}" -m pytest test_b.py -q',
-        }),
+        (
+            ADD_WORKER,
+            {
+                "id": "a",
+                "brief": "Implement a.",
+                "writes": ["a.py", "test_a.py"],
+                "tests": ["test_a.py"],
+                "reads": ["types.py"],
+                "accept": f'"{sys.executable}" -m pytest test_a.py -q',
+            },
+        ),
+        (
+            ADD_WORKER,
+            {
+                "id": "b",
+                "brief": "Implement b.",
+                "writes": ["b.py", "test_b.py"],
+                "tests": ["test_b.py"],
+                "reads": ["types.py"],
+                "accept": f'"{sys.executable}" -m pytest test_b.py -q',
+            },
+        ),
         (SEAL_CHARTER, {"objective": "two things", "concurrency": 2}),
     ]
 
@@ -727,8 +786,11 @@ def test_a_charter_built_a_move_at_a_time_reaches_approval(monkeypatch, tmp_path
     orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(_builder_calls(tmp_path)))
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert run.charter is not None
@@ -754,8 +816,11 @@ def test_a_sealed_charter_cannot_overlap(monkeypatch, tmp_path):
     orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(calls))
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert find_conflicts(run.charter) == []
@@ -816,8 +881,11 @@ def test_a_plan_built_but_never_sealed_is_its_own_outcome(monkeypatch, tmp_path)
     orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(calls + [None, None]))
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert run.stopped_at == "unsealed"
@@ -843,20 +911,22 @@ def test_an_unsealed_plan_gets_one_nudge_to_seal_it(monkeypatch, tmp_path):
     prompts = []
     original = orchestrator.run
     monkeypatch.setattr(
-        orchestrator, "run",
+        orchestrator,
+        "run",
         lambda prompt, *a, **k: (prompts.append(prompt), original(prompt, *a, **k))[1],
     )
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert any("not a charter until it is sealed" in p for p in prompts)
     assert run.charter is not None
-    assert "Do not add the tickets again" in next(
-        p for p in prompts if "sealed" in p
-    )
+    assert "Do not add the tickets again" in next(p for p in prompts if "sealed" in p)
 
 
 def test_an_empty_draft_is_still_a_legitimate_decision_not_to_divide(monkeypatch, tmp_path):
@@ -864,8 +934,11 @@ def test_an_empty_draft_is_still_a_legitimate_decision_not_to_divide(monkeypatch
     orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy("", propose=False))
 
     run = run_flock_session(
-        orchestrator, "rename one variable", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "rename one variable",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert run.stopped_at == "planning"
@@ -882,8 +955,11 @@ def test_planning_is_not_subject_to_the_projects_verify_command(monkeypatch, tmp
     ran = []
     monkeypatch.setattr(
         "cobirb.orchestrator.run_verification",
-        lambda command, cwd, timeout: ran.append(command) or (_ for _ in ()).throw(
-            AssertionError("the project verify command must not run during planning")
+        lambda command, cwd, timeout: (
+            ran.append(command)
+            or (_ for _ in ()).throw(
+                AssertionError("the project verify command must not run during planning")
+            )
         ),
     )
     orchestrator = _orchestrator(monkeypatch, tmp_path, _ScriptedBrainy(_charter_toml(tmp_path)))
@@ -892,8 +968,11 @@ def test_planning_is_not_subject_to_the_projects_verify_command(monkeypatch, tmp
     orchestrator.verify = VerifySettings(command="exit 1", cwd=str(tmp_path))
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert ran == []
@@ -912,8 +991,11 @@ def test_the_projects_verify_command_is_put_back_after_planning(monkeypatch, tmp
     orchestrator.verify = settings
 
     run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert orchestrator.verify is settings
@@ -936,13 +1018,17 @@ def test_a_draft_of_only_seams_is_asked_for_tickets_not_for_a_seal(monkeypatch, 
     prompts = []
     original = orchestrator.run
     monkeypatch.setattr(
-        orchestrator, "run",
+        orchestrator,
+        "run",
         lambda prompt, *a, **k: (prompts.append(prompt), original(prompt, *a, **k))[1],
     )
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert not any("sealed" in p for p in prompts)
@@ -953,9 +1039,7 @@ def test_a_draft_of_only_seams_is_asked_for_tickets_not_for_a_seal(monkeypatch, 
 # --------------------------------------------------------------------------- #
 # The driven planning loop
 # --------------------------------------------------------------------------- #
-def test_a_plan_that_stopped_to_narrate_its_next_move_is_driven_to_a_charter(
-    monkeypatch, tmp_path
-):
+def test_a_plan_that_stopped_to_narrate_its_next_move_is_driven_to_a_charter(monkeypatch, tmp_path):
     """The run this loop was written for.
 
     Two seams declared, one `add_worker` refused, and then the model stopped to
@@ -980,8 +1064,11 @@ def test_a_plan_that_stopped_to_narrate_its_next_move_is_driven_to_a_charter(
     orchestrator = _orchestrator(monkeypatch, tmp_path, _BuilderBrainy(calls))
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert run.charter is not None
@@ -1006,13 +1093,17 @@ def test_the_nudge_quotes_the_refusal_that_stopped_the_plan(monkeypatch, tmp_pat
     prompts = []
     original = orchestrator.run
     monkeypatch.setattr(
-        orchestrator, "run",
+        orchestrator,
+        "run",
         lambda prompt, *a, **k: (prompts.append(prompt), original(prompt, *a, **k))[1],
     )
 
     run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     nudge = next(p for p in prompts if "was refused" in p)
@@ -1020,9 +1111,7 @@ def test_the_nudge_quotes_the_refusal_that_stopped_the_plan(monkeypatch, tmp_pat
     assert "add_worker" in nudge
 
 
-def test_planning_stops_rather_than_looping_on_a_model_that_only_narrates(
-    monkeypatch, tmp_path
-):
+def test_planning_stops_rather_than_looping_on_a_model_that_only_narrates(monkeypatch, tmp_path):
     """A driven loop that cannot tell working from talking replaces a halt with
     a loop, which is not an improvement."""
     from cobirb.flock.brainy import DECLARE_SEAM
@@ -1036,13 +1125,17 @@ def test_planning_stops_rather_than_looping_on_a_model_that_only_narrates(
     runs = []
     original = orchestrator.run
     monkeypatch.setattr(
-        orchestrator, "run",
+        orchestrator,
+        "run",
         lambda prompt, *a, **k: (runs.append(prompt), original(prompt, *a, **k))[1],
     )
 
     run = run_flock_session(
-        orchestrator, "do the thing", str(tmp_path),
-        ask=Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        "do the thing",
+        str(tmp_path),
+        ask=Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
     assert run.stopped_at == "stalled"

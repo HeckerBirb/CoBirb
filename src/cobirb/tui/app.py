@@ -18,6 +18,7 @@ where a full-screen app's user can actually see it (unlike the plugin
 discovery warnings ``_build_orchestrator`` prints to stderr for the CLI
 modes, which a full-screen app's stderr is invisible to).
 """
+
 from __future__ import annotations
 
 import collections
@@ -35,26 +36,25 @@ from textual.theme import Theme
 from textual.widgets import Footer, Header, TabbedContent, TabPane, TextArea
 
 from .. import memory, session
-from ..help_text import HELP_TEXT, HELP_TOPICS
-from ..runtime import commands, plugins, wiring
-from ..runtime.catalogues import CatalogueStore
-from . import slash_commands
-from ..runtime import command_index, mentions
-from .attachments import PendingAttachments
-from .command_picker import CommandPicker
-from .mention_picker import MentionPicker
-from .transcript import TranscriptView
-from ..runtime.custom_commands import expand_custom_command
 from ..config import Config
+from ..flock.brainy import PROPOSE_CHARTER
 from ..flock.stages import CharterApproval
+from ..flock.supervisor import Canceller
+from ..flock.worker import AUTOPILOT_NOTE
+from ..help_text import HELP_TEXT, HELP_TOPICS
 from ..orchestrator import REPLY_LABEL, Orchestrator, render_through
 from ..plugins.core import render
 from ..policy import PermissionError
-from .io_bridge import TuiIO
-from ..flock.brainy import PROPOSE_CHARTER
-from ..flock.supervisor import Canceller
-from ..flock.worker import AUTOPILOT_NOTE
+from ..runtime import command_index, mentions, plugins, wiring
+from ..runtime.catalogues import CatalogueStore
+from ..runtime.custom_commands import expand_custom_command
+from ..typing.spi import DECISION_DENY
+from . import slash_commands
+from .attachments import PendingAttachments
+from .command_picker import CommandPicker
 from .flock_bridge import TuiAsker, WorkerPaneIO
+from .io_bridge import TuiIO
+from .mention_picker import MentionPicker
 from .panes import FlockPane, PluginsPane, SessionsPane
 from .screens import (
     ApprovalModal,
@@ -65,8 +65,8 @@ from .screens import (
     ModelPickerModal,
     TextPromptModal,
 )
+from .transcript import TranscriptView
 from .widgets import ActivityBar, PromptInput, StatusBar, StreamPreview, TranscriptLog
-from ..typing.spi import DECISION_DENY
 
 logger = logging.getLogger("cobirb")
 
@@ -218,7 +218,7 @@ class CoBirbApp(App[None]):
         # _flock_stop for the duration of an engagement. The graceful Event
         # above only keeps new workers from starting; this drops the model
         # connections of the ones already running.
-        self._flock_canceller: "Canceller | None" = None
+        self._flock_canceller: Canceller | None = None
         # The charter of the round in progress, set once its panes are laid
         # out. Held because a Worker Birb asking for something needs it
         # answered against the whole partition — a write into a file another
@@ -233,7 +233,7 @@ class CoBirbApp(App[None]):
         # Worker panes' output, queued by the workers and drawn by the timer
         # set in on_mount (see drain_flock_writes). A deque's append and
         # popleft are thread-safe, which is all this needs.
-        self.flock_write_queue: "collections.deque" = collections.deque()
+        self.flock_write_queue: collections.deque = collections.deque()
         # True for exactly the span between submitting a prompt and
         # _on_turn_finished — see action_cancel_turn and action_quit, which
         # both need to know whether there's a turn worth cancelling.
@@ -253,13 +253,9 @@ class CoBirbApp(App[None]):
                 yield StreamPreview(id="streaming-preview")
                 # Above the box, not below: the box is already at the bottom
                 # of the screen, so a list under it would have nowhere to go.
-                yield MentionPicker(
-                    lambda: mentions.candidate_paths(self.cwd), id="mention-picker"
-                )
+                yield MentionPicker(lambda: mentions.candidate_paths(self.cwd), id="mention-picker")
                 yield CommandPicker(
-                    lambda: command_index.available_commands(
-                        slash_commands.COMMANDS, self.cwd
-                    ),
+                    lambda: command_index.available_commands(slash_commands.COMMANDS, self.cwd),
                     id="command-picker",
                 )
                 with Container(id="prompt-box"):
@@ -298,9 +294,7 @@ class CoBirbApp(App[None]):
 
         self.write_transcript(render.build_notice(f"{REPLY_LABEL} ready."))
         self.write_transcript(
-            render.build_notice(
-                "/model picks a model · /plan on|off toggles plan mode · ? or /help for help"
-            )
+            render.build_notice("/model picks a model · /plan on|off toggles plan mode · ? or /help for help")
         )
         prompt_input = self.query_one("#prompt-input", PromptInput)
         prompt_input.mention_picker = self.query_one("#mention-picker", MentionPicker)
@@ -315,9 +309,7 @@ class CoBirbApp(App[None]):
         # nothing to interact with). So there is nothing to decrypt here —
         # only turns to draw.
         if self.orchestrator is not None and self.session_path is not None:
-            self.render_history(
-                _session_turns(self.orchestrator), os.path.basename(self.session_path)
-            )
+            self.render_history(_session_turns(self.orchestrator), os.path.basename(self.session_path))
         # Validates whatever model got configured against the endpoint's
         # live list, and opens the /model picker itself if that didn't work
         # out — see _select_model_worker's docstring for the exact rules.
@@ -351,9 +343,7 @@ class CoBirbApp(App[None]):
         self.transcript.flush_stream()
 
     def write_user_prompt(self, prompt: str) -> None:
-        self.transcript.write_user_prompt(
-            prompt, [item.filename for item in self.attachments.pending]
-        )
+        self.transcript.write_user_prompt(prompt, [item.filename for item in self.attachments.pending])
 
     def render_history(self, turns: list[Any], label: str) -> None:
         self.transcript.render_history(turns, label, REPLY_LABEL)
@@ -525,9 +515,7 @@ class CoBirbApp(App[None]):
         from being sent as an ordinary prompt instead.
         """
         if self.orchestrator is None or not self.orchestrator.steer(message):
-            self.write_transcript(
-                render.build_notice("Nothing to steer — the turn just finished.")
-            )
+            self.write_transcript(render.build_notice("Nothing to steer — the turn just finished."))
             return
         # Not written here: the orchestrator shows it when it is applied
         # (TuiIO.render_steer), after whatever it interrupted — written now,
@@ -610,10 +598,10 @@ class CoBirbApp(App[None]):
     # touches a widget. These two remain because the modals ask the *app*
     # for them (`cast("CoBirbApp", self.app)`), and forwarding is cheaper
     # than teaching every screen where the store lives.
-    def memory_catalogue_rows(self) -> "list[memory.CatalogueFile]":
+    def memory_catalogue_rows(self) -> list[memory.CatalogueFile]:
         return self.catalogues.rows()
 
-    def memory_load(self, row: "memory.CatalogueFile", password: "str | None") -> str:
+    def memory_load(self, row: memory.CatalogueFile, password: str | None) -> str:
         return self.catalogues.load(row, password)
 
     def memory_unload(self, name: str) -> None:
@@ -632,9 +620,7 @@ class CoBirbApp(App[None]):
         """Save the fact, then say what happened — the one part of this that
         is the app's job rather than the store's."""
         error = self.catalogues.remember(catalogue_name, fact)
-        self.write_transcript(
-            render.build_notice(error or f"Remembered, in '{catalogue_name}'.")
-        )
+        self.write_transcript(render.build_notice(error or f"Remembered, in '{catalogue_name}'."))
 
     def _on_turn_finished(self) -> None:
         self._turn_in_progress = False
@@ -698,8 +684,9 @@ class CoBirbApp(App[None]):
         """
         if self._turn_in_progress or self._flock_stop is not None:
             self.write_transcript(
-                render.build_notice("Something else is running; the charter is still available "
-                                    "— /charter when it finishes.")
+                render.build_notice(
+                    "Something else is running; the charter is still available — /charter when it finishes."
+                )
             )
             return
         self.query_one(TabbedContent).active = "flock"
@@ -818,9 +805,7 @@ class CoBirbApp(App[None]):
             self.io_bridge.render_answer(REPLY_LABEL, answer)
 
         io_adapter = getattr(self.orchestrator, "io", None)
-        if not render_through(
-            io_adapter, "render_answer", REPLY_LABEL, answer, fallback=into_the_transcript
-        ):
+        if not render_through(io_adapter, "render_answer", REPLY_LABEL, answer, fallback=into_the_transcript):
             into_the_transcript()  # no adapter at all
 
     # ------------------------------------------------------------------ #
@@ -853,7 +838,11 @@ class CoBirbApp(App[None]):
                 models = wiring.build_model(None, self.cwd).list_models()
             except Exception as exc:  # noqa: BLE001 - report, never crash the app over this
                 if not auto or not self.model_name:
-                    hint = "" if self.model_name else " Run 'cobirb setup' in a terminal to choose a server and model."
+                    hint = (
+                        ""
+                        if self.model_name
+                        else " Run 'cobirb setup' in a terminal to choose a server and model."
+                    )
                     self.call_from_thread(
                         self.io_bridge.write_error,
                         REPLY_LABEL,
@@ -873,7 +862,9 @@ class CoBirbApp(App[None]):
             if auto and self.model_name:
                 self.call_from_thread(
                     self.write_transcript,
-                    render.build_notice(f"Configured model '{self.model_name}' was not found there — pick one:"),
+                    render.build_notice(
+                        f"Configured model '{self.model_name}' was not found there — pick one:"
+                    ),
                 )
 
             selected = self.call_from_thread(self.pick_model, models, self.model_name)
@@ -909,17 +900,21 @@ class CoBirbApp(App[None]):
                 continue
 
             def trust(spec, fingerprint):
-                return bool(self.call_from_thread(
-                    self.request_confirmation,
-                    f"Trust the Remote Worker Birb at {spec.url}?",
-                    f"Its certificate fingerprint is:\n\n{fingerprint}\n\nCompare it with the one printed "
-                    "in the remote's terminal. Trust it only if they match.",
-                ))
+                return bool(
+                    self.call_from_thread(
+                        self.request_confirmation,
+                        f"Trust the Remote Worker Birb at {spec.url}?",
+                        f"Its certificate fingerprint is:\n\n{fingerprint}\n\nCompare it with the one printed "
+                        "in the remote's terminal. Trust it only if they match.",
+                    )
+                )
 
             def code(spec):
                 return self.call_from_thread(
-                    self.prompt_text, f"Pair with {spec.label()}",
-                    "Enter the 8-digit code shown in the remote's terminal:")
+                    self.prompt_text,
+                    f"Pair with {spec.label()}",
+                    "Enter the 8-digit code shown in the remote's terminal:",
+                )
 
             self.call_from_thread(self.set_busy, f"Pairing with {spec.label()}…")
             client = RemoteClient(spec, store, ask_trust=trust, ask_code=code)
@@ -987,9 +982,11 @@ class CoBirbApp(App[None]):
             self.write_transcript(render.build_notice(f"Saved {name} as your default model in {path}."))
 
         self.push_screen(
-            ConfirmModal(f"Use {name} by default from now on?",
-                         "No model is set in your config, so CoBirb would ask again next time.",
-                         confirm_label="Save"),
+            ConfirmModal(
+                f"Use {name} by default from now on?",
+                "No model is set in your config, so CoBirb would ask again next time.",
+                confirm_label="Save",
+            ),
             answered,
         )
 
@@ -1019,11 +1016,9 @@ class CoBirbApp(App[None]):
             install_charter_tool(
                 self.orchestrator,
                 self.cwd,
-                on_proposed=lambda charter: self.call_from_thread(
-                    self.note_proposed_charter, charter
-                ),
+                on_proposed=lambda charter: self.call_from_thread(self.note_proposed_charter, charter),
             )
-        except Exception:  # noqa: BLE001 - flock arming must not cost an ordinary turn
+        except Exception:  # flock arming must not cost an ordinary turn
             # Losing the charter tool costs flock mode, which will say so
             # plainly when it cannot find it. Taking the turn down with it
             # would cost the conversation the user is actually having.
@@ -1044,8 +1039,11 @@ class CoBirbApp(App[None]):
         try:
             if self.orchestrator is None:
                 self.orchestrator = wiring.build_orchestrator(
-                    self.cwd, self.allow_overrides,
-                    self.session_path, self.password, self.model_name,
+                    self.cwd,
+                    self.allow_overrides,
+                    self.session_path,
+                    self.password,
+                    self.model_name,
                     io_factory=lambda: TuiIO(self),
                 )
                 self._arm_charter_tool()
@@ -1057,17 +1055,13 @@ class CoBirbApp(App[None]):
                 stop=self._flock_stop,
                 on_event=self._on_flock_event,
                 io_for=lambda worker, slots: WorkerPaneIO(self, worker.id, slots),
-                on_charter=lambda charter: self.call_from_thread(
-                    self.prepare_flock_panes, charter
-                ),
+                on_charter=lambda charter: self.call_from_thread(self.prepare_flock_panes, charter),
                 canceller=self._flock_canceller,
                 password=self.password,
                 charter=charter,
             )
         except Exception as exc:  # noqa: BLE001 - a failed flock is a message, not a crash
-            self.call_from_thread(
-                self.write_transcript, render.build_error_panel("Brainy Birb", str(exc))
-            )
+            self.call_from_thread(self.write_transcript, render.build_error_panel("Brainy Birb", str(exc)))
             self.call_from_thread(self._on_flock_finished, None)
             return
         self.call_from_thread(self._on_flock_finished, run)
@@ -1159,8 +1153,7 @@ class CoBirbApp(App[None]):
             return
         self._planning_calls += 1
         self.set_activity(
-            f"{self._planning_agent} is planning — {self._planning_calls} tool call(s), "
-            f"last: {tool_name}"
+            f"{self._planning_agent} is planning — {self._planning_calls} tool call(s), last: {tool_name}"
         )
 
     def flock_speaker(self, label: str) -> None:
@@ -1233,7 +1226,7 @@ class CoBirbApp(App[None]):
             return await self.push_screen_wait(CharterModal(question, detail))
         return await self.push_screen_wait(ConfirmModal(question, detail))
 
-    async def request_choice(self, question: str, detail: str, options: list[str]) -> "int | None":
+    async def request_choice(self, question: str, detail: str, options: list[str]) -> int | None:
         """Show a pick-one dialog and resolve to the index chosen, or None."""
         return await self.push_screen_wait(ChoiceModal(question, detail, options))
 
@@ -1306,7 +1299,9 @@ class CoBirbApp(App[None]):
         run on the main thread rather than needing a worker."""
         self.query_one(SessionsPane).refresh_sessions(self.session_path)
 
-    async def prompt_text(self, title: str, label: str, default: str = "", *, password: bool = False) -> str | None:
+    async def prompt_text(
+        self, title: str, label: str, default: str = "", *, password: bool = False
+    ) -> str | None:
         """Show a text/password prompt and resolve to what was entered, or
         ``None`` if cancelled — the Sessions tab's only way to collect a
         session password or a new session's name, since a full-screen app
@@ -1360,9 +1355,7 @@ class CoBirbApp(App[None]):
             config = Config()
             _, discovered, _ = plugins.discover_plugins(self.cwd, config)
             crypto, _ = plugins.build_crypto(config, discovered)
-            manager = session.SessionManager.load(
-                path, crypto, password, self.cwd
-            )
+            manager = session.SessionManager.load(path, crypto, password, self.cwd)
         except Exception as exc:  # noqa: BLE001 - wrong password/corruption is routine, not fatal
             self.call_from_thread(
                 self.query_one(SessionsPane).set_status, f"Could not open that session — {exc}"
@@ -1393,8 +1386,7 @@ class CoBirbApp(App[None]):
         self.render_history(turns, os.path.basename(path))
 
         self.query_one(SessionsPane).set_status(
-            f"{verb} '{os.path.basename(path)}' — {len(turns)} turn(s). "
-            "Your next message continues it."
+            f"{verb} '{os.path.basename(path)}' — {len(turns)} turn(s). Your next message continues it."
         )
         self.refresh_sessions_pane()
         # Straight back to the conversation: resuming is a thing you do in
@@ -1438,10 +1430,7 @@ class CoBirbApp(App[None]):
     def action_help(self, topic: str = "") -> None:
         text = HELP_TOPICS.get(topic, HELP_TEXT) if topic else HELP_TEXT
         if topic and topic not in HELP_TOPICS:
-            text = (
-                f"No help topic '{topic}'. Available: {', '.join(HELP_TOPICS.pages())}\n\n"
-                + HELP_TEXT
-            )
+            text = f"No help topic '{topic}'. Available: {', '.join(HELP_TOPICS.pages())}\n\n" + HELP_TEXT
         self.push_screen(HelpModal(text))
 
     def action_autopilot(self, state: str) -> None:
@@ -1603,9 +1592,7 @@ class CoBirbApp(App[None]):
         self.copy_to_clipboard(selection)
         self.screen.clear_selection()
         lines = len(selection.splitlines())
-        self.notify(
-            f"Copied {lines} line{'s' if lines != 1 else ''} to the clipboard.", title="Copy"
-        )
+        self.notify(f"Copied {lines} line{'s' if lines != 1 else ''} to the clipboard.", title="Copy")
         return True
 
     def _attempt_cancel(self) -> bool:

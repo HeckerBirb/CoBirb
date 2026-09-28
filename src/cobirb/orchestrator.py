@@ -9,15 +9,17 @@ The loop keeps the familiar agentic coding-assistant shape, but local and approv
     Prompt → understand → inspect → plan → act → observe → reason → iterate
             → validate → report
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import queue
 import threading
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from difflib import get_close_matches
-from typing import Any, Callable, Iterable
+from typing import Any
 
 from .checkpoints import Checkpoints
 from .context import DEFAULT_CONTEXT_TOKENS, CompactionReport, compact, history_budget
@@ -166,9 +168,7 @@ def _join_system(*parts: str) -> str:
     return "\n\n".join(part for part in parts if part and part.strip())
 
 
-def render_through(
-    io: Any, hook: str, *args: Any, fallback: Callable[[], None] | None = None
-) -> bool:
+def render_through(io: Any, hook: str, *args: Any, fallback: Callable[[], None] | None = None) -> bool:
     """Show something via ``io``'s optional ``hook``, else via ``fallback``.
 
     The I/O adapter contract is four methods, but both shipped adapters also
@@ -266,7 +266,7 @@ def _tool_failure_message(tool_name: str, tool: Any, exc: Exception) -> str:
     )
 
 
-def _materialize(reply: "str | Iterable[str]") -> str:
+def _materialize(reply: str | Iterable[str]) -> str:
     """Return a plain string from the model's reply.
 
     A model may return a string or (when streaming) an iterable of tokens.
@@ -293,11 +293,11 @@ class Orchestrator:
         context_tokens: int | None = None,
         project_context: str = "",
         redact_secrets: bool = True,
-        verify: "VerifySettings | None" = None,
-        checkpoints: "Checkpoints | None" = None,
-        hooks: "HookRunner | None" = None,
+        verify: VerifySettings | None = None,
+        checkpoints: Checkpoints | None = None,
+        hooks: HookRunner | None = None,
         mcp_clients: list[Any] | None = None,
-        grants: "SessionGrants | None" = None,
+        grants: SessionGrants | None = None,
         max_turns: int = DEFAULT_MAX_TURNS,
     ) -> None:
         self.model = model
@@ -372,7 +372,7 @@ class Orchestrator:
         # thread while run() is executing, applied at the next loop boundary
         # by _drain_steer. A plain queue.SimpleQueue rather than a list plus
         # a lock — nothing here needs more than thread-safe put/get.
-        self._steer_queue: "queue.SimpleQueue[str]" = queue.SimpleQueue()
+        self._steer_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
         # Held while steer() checks the turn is live and queues, and while
         # run() ends it and collects what was never applied: without it a
         # message could be accepted in the gap and then silently dropped.
@@ -400,7 +400,7 @@ class Orchestrator:
         max_turns: int | None = None,
         session_path: str | None = None,
         plan_mode: bool = False,
-        images: "list[dict[str, str]] | None" = None,
+        images: list[dict[str, str]] | None = None,
     ) -> Session:
         """Run the loop for a single objective.
 
@@ -460,15 +460,18 @@ class Orchestrator:
             for message in unused:
                 # Accepted while the turn was live, but after its last
                 # boundary: said so, rather than dropped without a word.
-                render_through(self.io, "render_notice",
-                               f"↳ not used — it arrived after the reply had finished: {message}")
+                render_through(
+                    self.io,
+                    "render_notice",
+                    f"↳ not used — it arrived after the reply had finished: {message}",
+                )
             # Whole-tree checkpoints close the turn's snapshot here, so /undo
             # knows exactly what this turn changed (see TreeCheckpoints).
             end_turn = getattr(self.checkpoints, "end_turn", None)
             if callable(end_turn):
                 try:
                     end_turn()
-                except Exception:  # noqa: BLE001 - undo is a convenience; never cost a turn
+                except Exception:  # undo is a convenience; never cost a turn
                     logger.debug("could not close the turn's checkpoint", exc_info=True)
 
     def _run_body(
@@ -500,9 +503,11 @@ class Orchestrator:
         # presence alone is enough to start sending a system message — the
         # empty-stays-empty rule above is about not inventing one, not about
         # withholding what the project explicitly asked to be told.
-        system_with_cwd = _join_system(
-            system, self.project_context, f"Working directory: {cwd}"
-        ) if (system or self.project_context) else ""
+        system_with_cwd = (
+            _join_system(system, self.project_context, f"Working directory: {cwd}")
+            if (system or self.project_context)
+            else ""
+        )
         logger.info("starting run; turns=%d plan_mode=%s", len(session.turns), plan_mode)
         self.last_turn_streamed = False
         self._stream_label = label
@@ -515,13 +520,9 @@ class Orchestrator:
             if not plan_streamed:
                 self._render_phase(PHASE_PLAN, label, plan_text)
 
-        act_system = (
-            _join_system(system_with_cwd, _ACT_PHASE_INSTRUCTIONS) if plan_mode else system_with_cwd
-        )
+        act_system = _join_system(system_with_cwd, _ACT_PHASE_INSTRUCTIONS) if plan_mode else system_with_cwd
         content, streamed = self._loop(act_system, session, max_turns, PHASE_ACT if plan_mode else None)
-        content, streamed = self._verify_and_fix(
-            act_system, session, content, streamed, plan_mode
-        )
+        content, streamed = self._verify_and_fix(act_system, session, content, streamed, plan_mode)
         session.summary = content
         self.last_turn_streamed = streamed
         stop = self.last_stop
@@ -532,9 +533,7 @@ class Orchestrator:
         # Last thing before the session is handed back, so an after_turn hook
         # that reads the workspace sees it in its finished state — including
         # anything the verify-and-fix pass changed.
-        self._fire_and_report(
-            EVENT_AFTER_TURN, payload={"changed_files": self._changed_anything()}
-        )
+        self._fire_and_report(EVENT_AFTER_TURN, payload={"changed_files": self._changed_anything()})
         return session
 
     def _verify_and_fix(
@@ -557,8 +556,10 @@ class Orchestrator:
             result = run_verification(self.verify.command, self.verify.cwd, self.verify.timeout)
             self.last_verification = result
             render_through(
-                self.io, "render_notice", result.describe(),
-                fallback=lambda: self.io.render(f"\n[verify] {result.describe()}\n"),
+                self.io,
+                "render_notice",
+                result.describe(),
+                fallback=lambda: self.io.render(f"\n[verify] {result.describe()}\n"),  # noqa: B023 - called at once
             )
             if result.ok or result.error or attempt == self.verify.max_fix_attempts:
                 return content, streamed
@@ -573,10 +574,7 @@ class Orchestrator:
 
     def _changed_anything(self) -> bool:
         """Whether this run has actually modified the workspace."""
-        return any(
-            call["ok"] and call["name"] in _CHANGING_TOOLS
-            for call in self.last_run_tool_calls
-        )
+        return any(call["ok"] and call["name"] in _CHANGING_TOOLS for call in self.last_run_tool_calls)
 
     def _run_plan_phase(self, system: str, session: Session) -> tuple[str, bool]:
         """Look, then plan: a bounded loop offered only the read-only tools
@@ -597,7 +595,7 @@ class Orchestrator:
         session: Session,
         max_turns: int,
         phase: str | None,
-        tools: "list[cobirb_typing.Tool] | None" = None,
+        tools: list[cobirb_typing.Tool] | None = None,
     ) -> tuple[str, bool]:
         """Drive one bounded model<->tool loop until the model gives a
         plain final answer, or ``max_turns`` is exhausted (a synthetic
@@ -681,13 +679,15 @@ class Orchestrator:
 
                 if repeats >= _REPEAT_STOP_AT:
                     self.last_stop = RunStop(
-                        STOP_NO_PROGRESS, max_turns,
+                        STOP_NO_PROGRESS,
+                        max_turns,
                         f"the model made the same {tool_calls[0].name} call {repeats} times in a row.",
                     )
                     return "", False
                 if failures >= _FAILURE_STOP_AT:
                     self.last_stop = RunStop(
-                        STOP_NO_PROGRESS, max_turns,
+                        STOP_NO_PROGRESS,
+                        max_turns,
                         f"{failures} tool calls in a row failed or were refused.",
                     )
                     return "", False
@@ -707,7 +707,8 @@ class Orchestrator:
                 failures += 1
                 if failures >= _FAILURE_STOP_AT:
                     self.last_stop = RunStop(
-                        STOP_NO_PROGRESS, max_turns,
+                        STOP_NO_PROGRESS,
+                        max_turns,
                         f"the model's last {failures} tool calls could not be read or failed.",
                     )
                     return "", False
@@ -723,7 +724,7 @@ class Orchestrator:
         self.last_stop = RunStop(STOP_TURN_LIMIT, max_turns)
         return "", False
 
-    def _malformed_tool_call(self, tools: "list[cobirb_typing.Tool] | None") -> str:
+    def _malformed_tool_call(self, tools: list[cobirb_typing.Tool] | None) -> str:
         """The provider's report of a tool call it could not read, if it has
         the optional ``malformed_tool_call`` hook and tools were on offer."""
         if tools == [] or not self.model.supports_tool_calling():
@@ -751,7 +752,7 @@ class Orchestrator:
             return fn()
 
     def _chat(
-        self, system: str, context: str, tools: "list[cobirb_typing.Tool] | None" = None
+        self, system: str, context: str, tools: list[cobirb_typing.Tool] | None = None
     ) -> tuple[str, bool]:
         """Get the model's reply for this turn, streaming it live to ``io``
         when the model supports streaming and an I/O adapter is attached.
@@ -836,7 +837,7 @@ class Orchestrator:
         system: str,
         cwd: str,
         session_path: str | None = None,
-        images: "list[dict[str, str]] | None" = None,
+        images: list[dict[str, str]] | None = None,
     ) -> Session:
         # Reuse the supplied session manager when one was injected (e.g. a
         # resumed --session), so prior history and the session path/cipher
@@ -945,8 +946,9 @@ class Orchestrator:
             content = str(turn.get("content") or "")
             if len(content) > _SUMMARY_TURN_CHARS:
                 content = content[:_SUMMARY_TURN_CHARS] + " …[cut]"
-            material.append({"role": turn.get("role", "user"), "content": content,
-                             "tool_use": turn.get("tool_use")})
+            material.append(
+                {"role": turn.get("role", "user"), "content": content, "tool_use": turn.get("tool_use")}
+            )
         limit = max(4000, self._context_budget() * 2)  # characters, well inside the window
         while len(json.dumps(material)) > limit and len(material) > 1:
             material.pop(1 if material[0]["content"].startswith("Summary so far") else 0)
@@ -964,7 +966,7 @@ class Orchestrator:
         self,
         tool_calls: list[cobirb_typing.ToolCall],
         phase: str | None = None,
-        offered: "set[str] | None" = None,
+        offered: set[str] | None = None,
     ) -> None:
         """Run each call — except one naming a tool this phase did not offer.
 
@@ -976,8 +978,10 @@ class Orchestrator:
         for call in tool_calls:
             if offered is not None and call.name not in offered and call.name in self.tools:
                 self._record_call(call.name, ok=False, denied=True, arguments=call.arguments)
-                message = (f"'{call.name}' is not available in this phase — only "
-                           f"{', '.join(sorted(offered)) or 'no tools'}. Nothing was changed.")
+                message = (
+                    f"'{call.name}' is not available in this phase — only "
+                    f"{', '.join(sorted(offered)) or 'no tools'}. Nothing was changed."
+                )
                 tool_use = [{"name": call.name, "arguments": call.arguments}]
                 self.session.session.add(Turn(role="tool", content=message, tool_use=tool_use, phase=phase))
                 continue
@@ -997,8 +1001,10 @@ class Orchestrator:
         if box is None or not getattr(box, "active", False):
             return "the shell sandbox is not active here (bubblewrap is needed — see 'cobirb doctor')"
         if not callable(getattr(self.checkpoints, "end_turn", None)):
-            return ("whole-tree checkpoints are not active (git is needed, and \"checkpoints\" "
-                    "must not be false), so what it changed could not be undone")
+            return (
+                'whole-tree checkpoints are not active (git is needed, and "checkpoints" '
+                "must not be false), so what it changed could not be undone"
+            )
         root = self.policy._project_root()
         if root is None:
             return "the working directory is your home directory or /, which is too broad a project"
@@ -1026,9 +1032,7 @@ class Orchestrator:
         """
         return self.policy.autopilot_root is not None
 
-    def _request_approval(
-        self, tool_name: str, arguments: dict[str, Any]
-    ) -> tuple[str, str]:
+    def _request_approval(self, tool_name: str, arguments: dict[str, Any]) -> tuple[str, str]:
         """Ask ``io`` whether to allow a not-yet-permitted tool call.
 
         Returns the decision and, when the answer was a refusal carrying one,
@@ -1134,7 +1138,8 @@ class Orchestrator:
                 self._record_call(tool_name, ok=False, denied=True, arguments=arguments)
                 result = cobirb_typing.ToolResult(
                     ok=False,
-                    content=_autopilot_refusal(tool_name) if self.autopilot
+                    content=_autopilot_refusal(tool_name)
+                    if self.autopilot
                     else _denial_message(tool_name, instruction),
                 )
                 session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
@@ -1163,9 +1168,7 @@ class Orchestrator:
             # went wrong and correct itself on the next turn, rather than
             # tearing down the whole run over a recoverable mistake.
             self._record_call(tool_name, ok=False, denied=False)
-            result = cobirb_typing.ToolResult(
-                ok=False, content=_tool_failure_message(tool_name, tool, exc)
-            )
+            result = cobirb_typing.ToolResult(ok=False, content=_tool_failure_message(tool_name, tool, exc))
             session.add(Turn(role="tool", content=result.content, tool_use=tool_use, phase=phase))
             self._render_tool_call(tool_name, arguments, result)
             return
@@ -1212,8 +1215,10 @@ class Orchestrator:
             message = f"{event} hook failed: {failure}"
             logger.warning(message)
             render_through(
-                self.io, "render_notice", message,
-                fallback=lambda: self.io.render(f"\n[hook] {message}\n"),
+                self.io,
+                "render_notice",
+                message,
+                fallback=lambda: self.io.render(f"\n[hook] {message}\n"),  # noqa: B023 - called at once
             )
 
     def _record_call(
@@ -1229,8 +1234,11 @@ class Orchestrator:
         record: dict[str, Any] = {"name": tool_name, "ok": ok, "denied": denied}
         if denied and arguments:
             target = next(
-                (arguments[key] for key in ("command", "path", "pattern")
-                 if isinstance(arguments.get(key), str)),
+                (
+                    arguments[key]
+                    for key in ("command", "path", "pattern")
+                    if isinstance(arguments.get(key), str)
+                ),
                 "",
             )
             if target:
@@ -1317,7 +1325,10 @@ class Orchestrator:
         if not text:
             return
         render_through(
-            self.io, "render_plan", label, text,
+            self.io,
+            "render_plan",
+            label,
+            text,
             fallback=lambda: self.io.render(f"\n[{phase}] {text}\n"),
         )
 
@@ -1369,7 +1380,7 @@ class Orchestrator:
         if callable(interrupt):
             try:
                 interrupt()
-            except Exception:  # noqa: BLE001 - the queued message still lands at the next boundary
+            except Exception:  # the queued message still lands at the next boundary
                 logger.debug("interrupt_current_reply raised", exc_info=True)
         return True
 
@@ -1430,13 +1441,13 @@ class Orchestrator:
         if callable(stop_shell):
             try:
                 stop_shell()
-            except Exception:  # noqa: BLE001 - a stuck turn is not worth a crash on the way out
+            except Exception:  # a stuck turn is not worth a crash on the way out
                 logger.debug("shell cancel raised", exc_info=True)
         stop_model = getattr(self.model, "cancel", None)
         if callable(stop_model):
             try:
                 stop_model()
-            except Exception:  # noqa: BLE001
+            except Exception:  # a stuck turn is not worth a crash on the way out
                 logger.debug("model cancel raised", exc_info=True)
 
     def close(self) -> None:
@@ -1451,7 +1462,7 @@ class Orchestrator:
         for client in self.mcp_clients:
             try:
                 client.close()
-            except Exception:  # noqa: BLE001 - nothing to do about it at this point
+            except Exception:  # nothing to do about it at this point
                 logger.debug("an MCP server did not shut down cleanly", exc_info=True)
         self.mcp_clients = []
         # Whole-tree checkpoints live as long as the session (TreeCheckpoints).
@@ -1459,7 +1470,7 @@ class Orchestrator:
         if callable(close):
             try:
                 close()
-            except Exception:  # noqa: BLE001
+            except Exception:  # nothing to do about it at this point
                 logger.debug("could not remove the checkpoint store", exc_info=True)
 
 

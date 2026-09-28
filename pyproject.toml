@@ -55,6 +55,9 @@ dev = [
     # Parallel runs: the suite goes from minutes to seconds, and every test
     # already has its own COBIRB_HOME and no network, so they are independent.
     "pytest-xdist>=3.5",
+    # Linter and formatter: `ruff check` and `ruff format` (settings under
+    # [tool.ruff] below). CI runs both.
+    "ruff>=0.15",
 ]
 
 [project.scripts]
@@ -100,3 +103,39 @@ markers = [
     "integration: hits a real local Ollama server; skipped unless COBIRB_TEST_MODEL is set (see tests/test_integration_ollama.py)",
     "tree_checkpoints: wire whole-tree (git) checkpoints instead of the per-file ones every other test gets (see tests/conftest.py)",
 ]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["bench/tasks", "bench/results"]
+
+[tool.ruff.lint]
+# Rules that catch defects or dead weight, plus the modern-Python rewrites.
+# Style beyond that is the formatter's job.
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes: unused names, undefined names
+    "I",        # import order
+    "B",        # bugbear: likely bugs
+    "UP",       # pyupgrade
+    "SIM",      # simplifications
+    "C4",       # comprehensions
+    "PIE", "RET",
+    "RUF",
+    "BLE",      # a broad `except Exception` needs `# noqa: BLE001 - <why>` (see AGENTS.md)
+]
+ignore = [
+    "E501",     # the formatter wraps code; a long string or URL is left as written
+    "RUF001", "RUF002", "RUF003",  # em dashes, arrows and quotes in prose are deliberate
+    "SIM108",   # a ternary is not always clearer than an if/else
+    "RET505", "RET506", "RET507", "RET508",  # `else` after `return` can read better
+    "RUF005",   # `a + [b]` is as clear as `[*a, b]`
+    "RUF012",   # Textual's BINDINGS and CSS class attributes are lists by convention
+    "RUF022",   # `__all__` lists are grouped by meaning, with comments, not sorted
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests read files in one line, unpack results they only half check, import
+# per section, and expect whatever a wrong password raises: idioms, not
+# defects, in a test.
+"tests/**" = ["B008", "B011", "B017", "BLE001", "E402", "E702", "RET503", "RUF015", "RUF043", "RUF059", "SIM115"]

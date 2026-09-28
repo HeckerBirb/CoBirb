@@ -4,6 +4,7 @@ No real network call is made: ``urllib.request.urlopen`` is monkeypatched
 with a fake response so these tests exercise the request/response wiring
 without requiring a running Ollama server.
 """
+
 from __future__ import annotations
 
 import json
@@ -49,7 +50,6 @@ class _FakeStreamResponse:
 class _StubTool:
     def name(self) -> str:
         return "read_file"
-
 
     def description(self) -> str:
         return "Read a file."
@@ -201,27 +201,31 @@ def _streaming_server(chunks):
 
 
 def test_stream_chat_yields_content_incrementally():
-    url = _streaming_server([
-        {"message": {"role": "assistant", "content": "Hel"}, "done": False},
-        {"message": {"role": "assistant", "content": "lo"}, "done": False},
-        {"message": {"role": "assistant", "content": ""}, "done": True},
-    ])
+    url = _streaming_server(
+        [
+            {"message": {"role": "assistant", "content": "Hel"}, "done": False},
+            {"message": {"role": "assistant", "content": "lo"}, "done": False},
+            {"message": {"role": "assistant", "content": ""}, "done": True},
+        ]
+    )
     provider = LocalModelProvider(model="llama3.1", base_url=url)
     assert list(provider.chat("system", "context", stream=True)) == ["Hel", "lo"]
 
 
 def test_stream_chat_captures_tool_calls_from_final_chunk():
-    url = _streaming_server([
-        {"message": {"role": "assistant", "content": ""}, "done": False},
-        {
-            "message": {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [{"function": {"name": "read_file", "arguments": {"path": "a.txt"}}}],
+    url = _streaming_server(
+        [
+            {"message": {"role": "assistant", "content": ""}, "done": False},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"function": {"name": "read_file", "arguments": {"path": "a.txt"}}}],
+                },
+                "done": True,
             },
-            "done": True,
-        },
-    ])
+        ]
+    )
     provider = LocalModelProvider(model="llama3.1", base_url=url)
     reply = provider.chat("system", "context", [_StubTool()], stream=True)
     list(reply)  # fully consume the generator so tool calls are captured
@@ -297,7 +301,7 @@ def test_a_stuck_stream_can_be_cancelled_from_another_thread():
         try:
             for chunk in provider.chat("", "hi", stream=True):
                 received.append(chunk)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             error.append(exc)
 
     worker = threading.Thread(target=consume, daemon=True)
@@ -370,7 +374,7 @@ def test_interrupting_a_reply_raises_but_leaves_the_provider_usable():
         try:
             for chunk in provider.chat("", "hi", stream=True):
                 received.append(chunk)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             error.append(exc)
 
     worker = threading.Thread(target=consume, daemon=True)
@@ -490,8 +494,13 @@ class _RoutingResponses:
     can't exercise the interesting part any more.
     """
 
-    def __init__(self, system: str | None = None, chat_payload: dict | None = None,
-                 model_info: dict | None = None, capabilities: list | None = None):
+    def __init__(
+        self,
+        system: str | None = None,
+        chat_payload: dict | None = None,
+        model_info: dict | None = None,
+        capabilities: list | None = None,
+    ):
         self.system = system
         self.model_info = model_info
         self.capabilities = capabilities
@@ -607,6 +616,7 @@ def test_switching_models_re_reads_the_prompt(monkeypatch):
 def test_an_unreadable_model_prompt_never_blocks_the_turn(monkeypatch):
     """Best-effort context, not a precondition: if the lookup fails the turn
     still runs with whatever CoBirb had to say."""
+
     def urlopen(request, timeout=None):
         if request.full_url.endswith("/api/show"):
             raise urllib.error.URLError("nope")
@@ -656,9 +666,7 @@ def test_a_model_prompts_surrounding_whitespace_is_trimmed_when_composing(monkey
 
 
 def test_build_messages_omits_an_empty_system_message():
-    assert _build_messages("", '[{"role": "user", "content": "hi"}]') == [
-        {"role": "user", "content": "hi"}
-    ]
+    assert _build_messages("", '[{"role": "user", "content": "hi"}]') == [{"role": "user", "content": "hi"}]
 
 
 def test_build_messages_keeps_a_system_message_when_there_is_one():
@@ -743,7 +751,7 @@ class _ShowResponses:
 
 
 def test_context_window_reads_num_ctx(monkeypatch):
-    monkeypatch.setattr("urllib.request.urlopen", _ShowResponses("stop \"<|im_end|>\"\nnum_ctx 32768"))
+    monkeypatch.setattr("urllib.request.urlopen", _ShowResponses('stop "<|im_end|>"\nnum_ctx 32768'))
 
     assert LocalModelProvider(model="m").context_window() == 32768
 
@@ -754,7 +762,7 @@ def test_the_advertised_context_length_is_used_when_no_num_ctx_is_set(monkeypatc
     says it can do is what to request, not something to distrust."""
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _ShowResponses(parameters="stop \"x\"", model_info={"llama.context_length": 131072}),
+        _ShowResponses(parameters='stop "x"', model_info={"llama.context_length": 131072}),
     )
 
     assert LocalModelProvider(model="m").context_window() == 131072
@@ -812,7 +820,7 @@ def test_max_num_ctx_clamps_an_advertised_window_that_exceeds_it(monkeypatch):
     it are counted. max_num_ctx is the ceiling for that."""
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        _ShowResponses(parameters="stop \"x\"", model_info={"qwen2.context_length": 262144}),
+        _ShowResponses(parameters='stop "x"', model_info={"qwen2.context_length": 262144}),
     )
 
     assert LocalModelProvider(model="m", max_num_ctx=32768).context_window() == 32768
@@ -847,8 +855,8 @@ def test_max_num_ctx_does_nothing_when_the_endpoint_cannot_answer(monkeypatch):
 # --------------------------------------------------------------------------- #
 import json as _json
 import threading as _threading
-import urllib.error as _urllib_error
-from http.server import BaseHTTPRequestHandler as _Handler, HTTPServer as _HTTPServer
+from http.server import BaseHTTPRequestHandler as _Handler
+from http.server import HTTPServer as _HTTPServer
 
 import pytest as _pytest
 
@@ -950,7 +958,13 @@ def test_images_are_attached_when_the_model_supports_vision(monkeypatch):
     responses = _RoutingResponses(capabilities=["vision"])
     monkeypatch.setattr("urllib.request.urlopen", responses)
     context = json.dumps(
-        [{"role": "user", "content": "what is this", "images": [{"id": "a", "filename": "x.png", "data": "QUJD"}]}]
+        [
+            {
+                "role": "user",
+                "content": "what is this",
+                "images": [{"id": "a", "filename": "x.png", "data": "QUJD"}],
+            }
+        ]
     )
 
     LocalModelProvider(model="m").chat("", context)
@@ -962,7 +976,13 @@ def test_images_are_not_attached_when_the_model_lacks_vision(monkeypatch):
     responses = _RoutingResponses(capabilities=["completion"])
     monkeypatch.setattr("urllib.request.urlopen", responses)
     context = json.dumps(
-        [{"role": "user", "content": "what is this", "images": [{"id": "a", "filename": "x.png", "data": "QUJD"}]}]
+        [
+            {
+                "role": "user",
+                "content": "what is this",
+                "images": [{"id": "a", "filename": "x.png", "data": "QUJD"}],
+            }
+        ]
     )
 
     LocalModelProvider(model="m").chat("", context)
@@ -1027,8 +1047,14 @@ def test_text_is_not_read_for_calls_when_no_tools_were_offered(monkeypatch):
 
 
 def test_the_servers_own_parse_failure_is_a_problem_not_an_answer(monkeypatch):
-    responses = _RoutingResponses(chat_payload={"message": {
-        "role": "assistant", "content": "error parsing tool call: raw='<function=read_file>', err=XML syntax error"}})
+    responses = _RoutingResponses(
+        chat_payload={
+            "message": {
+                "role": "assistant",
+                "content": "error parsing tool call: raw='<function=read_file>', err=XML syntax error",
+            }
+        }
+    )
     monkeypatch.setattr("urllib.request.urlopen", responses)
     provider = LocalModelProvider(model="m")
 
@@ -1040,11 +1066,16 @@ def test_the_servers_own_parse_failure_is_a_problem_not_an_answer(monkeypatch):
 
 
 def test_replayed_history_carries_a_text_call_once_not_twice():
-    context = json.dumps([
-        {"role": "user", "content": "go"},
-        {"role": "assistant", "content": 'Reading.<tool_call>{"name":"read_file"}</tool_call>',
-         "tool_use": [{"name": "read_file", "arguments": {"path": "a"}}]},
-    ])
+    context = json.dumps(
+        [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": 'Reading.<tool_call>{"name":"read_file"}</tool_call>',
+                "tool_use": [{"name": "read_file", "arguments": {"path": "a"}}],
+            },
+        ]
+    )
     messages = _build_messages("", context)
     assert messages[-1]["content"] == "Reading."
     assert messages[-1]["tool_calls"][0]["function"]["name"] == "read_file"
@@ -1053,20 +1084,33 @@ def test_replayed_history_carries_a_text_call_once_not_twice():
 def test_a_thinking_models_reasoning_comes_back_with_the_calls_it_led_to(monkeypatch):
     """gpt-oss expects its earlier reasoning within a task to be replayed with
     its tool calls; without it the model lost its own working between steps."""
-    responses = _RoutingResponses(chat_payload={"message": {
-        "role": "assistant", "content": "", "thinking": "I should read a.py first.",
-        "tool_calls": [{"function": {"name": "read_file", "arguments": {"path": "a.py"}}}]}})
+    responses = _RoutingResponses(
+        chat_payload={
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "thinking": "I should read a.py first.",
+                "tool_calls": [{"function": {"name": "read_file", "arguments": {"path": "a.py"}}}],
+            }
+        }
+    )
     monkeypatch.setattr("urllib.request.urlopen", responses)
     provider = LocalModelProvider(model="m")
 
     reply = provider.chat("", '[{"role": "user", "content": "go"}]', [_Tool()])
     provider.parse_tool_calls(reply)
-    history = json.dumps([
-        {"role": "user", "content": "go"},
-        {"role": "assistant", "content": "", "tool_use": [{"name": "read_file", "arguments": {"path": "a.py"}}]},
-        {"role": "tool", "content": "x = 1", "tool_use": [{"name": "read_file"}]},
-        {"role": "assistant", "content": "Final answer."},
-    ])
+    history = json.dumps(
+        [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_use": [{"name": "read_file", "arguments": {"path": "a.py"}}],
+            },
+            {"role": "tool", "content": "x = 1", "tool_use": [{"name": "read_file"}]},
+            {"role": "assistant", "content": "Final answer."},
+        ]
+    )
     provider.chat("", history, [_Tool()])
 
     replayed = responses.chat_messages

@@ -4,6 +4,7 @@ Persists conversations to disk only as an encrypted blob. The plaintext session
 exists in RAM only, never on disk. Each turn carries a content hash so tampering
 with the session file is detectable on reload.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -11,8 +12,9 @@ import json
 import os
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from . import paths
 
@@ -48,7 +50,7 @@ class UnsupportedSessionSchema(ValueError):
 # genuinely *wrong* rather than merely sparse — a renamed field, a changed
 # unit, a restructured turn — and then the function that fixes it goes here,
 # `SCHEMA_VERSION` goes up, and a round-trip test covers the upgrade.
-_MIGRATIONS: "dict[int, Callable[[dict[str, Any]], dict[str, Any]]]" = {}
+_MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {}
 
 
 def migrate(data: dict[str, Any]) -> dict[str, Any]:
@@ -75,9 +77,7 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
     while version < SCHEMA_VERSION:
         upgrade = _MIGRATIONS.get(version)
         if upgrade is None:  # pragma: no cover - guarded by test_every_schema_step_has_a_migration
-            raise UnsupportedSessionSchema(
-                f"no migration from session schema v{version} to v{version + 1}"
-            )
+            raise UnsupportedSessionSchema(f"no migration from session schema v{version} to v{version + 1}")
         data = upgrade(data)
         version += 1
         data["schema"] = version
@@ -136,7 +136,7 @@ def discover_sessions(directory: str) -> list[SessionFile]:
 CLEAR_ROLE = "clear"
 
 
-def turns_since_clear(turns: "list[Any]") -> "list[Any]":
+def turns_since_clear(turns: list[Any]) -> list[Any]:
     """The turns after the most recent ``/clear``, or all of them.
 
     The single definition of what a clear marker means, shared by the two
@@ -148,7 +148,7 @@ def turns_since_clear(turns: "list[Any]") -> "list[Any]":
     """
     for index in range(len(turns) - 1, -1, -1):
         if getattr(turns[index], "role", "") == CLEAR_ROLE:
-            return list(turns[index + 1:])
+            return list(turns[index + 1 :])
     return list(turns)
 
 
@@ -171,7 +171,7 @@ class Turn:
     # own screenshot, and a model-written one would need a model call this class
     # has no business making. Deliberately *not* covered by digest() below —
     # see that method's docstring for why.
-    images: "list[dict[str, str]] | None" = None
+    images: list[dict[str, str]] | None = None
     ts: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     _stored_hash: str | None = None
 
@@ -196,7 +196,7 @@ class Turn:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Turn":
+    def from_dict(cls, data: dict[str, Any]) -> Turn:
         return cls(
             role=data["role"],
             content=data["content"],
@@ -308,7 +308,7 @@ class Session:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Session":
+    def from_dict(cls, data: dict[str, Any]) -> Session:
         # Every path that reads a session goes through here — SessionManager.load,
         # fork_session, the tests — so this is the one place the version has to
         # be honoured, and putting it anywhere else would leave a way in that
@@ -357,7 +357,7 @@ class SessionManager:
         crypto: Any,
         working_dir: str = ".",
         password: str | None = None,
-    ) -> "SessionManager":
+    ) -> SessionManager:
         manager = cls(path, crypto, working_dir, password)
         manager.session = Session(
             created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -366,9 +366,7 @@ class SessionManager:
         return manager
 
     @classmethod
-    def load(
-        cls, path: str, crypto: Any, password: str | None, working_dir: str = "."
-    ) -> "SessionManager":
+    def load(cls, path: str, crypto: Any, password: str | None, working_dir: str = ".") -> SessionManager:
         """Load an existing session, verifying turn hashes against the file.
 
         The ``password`` decrypts the blob and is not retained; ``save()``
@@ -481,9 +479,7 @@ def fork_session(
     total = len(source.turns)
     if up_to_turn is not None:
         if not (0 <= up_to_turn < total):
-            raise ValueError(
-                f"turn index {up_to_turn} is out of range for {path} (0..{total - 1})"
-            )
+            raise ValueError(f"turn index {up_to_turn} is out of range for {path} (0..{total - 1})")
         kept = source.turns[: up_to_turn + 1]
         lineage_turn = up_to_turn
     else:

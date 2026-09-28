@@ -18,6 +18,7 @@ config names.
 A remote with the same OS as this machine is ignored: telling apart work that
 should run in isolation from work that should run here is not decided yet.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -58,15 +59,17 @@ class RemoteSpec:
         return f"{self.os} ({self.host}:{self.port})"
 
 
-def parse_entry(entry: object) -> "tuple[RemoteSpec | None, str]":
+def parse_entry(entry: object) -> tuple[RemoteSpec | None, str]:
     """One config entry as a ``RemoteSpec``, or ``None`` and why not."""
     if not isinstance(entry, dict):
         return None, "each entry must be an object"
     family = canonical_os(entry.get("remote_os"))
     if family is None:
         accepted = ", ".join(name for names in ACCEPTED.values() for name in names)
-        return None, (f"remote_os {entry.get('remote_os')!r} is not an OS name CoBirb knows "
-                      f"(accepted, in any case: {accepted}; a BSD release number may follow)")
+        return None, (
+            f"remote_os {entry.get('remote_os')!r} is not an OS name CoBirb knows "
+            f"(accepted, in any case: {accepted}; a BSD release number may follow)"
+        )
     url = entry.get("remote_url")
     parsed = urlparse(url) if isinstance(url, str) else None
     if parsed is None or parsed.scheme != "https" or not parsed.hostname:
@@ -76,7 +79,10 @@ def parse_entry(entry: object) -> "tuple[RemoteSpec | None, str]":
         return None, "run_llms_locally must be true or false"
     endpoint = entry.get("openai_endpoint", "")
     if local and not (isinstance(endpoint, str) and endpoint.startswith(("http://", "https://"))):
-        return None, "run_llms_locally is true, so openai_endpoint must be the remote's http(s):// model server"
+        return (
+            None,
+            "run_llms_locally is true, so openai_endpoint must be the remote's http(s):// model server",
+        )
     model = entry.get("model_name", "")
     if not isinstance(model, str):
         return None, "model_name must be a string"
@@ -86,7 +92,7 @@ def parse_entry(entry: object) -> "tuple[RemoteSpec | None, str]":
     return RemoteSpec(family, url, local, endpoint if isinstance(endpoint, str) else "", model), ""
 
 
-def configured(config: Config) -> "tuple[list[RemoteSpec], list[str]]":
+def configured(config: Config) -> tuple[list[RemoteSpec], list[str]]:
     """Every usable remote, and a line for each entry that is not.
 
     Same-OS remotes are left out, with a line saying so: an entry that silently
@@ -104,8 +110,10 @@ def configured(config: Config) -> "tuple[list[RemoteSpec], list[str]]":
         if spec is None:
             problems.append(f"{KEY}[{index}]: {problem}")
         elif spec.os == here:
-            problems.append(f"{KEY}[{index}]: {spec.label()} has this machine's OS ({here}) and is "
-                            "ignored — only remotes with another OS are used")
+            problems.append(
+                f"{KEY}[{index}]: {spec.label()} has this machine's OS ({here}) and is "
+                "ignored — only remotes with another OS are used"
+            )
         else:
             remotes.append(spec)
     return remotes, problems

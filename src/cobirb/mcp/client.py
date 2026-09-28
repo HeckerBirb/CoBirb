@@ -22,8 +22,10 @@ none. stderr is drained by another, keeping only the last few lines, because a
 chatty server that nobody reads will otherwise fill the pipe buffer and hang
 mid-sentence — a failure that looks exactly like the server being slow.
 """
+
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -107,7 +109,7 @@ class StdioClient:
         # the id does not match, so a concurrent caller loses its reply and
         # waits out its whole timeout. Nothing called this concurrently until
         # the Flock did.
-        self._mailboxes: "dict[int, queue.Queue[dict[str, Any]]]" = {}
+        self._mailboxes: dict[int, queue.Queue[dict[str, Any]]] = {}
         # Set when the server's stdout closes, so everyone waiting gives up
         # rather than each sitting out its own timeout.
         self._eof = threading.Event()
@@ -122,7 +124,7 @@ class StdioClient:
     def start(self) -> None:
         """Spawn the server and complete the MCP handshake."""
         try:
-            self._process = subprocess.Popen(  # noqa: S603 - the command is the user's own
+            self._process = subprocess.Popen(  # the command is the user's own
                 [os.path.expanduser(self.command), *self.args],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -170,10 +172,8 @@ class StdioClient:
             process.terminate()
             process.wait(timeout=5)
         except (subprocess.TimeoutExpired, OSError):
-            try:
+            with contextlib.suppress(OSError):
                 process.kill()
-            except OSError:
-                pass
         for stream in (process.stdin, process.stdout, process.stderr):
             try:
                 if stream is not None:

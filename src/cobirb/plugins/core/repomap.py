@@ -21,6 +21,7 @@ tree-sitter means a compiled dependency and a per-language grammar, and the
 job here is orientation rather than analysis. A slightly wrong signature in
 the outline costs nothing; the file path being right is what matters.
 """
+
 from __future__ import annotations
 
 import ast
@@ -39,10 +40,14 @@ _PATTERNS: dict[frozenset[str], list[re.Pattern[str]]] = {
         re.compile(r"^\s*(?:export\s+)?class\s+(\w+)", re.M),
         re.compile(r"^\s*(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\(", re.M),
     ],
-    frozenset({".go"}): [re.compile(r"^func\s+(?:\([^)]*\)\s*)?(\w+)", re.M),
-                         re.compile(r"^type\s+(\w+)", re.M)],
-    frozenset({".rs"}): [re.compile(r"^\s*(?:pub\s+)?fn\s+(\w+)", re.M),
-                         re.compile(r"^\s*(?:pub\s+)?(?:struct|enum|trait)\s+(\w+)", re.M)],
+    frozenset({".go"}): [
+        re.compile(r"^func\s+(?:\([^)]*\)\s*)?(\w+)", re.M),
+        re.compile(r"^type\s+(\w+)", re.M),
+    ],
+    frozenset({".rs"}): [
+        re.compile(r"^\s*(?:pub\s+)?fn\s+(\w+)", re.M),
+        re.compile(r"^\s*(?:pub\s+)?(?:struct|enum|trait)\s+(\w+)", re.M),
+    ],
     frozenset({".rb"}): [re.compile(r"^\s*(?:def|class|module)\s+([\w.]+)", re.M)],
     frozenset({".java", ".kt", ".cs"}): [
         re.compile(r"^\s*(?:public|private|protected)?\s*(?:static\s+)?(?:class|interface)\s+(\w+)", re.M),
@@ -84,7 +89,7 @@ def _is_test(path: str) -> bool:
 
 @dataclass
 class FileOutline:
-    path: str            # relative to the map's root
+    path: str  # relative to the map's root
     lines: int
     symbols: list[str] = field(default_factory=list)
     imported_by: int = 0
@@ -174,7 +179,8 @@ def build_outlines(root: str, max_files: int = 400) -> list[FileOutline]:
 
     for directory, subdirectories, filenames in os.walk(root):
         subdirectories[:] = [
-            name for name in sorted(subdirectories)
+            name
+            for name in sorted(subdirectories)
             if not rules.is_ignored(os.path.join(directory, name), is_dir=True)
         ]
         for filename in sorted(filenames):
@@ -191,7 +197,7 @@ def build_outlines(root: str, max_files: int = 400) -> list[FileOutline]:
                 if size > _MAX_PARSE_BYTES:
                     outlines.append(FileOutline(os.path.relpath(path, root), 0))
                     continue
-                with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+                with open(path, encoding="utf-8", errors="ignore") as fh:
                     source = fh.read()
             except OSError:
                 continue

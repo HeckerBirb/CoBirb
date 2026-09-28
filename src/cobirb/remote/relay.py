@@ -11,12 +11,14 @@ The relay passes on what the main provider decided — the text, the tool calls
 it read, and whether a call was malformed — so the remote's orchestrator sees
 exactly what a local worker would.
 """
+
 from __future__ import annotations
 
 import itertools
 import queue
 import threading
-from typing import Any, Callable, Iterator
+from collections.abc import Callable, Iterator
+from typing import Any
 
 from ..typing import spi as cobirb_typing
 
@@ -43,19 +45,23 @@ class _ToolSchema(cobirb_typing.Tool):
         raise RuntimeError("a relayed tool runs on the remote, never here")
 
 
-def tool_specs(tools: "list[cobirb_typing.Tool] | None") -> list[dict[str, Any]]:
-    return [{"name": t.name(), "description": t.description(), "parameters": t.parameters()}
-            for t in (tools or [])]
+def tool_specs(tools: list[cobirb_typing.Tool] | None) -> list[dict[str, Any]]:
+    return [
+        {"name": t.name(), "description": t.description(), "parameters": t.parameters()}
+        for t in (tools or [])
+    ]
 
 
 def model_info(provider: Any) -> dict[str, Any]:
     """What the remote needs to know about the main provider up front."""
+
     def ask(name: str, default: Any) -> Any:
         hook = getattr(provider, name, None)
         try:
             return hook() if callable(hook) else default
         except Exception:  # noqa: BLE001 - an unanswerable question is the default, not a failed flock
             return default
+
     return {
         "name": ask("name", "relay"),
         "context_window": ask("context_window", None),
@@ -88,8 +94,12 @@ def answer_model_request(provider: Any, request: dict[str, Any], send: Callable[
         calls = provider.parse_tool_calls(reply) if tools and provider.supports_tool_calling() else []
         malformed_hook = getattr(provider, "malformed_tool_call", None)
         malformed = malformed_hook() if callable(malformed_hook) else ""
-        send("model_end", req_id=req_id, malformed=malformed or "",
-             tool_calls=[{"name": c.name, "arguments": c.arguments} for c in calls])
+        send(
+            "model_end",
+            req_id=req_id,
+            malformed=malformed or "",
+            tool_calls=[{"name": c.name, "arguments": c.arguments} for c in calls],
+        )
     except Exception as exc:  # noqa: BLE001 - reported to the remote, whose worker fails as a local one would
         send("model_error", req_id=req_id, error=str(exc))
 
@@ -106,7 +116,7 @@ class RelayProvider(cobirb_typing.ModelProvider):
         self._emit = emit
         self._info = info or {}
         self._ids = itertools.count(1)
-        self._waiting: dict[int, "queue.Queue[Any]"] = {}
+        self._waiting: dict[int, queue.Queue[Any]] = {}
         self._lock = threading.Lock()
         self._last_calls: list[cobirb_typing.ToolCall] = []
         self._malformed = ""
@@ -141,16 +151,24 @@ class RelayProvider(cobirb_typing.ModelProvider):
 
     def chat(self, system: str, context: Any, tools=None, *, stream: bool = False):
         req_id = next(self._ids)
-        replies: "queue.Queue[Any]" = queue.Queue()
+        replies: queue.Queue[Any] = queue.Queue()
         with self._lock:
             self._waiting[req_id] = replies
         self._last_calls, self._malformed = [], ""
-        self._emit({"kind": "model", "req_id": req_id, "system": system, "context": context,
-                    "tools": tool_specs(tools), "stream": True})
+        self._emit(
+            {
+                "kind": "model",
+                "req_id": req_id,
+                "system": system,
+                "context": context,
+                "tools": tool_specs(tools),
+                "stream": True,
+            }
+        )
         chunks = self._stream(req_id, replies)
         return chunks if stream else "".join(chunks)
 
-    def _stream(self, req_id: int, replies: "queue.Queue[Any]") -> Iterator[str]:
+    def _stream(self, req_id: int, replies: queue.Queue[Any]) -> Iterator[str]:
         try:
             while True:
                 message = replies.get()
@@ -159,13 +177,18 @@ class RelayProvider(cobirb_typing.ModelProvider):
                     yield str(message.get("text", ""))
                 elif kind == "model_end":
                     self._last_calls = [
-                        cobirb_typing.ToolCall(name=str(c.get("name", "")), arguments=dict(c.get("arguments") or {}))
-                        for c in message.get("tool_calls") or [] if isinstance(c, dict)
+                        cobirb_typing.ToolCall(
+                            name=str(c.get("name", "")), arguments=dict(c.get("arguments") or {})
+                        )
+                        for c in message.get("tool_calls") or []
+                        if isinstance(c, dict)
                     ]
                     self._malformed = str(message.get("malformed") or "")
                     return
                 else:
-                    raise RuntimeError(f"The main session's model failed: {message.get('error', 'unknown error')}")
+                    raise RuntimeError(
+                        f"The main session's model failed: {message.get('error', 'unknown error')}"
+                    )
         finally:
             with self._lock:
                 self._waiting.pop(req_id, None)

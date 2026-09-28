@@ -32,6 +32,7 @@ to be wrong on the first fan-out. ``describe_roles`` exists precisely so that
 "which model would actually be used for what" is a question with an answer you
 can read, instead of one you infer from three layers of fallback.
 """
+
 from __future__ import annotations
 
 import logging
@@ -145,9 +146,7 @@ def resolve_role(role: str, config: Config, override: str | None = None) -> Mode
     for this job" — a typo costs the specialisation, never the run.
     """
     if override:
-        base_url = config.get("models", role, "base_url") or config.get(
-            "models", ROLE_DEFAULT, "base_url"
-        )
+        base_url = config.get("models", role, "base_url") or config.get("models", ROLE_DEFAULT, "base_url")
         return ModelSpec(role, str(override), base_url, "--model")
 
     name = ""
@@ -160,15 +159,9 @@ def resolve_role(role: str, config: Config, override: str | None = None) -> Mode
         name, default_source = _default_name(config)
         # "inherited from unset" is a sentence about nothing. A role with no
         # model anywhere to inherit is simply unset, like the default is.
-        source = (
-            default_source
-            if role == ROLE_DEFAULT or not name
-            else f"inherited from {default_source}"
-        )
+        source = default_source if role == ROLE_DEFAULT or not name else f"inherited from {default_source}"
 
-    base_url = config.get("models", role, "base_url") or config.get(
-        "models", ROLE_DEFAULT, "base_url"
-    )
+    base_url = config.get("models", role, "base_url") or config.get("models", ROLE_DEFAULT, "base_url")
     return ModelSpec(role, name, base_url, source)
 
 
@@ -183,14 +176,14 @@ def build_for_role(
     """
     config = config or Config()
     spec = resolve_role(role, config, override)
-    common = dict(
-        model=spec.name,
-        base_url=spec.base_url,
-        max_num_ctx=parse_context_size(config.get("max_num_ctx")),
-        connect_timeout=_timeout(config, "connect_timeout"),
-        request_timeout=_timeout(config, "request_timeout"),
-        options=model_options(role, config),
-    )
+    common = {
+        "model": spec.name,
+        "base_url": spec.base_url,
+        "max_num_ctx": parse_context_size(config.get("max_num_ctx")),
+        "connect_timeout": _timeout(config, "connect_timeout"),
+        "request_timeout": _timeout(config, "request_timeout"),
+        "options": model_options(role, config),
+    }
     if model_api(role, config) == API_OPENAI:
         from ..plugins.core.openai import OpenAICompatibleProvider
 

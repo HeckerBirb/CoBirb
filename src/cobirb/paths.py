@@ -11,6 +11,7 @@ Everything here is a function, not a module constant: ``COBIRB_HOME`` is read
 at call time so relocating it takes effect immediately, which is also how the
 test suite gives every test its own isolated tree.
 """
+
 from __future__ import annotations
 
 import os

@@ -1,7 +1,9 @@
 """Tests for project instructions — what a repo tells an agent about itself."""
+
 from __future__ import annotations
 
 import json
+
 from conftest import write_config
 
 from cobirb.config import Config

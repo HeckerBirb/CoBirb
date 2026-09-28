@@ -31,6 +31,7 @@ holding one would deadlock any chain longer than the limit.
 flight cannot be interrupted, which is already true of a single-agent turn.
 Asking to stop means no further workers start and the run reports what it has.
 """
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -38,8 +39,8 @@ import contextlib
 import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 from ..config import Config
 from ..runtime.verify import DEFAULT_TIMEOUT_SECONDS, run_verification
@@ -122,8 +123,7 @@ class FlockOutcome:
             # finished and passed on the final tree. Worth saying, because it
             # means those tickets were not as independent as the charter said.
             late = [
-                r.worker_id for r in self.complete
-                if r.rechecked and r.accepted_when_finished is not True
+                r.worker_id for r in self.complete if r.rechecked and r.accepted_when_finished is not True
             ]
             if late:
                 lines.append(
@@ -182,7 +182,7 @@ class Canceller:
     def _cancel(orchestrator) -> None:
         try:
             orchestrator.cancel()
-        except Exception:  # noqa: BLE001 - one worker that will not die is not worth the rest
+        except Exception:  # one worker that will not die is not worth the rest
             logger.debug("force-cancelling a worker raised", exc_info=True)
 
 
@@ -216,7 +216,7 @@ class Slots:
     def __init__(self, limit: int) -> None:
         self._semaphore = threading.Semaphore(max(1, limit))
 
-    def __enter__(self) -> "Slots":
+    def __enter__(self) -> Slots:
         self._semaphore.acquire()
         return self
 
@@ -254,7 +254,7 @@ def run_flock(
     stop: threading.Event | None = None,
     on_event=None,
     io_for=None,
-    canceller: "Canceller | None" = None,
+    canceller: Canceller | None = None,
     grants=None,
     refuse: bool | Callable[[], bool] = False,
     remotes=None,
@@ -299,7 +299,7 @@ def run_flock(
             return
         try:
             on_event(kind, payload)
-        except Exception:  # noqa: BLE001 - a broken display must not fail the run
+        except Exception:  # a broken display must not fail the run
             logger.debug("a flock event handler raised", exc_info=True)
 
     # Captured before anything runs: this *is* the skeleton, and without it
@@ -350,13 +350,25 @@ def run_flock(
 
         client = remotes.acquire(worker.runs_on, stop, on_wait=lambda: announce("waiting_remote", worker))
         if client is None:
-            return WorkerReport(worker_id=worker.id, ok=False, error=(
-                "stopped while waiting for a remote" if stop.is_set()
-                else f"no {worker.runs_on} remote is available"))
+            return WorkerReport(
+                worker_id=worker.id,
+                ok=False,
+                error=(
+                    "stopped while waiting for a remote"
+                    if stop.is_set()
+                    else f"no {worker.runs_on} remote is available"
+                ),
+            )
         announce("started", worker)
-        run = RemoteRun(client, worker, cwd, config=config,
-                        io=io_for(worker, None) if io_for else None,
-                        grants=grants, refuse=refusing)
+        run = RemoteRun(
+            client,
+            worker,
+            cwd,
+            config=config,
+            io=io_for(worker, None) if io_for else None,
+            grants=grants,
+            refuse=refusing,
+        )
         with reports_lock:
             remote_runs[worker.id] = run
         report = run.execute(stop)
@@ -368,9 +380,7 @@ def run_flock(
         # should not queue up behind the workers still finishing just to
         # decline to run.
         if stop.is_set():
-            return WorkerReport(
-                worker_id=worker.id, ok=False, error="stopped before it started"
-            )
+            return WorkerReport(worker_id=worker.id, ok=False, error="stopped before it started")
         blocked = wait_for_dependencies(worker)
         if blocked:
             return WorkerReport(worker_id=worker.id, ok=False, error=blocked)
@@ -378,14 +388,16 @@ def run_flock(
             return run_remote(worker)
         with slots:
             if stop.is_set():
-                return WorkerReport(
-                    worker_id=worker.id, ok=False, error="stopped before it started"
-                )
+                return WorkerReport(worker_id=worker.id, ok=False, error="stopped before it started")
             announce("started", worker)
             report = run_worker(
-                worker, cwd, config=config,
+                worker,
+                cwd,
+                config=config,
                 io=io_for(worker, slots) if io_for else None,
-                canceller=canceller, grants=grants, refuse=refuse,
+                canceller=canceller,
+                grants=grants,
+                refuse=refuse,
             )
         announce("finished", report)
         return report
@@ -401,9 +413,7 @@ def run_flock(
         ``run_worker`` reports rather than throws, but a dependent left
         waiting forever is not the way to find out that changed.
         """
-        report = WorkerReport(
-            worker_id=worker.id, ok=False, error="did not finish and said nothing"
-        )
+        report = WorkerReport(worker_id=worker.id, ok=False, error="did not finish and said nothing")
         try:
             report = run_one(worker)
             report.static = worker.static
@@ -411,8 +421,9 @@ def run_flock(
         finally:
             with reports_lock:
                 reports[worker.id] = report
-                running_remotes = [r for wid, r in remote_runs.items()
-                                   if wid != worker.id and wid not in reports]
+                running_remotes = [
+                    r for wid, r in remote_runs.items() if wid != worker.id and wid not in reports
+                ]
             finished[worker.id].set()
             # A remote worker reading this one's files gets them now, as a
             # local one would on its next read of the shared tree.
@@ -433,8 +444,11 @@ def run_flock(
 
     def remote_check(worker_id: str):
         run = remote_runs.get(worker_id)
-        return None if run is None else (lambda command, seconds, overrides=None:
-                                         run.check(command, seconds, overrides))
+        return (
+            None
+            if run is None
+            else (lambda command, seconds, overrides=None: run.check(command, seconds, overrides))
+        )
 
     outcome.stopped = stop.is_set()
     if not outcome.stopped:
@@ -477,12 +491,12 @@ def run_flock(
 
 def recheck(
     charter: Charter,
-    reports: "list[WorkerReport]",
+    reports: list[WorkerReport],
     cwd: str,
     *,
     stop: threading.Event | None = None,
     config: Config | None = None,
-    run_check_for: "Callable[[str], Callable | None] | None" = None,
+    run_check_for: Callable[[str], Callable | None] | None = None,
 ) -> None:
     """Run every finished worker's acceptance check again, now that all are done.
 
@@ -508,7 +522,11 @@ def recheck(
         if worker is None or not report.ok or not worker.accept.strip():
             continue
         remote = run_check_for(worker.id) if run_check_for is not None else None
-        result = remote(worker.accept, timeout) if remote is not None else run_verification(worker.accept, cwd, timeout)
+        result = (
+            remote(worker.accept, timeout)
+            if remote is not None
+            else run_verification(worker.accept, cwd, timeout)
+        )
         if result.error:
             # The check could not run at all; the worker's own verdict is the
             # better evidence than none.

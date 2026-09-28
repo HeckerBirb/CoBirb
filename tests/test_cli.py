@@ -6,6 +6,7 @@ suite doesn't exercise directly: a positional-argument mismatch between
 every other test, because ``session.py`` was only ever tested by calling
 ``SessionManager.load`` correctly in isolation.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,20 +14,17 @@ import os
 import time
 
 import pytest
-
 from conftest import DummyModel, StubSession, StubSessionManager, write_config
 
 from cobirb import cli, help_text, session
-from cobirb.runtime import commands, plugins, sessions, system_prompt, wiring
-from cobirb.runtime.system_prompt import build_system_prompt
 from cobirb.cli import _resolve_plan_mode
-from cobirb.runtime.wiring import parse_allow_tools
-from cobirb.runtime.plugins import merge_tool_plugins, select_plugin
-from cobirb.runtime.wiring import build_orchestrator
 from cobirb.config import Config
 from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
 from cobirb.plugins.core.io import TerminalIO
 from cobirb.plugins.core.tools import ToolRegistry
+from cobirb.runtime import commands, plugins, sessions, system_prompt, wiring
+from cobirb.runtime.system_prompt import build_system_prompt
+from cobirb.runtime.wiring import parse_allow_tools
 from cobirb.session import SessionManager
 from cobirb.typing import spi as cobirb_typing
 from cobirb.typing.spi import Tool, ToolCall, ToolResult
@@ -103,9 +101,7 @@ def test_build_orchestrator_creates_new_session_on_first_run(tmp_path):
     """A --session path that doesn't exist yet must be created, not loaded."""
     session_path = str(tmp_path / "new-session.json")
 
-    orchestrator = wiring.build_orchestrator(
-        str(tmp_path), {}, session_path, "pw"
-    )
+    orchestrator = wiring.build_orchestrator(str(tmp_path), {}, session_path, "pw")
 
     assert orchestrator.session is not None
     assert orchestrator.session.session is not None
@@ -146,25 +142,19 @@ def test_build_orchestrator_loads_existing_session_with_correct_password(tmp_pat
     """The real password must reach SessionManager.load, not the cwd string."""
     session_path = str(tmp_path / "existing-session.json")
 
-    orchestrator = wiring.build_orchestrator(
-        str(tmp_path), {}, session_path, "correct-password"
-    )
+    orchestrator = wiring.build_orchestrator(str(tmp_path), {}, session_path, "correct-password")
     orchestrator.session.session.add_text("user", "hello")
     orchestrator.session.save("correct-password")
 
     # Re-open with the same password: must decrypt and recover the turn.
-    reopened = wiring.build_orchestrator(
-        str(tmp_path), {}, session_path, "correct-password"
-    )
+    reopened = wiring.build_orchestrator(str(tmp_path), {}, session_path, "correct-password")
     assert [t.content for t in reopened.session.session.turns] == ["hello"]
 
 
 def test_build_orchestrator_rejects_wrong_password_on_existing_session(tmp_path):
     session_path = str(tmp_path / "existing-session.json")
 
-    orchestrator = wiring.build_orchestrator(
-        str(tmp_path), {}, session_path, "correct-password"
-    )
+    orchestrator = wiring.build_orchestrator(str(tmp_path), {}, session_path, "correct-password")
     orchestrator.session.save("correct-password")
 
     try:
@@ -181,9 +171,7 @@ def test_run_with_session_records_user_prompt(tmp_path):
     there loses the user's side of a resumed session's transcript."""
     session_path = str(tmp_path / "session.json")
 
-    orchestrator = wiring.build_orchestrator(
-        str(tmp_path), {}, session_path, "pw"
-    )
+    orchestrator = wiring.build_orchestrator(str(tmp_path), {}, session_path, "pw")
     orchestrator.model = DummyModel(reply="hi there")
 
     session = orchestrator.run("hello noah", "system prompt", cwd=str(tmp_path))
@@ -199,9 +187,7 @@ def test_run_twice_with_same_session_accumulates_history(tmp_path):
     turn's history, not start over."""
     session_path = str(tmp_path / "session.json")
 
-    orchestrator = wiring.build_orchestrator(
-        str(tmp_path), {}, session_path, "pw"
-    )
+    orchestrator = wiring.build_orchestrator(str(tmp_path), {}, session_path, "pw")
     orchestrator.model = DummyModel(reply="first reply")
     orchestrator.run("first message", "system prompt", cwd=str(tmp_path))
 
@@ -377,7 +363,15 @@ def test_main_one_shot_mode_routes_prompt_and_options(monkeypatch):
     captured = {}
 
     def fake_run_one_shot(
-        prompt, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
+        prompt,
+        system,
+        allow_overrides,
+        session_path,
+        password,
+        cwd,
+        model_name=None,
+        plan_mode=False,
+        **kwargs,
     ):
         captured.update(
             prompt=prompt,
@@ -391,7 +385,9 @@ def test_main_one_shot_mode_routes_prompt_and_options(monkeypatch):
         return 0
 
     monkeypatch.setattr(cli, "_run_one_shot", fake_run_one_shot)
-    result = cli.main(["-p", "do the thing", "--cwd", "/tmp", "--model", "llama3.1", "--allow-tool", "shell(git)"])
+    result = cli.main(
+        ["-p", "do the thing", "--cwd", "/tmp", "--model", "llama3.1", "--allow-tool", "shell(git)"]
+    )
 
     assert result == 0
     assert captured["prompt"] == "do the thing"
@@ -407,7 +403,15 @@ def test_main_plan_mode_flag_routes_through_to_run_one_shot(monkeypatch):
     captured = {}
 
     def fake_run_one_shot(
-        prompt, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
+        prompt,
+        system,
+        allow_overrides,
+        session_path,
+        password,
+        cwd,
+        model_name=None,
+        plan_mode=False,
+        **kwargs,
     ):
         captured["plan_mode"] = plan_mode
         return 0
@@ -437,7 +441,15 @@ def test_main_defaults_cwd_to_current_directory(monkeypatch):
     captured = {}
 
     def fake_run_one_shot(
-        prompt, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
+        prompt,
+        system,
+        allow_overrides,
+        session_path,
+        password,
+        cwd,
+        model_name=None,
+        plan_mode=False,
+        **kwargs,
     ):
         captured["cwd"] = cwd
         return 0
@@ -467,7 +479,15 @@ def test_main_one_shot_with_session_prompts_for_a_password(monkeypatch, tmp_path
     captured = {}
 
     def fake_run_one_shot(
-        prompt, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
+        prompt,
+        system,
+        allow_overrides,
+        session_path,
+        password,
+        cwd,
+        model_name=None,
+        plan_mode=False,
+        **kwargs,
     ):
         captured["password"] = password
         return 0
@@ -483,8 +503,13 @@ def test_main_interactive_with_session_prompts_for_a_password(monkeypatch, tmp_p
     captured = {}
 
     def fake_run_tui(
-        system, allow_overrides, session_path, password, cwd,
-        model_name=None, plan_mode=False,
+        system,
+        allow_overrides,
+        session_path,
+        password,
+        cwd,
+        model_name=None,
+        plan_mode=False,
     ):
         captured["password"] = password
         return 0
@@ -507,8 +532,13 @@ def test_password_alone_starts_a_session_under_the_sessions_dir(monkeypatch, tmp
     captured = {}
 
     def fake_run_tui(
-        system, allow_overrides, session_path, password, cwd,
-        model_name=None, plan_mode=False,
+        system,
+        allow_overrides,
+        session_path,
+        password,
+        cwd,
+        model_name=None,
+        plan_mode=False,
     ):
         captured.update(session_path=session_path, password=password)
         return 0
@@ -573,7 +603,15 @@ def test_password_alone_starts_a_session_in_one_shot_mode_too(monkeypatch, tmp_p
     captured = {}
 
     def fake_run_one_shot(
-        prompt, system, allow_overrides, session_path, password, cwd, model_name=None, plan_mode=False, **kwargs
+        prompt,
+        system,
+        allow_overrides,
+        session_path,
+        password,
+        cwd,
+        model_name=None,
+        plan_mode=False,
+        **kwargs,
     ):
         captured.update(session_path=session_path, password=password)
         return 0
@@ -629,6 +667,7 @@ def test_run_tui_prints_the_resume_hint_for_a_session_that_was_written(monkeypat
 def test_run_tui_prints_no_hint_when_the_session_was_never_written(monkeypatch, tmp_path, capsys):
     """Quitting before sending anything leaves no file — and nothing to
     resume, so promising a resume command would be a lie."""
+
     class _FakeApp:
         def __init__(self, **kwargs):
             self.session_path = kwargs["session_path"]
@@ -779,8 +818,13 @@ def test_main_passes_the_system_prompt_choice_through_to_the_tui(monkeypatch):
     captured = {}
 
     def fake_run_tui(
-        system, allow_overrides, session_path, password, cwd,
-        model_name=None, plan_mode=False,
+        system,
+        allow_overrides,
+        session_path,
+        password,
+        cwd,
+        model_name=None,
+        plan_mode=False,
     ):
         captured.update(system=system)
         return 0
@@ -795,8 +839,13 @@ def test_main_sends_no_system_prompt_by_default(monkeypatch):
     captured = {}
 
     def fake_run_tui(
-        system, allow_overrides, session_path, password, cwd,
-        model_name=None, plan_mode=False,
+        system,
+        allow_overrides,
+        session_path,
+        password,
+        cwd,
+        model_name=None,
+        plan_mode=False,
     ):
         captured.update(system=system)
         return 0
@@ -985,9 +1034,7 @@ def test_select_plugin_resolves_a_configured_selection(tmp_path):
 def test_build_orchestrator_merges_discovered_tool_plugins(monkeypatch, tmp_path):
     """The end-to-end wiring: a plugin discovered by load_plugins() must
     actually reach the orchestrator's live tool registry."""
-    monkeypatch.setattr(
-        plugins, "load_plugins", lambda: ({"tool:fake": _FakeToolPlugin}, {})
-    )
+    monkeypatch.setattr(plugins, "load_plugins", lambda: ({"tool:fake": _FakeToolPlugin}, {}))
 
     orchestrator = wiring.build_orchestrator(str(tmp_path), {})
 
@@ -996,9 +1043,7 @@ def test_build_orchestrator_merges_discovered_tool_plugins(monkeypatch, tmp_path
 
 
 def test_build_orchestrator_reports_plugin_errors_to_stderr(monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(
-        plugins, "load_plugins", lambda: ({}, {"entry-point:broken": "boom"})
-    )
+    monkeypatch.setattr(plugins, "load_plugins", lambda: ({}, {"entry-point:broken": "boom"}))
 
     wiring.build_orchestrator(str(tmp_path), {})
 
@@ -1054,9 +1099,7 @@ def test_build_model_falls_back_to_default_model_key(tmp_path):
 def test_build_model_default_model_is_the_lowest_priority_fallback(tmp_path):
     """All three name the same setting; "default_model" only kicks in once
     the older, more specific keys have nothing to say."""
-    write_config(tmp_path, json.loads(
-        '{"model": "from-model-key", "default_model": "from-default-model"}'
-    ))
+    write_config(tmp_path, json.loads('{"model": "from-model-key", "default_model": "from-default-model"}'))
     assert wiring.build_model(None, str(tmp_path)).name() == "ollama/from-model-key"
 
 
@@ -1203,7 +1246,8 @@ def test_render_final_answer_falls_back_to_completed_for_empty_text(capsys):
 
 
 def test_resolve_model_name_returns_the_provider_display_name(monkeypatch):
-    monkeypatch.setattr(wiring, "build_model", lambda model_name, cwd: type("M", (), {"name": lambda self: "fake/model"})()
+    monkeypatch.setattr(
+        wiring, "build_model", lambda model_name, cwd: type("M", (), {"name": lambda self: "fake/model"})()
     )
 
     assert wiring.resolve_model_name(None, "/tmp") == "fake/model"
@@ -1277,9 +1321,7 @@ def test_run_tui_builds_the_app_with_everything_it_was_given(monkeypatch):
 
     monkeypatch.setattr(tui_app, "CoBirbApp", _FakeApp)
 
-    result = cli._run_tui(
-        "system", {"shell": "git"}, "/tmp/s.json", "pw", "/work", "llama3.1", True
-    )
+    result = cli._run_tui("system", {"shell": "git"}, "/tmp/s.json", "pw", "/work", "llama3.1", True)
 
     assert result == 0
     assert captured["ran"] is True
@@ -1365,7 +1407,9 @@ def test_a_session_that_will_not_unlock_never_starts_the_app(monkeypatch, tmp_pa
     assert "could not open" in capsys.readouterr().err
 
 
-def test_a_wrong_password_is_explained_rather_than_printed_blank(monkeypatch, tmp_path, capsys, _never_runs_app):
+def test_a_wrong_password_is_explained_rather_than_printed_blank(
+    monkeypatch, tmp_path, capsys, _never_runs_app
+):
     """A wrong password surfaces as the crypto library's InvalidTag, which
     carries no message at all — printed raw it left a dangling dash."""
     locked = tmp_path / "s.json"
@@ -1433,6 +1477,7 @@ def test_a_session_that_unlocks_is_handed_to_the_app_already_open(monkeypatch, t
 def test_a_new_session_path_does_not_try_to_unlock_anything(monkeypatch, tmp_path, _never_runs_app):
     """--session naming a file that doesn't exist yet is a new session; there
     is nothing to open and no password to be wrong."""
+
     def fail_if_called(*args, **kwargs):
         raise AssertionError("nothing to open for a file that isn't there")
 
@@ -1454,9 +1499,7 @@ def test_one_shot_reports_a_session_that_will_not_unlock_instead_of_tracebacking
 
     monkeypatch.setattr(wiring, "build_orchestrator", wrong_password)
 
-    status = cli._run_one_shot(
-        "hi", "", {}, str(tmp_path / "s.json"), "nope", "/work"
-    )
+    status = cli._run_one_shot("hi", "", {}, str(tmp_path / "s.json"), "nope", "/work")
 
     assert status == 1
     assert "wrong password, or the file has been modified" in capsys.readouterr().err
@@ -1465,6 +1508,7 @@ def test_one_shot_reports_a_session_that_will_not_unlock_instead_of_tracebacking
 def test_one_shot_does_not_echo_a_prompt_it_never_ran(monkeypatch, tmp_path, capsys):
     """Echoing before the session failed to open reads as though the task was
     attempted, when nothing ran at all."""
+
     def wrong_password(*args, **kwargs):
         from cryptography.exceptions import InvalidTag
 
@@ -1477,7 +1521,7 @@ def test_one_shot_does_not_echo_a_prompt_it_never_ran(monkeypatch, tmp_path, cap
 
 
 def test_no_resume_hint_is_printed_after_a_failed_run(monkeypatch, tmp_path, capsys):
-    """"could not open …" followed by "Session saved" claimed something that
+    """ "could not open …" followed by "Session saved" claimed something that
     never happened — the file existed, it just wasn't this run's doing."""
     existing = tmp_path / "s.json"
     existing.write_bytes(b"encrypted")
@@ -1557,9 +1601,7 @@ def test_upgrade_flag_dispatches_to_run_upgrade(monkeypatch):
 
 def test_upgrade_flag_with_no_tag_passes_none(monkeypatch):
     seen = {}
-    monkeypatch.setattr(
-        cli, "_run_upgrade", lambda tag, *, force: seen.update(tag=tag, force=force) or 0
-    )
+    monkeypatch.setattr(cli, "_run_upgrade", lambda tag, *, force: seen.update(tag=tag, force=force) or 0)
 
     assert cli.main(["--upgrade"]) == 0
     assert seen == {"tag": None, "force": False}
@@ -1681,8 +1723,7 @@ def test_continue_reaches_the_orchestrator_with_that_session(tmp_path, monkeypat
     newest = _session_file(tmp_path, "new.json")
     captured = {}
 
-    def fake_build(cwd, allow_overrides, session_path=None, password=None,
-                   model_name=None, io_factory=None):
+    def fake_build(cwd, allow_overrides, session_path=None, password=None, model_name=None, io_factory=None):
         captured["session_path"] = session_path
         captured["password"] = password
         return _StubOrchestrator()
@@ -1699,8 +1740,10 @@ def test_continue_reaches_the_orchestrator_with_that_session(tmp_path, monkeypat
 # --------------------------------------------------------------------------- #
 # Help is the manual
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("topic", ["session", "plan", "model", "flock", "hooks", "plugin", "commands",
-                                   "mcp", "plugins", "tools", "config"])
+@pytest.mark.parametrize(
+    "topic",
+    ["session", "plan", "model", "flock", "hooks", "plugin", "commands", "mcp", "plugins", "tools", "config"],
+)
 def test_every_topic_the_old_help_had_still_answers(topic):
     """Topic names people have typed or written down must keep working."""
     assert help_text.HELP_TOPICS[topic].startswith("# ")

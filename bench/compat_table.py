@@ -6,6 +6,7 @@ release changes how CoBirb talks to a model. Regenerate it from a fresh run:
 
     python bench/compat_table.py bench/results/<run> > docs/manual/models.md
 """
+
 from __future__ import annotations
 
 import json
@@ -51,7 +52,10 @@ def render(results_dir: Path) -> str:
     for model, results in sorted(by_model.items()):
         failures = Counter(r["outcome"] for r in results if not r["passed"])
         if failures:
-            lines.append(f"- `{model}`: " + ", ".join(f"{n}× {kind.replace('_', ' ')}" for kind, n in failures.most_common()))
+            lines.append(
+                f"- `{model}`: "
+                + ", ".join(f"{n}× {kind.replace('_', ' ')}" for kind, n in failures.most_common())
+            )
     lines += [
         "",
         "These are small tasks on one machine; treat the numbers as a floor for what works, not a",

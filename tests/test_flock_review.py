@@ -4,6 +4,7 @@ The reliable pass is stub reversion, so most of these exercise it against a
 real test file running under a real interpreter: a check that only pretended to
 run broken code would be worth nothing.
 """
+
 from __future__ import annotations
 
 import sys
@@ -41,7 +42,8 @@ def test_it_exists():
 
 def _charter(tmp_path, tests_field='tests = ["test_work.py"]'):
     accept = f'"{sys.executable}" -m pytest test_work.py -q'
-    return parse_charter(textwrap.dedent(f"""
+    return parse_charter(
+        textwrap.dedent(f"""
         objective = "double things"
 
         [[workers]]
@@ -50,7 +52,8 @@ def _charter(tmp_path, tests_field='tests = ["test_work.py"]'):
         {tests_field}
         accept = '{accept}'
         brief  = "Implement double()."
-    """))
+    """)
+    )
 
 
 def _skeleton(tmp_path, tests=_TESTS):
@@ -71,7 +74,7 @@ def test_the_baseline_is_the_skeleton_as_brainy_birb_wrote_it(tmp_path):
 
 
 def test_a_file_the_skeleton_never_created_is_recorded_as_empty(tmp_path):
-    """"The skeleton did not create this" is a real state, and it is what a
+    """ "The skeleton did not create this" is a real state, and it is what a
     stub reversion should restore such a file to."""
     charter = _charter(tmp_path)
     baseline = Baseline.capture(charter, str(tmp_path))
@@ -203,9 +206,10 @@ def test_the_workers_own_tests_are_kept_during_the_reversion(tmp_path):
 
 
 def test_a_worker_that_writes_only_tests_says_so_rather_than_passing(tmp_path):
-    """"We could not check" must never read the same as "we checked and it was
+    """ "We could not check" must never read the same as "we checked and it was
     fine"."""
-    charter = parse_charter(textwrap.dedent("""
+    charter = parse_charter(
+        textwrap.dedent("""
         objective = "x"
         [[workers]]
         id     = "a"
@@ -213,7 +217,8 @@ def test_a_worker_that_writes_only_tests_says_so_rather_than_passing(tmp_path):
         tests  = ["test_only.py"]
         accept = "true"
         brief  = "write tests"
-    """))
+    """)
+    )
     baseline = Baseline.capture(charter, str(tmp_path))
 
     check = put_the_stub_back(charter.workers[0], baseline, str(tmp_path))
@@ -223,13 +228,15 @@ def test_a_worker_that_writes_only_tests_says_so_rather_than_passing(tmp_path):
 
 
 def test_a_worker_with_no_acceptance_check_cannot_be_checked_this_way(tmp_path):
-    charter = parse_charter(textwrap.dedent("""
+    charter = parse_charter(
+        textwrap.dedent("""
         objective = "x"
         [[workers]]
         id     = "a"
         writes = ["work.py"]
         brief  = "go"
-    """))
+    """)
+    )
     baseline = Baseline.capture(charter, str(tmp_path))
 
     check = put_the_stub_back(charter.workers[0], baseline, str(tmp_path))
@@ -262,13 +269,15 @@ def test_a_vacuous_suite_does_not_review_clean(tmp_path):
 
 def test_an_uncheckable_worker_does_not_review_clean(tmp_path):
     """A check that could not run is not a check that passed."""
-    charter = parse_charter(textwrap.dedent("""
+    charter = parse_charter(
+        textwrap.dedent("""
         objective = "x"
         [[workers]]
         id     = "a"
         writes = ["work.py"]
         brief  = "go"
-    """))
+    """)
+    )
     baseline = Baseline.capture(charter, str(tmp_path))
 
     assert not review_worker(charter.workers[0], baseline, str(tmp_path)).clean
@@ -311,14 +320,16 @@ def test_a_single_file_ticket_without_tests_is_still_checkable(tmp_path):
     honest ticket."""
     (tmp_path / "work.py").write_text(_STUB)
     (tmp_path / "test_work.py").write_text(_TESTS)
-    charter = parse_charter(textwrap.dedent(f"""
+    charter = parse_charter(
+        textwrap.dedent(f"""
         objective = "x"
         [[workers]]
         id     = "a"
         writes = ["work.py"]
         accept = '"{sys.executable}" -m pytest test_work.py -q'
         brief  = "go"
-    """))
+    """)
+    )
     baseline = Baseline.capture(charter, str(tmp_path))
     (tmp_path / "work.py").write_text(_REAL)
 

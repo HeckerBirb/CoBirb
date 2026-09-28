@@ -13,6 +13,7 @@ install starts with. Everything else is created explicitly through
 ``/memories`` in the TUI — this module has no opinion about that surface,
 only about the files themselves.
 """
+
 from __future__ import annotations
 
 import os
@@ -160,7 +161,7 @@ def _write_plain(path: str, facts: list[str]) -> None:
 
 
 def _read_plain(path: str) -> list[str]:
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         text = fh.read()
     return _parse_facts(text)
 
@@ -183,7 +184,7 @@ def _parse_facts(text: str) -> list[str]:
     return facts
 
 
-def discover_catalogues(directory: "str | None" = None) -> list[CatalogueFile]:
+def discover_catalogues(directory: str | None = None) -> list[CatalogueFile]:
     """List every catalogue in ``directory`` (default: ``paths.memories_dir()``),
     without opening any of them. Returns ``[]`` for a directory that doesn't
     exist yet, the same convention ``session.discover_sessions`` uses."""
@@ -202,15 +203,15 @@ def discover_catalogues(directory: "str | None" = None) -> list[CatalogueFile]:
     return sorted(rows, key=lambda row: row.name)
 
 
-def _existing_path(directory: str, name: str) -> "str | None":
-    for suffix, encrypted in ((_PLAIN_SUFFIX, False), (_ENCRYPTED_SUFFIX, True)):
+def _existing_path(directory: str, name: str) -> str | None:
+    for suffix, _encrypted in ((_PLAIN_SUFFIX, False), (_ENCRYPTED_SUFFIX, True)):
         candidate = os.path.join(directory, f"{name}{suffix}")
         if os.path.isfile(candidate):
             return candidate
     return None
 
 
-def create(directory: str, name: str, crypto: Any, password: "str | None") -> MemoryCatalogue:
+def create(directory: str, name: str, crypto: Any, password: str | None) -> MemoryCatalogue:
     """Create a new, empty catalogue named ``name``.
 
     ``password`` empty or ``None`` makes it plaintext; anything else
@@ -230,7 +231,7 @@ def create(directory: str, name: str, crypto: Any, password: "str | None") -> Me
     return MemoryCatalogue(name=name, path=path, encrypted=False, facts=[])
 
 
-def load(path: str, crypto: Any, password: "str | None" = None) -> MemoryCatalogue:
+def load(path: str, crypto: Any, password: str | None = None) -> MemoryCatalogue:
     """Open an existing catalogue. ``password`` is required iff the file is
     encrypted; raises ``CatalogueError`` on a wrong password or a corrupt
     file, the same way a session does."""
@@ -243,7 +244,7 @@ def load(path: str, crypto: Any, password: "str | None" = None) -> MemoryCatalog
             blob = fh.read()
         try:
             text = crypto.decrypt(blob, password or "")
-        except Exception as exc:  # noqa: BLE001 - wrong password/corruption, not fatal
+        except Exception as exc:  # wrong password/corruption, not fatal
             raise CatalogueError(f"could not open '{catalogue_name}' — {exc}") from exc
         return MemoryCatalogue(
             name=catalogue_name, path=path, encrypted=True, facts=_parse_facts(text), password=password

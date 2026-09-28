@@ -27,6 +27,7 @@ tell CoBirb what it is allowed to do.
 
 Model/provider settings remain opt-in and never default to anything networked.
 """
+
 from __future__ import annotations
 
 import json
@@ -52,7 +53,7 @@ def _load(path: str | None) -> dict[str, Any]:
     if not path or not os.path.isfile(path):
         return {}
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
         print(f"cobirb: ignoring {path} — {exc}", file=sys.stderr)

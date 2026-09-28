@@ -8,6 +8,7 @@ shape of what they return is a contract in its own right: a Panel handed to
 ``RichLog.write()`` has to be a Panel, not something that only happens to
 look right once printed.
 """
+
 from __future__ import annotations
 
 import io
@@ -142,13 +143,19 @@ def test_tool_call_panel_falls_back_to_plain_content_when_there_is_no_diff():
     assert "no change" in _printed(panel)
 
 
-@pytest.mark.parametrize("ok, content", [
-    (False, "Permission denied: tool 'shell' is not permitted."),
-    (True, "exit=0\nhello"),
-])
+@pytest.mark.parametrize(
+    "ok, content",
+    [
+        (False, "Permission denied: tool 'shell' is not permitted."),
+        (True, "exit=0\nhello"),
+    ],
+)
 def test_a_shell_panel_shows_the_command_above_its_result(ok, content):
-    printed = _printed(render.build_tool_call_panel(
-        "shell", {"command": "gcc -Wall x.c"}, ToolResult(ok=ok, content=content)))
+    printed = _printed(
+        render.build_tool_call_panel(
+            "shell", {"command": "gcc -Wall x.c"}, ToolResult(ok=ok, content=content)
+        )
+    )
 
     assert "$ gcc -Wall x.c" in printed and content.splitlines()[-1] in printed
 
@@ -157,7 +164,9 @@ def test_a_shell_panel_shows_the_command_above_its_result(ok, content):
 def test_a_file_tool_panel_shows_the_path_above_its_result(tool):
     refusal = f"Permission denied: tool '{tool}' is not permitted."
 
-    printed = _printed(render.build_tool_call_panel(tool, {"path": "src/x.py"}, ToolResult(ok=False, content=refusal)))
+    printed = _printed(
+        render.build_tool_call_panel(tool, {"path": "src/x.py"}, ToolResult(ok=False, content=refusal))
+    )
 
     assert "src/x.py" in printed and refusal in printed
 
@@ -165,7 +174,9 @@ def test_a_file_tool_panel_shows_the_path_above_its_result(tool):
 def test_a_long_shell_command_is_shown_bounded_and_says_so():
     script = "python - <<'EOF'\n" + "\n".join(f"print({i})" for i in range(40)) + "\nEOF"
 
-    printed = _printed(render.build_tool_call_panel("shell", {"command": script}, ToolResult(ok=False, content="no")))
+    printed = _printed(
+        render.build_tool_call_panel("shell", {"command": script}, ToolResult(ok=False, content="no"))
+    )
 
     assert "print(3)" in printed and "print(39)" not in printed
     assert "more lines)" in printed
@@ -337,16 +348,21 @@ def test_the_history_divider_names_what_was_restored():
 def _charter(writes, accept="pytest"):
     from cobirb.flock.charter import parse_charter
 
-    return parse_charter(f'objective = "double it"\n[[workers]]\nid = "a"\nwrites = {writes!r}\n'
-                         f'accept = "{accept}"\nbrief = "go"')
+    return parse_charter(
+        f'objective = "double it"\n[[workers]]\nid = "a"\nwrites = {writes!r}\n'
+        f'accept = "{accept}"\nbrief = "go"'
+    )
 
 
-@pytest.mark.parametrize("earlier, writes, accept, new", [
-    ([], ["a.py"], "pytest", []),                                   # a first charter marks nothing
-    ([["a.py"]], ["a.py"], "pytest", []),                           # all approved before
-    ([["a.py"]], ["a.py"], "pytest -x", ["pytest -x NEW"]),         # a new command
-    ([["a.py"]], ["a.py", "extra.py"], "pytest", ["extra.py NEW"]),  # a new file
-])
+@pytest.mark.parametrize(
+    "earlier, writes, accept, new",
+    [
+        ([], ["a.py"], "pytest", []),  # a first charter marks nothing
+        ([["a.py"]], ["a.py"], "pytest", []),  # all approved before
+        ([["a.py"]], ["a.py"], "pytest -x", ["pytest -x NEW"]),  # a new command
+        ([["a.py"]], ["a.py", "extra.py"], "pytest", ["extra.py NEW"]),  # a new file
+    ],
+)
 def test_a_charter_marks_what_no_earlier_approval_covered(earlier, writes, accept, new):
     plain = render.build_charter(_charter(writes, accept), [_charter(w) for w in earlier]).plain
 

@@ -15,6 +15,7 @@ is sent to stderr instead, so it can never corrupt the conversation.
 It runs the ordinary ``run_worker`` — the same brief, the same policy built
 from the ticket's scope, the same checkpoints and checks as a local Worker Birb.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -43,7 +44,7 @@ class _Channel:
             self._out.flush()
 
 
-def _io(channel: _Channel, answers: "dict[int, queue.Queue]", answers_lock: threading.Lock):
+def _io(channel: _Channel, answers: dict[int, queue.Queue], answers_lock: threading.Lock):
     from ..runtime.headless import HeadlessIO
     from ..typing.spi import DECISION_DENY, ApprovalOutcome
 
@@ -60,8 +61,15 @@ def _io(channel: _Channel, answers: "dict[int, queue.Queue]", answers_lock: thre
 
         def render_tool_call(self, tool_name: str, arguments: dict[str, Any], result: Any) -> None:
             content = str(getattr(result, "content", result))
-            channel.emit({"kind": "tool_call", "tool": tool_name, "arguments": arguments,
-                          "ok": bool(getattr(result, "ok", True)), "content": content[:_MAX_CONTENT]})
+            channel.emit(
+                {
+                    "kind": "tool_call",
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "ok": bool(getattr(result, "ok", True)),
+                    "content": content[:_MAX_CONTENT],
+                }
+            )
 
         def render_notice(self, text: str) -> None:
             channel.emit({"kind": "notice", "text": text})
@@ -70,11 +78,18 @@ def _io(channel: _Channel, answers: "dict[int, queue.Queue]", answers_lock: thre
             with answers_lock:
                 self._next += 1
                 req_id = self._next
-                waiting: "queue.Queue" = queue.Queue()
+                waiting: queue.Queue = queue.Queue()
                 answers[req_id] = waiting
-            channel.emit({"kind": "approval", "req_id": req_id, "tool": request.tool_name,
-                          "arguments": request.arguments, "scope": request.scope,
-                          "preview": request.preview})
+            channel.emit(
+                {
+                    "kind": "approval",
+                    "req_id": req_id,
+                    "tool": request.tool_name,
+                    "arguments": request.arguments,
+                    "scope": request.scope,
+                    "preview": request.preview,
+                }
+            )
             try:
                 answer = waiting.get()
             finally:
@@ -82,8 +97,10 @@ def _io(channel: _Channel, answers: "dict[int, queue.Queue]", answers_lock: thre
                     answers.pop(req_id, None)
             if not isinstance(answer, dict):
                 return ApprovalOutcome(decision=DECISION_DENY)
-            return ApprovalOutcome(decision=str(answer.get("decision") or DECISION_DENY),
-                                   instruction=str(answer.get("instruction") or ""))
+            return ApprovalOutcome(
+                decision=str(answer.get("decision") or DECISION_DENY),
+                instruction=str(answer.get("instruction") or ""),
+            )
 
     return JobIO()
 
@@ -95,11 +112,11 @@ def _grants(channel: _Channel):
         """A session grant made here is reported home, where it reaches every
         other agent; one arriving from home is applied without echoing it."""
 
-        def grant(self, tool_name: str, arguments: "dict[str, Any] | None" = None) -> None:
+        def grant(self, tool_name: str, arguments: dict[str, Any] | None = None) -> None:
             super().grant(tool_name, arguments)
             channel.emit({"kind": "grant", "tool": tool_name, "arguments": dict(arguments or {})})
 
-        def apply(self, tool_name: str, arguments: "dict[str, Any] | None" = None) -> None:
+        def apply(self, tool_name: str, arguments: dict[str, Any] | None = None) -> None:
             SessionGrants.grant(self, tool_name, arguments)
 
     return ReportingGrants()
@@ -119,8 +136,9 @@ def _model(order: dict[str, Any], channel: _Channel):
     if model.get("mode") == "local":
         from ..plugins.core.openai import OpenAICompatibleProvider
 
-        return None, OpenAICompatibleProvider(model=str(model.get("name", "")),
-                                              base_url=str(model.get("endpoint", "")))
+        return None, OpenAICompatibleProvider(
+            model=str(model.get("name", "")), base_url=str(model.get("endpoint", ""))
+        )
     from .relay import RelayProvider
 
     relay = RelayProvider(channel.emit, model.get("info") or {})
@@ -136,7 +154,7 @@ def run(order: dict[str, Any], workspace: str, messages, out) -> None:
     from .osnames import local_os
 
     channel = _Channel(out)
-    answers: "dict[int, queue.Queue]" = {}
+    answers: dict[int, queue.Queue] = {}
     answers_lock = threading.Lock()
     autopilot = threading.Event()
     if order.get("refuse"):
@@ -188,8 +206,14 @@ def run(order: dict[str, Any], workspace: str, messages, out) -> None:
     )
     _write_config(order.get("config") or {})
     report = run_worker(
-        worker, workspace, config=Config(), io=_io(channel, answers, answers_lock),
-        canceller=canceller, grants=grants, refuse=autopilot.is_set, model=model,
+        worker,
+        workspace,
+        config=Config(),
+        io=_io(channel, answers, answers_lock),
+        canceller=canceller,
+        grants=grants,
+        refuse=autopilot.is_set,
+        model=model,
         max_turns=int(order.get("max_turns") or 30),
     )
     channel.emit({"kind": "done", "report": dataclasses.asdict(report)})

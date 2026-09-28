@@ -5,6 +5,7 @@ is here is the error contract, which is the part a screen can't easily
 provoke: every fallible method answers with a sentence to show the user
 rather than raising, and "" means it worked.
 """
+
 from __future__ import annotations
 
 import pytest

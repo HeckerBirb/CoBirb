@@ -1,4 +1,5 @@
 """Tests for custom commands — a prompt you wrote down, invoked by name."""
+
 from __future__ import annotations
 
 import os

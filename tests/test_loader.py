@@ -1,4 +1,5 @@
 """Tests for the plugin loader."""
+
 from __future__ import annotations
 
 import types
@@ -78,6 +79,7 @@ def test_is_subclass_false_for_identical_class():
 
 def test_is_subclass_false_for_instances():
     from cobirb.plugins.core.crypto import AesGcmScryptSessionCrypto
+
     assert not _is_subclass(AesGcmScryptSessionCrypto(), object)
 
 
@@ -171,9 +173,7 @@ class _PlainTool(Tool):
 def test_a_plugin_declaring_no_spi_version_is_taken_as_version_one(monkeypatch, tmp_path):
     """Everything written before the freeze existed, and every plugin whose
     author never thinks about this, has to keep working."""
-    discovered, errors = _discover_only(
-        monkeypatch, tmp_path, _entry_point_serving(_PlainTool)
-    )
+    discovered, errors = _discover_only(monkeypatch, tmp_path, _entry_point_serving(_PlainTool))
 
     assert discovered == {"tool:versioned-plugin": _PlainTool}
     assert errors == {}
@@ -187,9 +187,7 @@ def test_a_plugin_from_the_future_is_refused_with_an_actionable_message(monkeypa
     class _FromTheFuture(_PlainTool):
         COBIRB_SPI = 99
 
-    discovered, errors = _discover_only(
-        monkeypatch, tmp_path, _entry_point_serving(_FromTheFuture)
-    )
+    discovered, errors = _discover_only(monkeypatch, tmp_path, _entry_point_serving(_FromTheFuture))
 
     assert discovered == {}
     assert "upgrade CoBirb" in errors["entry-point:versioned-plugin"]
@@ -202,9 +200,7 @@ def test_a_non_integer_spi_declaration_is_a_mistake_not_a_shrug(monkeypatch, tmp
     class _Stringly(_PlainTool):
         COBIRB_SPI = "1"
 
-    discovered, errors = _discover_only(
-        monkeypatch, tmp_path, _entry_point_serving(_Stringly)
-    )
+    discovered, errors = _discover_only(monkeypatch, tmp_path, _entry_point_serving(_Stringly))
 
     assert discovered == {}
     assert "must be an integer" in errors["entry-point:versioned-plugin"]

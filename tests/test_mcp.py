@@ -6,6 +6,7 @@ subprocess that can die halfway — and none of that is exercised by a double
 that returns dictionaries. It costs a process per test and buys tests that
 would catch a wire-format mistake.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,7 +14,6 @@ import sys
 import textwrap
 
 import pytest
-
 from conftest import write_config
 
 from cobirb.config import Config
@@ -21,7 +21,7 @@ from cobirb.mcp import McpError, StdioClient, connect_servers, tool_name_for
 from cobirb.orchestrator import build_default_policy
 
 # A minimal but genuine MCP server: initialize, tools/list, tools/call.
-_SERVER = '''
+_SERVER = """
 import json, os, sys
 
 TOOLS = [
@@ -65,14 +65,14 @@ for line in sys.stdin:
                                                "text": arguments.get("text", "")}]})
     elif method and method.startswith("notifications/"):
         continue
-'''
+"""
 
-_SILENT_SERVER = '''
+_SILENT_SERVER = """
 import sys, time
 sys.stderr.write("could not find the database\\n")
 sys.stderr.flush()
 time.sleep(30)
-'''
+"""
 
 
 def _server(tmp_path, name="server.py", source=_SERVER) -> str:
@@ -220,9 +220,7 @@ def test_a_server_can_be_given_exactly_what_it_needs(tmp_path):
 
 def test_inheriting_the_environment_is_possible_but_asked_for(tmp_path, monkeypatch):
     monkeypatch.setenv("SOME_TOKEN", "x")
-    fresh = StdioClient(
-        name="fixture", command=sys.executable, args=[_server(tmp_path)], inherit_env=True
-    )
+    fresh = StdioClient(name="fixture", command=sys.executable, args=[_server(tmp_path)], inherit_env=True)
     fresh.start()
 
     _, text = fresh.call_tool("leak", {})
@@ -280,9 +278,7 @@ def test_calling_a_tool_whose_server_has_died_fails_the_call_not_the_run(tmp_pat
 def test_a_server_that_will_not_start_is_an_issue_and_not_an_exception(tmp_path):
     """The session is worth more than any one server — but a silent absence
     would present as the model inexplicably lacking a configured tool."""
-    config = _user_config(
-        tmp_path, {"mcp_servers": {"broken": {"command": str(tmp_path / "not-here")}}}
-    )
+    config = _user_config(tmp_path, {"mcp_servers": {"broken": {"command": str(tmp_path / "not-here")}}})
 
     tools, clients, issues = connect_servers(config, str(tmp_path))
 

@@ -12,8 +12,10 @@ workspace deleted. A dropped connection alone costs nothing — the job keeps
 going, its events are kept, and the main machine picks up where it left off
 (``resume``).
 """
+
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -28,7 +30,8 @@ import tempfile
 import threading
 import time
 import uuid
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from .. import __version__
 from ..runtime.verify import DEFAULT_TIMEOUT_SECONDS, run_verification
@@ -64,7 +67,7 @@ def _safe_path(root: str, relative: str) -> str:
     return target
 
 
-def _write_files(root: str, files: "dict[str, bytes]") -> None:
+def _write_files(root: str, files: dict[str, bytes]) -> None:
     for relative, data in files.items():
         target = _safe_path(root, relative)
         os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -80,14 +83,13 @@ def _kill_tree(process: subprocess.Popen) -> None:
         if os.name == "posix":
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
         else:
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
-                           capture_output=True, check=False)
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True, check=False
+            )
     except (OSError, ProcessLookupError):
         pass
-    try:
+    with contextlib.suppress(OSError):
         process.kill()
-    except OSError:
-        pass
 
 
 class _Job:
@@ -148,23 +150,33 @@ def summarise(message: dict[str, Any]) -> str | None:
     else:
         line = kind
     line = " ".join(line.split())
-    return line if len(line) <= _TRACE_CHARS else line[:_TRACE_CHARS - 1] + "…"
+    return line if len(line) <= _TRACE_CHARS else line[: _TRACE_CHARS - 1] + "…"
 
 
 class RemoteWorkerServer:
     """The server. ``say`` is where it talks to the person at this machine;
     ``verbose`` has it say a line for every message and job event too."""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 8443, *, directory: str | None = None,
-                 say: Callable[[str], None] = print, halt_after: float = protocol.HALT_AFTER_SECONDS,
-                 python: str = sys.executable, verbose: bool = False) -> None:
+    def __init__(
+        self,
+        host: str = "0.0.0.0",
+        port: int = 8443,
+        *,
+        directory: str | None = None,
+        say: Callable[[str], None] = print,
+        halt_after: float = protocol.HALT_AFTER_SECONDS,
+        python: str = sys.executable,
+        verbose: bool = False,
+    ) -> None:
         self.host, self.port = host, port
         self._say = say
         self._verbose = verbose
         self._halt_after = halt_after
         self._python = python
         self._tokens = IssuedTokens(os.path.join(directory, "tokens.json") if directory else None)
-        self._cert, self._key = ensure_certificate(directory, (host,) if host not in ("0.0.0.0", "::") else ())
+        self._cert, self._key = ensure_certificate(
+            directory, (host,) if host not in ("0.0.0.0", "::") else ()
+        )
         self.fingerprint = certificate_fingerprint(self._cert)
         self._job: _Job | None = None
         self._lock = threading.Lock()
@@ -185,8 +197,9 @@ class RemoteWorkerServer:
         # the loopback tests. Nothing here resumes a session, so none is lost.
         context.num_tickets = 0
         threading.Thread(target=self._watchdog, daemon=True, name="remote-watchdog").start()
-        with serve(self._handle, self.host, self.port, ssl=context,
-                   max_size=protocol.MAX_MESSAGE_BYTES) as server:
+        with serve(
+            self._handle, self.host, self.port, ssl=context, max_size=protocol.MAX_MESSAGE_BYTES
+        ) as server:
             self._server = server
             self.port = server.socket.getsockname()[1]
             self._say(f"CoBirb remote worker ({local_os()}) listening on {self.host}:{self.port}")
@@ -238,14 +251,20 @@ class RemoteWorkerServer:
         except Exception:  # noqa: BLE001 - a peer that cannot say hello is simply not served
             return
         if hello.get("type") != "hello" or hello.get("protocol") != protocol.PROTOCOL_VERSION:
-            send("error", error=f"this remote speaks protocol {protocol.PROTOCOL_VERSION}; "
-                                "update CoBirb on one side")
+            send(
+                "error",
+                error=f"this remote speaks protocol {protocol.PROTOCOL_VERSION}; update CoBirb on one side",
+            )
             return
         token = hello.get("token")
         authenticated = self._tokens.valid(token)
-        send("hello", protocol=protocol.PROTOCOL_VERSION, facts=machine_facts(),
-             authenticated=authenticated,
-             state=self._state_for(hashlib.sha256(str(token).encode()).hexdigest()))
+        send(
+            "hello",
+            protocol=protocol.PROTOCOL_VERSION,
+            facts=machine_facts(),
+            authenticated=authenticated,
+            state=self._state_for(hashlib.sha256(str(token).encode()).hexdigest()),
+        )
         if not authenticated:
             token = self._pair(connection, send)
             if not token:
@@ -311,8 +330,11 @@ class RemoteWorkerServer:
         elif kind == "run":
             scratch = tempfile.mkdtemp(prefix="cobirb-check-")
             try:
-                result = run_verification(str(message.get("command", "")), scratch,
-                                          int(message.get("seconds") or DEFAULT_TIMEOUT_SECONDS))
+                result = run_verification(
+                    str(message.get("command", "")),
+                    scratch,
+                    int(message.get("seconds") or DEFAULT_TIMEOUT_SECONDS),
+                )
             finally:
                 shutil.rmtree(scratch, ignore_errors=True)
             reply(message, **_result(result))
@@ -370,8 +392,13 @@ class RemoteWorkerServer:
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         job.process = subprocess.Popen(
             [self._python, "-m", "cobirb.remote.job", workspace],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8",
-            env=env, cwd=workspace, **kwargs,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            cwd=workspace,
+            **kwargs,
         )
         job.home = home  # type: ignore[attr-defined]
         assert job.process.stdin is not None
@@ -414,10 +441,8 @@ class RemoteWorkerServer:
                     job.done = True
             self._trace("job", {"type": "event", "event": event})
             if sink is not None:
-                try:
+                with contextlib.suppress(Exception):  # the connection dropped; kept for resume
                     sink(protocol.encode("event", **record))
-                except Exception:  # noqa: BLE001 - the connection dropped; kept for resume
-                    pass
             if event.get("kind") == "done":
                 self._say(f"Ticket '{job.order.get('worker', {}).get('id', '?')}' finished.")
 
@@ -426,7 +451,9 @@ class RemoteWorkerServer:
         if process is None or process.poll() is not None or process.stdin is None:
             return
         try:
-            process.stdin.write(protocol.encode(message["type"], **{k: v for k, v in message.items() if k != "type"}) + "\n")
+            process.stdin.write(
+                protocol.encode(message["type"], **{k: v for k, v in message.items() if k != "type"}) + "\n"
+            )
             process.stdin.flush()
         except (OSError, ValueError):
             pass
@@ -447,8 +474,11 @@ class RemoteWorkerServer:
             return {"ok": False, "output": "", "error": str(exc)}
         try:
             _write_files(job.workspace, overrides)
-            result = run_verification(str(message.get("command", "")), job.workspace,
-                                      int(message.get("seconds") or DEFAULT_TIMEOUT_SECONDS))
+            result = run_verification(
+                str(message.get("command", "")),
+                job.workspace,
+                int(message.get("seconds") or DEFAULT_TIMEOUT_SECONDS),
+            )
         finally:
             for target, content in saved.items():
                 try:
@@ -464,10 +494,8 @@ class RemoteWorkerServer:
     def _end(self, job: _Job) -> None:
         if job.process is not None:
             _kill_tree(job.process)
-            try:
+            with contextlib.suppress(subprocess.TimeoutExpired):
                 job.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                pass
         shutil.rmtree(job.workspace, ignore_errors=True)
         home = getattr(job, "home", "")
         if home:
@@ -482,14 +510,20 @@ class RemoteWorkerServer:
             with self._lock:
                 job = self._job
             if job is not None and time.monotonic() - job.last_heartbeat > self._halt_after:
-                self._say(f"No heartbeat from the main CoBirb for {int(self._halt_after)} s: "
-                          "halting the job and discarding its work.")
+                self._say(
+                    f"No heartbeat from the main CoBirb for {int(self._halt_after)} s: "
+                    "halting the job and discarding its work."
+                )
                 self._end(job)
 
 
 def _result(result) -> dict[str, Any]:
-    return {"ok": bool(result.ok), "output": result.output, "timed_out": bool(result.timed_out),
-            "error": result.error or ""}
+    return {
+        "ok": bool(result.ok),
+        "output": result.output,
+        "timed_out": bool(result.timed_out),
+        "error": result.error or "",
+    }
 
 
 def main(listen: str = "0.0.0.0:8443", verbose: bool = False) -> int:
@@ -497,8 +531,9 @@ def main(listen: str = "0.0.0.0:8443", verbose: bool = False) -> int:
     host, _, port = listen.rpartition(":")
     # Flushed line by line: the pairing code has to appear the moment it is
     # made, also when this runs under a service manager or a pipe.
-    server = RemoteWorkerServer(host or "0.0.0.0", int(port or 8443),
-                                say=lambda line: print(line, flush=True), verbose=verbose)
+    server = RemoteWorkerServer(
+        host or "0.0.0.0", int(port or 8443), say=lambda line: print(line, flush=True), verbose=verbose
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

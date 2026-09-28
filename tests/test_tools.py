@@ -1,4 +1,5 @@
 """Tests for the built-in tools and tool registry."""
+
 from __future__ import annotations
 
 import difflib
@@ -9,14 +10,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from cobirb.policy import AuditLog, Policy
-from cobirb.typing.spi import ToolCall
 from cobirb.plugins.core.tools import (
     ApplyPatchTool,
     CobirbTool,
     EditFileTool,
-    GrepTool,
     GlobTool,
+    GrepTool,
     ListDirTool,
     ReadFileTool,
     ShellTool,
@@ -25,6 +24,9 @@ from cobirb.plugins.core.tools import (
     WriteFileTool,
     _shell_timeout,
 )
+from cobirb.policy import AuditLog, Policy
+from cobirb.typing.spi import ToolCall
+
 
 def _mk_tool(cls):
     return cls()
@@ -45,9 +47,7 @@ def test_read_file_error(tmp_path):
 
 
 def test_write_file(tmp_path):
-    result = _mk_tool(WriteFileTool).execute(
-        {"path": str(tmp_path / "sub" / "new.txt"), "content": "data"}
-    )
+    result = _mk_tool(WriteFileTool).execute({"path": str(tmp_path / "sub" / "new.txt"), "content": "data"})
     assert result.ok
     assert (tmp_path / "sub" / "new.txt").read_text() == "data"
 
@@ -63,9 +63,7 @@ def test_edit_file_success(tmp_path):
 def test_edit_file_no_match(tmp_path):
     f = tmp_path / "a.txt"
     f.write_text("keep")
-    result = _mk_tool(EditFileTool).execute(
-        {"path": str(f), "old_str": "missing", "new_str": "x"}
-    )
+    result = _mk_tool(EditFileTool).execute({"path": str(f), "old_str": "missing", "new_str": "x"})
     assert not result.ok
     assert "not found" in result.content
 
@@ -179,9 +177,7 @@ def test_glob_include_ignored_opts_back_in(tmp_path):
     (tmp_path / "node_modules" / "lib").mkdir(parents=True)
     (tmp_path / "node_modules" / "lib" / "vendored.py").write_text("x")
 
-    result = _mk_tool(GlobTool).execute(
-        {"pattern": str(tmp_path / "**" / "*.py"), "include_ignored": True}
-    )
+    result = _mk_tool(GlobTool).execute({"pattern": str(tmp_path / "**" / "*.py"), "include_ignored": True})
     assert result.ok
     assert "vendored.py" in result.content
 
@@ -202,9 +198,7 @@ def test_grep_include_ignored_opts_back_in(tmp_path):
     (tmp_path / "node_modules" / "lib").mkdir(parents=True)
     (tmp_path / "node_modules" / "lib" / "vendored.txt").write_text("needle")
 
-    result = _mk_tool(GrepTool).execute(
-        {"pattern": "needle", "path": str(tmp_path), "include_ignored": True}
-    )
+    result = _mk_tool(GrepTool).execute({"pattern": "needle", "path": str(tmp_path), "include_ignored": True})
     assert result.ok
     assert "vendored.txt" in result.content
 
@@ -360,8 +354,6 @@ def test_registry_custom_tool_extension():
     registry.register(MyTool())
     assert registry.is_known("my_tool")
     assert "my_tool" in registry.names()
-
-
 
 
 # --------------------------------------------------------------------------- #
@@ -629,9 +621,7 @@ def test_edit_preview_says_so_when_the_edit_would_not_apply(tmp_path):
     """Better to learn the old_str doesn't match while deciding than after."""
     (tmp_path / "a.py").write_text("something else\n")
 
-    preview = EditFileTool(str(tmp_path)).preview(
-        {"path": "a.py", "old_str": "not here", "new_str": "x"}
-    )
+    preview = EditFileTool(str(tmp_path)).preview({"path": "a.py", "old_str": "not here", "new_str": "x"})
 
     assert "will fail" in preview
 
@@ -701,9 +691,7 @@ def test_list_dir_pages_a_huge_directory(tmp_path):
     assert "more follow" in result.content
     assert len(result.content.splitlines()) < 1100
 
-    rest = ListDirTool(str(tmp_path)).execute(
-        {"path": "many", "offset": result.meta["next_offset"]}
-    )
+    rest = ListDirTool(str(tmp_path)).execute({"path": "many", "offset": result.meta["next_offset"]})
     assert rest.ok and rest.meta["total"] == 2500
 
 
@@ -778,9 +766,7 @@ def test_shell_output_keeps_both_ends_when_it_overflows(tmp_path):
         'for i in range(200000): print("noise", i)\n'
         'print("THE VERY LAST LINE")\n'
     )
-    result = ShellTool(str(tmp_path)).execute(
-        {"command": f'"{sys.executable}" -c \'{script}\''}
-    )
+    result = ShellTool(str(tmp_path)).execute({"command": f"\"{sys.executable}\" -c '{script}'"})
 
     assert len(result.content) < 200_000
     assert "THE VERY FIRST LINE" in result.content
@@ -939,8 +925,9 @@ def test_replace_all_changes_every_occurrence(tmp_path):
 
 def test_enough_context_makes_an_ambiguous_edit_unique(tmp_path):
     text = "def a():\n    return 200\n\ndef b():\n    return 200\n"
-    result, after = _edit(tmp_path, text, old_str="def b():\n    return 200",
-                          new_str="def b():\n    return 204")
+    result, after = _edit(
+        tmp_path, text, old_str="def b():\n    return 200", new_str="def b():\n    return 204"
+    )
 
     assert result.ok
     assert after == "def a():\n    return 200\n\ndef b():\n    return 204\n"
@@ -956,8 +943,9 @@ def test_trailing_whitespace_and_crlf_differences_still_match(tmp_path):
 
 def test_a_dropped_indent_is_matched_and_put_back(tmp_path):
     text = "class C:\n    def f(self):\n        return 1\n"
-    result, after = _edit(tmp_path, text, old_str="def f(self):\n    return 1",
-                          new_str="def f(self):\n    return 2")
+    result, after = _edit(
+        tmp_path, text, old_str="def f(self):\n    return 1", new_str="def f(self):\n    return 2"
+    )
 
     assert result.ok
     assert after == "class C:\n    def f(self):\n        return 2\n"
@@ -994,7 +982,9 @@ def test_writing_python_that_does_not_parse_is_flagged(tmp_path):
 def test_an_edit_that_breaks_json_is_flagged(tmp_path):
     (tmp_path / "s.json").write_text('{"a": 1, "b": 2}\n')
 
-    result = EditFileTool(str(tmp_path)).execute({"path": "s.json", "old_str": '"b": 2', "new_str": '"b": 2,'})
+    result = EditFileTool(str(tmp_path)).execute(
+        {"path": "s.json", "old_str": '"b": 2', "new_str": '"b": 2,'}
+    )
 
     assert "no longer valid JSON" in result.content
 
@@ -1015,27 +1005,30 @@ def test_files_nothing_can_check_carry_no_warning(tmp_path):
 # apply_patch: the *** Begin Patch format
 # --------------------------------------------------------------------------- #
 _HANDLERS = (
-    "def handle_create(request):\n    return {\"code\": 200}\n\n"
-    "def handle_delete(request):\n    return {\"code\": 200}\n"
+    'def handle_create(request):\n    return {"code": 200}\n\n'
+    'def handle_delete(request):\n    return {"code": 200}\n'
 )
 
 
 def test_a_begin_patch_is_applied_where_its_anchor_says(tmp_path):
     """The shape gpt-oss sends — no path argument, no line numbers."""
     (tmp_path / "h.py").write_text(_HANDLERS)
-    patch = ("*** Begin Patch\n*** Update File: h.py\n@@ def handle_delete(request):\n"
-             "-    return {\"code\": 200}\n+    return {\"code\": 204}\n*** End Patch")
+    patch = (
+        "*** Begin Patch\n*** Update File: h.py\n@@ def handle_delete(request):\n"
+        '-    return {"code": 200}\n+    return {"code": 204}\n*** End Patch'
+    )
 
     result = ApplyPatchTool(str(tmp_path)).execute({"patch": patch})
 
     assert result.ok, result.content
     assert (tmp_path / "h.py").read_text() == _HANDLERS.replace(
-        'delete(request):\n    return {"code": 200}', 'delete(request):\n    return {"code": 204}')
+        'delete(request):\n    return {"code": 200}', 'delete(request):\n    return {"code": 204}'
+    )
 
 
 def test_an_unanchored_hunk_that_matches_twice_is_refused(tmp_path):
     (tmp_path / "h.py").write_text(_HANDLERS)
-    patch = "*** Begin Patch\n*** Update File: h.py\n@@\n-    return {\"code\": 200}\n+    return {\"code\": 204}\n*** End Patch"
+    patch = '*** Begin Patch\n*** Update File: h.py\n@@\n-    return {"code": 200}\n+    return {"code": 204}\n*** End Patch'
 
     result = ApplyPatchTool(str(tmp_path)).execute({"patch": patch})
 
@@ -1054,8 +1047,10 @@ def test_a_begin_patch_can_add_a_file(tmp_path):
 def test_a_patch_touching_two_files_is_refused_whole(tmp_path):
     (tmp_path / "a.py").write_text("a = 1\n")
     (tmp_path / "b.py").write_text("b = 1\n")
-    patch = ("*** Begin Patch\n*** Update File: a.py\n@@\n-a = 1\n+a = 2\n"
-             "*** Update File: b.py\n@@\n-b = 1\n+b = 2\n*** End Patch")
+    patch = (
+        "*** Begin Patch\n*** Update File: a.py\n@@\n-a = 1\n+a = 2\n"
+        "*** Update File: b.py\n@@\n-b = 1\n+b = 2\n*** End Patch"
+    )
 
     result = ApplyPatchTool(str(tmp_path)).execute({"patch": patch})
 
@@ -1078,8 +1073,15 @@ def test_the_checklist_replaces_itself_and_reports_progress(tmp_path):
     from cobirb.plugins.core.tools import TodoTool
 
     tool = TodoTool(str(tmp_path))
-    tool.execute({"items": [{"text": "read", "status": "done"}, {"text": "edit", "status": "in_progress"},
-                            {"text": "test"}]})
+    tool.execute(
+        {
+            "items": [
+                {"text": "read", "status": "done"},
+                {"text": "edit", "status": "in_progress"},
+                {"text": "test"},
+            ]
+        }
+    )
     result = tool.execute({"items": [{"text": "read", "status": "done"}, {"text": "edit", "status": "done"}]})
 
     assert result.ok
@@ -1090,16 +1092,18 @@ def test_the_checklist_replaces_itself_and_reports_progress(tmp_path):
 def test_a_sloppy_checklist_is_still_read(tmp_path):
     from cobirb.plugins.core.tools import TodoTool
 
-    result = TodoTool(str(tmp_path)).execute({"items": ["first", {"text": "second", "status": "In Progress"},
-                                                        {"text": ""}]})
+    result = TodoTool(str(tmp_path)).execute(
+        {"items": ["first", {"text": "second", "status": "In Progress"}, {"text": ""}]}
+    )
 
     assert "[ ] first" in result.content and "[>] second" in result.content
     assert "(0/2 done)" in result.content
 
 
 def test_the_checklist_needs_no_approval():
-    from cobirb.runtime import wiring
     import os
+
+    from cobirb.runtime import wiring
 
     orchestrator = wiring.build_orchestrator(os.getcwd(), {})
     try:
@@ -1148,17 +1152,21 @@ def test_a_deleted_file_is_scoped_like_any_write_and_comes_back_on_undo(tmp_path
     checkpoints = Checkpoints(str(tmp_path), store=str(tmp_path / ".store"))
     registry = ToolRegistry(str(tmp_path))
     Orchestrator(model=_Deleter(), tools=registry.tools, policy=policy, checkpoints=checkpoints).run(
-        "delete it", "sys", cwd=str(tmp_path))
+        "delete it", "sys", cwd=str(tmp_path)
+    )
 
     assert not (tmp_path / "old.py").exists()
     checkpoints.undo_last()
     assert (tmp_path / "old.py").read_text() == "x = 1\n"
 
 
-@pytest.mark.parametrize("runner", [
-    "ShellTool(cwd).execute({'command': command}).content",
-    "run_verification(command, cwd).output",
-])
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "ShellTool(cwd).execute({'command': command}).content",
+        "run_verification(command, cwd).output",
+    ],
+)
 def test_a_command_never_gets_cobirbs_own_stdin(tmp_path, runner):
     """A Remote Worker Birb's job reads its orders from a pipe on stdin; a
     command it started once held that pipe too, and hung until its timeout."""
@@ -1175,8 +1183,9 @@ def test_a_command_never_gets_cobirbs_own_stdin(tmp_path, runner):
         print({runner})
     """)
     # Its stdin stays open and empty — as a remote job's does between orders.
-    parent = subprocess.Popen([sys.executable, "-c", script], stdin=subprocess.PIPE,
-                              stdout=subprocess.PIPE, text=True)
+    parent = subprocess.Popen(
+        [sys.executable, "-c", script], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+    )
     out: list[str] = []
     reader = threading.Thread(target=lambda: out.append(parent.stdout.read()), daemon=True)
     reader.start()

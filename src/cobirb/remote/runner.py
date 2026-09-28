@@ -11,12 +11,15 @@ After the round, ``check`` runs the ticket's check on the remote against the
 round's final files — the re-check, and with ``overrides`` the review's
 put-the-stub-back pass — so a Windows test is judged on Windows.
 """
+
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import os
 import threading
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from ..config import Config
 from ..flock.charter import WorkerBrief
@@ -30,11 +33,20 @@ from .relay import answer_model_request, model_info
 
 # The main machine's settings a remote worker runs under. Everything comes from
 # here; hooks do not, since they name commands on this machine.
-_SETTINGS = ("verify_timeout", "verify_fix_attempts", "redact_secrets", "checkpoints", "sandbox",
-             "context_tokens", "max_num_ctx", "connect_timeout", "request_timeout")
+_SETTINGS = (
+    "verify_timeout",
+    "verify_fix_attempts",
+    "redact_secrets",
+    "checkpoints",
+    "sandbox",
+    "context_tokens",
+    "max_num_ctx",
+    "connect_timeout",
+    "request_timeout",
+)
 
 
-def _read_files(cwd: str, paths: "tuple[str, ...] | list[str]") -> "dict[str, bytes]":
+def _read_files(cwd: str, paths: tuple[str, ...] | list[str]) -> dict[str, bytes]:
     files = {}
     for relative in paths:
         try:
@@ -52,14 +64,24 @@ class _GrantRelay:
     def __init__(self, client: RemoteClient) -> None:
         self._client = client
 
-    def grant(self, tool_name: str, arguments: "dict[str, Any] | None" = None) -> None:
+    def grant(self, tool_name: str, arguments: dict[str, Any] | None = None) -> None:
         self._client.send("grant", tool=tool_name, arguments=dict(arguments or {}))
 
 
 class RemoteRun:
-    def __init__(self, client: RemoteClient, worker: WorkerBrief, cwd: str, *, config: Config,
-                 io: Any = None, grants: Any = None, refuse: Callable[[], bool] = lambda: False,
-                 max_turns: int = 30, provider: Any = None) -> None:
+    def __init__(
+        self,
+        client: RemoteClient,
+        worker: WorkerBrief,
+        cwd: str,
+        *,
+        config: Config,
+        io: Any = None,
+        grants: Any = None,
+        refuse: Callable[[], bool] = lambda: False,
+        max_turns: int = 30,
+        provider: Any = None,
+    ) -> None:
         self.client = client
         self.worker = worker
         self._cwd = cwd
@@ -86,8 +108,14 @@ class RemoteRun:
                 self._provider = build_for_role(ROLE_WORKER, self._config)
             model = {"mode": "relay", "info": model_info(self._provider)}
         return {
-            "worker": {"id": worker.id, "brief": worker.brief, "writes": list(worker.writes),
-                       "reads": list(worker.reads), "accept": worker.accept, "tests": list(worker.tests)},
+            "worker": {
+                "id": worker.id,
+                "brief": worker.brief,
+                "writes": list(worker.writes),
+                "reads": list(worker.reads),
+                "accept": worker.accept,
+                "tests": list(worker.tests),
+            },
             "config": {key: self._config.get(key) for key in _SETTINGS if self._config.get(key) is not None},
             "grants": [list(g) for g in (getattr(self._grants, "granted", ()) or ())],
             "refuse": bool(self._refuse()),
@@ -104,8 +132,9 @@ class RemoteRun:
         # ahead of the reply, and counting from zero again would replay them.
         self.client.last_seq = 0
         try:
-            answer = self.client.request("job_start", order=self._order(),
-                                         files=protocol.pack_files(files), timeout=120)
+            answer = self.client.request(
+                "job_start", order=self._order(), files=protocol.pack_files(files), timeout=120
+            )
         except RemoteError as exc:
             return self._failed(str(exc))
         if not answer.get("ok"):
@@ -129,8 +158,9 @@ class RemoteRun:
         return self._report
 
     def _failed(self, error: str) -> WorkerReport:
-        return WorkerReport(worker_id=self.worker.id, ok=False,
-                            error=f"on {self.client.spec.label()}: {error}")
+        return WorkerReport(
+            worker_id=self.worker.id, ok=False, error=f"on {self.client.spec.label()}: {error}"
+        )
 
     def _bring_home(self) -> None:
         """The worker's own files, written here — and only those."""
@@ -157,8 +187,11 @@ class RemoteRun:
         if kind == "tool_call":
             render = getattr(self._io, "render_tool_call", None)
             if callable(render):
-                render(str(event.get("tool", "")), dict(event.get("arguments") or {}),
-                       ToolResult(ok=bool(event.get("ok")), content=str(event.get("content", ""))))
+                render(
+                    str(event.get("tool", "")),
+                    dict(event.get("arguments") or {}),
+                    ToolResult(ok=bool(event.get("ok")), content=str(event.get("content", ""))),
+                )
         elif kind == "notice":
             render = getattr(self._io, "render_notice", None)
             if callable(render):
@@ -168,8 +201,9 @@ class RemoteRun:
         elif kind == "model":
             if self._provider is None:
                 self._provider = build_for_role(ROLE_WORKER, self._config)
-            threading.Thread(target=answer_model_request, args=(self._provider, event, self.client.send),
-                             daemon=True).start()
+            threading.Thread(
+                target=answer_model_request, args=(self._provider, event, self.client.send), daemon=True
+            ).start()
         elif kind == "grant":
             if self._grants is not None:
                 self._grants.grant(str(event.get("tool", "")), dict(event.get("arguments") or {}))
@@ -186,10 +220,15 @@ class RemoteRun:
         ask = getattr(self._io, "confirm_request", None)
         if not self._refuse() and callable(ask):
             try:
-                outcome = ask(ApprovalRequest(
-                    tool_name=str(event.get("tool", "")), arguments=dict(event.get("arguments") or {}),
-                    scope=str(event.get("scope", "")), preview=str(event.get("preview", "")),
-                    asked_by=self.worker.id))
+                outcome = ask(
+                    ApprovalRequest(
+                        tool_name=str(event.get("tool", "")),
+                        arguments=dict(event.get("arguments") or {}),
+                        scope=str(event.get("scope", "")),
+                        preview=str(event.get("preview", "")),
+                        asked_by=self.worker.id,
+                    )
+                )
                 decision = str(getattr(outcome, "decision", DECISION_DENY))
                 instruction = str(getattr(outcome, "instruction", "") or "")
             except Exception:  # noqa: BLE001 - nobody could answer: no, as for a local worker
@@ -197,40 +236,51 @@ class RemoteRun:
         self.client.send("answer", req_id=event.get("req_id"), decision=decision, instruction=instruction)
 
     # ------------------------------------------------------------------ #
-    def push(self, paths: "list[str] | tuple[str, ...]") -> None:
+    def push(self, paths: list[str] | tuple[str, ...]) -> None:
         """A colleague finished: send its files, silently, as a shared tree would."""
         files = _read_files(self._cwd, paths)
         if files:
-            try:
+            with contextlib.suppress(RemoteError):  # the re-check pushes the final tree again anyway
                 self.client.request("push", files=protocol.pack_files(files), timeout=120)
-            except RemoteError:
-                pass  # the re-check pushes the final tree again anyway
 
-    def check(self, command: str, timeout: int = DEFAULT_TIMEOUT_SECONDS,
-              overrides: "dict[str, str] | None" = None) -> VerifyResult:
+    def check(
+        self, command: str, timeout: int = DEFAULT_TIMEOUT_SECONDS, overrides: dict[str, str] | None = None
+    ) -> VerifyResult:
         """Run ``command`` on the remote against the round's final files, with
         ``overrides`` swapped in for the run."""
         try:
-            self.client.request("push", timeout=120, files=protocol.pack_files(
-                _read_files(self._cwd, list(self.worker.writes) + list(self.worker.reads))))
+            self.client.request(
+                "push",
+                timeout=120,
+                files=protocol.pack_files(
+                    _read_files(self._cwd, list(self.worker.writes) + list(self.worker.reads))
+                ),
+            )
             # `seconds` is the check's own limit; `timeout` is how long to wait
             # for the answer, a minute longer so the remote can report a timeout.
             answer = self.client.request(
-                "check", command=command, seconds=timeout, timeout=timeout + 60,
-                overrides=protocol.pack_files({p: c.encode() for p, c in (overrides or {}).items()}))
+                "check",
+                command=command,
+                seconds=timeout,
+                timeout=timeout + 60,
+                overrides=protocol.pack_files({p: c.encode() for p, c in (overrides or {}).items()}),
+            )
         except RemoteError as exc:
             return VerifyResult(command, ok=False, output="", error=str(exc))
-        return VerifyResult(command, ok=bool(answer.get("ok")), output=str(answer.get("output", "")),
-                            timed_out=bool(answer.get("timed_out")), error=answer.get("error") or None)
+        return VerifyResult(
+            command,
+            ok=bool(answer.get("ok")),
+            output=str(answer.get("output", "")),
+            timed_out=bool(answer.get("timed_out")),
+            error=answer.get("error") or None,
+        )
 
     def end(self) -> None:
         unregister = getattr(self._grants, "unregister", None)
         if callable(unregister):
             unregister(self._relay)
-        try:
+        with contextlib.suppress(RemoteError):
             self.client.request("job_end", timeout=60)
-        except RemoteError:
-            pass
         self.client.job_id = ""
 
 

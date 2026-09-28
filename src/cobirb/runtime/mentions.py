@@ -18,6 +18,7 @@ the terminal:
 - **Sending it.** ``expand`` turns the text the user submitted into the text
   the model receives, with each mentioned file appended in full.
 """
+
 from __future__ import annotations
 
 import os
@@ -100,8 +101,9 @@ def rank(query: str, paths: list[str], limit: int = 5) -> list[Match]:
         by_path = subsequence_score(query, path)
         if by_name is None and by_path is None:
             continue
-        score = max(by_name if by_name is not None else -10**6,
-                    (by_path - 5) if by_path is not None else -10**6)
+        score = max(
+            by_name if by_name is not None else -(10**6), (by_path - 5) if by_path is not None else -(10**6)
+        )
         stem = name.rsplit(".", 1)[0].lower()
         if query and stem == query.lower():
             score += 10_000  # the name they actually typed
@@ -135,9 +137,9 @@ def candidate_paths(cwd: str, limit: int = MAX_CANDIDATES) -> list[str]:
     found: list[str] = []
     for directory, subdirectories, filenames in os.walk(cwd):
         subdirectories[:] = [
-            name for name in subdirectories
-            if not name.startswith(".")
-            and not rules.is_ignored(os.path.join(directory, name), is_dir=True)
+            name
+            for name in subdirectories
+            if not name.startswith(".") and not rules.is_ignored(os.path.join(directory, name), is_dir=True)
         ]
         for name in sorted(filenames):
             if name.startswith("."):
@@ -170,7 +172,7 @@ def _read(path: str, cwd: str, *, redact_secrets: bool) -> str:
     """
     resolved = path if os.path.isabs(path) else os.path.join(cwd, os.path.expanduser(path))
     try:
-        with open(resolved, "r", encoding="utf-8", errors="replace") as handle:
+        with open(resolved, encoding="utf-8", errors="replace") as handle:
             content = handle.read(MAX_MENTION_BYTES + 1)
     except OSError as exc:
         return f"[@{path} could not be read — {exc}]"

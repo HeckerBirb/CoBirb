@@ -5,6 +5,7 @@ They are deliberately dumb — they hold display state and nothing else. Every
 decision about *when* to change them lives in ``app.py``, and every update
 reaches them on Textual's main thread (see ``io_bridge.TuiIO``).
 """
+
 from __future__ import annotations
 
 import os
@@ -15,10 +16,10 @@ from rich.segment import Segment
 from rich.style import Style
 from rich.text import Text
 from textual.binding import Binding
+from textual.message import Message
 from textual.reactive import reactive
 from textual.selection import Selection
 from textual.strip import Strip
-from textual.message import Message
 from textual.widgets import RichLog, Static, TextArea
 
 from ..plugins.core import render
@@ -150,7 +151,7 @@ class _LastRows:
         # the *first* that many lines — exactly the rows this is here to drop.
         lines = console.render_lines(self._renderable, options.update(height=None), pad=False)
         new_line = Segment.line()
-        for line in lines[-self._rows:]:
+        for line in lines[-self._rows :]:
             yield from line
             yield new_line
 
@@ -298,9 +299,7 @@ class PromptHistory:
             return
         self._entries.append(text)
         self._bytes += len(text.encode("utf-8"))
-        while self._entries and (
-            len(self._entries) > self.max_entries or self._bytes > self.max_bytes
-        ):
+        while self._entries and (len(self._entries) > self.max_entries or self._bytes > self.max_bytes):
             self._bytes -= len(self._entries.pop(0).encode("utf-8"))
 
 
@@ -453,12 +452,12 @@ class PromptInput(TextArea):
     class Submitted(Message):
         """Enter was pressed. Carries the text, as ``Input.Submitted`` did."""
 
-        def __init__(self, prompt: "PromptInput", value: str) -> None:
+        def __init__(self, prompt: PromptInput, value: str) -> None:
             super().__init__()
             self.input = prompt
             self.value = value
 
-    def __init__(self, history: "PromptHistory | None" = None, **kwargs: object) -> None:
+    def __init__(self, history: PromptHistory | None = None, **kwargs: object) -> None:
         kwargs.setdefault("soft_wrap", True)
         kwargs.setdefault("show_line_numbers", False)
         # `placeholder` is an Input argument; TextArea has no such thing, and
@@ -563,7 +562,7 @@ class PromptInput(TextArea):
     # ------------------------------------------------------------------ #
     # /commands
     # ------------------------------------------------------------------ #
-    def _command_query(self) -> "str | None":
+    def _command_query(self) -> str | None:
         """The half-typed command, if the whole message is one and nothing else.
 
         Deliberately asks about the entire text, not the word under the
@@ -608,7 +607,7 @@ class PromptInput(TextArea):
     # @path mentions
     # ------------------------------------------------------------------ #
 
-    def _mention_query(self) -> "str | None":
+    def _mention_query(self) -> str | None:
         """The half-typed mention immediately before the cursor, if any.
 
         ``None`` when the cursor is not sitting at the end of an ``@`` run —

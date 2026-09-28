@@ -7,6 +7,7 @@ its terminal, and the user compares them before saying yes. From then on the
 fingerprint is pinned, and a different certificate is refused until the user
 trusts it again.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -23,10 +24,10 @@ KEY_NAME = "key.pem"
 def fingerprint(der: bytes) -> str:
     """SHA-256 of the certificate, as colon-separated hex pairs."""
     digest = hashlib.sha256(der).hexdigest().upper()
-    return ":".join(digest[i:i + 2] for i in range(0, len(digest), 2))
+    return ":".join(digest[i : i + 2] for i in range(0, len(digest), 2))
 
 
-def ensure_certificate(directory: str | None = None, hostnames: "tuple[str, ...]" = ()) -> "tuple[str, str]":
+def ensure_certificate(directory: str | None = None, hostnames: tuple[str, ...] = ()) -> tuple[str, str]:
     """The remote's certificate and key paths, made on first use.
 
     An EC P-256 key, valid for ten years: it is identified by its fingerprint,
@@ -51,10 +52,11 @@ def ensure_certificate(directory: str | None = None, hostnames: "tuple[str, ...]
             alt.append(x509.IPAddress(ipaddress.ip_address(host)))
         except ValueError:
             alt.append(x509.DNSName(host))
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     cert = (
         x509.CertificateBuilder()
-        .subject_name(name).issuer_name(name)
+        .subject_name(name)
+        .issuer_name(name)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - datetime.timedelta(days=1))
@@ -64,8 +66,11 @@ def ensure_certificate(directory: str | None = None, hostnames: "tuple[str, ...]
     )
     fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "wb") as fh:
-        fh.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                                   serialization.NoEncryption()))
+        fh.write(
+            key.private_bytes(
+                serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+            )
+        )
     with open(cert_path, "wb") as fh:
         fh.write(cert.public_bytes(serialization.Encoding.PEM))
     return cert_path, key_path

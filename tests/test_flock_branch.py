@@ -4,10 +4,10 @@ The contract is a pair of tokens: one in the main session where the
 conversation branched, one at the head of the flock's own file. Between them
 they make the handoff and the rejoin both findable later.
 """
+
 from __future__ import annotations
 
 import os
-
 
 from cobirb.flock import branch
 from cobirb.plugins.core import AesGcmScryptSessionCrypto
@@ -16,9 +16,7 @@ from cobirb.session import Session, SessionManager
 
 def _main_session(tmp_path, password="hunter2"):
     path = str(tmp_path / "session.json")
-    manager = SessionManager.create(
-        path, AesGcmScryptSessionCrypto(), str(tmp_path), password
-    )
+    manager = SessionManager.create(path, AesGcmScryptSessionCrypto(), str(tmp_path), password)
     manager.session.add_text("user", "let's build the exporter")
     return manager
 

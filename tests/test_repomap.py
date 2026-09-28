@@ -1,4 +1,5 @@
 """Tests for the codebase outline the agent uses to orient itself."""
+
 from __future__ import annotations
 
 from cobirb.plugins.core.repomap import build_outlines, render_map
@@ -50,7 +51,7 @@ def test_entry_points_are_boosted(tmp_path):
 
 
 def test_tests_rank_below_the_code_they_test(tmp_path):
-    """"Where does this behave" is almost never the first question."""
+    """ "Where does this behave" is almost never the first question."""
     _project(tmp_path)
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_core.py").write_text(

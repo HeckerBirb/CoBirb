@@ -4,11 +4,13 @@ Tools are the "hands" of the agent. The core ships a registry of built-in tools;
 third-party plugins extend it. The registry enforces a default-deny policy:
 every tool must be explicitly allowed before it runs.
 """
+
 from __future__ import annotations
 
 import os
 import re
-from typing import Any, ClassVar, Iterator
+from collections.abc import Iterator
+from typing import Any, ClassVar
 
 from ... import patches
 from ...policy import patch_target
@@ -202,8 +204,7 @@ def _page(items: list[str], offset: int, limit: int, what: str, path: str) -> To
     return ToolResult(
         ok=True,
         content=(
-            f"{body}\n[{what} {offset}-{end} of {total}; more follow — "
-            f"call again with offset={end + 1}]"
+            f"{body}\n[{what} {offset}-{end} of {total}; more follow — call again with offset={end + 1}]"
         ),
         meta={"total": total, "next_offset": end + 1, "at_end": False},
     )
@@ -233,7 +234,7 @@ def _read_range(path: str, offset: int, limit: int) -> tuple[list[str], int, boo
     collected_bytes = 0
     line_number = 0
     at_end = True
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         for line_number, line in enumerate(fh, 1):
             if line_number < offset:
                 continue
@@ -272,7 +273,7 @@ def _clip(line: str, limit: int = _MAX_MATCH_CHARS) -> str:
     return line if len(line) <= limit else line[:limit] + f"…[+{len(line) - limit} chars]"
 
 
-def _walk_files(root: str, rules: "IgnoreRules | None") -> "Iterator[str]":
+def _walk_files(root: str, rules: IgnoreRules | None) -> Iterator[str]:
     """Every file under ``root``, skipping ignored directories entirely.
 
     ``glob("**/*")`` builds a list of every path first and filters afterwards,
@@ -286,7 +287,8 @@ def _walk_files(root: str, rules: "IgnoreRules | None") -> "Iterator[str]":
     for directory, subdirectories, filenames in os.walk(root):
         if rules is not None:
             subdirectories[:] = [
-                name for name in subdirectories
+                name
+                for name in subdirectories
                 if not rules.is_ignored(os.path.join(directory, name), is_dir=True)
             ]
         for filename in sorted(filenames):
@@ -387,7 +389,7 @@ class WriteFileTool(CobirbTool):
         path = self._resolve(str(arguments.get("path", "")))
         new = str(arguments.get("content", ""))
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, encoding="utf-8") as fh:
                 old = fh.read()
         except OSError:
             lines = new.count("\n") + 1
@@ -450,7 +452,7 @@ class EditFileTool(CobirbTool):
     def preview(self, arguments: dict[str, Any]) -> str:
         path = self._resolve(str(arguments.get("path", "")))
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, encoding="utf-8") as fh:
                 old = fh.read()
         except OSError as exc:
             return f"cannot read {path}: {exc}"
@@ -485,7 +487,7 @@ class EditFileTool(CobirbTool):
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
         path = self._resolve(arguments["path"])
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, encoding="utf-8") as fh:
                 content = fh.read()
         except OSError as exc:
             return ToolResult(ok=False, content=f"Could not edit {path}: {exc}", error=str(exc))
@@ -503,7 +505,7 @@ class EditFileTool(CobirbTool):
 class _EditPlan:
     """What an edit would do: the new content (``None`` if refused) and a message."""
 
-    def __init__(self, content: "str | None", message: str, error: str = "") -> None:
+    def __init__(self, content: str | None, message: str, error: str = "") -> None:
         self.content, self.message, self.error = content, message, error
 
 
@@ -548,13 +550,14 @@ def _plan_edit(content: str, arguments: dict[str, Any]) -> _EditPlan:
     begin = starts[0]
     updated = content[:begin] + new + content[end:]
     first = _line_of(updated, begin)
-    region = updated[begin:begin + len(new)].splitlines() or [""]
+    region = updated[begin : begin + len(new)].splitlines() or [""]
     note = " (matched ignoring whitespace differences)" if loose else ""
-    return _EditPlan(updated, f"{note}. Lines {first}–{first + len(region) - 1} now read:\n"
-                     + _numbered(region, first))
+    return _EditPlan(
+        updated, f"{note}. Lines {first}–{first + len(region) - 1} now read:\n" + _numbered(region, first)
+    )
 
 
-def _loose_match(content: str, old: str, new: str) -> "tuple[int, int, str] | None":
+def _loose_match(content: str, old: str, new: str) -> tuple[int, int, str] | None:
     """A unique match ignoring trailing whitespace, CRLF and a missing indent.
 
     Returns ``(start, end, new_str re-indented)`` or ``None``. Whole lines
@@ -573,7 +576,7 @@ def _loose_match(content: str, old: str, new: str) -> "tuple[int, int, str] | No
     n = len(old_lines)
     matches: list[tuple[int, str]] = []
     for i in range(len(lines) - n + 1):
-        prefix = _common_extra_indent(lines[i:i + n], old_lines)
+        prefix = _common_extra_indent(lines[i : i + n], old_lines)
         if prefix is not None:
             matches.append((i, prefix))
     if len(matches) != 1:
@@ -586,11 +589,11 @@ def _loose_match(content: str, old: str, new: str) -> "tuple[int, int, str] | No
     return offsets[i], end, reindented
 
 
-def _common_extra_indent(have_lines: list[str], want_lines: list[str]) -> "str | None":
+def _common_extra_indent(have_lines: list[str], want_lines: list[str]) -> str | None:
     """The indent every ``have`` line carries beyond its ``want`` line, when
     the text is otherwise equal and that extra indent is the same throughout."""
-    prefix: "str | None" = None
-    for have, want in zip(have_lines, want_lines):
+    prefix: str | None = None
+    for have, want in zip(have_lines, want_lines, strict=False):
         have = have.rstrip()
         if not want.strip():
             if have.strip():
@@ -602,7 +605,7 @@ def _common_extra_indent(have_lines: list[str], want_lines: list[str]) -> "str |
         want_indent = want[: len(want) - len(want.lstrip())]
         if not have_indent.startswith(want_indent):
             return None
-        extra = have_indent[len(want_indent):]
+        extra = have_indent[len(want_indent) :]
         if prefix is None:
             prefix = extra
         elif extra != prefix:
@@ -611,15 +614,15 @@ def _common_extra_indent(have_lines: list[str], want_lines: list[str]) -> "str |
 
 
 def _miss_message(content: str, old: str) -> str:
-    """"Not found", plus the closest region so the model can copy it exactly."""
+    """ "Not found", plus the closest region so the model can copy it exactly."""
     import difflib
 
     lines = content.splitlines()
     size = max(1, len(old.strip("\n").splitlines()))
     best, best_ratio = -1, 0.0
     target = old.strip()
-    for i in range(0, max(1, len(lines) - size + 1)):
-        window = "\n".join(lines[i:i + size])
+    for i in range(max(1, len(lines) - size + 1)):
+        window = "\n".join(lines[i : i + size])
         matcher = difflib.SequenceMatcher(None, window, target, autojunk=False)
         if matcher.real_quick_ratio() <= best_ratio or matcher.quick_ratio() <= best_ratio:
             continue
@@ -630,7 +633,7 @@ def _miss_message(content: str, old: str) -> str:
     if best >= 0 and best_ratio >= 0.5:
         message += (
             f" The closest text is at line {best + 1} — copy it exactly, whitespace included:\n"
-            + _numbered(lines[best:best + size], best + 1)
+            + _numbered(lines[best : best + size], best + 1)
         )
     else:
         message += " Read the file again and copy the region exactly."
@@ -676,7 +679,9 @@ def _parse_patch_hunks(patch_text: str) -> list[tuple[int, list[tuple[str, str]]
     return hunks
 
 
-def _apply_patch_hunks(original_lines: list[str], hunks: list[tuple[int, list[tuple[str, str]]]]) -> list[str]:
+def _apply_patch_hunks(
+    original_lines: list[str], hunks: list[tuple[int, list[tuple[str, str]]]]
+) -> list[str]:
     """Apply parsed hunks (in order) to ``original_lines`` and return the
     patched lines. Raises ``ValueError`` if a hunk's context/removed lines
     don't match the file at the position its header claims, rather than
@@ -694,7 +699,9 @@ def _apply_patch_hunks(original_lines: list[str], hunks: list[tuple[int, list[tu
             if marker in (" ", "-"):
                 if cursor >= len(original_lines) or original_lines[cursor] != text:
                     found = original_lines[cursor] if cursor < len(original_lines) else "<end of file>"
-                    raise ValueError(f"patch does not apply at line {cursor + 1}: expected {text!r}, found {found!r}")
+                    raise ValueError(
+                        f"patch does not apply at line {cursor + 1}: expected {text!r}, found {found!r}"
+                    )
                 if marker == " ":
                     result.append(text)
                 cursor += 1
@@ -702,6 +709,20 @@ def _apply_patch_hunks(original_lines: list[str], hunks: list[tuple[int, list[tu
                 result.append(text)
     result.extend(original_lines[cursor:])
     return result
+
+
+def _block_positions(lines: list[str], block: list[str], start: int, *, loose: bool = False) -> list[int]:
+    """Every index at or after ``start`` where ``block`` appears in ``lines``;
+    ``loose`` ignores trailing whitespace."""
+
+    def same(a: str, b: str) -> bool:
+        return a.rstrip() == b.rstrip() if loose else a == b
+
+    return [
+        i
+        for i in range(start, len(lines) - len(block) + 1)
+        if all(same(lines[i + k], line) for k, line in enumerate(block))
+    ]
 
 
 def _apply_context_hunks(lines: list[str], hunks: list[tuple[str, list[tuple[str, str]]]]) -> list[str]:
@@ -725,22 +746,21 @@ def _apply_context_hunks(lines: list[str], hunks: list[tuple[str, list[tuple[str
                 raise ValueError(f"the @@ anchor {anchor!r} was not found")
             start = hits[0]
         if not old:
-            raise ValueError("a hunk with no context or removed lines cannot be placed; include the line it follows")
+            raise ValueError(
+                "a hunk with no context or removed lines cannot be placed; include the line it follows"
+            )
 
-        def matches(loose: bool) -> list[int]:
-            same = (lambda a, b: a.rstrip() == b.rstrip()) if loose else (lambda a, b: a == b)
-            return [i for i in range(start, len(result) - len(old) + 1)
-                    if all(same(result[i + k], old[k]) for k in range(len(old)))]
-
-        found = matches(False) or matches(True)
+        found = _block_positions(result, old, start) or _block_positions(result, old, start, loose=True)
         if not found:
             raise ValueError(f"these lines were not found in the file: {old[0]!r}…")
         if len(found) > 1 and not anchor:
             where = ", ".join(str(i + 1) for i in found[:8])
-            raise ValueError(f"the hunk starting {old[0]!r} matches {len(found)} places (lines {where}); "
-                             "add context or an @@ anchor naming the enclosing function")
+            raise ValueError(
+                f"the hunk starting {old[0]!r} matches {len(found)} places (lines {where}); "
+                "add context or an @@ anchor naming the enclosing function"
+            )
         at = found[0]
-        result[at:at + len(old)] = new
+        result[at : at + len(old)] = new
         cursor = at + len(new)
     return result
 
@@ -780,7 +800,10 @@ class ApplyPatchTool(CobirbTool):
         return {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "File to patch (optional when the patch names it)."},
+                "path": {
+                    "type": "string",
+                    "description": "File to patch (optional when the patch names it).",
+                },
                 "patch": {"type": "string", "description": "Unified diff, or '*** Begin Patch' text."},
             },
             "required": ["patch"],
@@ -792,20 +815,26 @@ class ApplyPatchTool(CobirbTool):
         if target is None:
             if patches.is_begin_patch(patch):
                 return ToolResult(
-                    ok=False, error="patch_scope",
+                    ok=False,
+                    error="patch_scope",
                     content="This patch touches more than one file, moves or deletes one, or names a "
-                            "different file than 'path'. Send one *** Update File (or *** Add File) "
-                            "section per call.",
+                    "different file than 'path'. Send one *** Update File (or *** Add File) "
+                    "section per call.",
                 )
-            return ToolResult(ok=False, content="apply_patch needs a path for a unified diff.", error="no_path")
+            return ToolResult(
+                ok=False, content="apply_patch needs a path for a unified diff.", error="no_path"
+            )
         path = self._resolve(target)
 
         if patches.is_begin_patch(patch):
             section = patches.parse(patch)[0]
             if section.op == "add":
                 if os.path.exists(path):
-                    return ToolResult(ok=False, error="exists",
-                                      content=f"{path} already exists; use *** Update File to change it.")
+                    return ToolResult(
+                        ok=False,
+                        error="exists",
+                        content=f"{path} already exists; use *** Update File to change it.",
+                    )
                 content = "\n".join(section.lines) + "\n"
                 try:
                     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -816,7 +845,7 @@ class ApplyPatchTool(CobirbTool):
                 return ToolResult(ok=True, content=f"Created {path}{_syntax_note(path, content)}")
 
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, encoding="utf-8") as fh:
                 original = fh.read()
         except OSError as exc:
             return ToolResult(ok=False, content=f"Could not patch {path}: {exc}", error=str(exc))
@@ -835,7 +864,9 @@ class ApplyPatchTool(CobirbTool):
                     # the numbers. Placed by context, like a Begin-Patch.
                     bare = patches.parse(f"*** Update File: {target}\n{patch}")
                     if not bare or not bare[0].hunks:
-                        return ToolResult(ok=False, content="No valid hunks found in patch.", error="no_hunks")
+                        return ToolResult(
+                            ok=False, content="No valid hunks found in patch.", error="no_hunks"
+                        )
                     new_lines = _apply_context_hunks(original_lines, bare[0].hunks)
         except ValueError as exc:
             return ToolResult(ok=False, content=f"Could not apply patch to {path}: {exc}", error=str(exc))
@@ -851,7 +882,7 @@ class ApplyPatchTool(CobirbTool):
         return ToolResult(ok=True, content=f"Applied patch to {path}{_syntax_note(path, content)}")
 
 
-def _ignore_rules(tool: "CobirbTool") -> IgnoreRules:
+def _ignore_rules(tool: CobirbTool) -> IgnoreRules:
     """The ignore rules for this tool's working directory.
 
     Built per call rather than cached: it is one small file read, and a
@@ -906,8 +937,11 @@ class GlobTool(CobirbTool):
             if not results:
                 return ToolResult(ok=True, content="(no matches)", meta={"total": 0, "at_end": True})
             return _page(
-                sorted(results), max(1, _as_int(arguments.get("offset"), 1)),
-                _as_int(arguments.get("limit"), 0), "matches", pattern,
+                sorted(results),
+                max(1, _as_int(arguments.get("offset"), 1)),
+                _as_int(arguments.get("limit"), 0),
+                "matches",
+                pattern,
             )
         except OSError as exc:
             return ToolResult(ok=False, content=f"glob failed: {exc}", error=str(exc))
@@ -972,7 +1006,7 @@ class GrepTool(CobirbTool):
                 if capped:
                     break
                 try:
-                    with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+                    with open(path, encoding="utf-8", errors="ignore") as fh:
                         for lineno, line in enumerate(fh, 1):
                             if not expression.search(line):
                                 continue
@@ -1032,16 +1066,18 @@ class ListDirTool(CobirbTool):
             # hundred thousand files is the difference between instant and not.
             with os.scandir(path) as entries:
                 names = sorted(
-                    entry.name + ("/" if entry.is_dir(follow_symlinks=False) else "")
-                    for entry in entries
+                    entry.name + ("/" if entry.is_dir(follow_symlinks=False) else "") for entry in entries
                 )
         except OSError as exc:
             return ToolResult(ok=False, content=f"Could not list {path}: {exc}", error=str(exc))
         if not names:
             return ToolResult(ok=True, content=f"({path} is empty)", meta={"total": 0, "at_end": True})
         return _page(
-            names, max(1, _as_int(arguments.get("offset"), 1)),
-            _as_int(arguments.get("limit"), 0), "entries", path,
+            names,
+            max(1, _as_int(arguments.get("offset"), 1)),
+            _as_int(arguments.get("limit"), 0),
+            "entries",
+            path,
         )
 
 
@@ -1314,7 +1350,9 @@ class ShellTool(CobirbTool):
                 f"The next call starts in {cwd or os.getcwd()} again. Chain it into one "
                 f"command ('cd somewhere && ...') or pass 'cwd' to run it elsewhere.]"
             )
-        return ToolResult(ok=process.returncode == 0, content=content, meta={"returncode": process.returncode})
+        return ToolResult(
+            ok=process.returncode == 0, content=content, meta={"returncode": process.returncode}
+        )
 
     @staticmethod
     def _kill(process: Any) -> None:
@@ -1330,8 +1368,12 @@ class ShellTool(CobirbTool):
             if os.name == "posix":
                 os.killpg(os.getpgid(process.pid), signal.SIGKILL)
             else:
-                subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
-                               stdin=subprocess.DEVNULL, capture_output=True, check=False)
+                subprocess.run(
+                    ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    check=False,
+                )
                 process.kill()
         except (ProcessLookupError, OSError):
             pass  # already gone — nothing to do
@@ -1376,7 +1418,7 @@ class DeleteFileTool(CobirbTool):
         if not os.path.isfile(path):
             return f"{path} is not a file — this will fail"
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            with open(path, encoding="utf-8", errors="replace") as fh:
                 lines = fh.read().count("\n")
         except OSError:
             lines = 0
@@ -1395,8 +1437,11 @@ class DeleteFileTool(CobirbTool):
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
         path = self._resolve(arguments["path"])
         if os.path.isdir(path):
-            return ToolResult(ok=False, error="is_directory",
-                              content=f"{path} is a directory; delete_file removes files only.")
+            return ToolResult(
+                ok=False,
+                error="is_directory",
+                content=f"{path} is a directory; delete_file removes files only.",
+            )
         try:
             os.remove(path)
         except FileNotFoundError:
@@ -1460,8 +1505,9 @@ class TodoTool(CobirbTool):
         if isinstance(raw, str):
             raw = [line for line in raw.splitlines() if line.strip()]
         if not isinstance(raw, list):
-            return ToolResult(ok=False, error="bad_items",
-                              content="items must be a list of {text, status} entries.")
+            return ToolResult(
+                ok=False, error="bad_items", content="items must be a list of {text, status} entries."
+            )
         items = []
         for entry in raw:
             if isinstance(entry, str):
@@ -1469,8 +1515,12 @@ class TodoTool(CobirbTool):
             if not isinstance(entry, dict) or not str(entry.get("text", "")).strip():
                 continue
             status = str(entry.get("status", "pending")).strip().lower().replace(" ", "_")
-            items.append({"text": str(entry["text"]).strip(),
-                          "status": status if status in self._STATUSES else "pending"})
+            items.append(
+                {
+                    "text": str(entry["text"]).strip(),
+                    "status": status if status in self._STATUSES else "pending",
+                }
+            )
         self.items = items[:50]
         done, total = self.progress()
         lines = [f"{self._MARKS[item['status']]} {item['text']}" for item in self.items]

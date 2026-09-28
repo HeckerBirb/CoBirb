@@ -22,6 +22,7 @@ Run them with, for example:
 
 Or select them explicitly among the full suite with `-m integration`.
 """
+
 from __future__ import annotations
 
 import os
@@ -78,7 +79,9 @@ def test_live_streaming_yields_content():
     non-empty content — this is the path test_model.py can only fake the
     NDJSON shape of, not prove Ollama's real streaming format matches."""
     provider = LocalModelProvider(model=TEST_MODEL)
-    chunks = list(provider.chat("You are a terse assistant.", "Say hello in one short sentence.", stream=True))
+    chunks = list(
+        provider.chat("You are a terse assistant.", "Say hello in one short sentence.", stream=True)
+    )
     assert chunks
     assert "".join(chunks).strip()
 

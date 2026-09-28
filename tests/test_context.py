@@ -6,6 +6,7 @@ survives is still a coherent conversation the model can act on. The specific
 order of elision is an implementation detail these deliberately don't pin
 down beyond "tool results go before turns do".
 """
+
 from __future__ import annotations
 
 from cobirb.context import (
@@ -202,8 +203,7 @@ def test_the_reserve_does_not_scale_absurdly_with_the_window():
 # Attached images
 # --------------------------------------------------------------------------- #
 def _image_turn(content, filename="shot.png"):
-    return {"role": "user", "content": content,
-            "images": [{"id": "a", "filename": filename, "data": "AAAA"}]}
+    return {"role": "user", "content": content, "images": [{"id": "a", "filename": filename, "data": "AAAA"}]}
 
 
 def test_an_image_counts_towards_the_budget():
@@ -216,9 +216,7 @@ def test_an_image_counts_towards_the_budget():
 
 
 def test_an_old_image_is_elided_when_the_session_outgrows_its_budget():
-    turns = [_image_turn("look at this")] + [
-        {"role": "user", "content": f"turn {n}"} for n in range(30)
-    ]
+    turns = [_image_turn("look at this")] + [{"role": "user", "content": f"turn {n}"} for n in range(30)]
     compacted, report = compact(turns, budget_tokens=200)
 
     kept = [t for t in compacted if "look at this" in str(t.get("content"))]

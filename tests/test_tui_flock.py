@@ -5,6 +5,7 @@ by a dialog that was dismissed rather than answered — it is the only place a
 person sees what the Worker Birbs will be allowed to touch. And ctrl+c has to
 ask, because a flock is several agents deep in somebody's working tree.
 """
+
 from __future__ import annotations
 
 import threading
@@ -13,16 +14,16 @@ import pytest
 from textual.widgets import TabbedContent
 
 from cobirb.flock.charter import parse_charter
-from cobirb.flock.run import FlockRun
 from cobirb.flock.review import RedCheck, Review
+from cobirb.flock.run import FlockRun
+from cobirb.flock.stages import CharterApproval, NameMap
 from cobirb.flock.supervisor import Canceller, FlockOutcome
 from cobirb.flock.worker import WorkerReport
 from cobirb.tui.app import CoBirbApp
-from cobirb.tui.widgets import PromptInput
 from cobirb.tui.flock_bridge import TuiAsker, WorkerPaneIO
 from cobirb.tui.panes import FlockPane, WorkerPane
-from cobirb.flock.stages import CharterApproval, NameMap
 from cobirb.tui.screens import CharterModal, ConfirmModal
+from cobirb.tui.widgets import PromptInput
 
 _CHARTER = parse_charter("""
 objective = "two things"
@@ -52,10 +53,7 @@ def _text(app, selector: str) -> str:
 
 
 def _make_app(**kwargs) -> CoBirbApp:
-    return CoBirbApp(
-        system="", allow_overrides={},
-        session_path=None, password=None, cwd=".", **kwargs
-    )
+    return CoBirbApp(system="", allow_overrides={}, session_path=None, password=None, cwd=".", **kwargs)
 
 
 async def _flock_tab(pilot, app):
@@ -129,9 +127,9 @@ async def test_a_new_flock_replaces_the_last_ones_panes():
         await pane.begin(_CHARTER)
         await pilot.pause()
 
-        await pane.begin(parse_charter(
-            'objective = "x"\n[[workers]]\nid = "z"\nwrites = ["z.py"]\nbrief = "go"\n'
-        ))
+        await pane.begin(
+            parse_charter('objective = "x"\n[[workers]]\nid = "z"\nwrites = ["z.py"]\nbrief = "go"\n')
+        )
         await pilot.pause()
 
         assert [p._worker_id for p in app.query(WorkerPane)] == ["z"]
@@ -256,13 +254,16 @@ async def test_answering_yes_approves():
     assert answers == [True]
 
 
-@pytest.mark.parametrize("keys, expected", [
-    (["y"], True),
-    (["n"], False),
-    (["escape"], False),
-    # The scrolling body has the focus, so Enter never approves.
-    (["enter", "escape"], False),
-])
+@pytest.mark.parametrize(
+    "keys, expected",
+    [
+        (["y"], True),
+        (["n"], False),
+        (["escape"], False),
+        # The scrolling body has the focus, so Enter never approves.
+        (["enter", "escape"], False),
+    ],
+)
 async def test_a_charter_approval_gets_the_wide_dialog_with_the_same_answers(keys, expected):
     app = _make_app()
     answers = []
@@ -285,6 +286,7 @@ async def test_a_charter_approval_gets_the_wide_dialog_with_the_same_answers(key
 
 def test_an_asker_with_no_app_to_ask_refuses():
     """Fails closed, like every other unanswerable question in CoBirb."""
+
     class _Dead:
         ui_thread_id = -1
 
@@ -352,7 +354,7 @@ async def test_declining_the_interrupt_leaves_the_flock_running():
 async def test_quitting_mid_flock_stops_it_rather_than_waiting_it_out():
     """Without this, quitting waits for every remaining Worker Birb to run."""
     app = _make_app()
-    async with app.run_test() as pilot:
+    async with app.run_test():
         stop = app._flock_stop = threading.Event()
 
         await app.action_quit()
@@ -432,7 +434,7 @@ async def test_quitting_mid_flock_force_stops_rather_than_asking():
     — so it goes straight to the hard stop rather than leaving a worker
     blocked on the model to hold the whole app open."""
     app = _make_app()
-    async with app.run_test() as pilot:
+    async with app.run_test():
         app._flock_stop = threading.Event()
         canceller = app._flock_canceller = Canceller()
 
@@ -523,9 +525,7 @@ async def test_a_report_the_transcript_already_holds_is_not_written_twice():
         app.write_transcript = lambda renderable: written.append(renderable)
         app.note_answer("Brainy Birb's account of the round.")
 
-        app._on_flock_finished(
-            FlockRun(report="Brainy Birb's account of the round.", stopped_at="planning")
-        )
+        app._on_flock_finished(FlockRun(report="Brainy Birb's account of the round.", stopped_at="planning"))
         await pilot.pause()
 
         assert written == []

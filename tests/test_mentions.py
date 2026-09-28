@@ -1,7 +1,6 @@
 """Tests for ``@path`` mentions: finding a file, and sending it along."""
-from __future__ import annotations
 
-import os
+from __future__ import annotations
 
 import pytest
 
@@ -89,13 +88,13 @@ def test_ranking_is_stable_for_equally_scored_paths():
     [
         ("explain @src/main.py", ["src/main.py"]),
         ("compare @a.py and @b.py", ["a.py", "b.py"]),
-        ("look at @main.py, then stop", ["main.py"]),          # trailing comma not part of it
-        ("is @main.py right?", ["main.py"]),                    # nor a question mark
-        ("(see @main.py)", ["main.py"]),                        # nor a closing bracket
+        ("look at @main.py, then stop", ["main.py"]),  # trailing comma not part of it
+        ("is @main.py right?", ["main.py"]),  # nor a question mark
+        ("(see @main.py)", ["main.py"]),  # nor a closing bracket
         ("@main.py", ["main.py"]),
         ("no mentions here", []),
-        ("email me at foo@example.com", []),                    # not a mention
-        ("@a.py and @a.py again", ["a.py"]),                    # de-duplicated
+        ("email me at foo@example.com", []),  # not a mention
+        ("@a.py and @a.py again", ["a.py"]),  # de-duplicated
     ],
 )
 def test_find_pulls_out_the_paths(text, expected):
@@ -110,8 +109,8 @@ def test_expand_appends_the_file_and_keeps_the_sentence(tmp_path):
 
     out = mentions.expand("explain @a.py please", str(tmp_path))
 
-    assert "explain @a.py please" in out      # the sentence still reads as written
-    assert "--- a.py ---" in out              # labelled, so the model knows which is which
+    assert "explain @a.py please" in out  # the sentence still reads as written
+    assert "--- a.py ---" in out  # labelled, so the model knows which is which
     assert "print('hello')" in out
 
 

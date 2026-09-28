@@ -61,6 +61,7 @@ default is what happens without being asked, and this is never that. Which host 
 git remote for a checkout, GitHub's release assets plus PyPI for the
 dependencies on a managed one — but not whether it talks at all.
 """
+
 from __future__ import annotations
 
 import json
@@ -159,9 +160,7 @@ class Install:
 def _parse_version(tag: str) -> tuple[int, int, int]:
     match = _TAG_PATTERN.match(tag.strip())
     if not match:
-        raise UpgradeError(
-            f"{tag!r} doesn't look like a release tag — expected e.g. 'v0.8.0' or '0.8.0'."
-        )
+        raise UpgradeError(f"{tag!r} doesn't look like a release tag — expected e.g. 'v0.8.0' or '0.8.0'.")
     major, minor, patch = match.groups()
     return (int(major), int(minor), int(patch))
 
@@ -222,9 +221,7 @@ def _find_repo_root(start: str | None = None) -> str:
     """
     here = start or os.path.dirname(os.path.abspath(__file__))
     for _ in range(8):
-        if os.path.isdir(os.path.join(here, ".git")) and os.path.isfile(
-            os.path.join(here, "pyproject.toml")
-        ):
+        if os.path.isdir(os.path.join(here, ".git")) and os.path.isfile(os.path.join(here, "pyproject.toml")):
             return here
         parent = os.path.dirname(here)
         if parent == here:
@@ -254,7 +251,7 @@ def _install_dir() -> str:
     return os.path.expanduser(os.environ.get("COBIRB_INSTALL_DIR", _DEFAULT_INSTALL_DIR))
 
 
-def _read_marker(path: str) -> "dict | None":
+def _read_marker(path: str) -> dict | None:
     """``install.json`` as a dict, or ``None`` if absent or unreadable.
 
     Unreadable counts as absent rather than as an error. A truncated or
@@ -305,9 +302,7 @@ def _bundled_install_script() -> str:
     on the way out of that version rather than only for people who never
     installed it.
     """
-    script = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "install.sh"
-    )
+    script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "install.sh")
     if not os.path.isfile(script):
         raise UpgradeError(
             "this install is missing its own install.sh, which the managed upgrade path "
@@ -317,7 +312,7 @@ def _bundled_install_script() -> str:
     return script
 
 
-def _run_install_script(args: "list[str]") -> None:
+def _run_install_script(args: list[str]) -> None:
     """Run the bundled installer from a copy, with its output left streaming.
 
     **From a copy** because pip is about to rewrite the original underneath
@@ -337,14 +332,12 @@ def _run_install_script(args: "list[str]") -> None:
         except FileNotFoundError as exc:
             raise UpgradeError("no 'sh' on PATH — the installer needs a POSIX shell") from exc
         except subprocess.TimeoutExpired as exc:
-            raise UpgradeError(
-                f"the installer timed out after {_INSTALL_TIMEOUT_SECONDS}s"
-            ) from exc
+            raise UpgradeError(f"the installer timed out after {_INSTALL_TIMEOUT_SECONDS}s") from exc
     if completed.returncode != 0:
         raise UpgradeError("the installer did not finish — its output above says why.")
 
 
-def _managed_upgrade(install: Install, tag: "str | None", *, force: bool) -> UpgradeResult:
+def _managed_upgrade(install: Install, tag: str | None, *, force: bool) -> UpgradeResult:
     """Hand the whole job to ``install.sh``, then report what it ended up doing.
 
     Every decision — resolving "latest", refusing a downgrade without
@@ -352,7 +345,7 @@ def _managed_upgrade(install: Install, tag: "str | None", *, force: bool) -> Upg
     what a first-time user runs. Re-deciding any of it here would be a second
     implementation to keep in step with the first.
     """
-    args: "list[str]" = []
+    args: list[str] = []
     if tag:
         args += ["--version", tag]
     if force:
@@ -495,9 +488,7 @@ def upgrade(tag: str | None = None, *, force: bool = False, remote: str = _DEFAU
     )
 
 
-def _checkout_upgrade(
-    repo_root: str, tag: str | None, *, force: bool, remote: str
-) -> UpgradeResult:
+def _checkout_upgrade(repo_root: str, tag: str | None, *, force: bool, remote: str) -> UpgradeResult:
     """Move a git checkout onto ``tag``, or the latest release tag.
 
     Refuses on a dirty working tree (see the module docstring for why) and on

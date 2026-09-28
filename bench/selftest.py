@@ -5,6 +5,7 @@ checker, and the fixture overlaid with ``solution/`` must PASS it. A checker
 that passes the untouched fixture measures nothing; one that fails the
 reference solution measures the checker.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -13,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from cobirb_bench import TASKS_DIR, Task, _check  # noqa: E402
+from cobirb_bench import TASKS_DIR, Task, _check
 
 
 def attempt(task: Task, solved: bool) -> bool:
@@ -51,8 +52,10 @@ def main() -> int:
         untouched, solved = attempt(task, False), attempt(task, True)
         ok = not untouched and solved
         bad += not ok
-        print(f"{'ok ' if ok else 'BAD'} {task.id:<30} fixture {'passes' if untouched else 'fails'}, "
-              f"solution {'passes' if solved else 'fails'}")
+        print(
+            f"{'ok ' if ok else 'BAD'} {task.id:<30} fixture {'passes' if untouched else 'fails'}, "
+            f"solution {'passes' if solved else 'fails'}"
+        )
     return 1 if bad else 0
 
 

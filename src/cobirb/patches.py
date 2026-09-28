@@ -23,6 +23,7 @@ Update and Add sections are accepted: a patch touching several files, or moving
 or deleting one, names targets the one-path permission check cannot vouch for,
 so it is refused rather than half-checked.
 """
+
 from __future__ import annotations
 
 import re

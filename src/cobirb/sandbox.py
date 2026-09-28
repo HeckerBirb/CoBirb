@@ -25,15 +25,16 @@ asking (``mode = "auto"``): nothing inside can reach further than the project.
 Backed by bubblewrap when it is installed. Without it, commands run as they
 always have — unsandboxed and asked about — and ``cobirb doctor`` says so.
 """
+
 from __future__ import annotations
 
 import os
 import shutil
 from dataclasses import dataclass, field
 
-MODE_ASK = "ask"      # sandboxed, and still asked about
-MODE_AUTO = "auto"    # sandboxed, and not asked about
-MODE_OFF = "off"      # no sandbox: the pre-0.34 behaviour
+MODE_ASK = "ask"  # sandboxed, and still asked about
+MODE_AUTO = "auto"  # sandboxed, and not asked about
+MODE_OFF = "off"  # no sandbox: the pre-0.34 behaviour
 MODES = (MODE_ASK, MODE_AUTO, MODE_OFF)
 # Auto by default — but a *default* auto only takes effect where every turn is
 # checkpointed whole, so what a command changes can be undone (see
@@ -43,9 +44,20 @@ DEFAULT_MODE = MODE_AUTO
 # Relative to the home directory. Hidden only when they exist; directories are
 # covered by an empty tmpfs, files by /dev/null.
 DEFAULT_HIDDEN = (
-    ".ssh", ".gnupg", ".aws", ".azure", ".config/gcloud", ".kube", ".docker",
-    ".netrc", ".git-credentials", ".password-store", ".local/share/keyrings",
-    ".pypirc", ".npmrc", ".cobirb",
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".azure",
+    ".config/gcloud",
+    ".kube",
+    ".docker",
+    ".netrc",
+    ".git-credentials",
+    ".password-store",
+    ".local/share/keyrings",
+    ".pypirc",
+    ".npmrc",
+    ".cobirb",
 )
 
 # Where WSL keeps the socket its interop uses to start Windows programs from
@@ -79,8 +91,10 @@ class Sandbox:
         if not self.active:
             return "unavailable (install bubblewrap)"
         if self.auto_approve:
-            return ("bubblewrap: shell commands run contained, without asking "
-                    "(no network, writes only inside the project)")
+            return (
+                "bubblewrap: shell commands run contained, without asking "
+                "(no network, writes only inside the project)"
+            )
         return "bubblewrap: shell commands run contained, and each is asked about first"
 
     def argv(self, command: str, cwd: str) -> list[str]:
@@ -89,11 +103,18 @@ class Sandbox:
         project = os.path.realpath(self.project)
         args = [
             self.bwrap,
-            "--ro-bind", "/", "/",
-            "--dev", "/dev",
-            "--proc", "/proc",
-            "--tmpfs", "/tmp",
-            "--bind", project, project,
+            "--ro-bind",
+            "/",
+            "/",
+            "--dev",
+            "/dev",
+            "--proc",
+            "/proc",
+            "--tmpfs",
+            "/tmp",
+            "--bind",
+            project,
+            project,
         ]
         # The project's repository is read-only inside: `git status`, `diff`
         # and `log` work, but a commit, reset or branch change cannot happen
@@ -122,10 +143,18 @@ class Sandbox:
         if os.path.isdir(WSL_INTEROP_DIR):
             args += ["--tmpfs", WSL_INTEROP_DIR]
         args += [
-            "--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
-            "--die-with-parent", "--new-session",
-            "--chdir", os.path.realpath(cwd),
-            "--", "/bin/sh", "-c", command,
+            "--unshare-net",
+            "--unshare-pid",
+            "--unshare-ipc",
+            "--unshare-uts",
+            "--die-with-parent",
+            "--new-session",
+            "--chdir",
+            os.path.realpath(cwd),
+            "--",
+            "/bin/sh",
+            "-c",
+            command,
         ]
         return args
 
@@ -182,9 +211,22 @@ def find_bwrap() -> str | None:
 
         try:
             probe = subprocess.run(
-                [path, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-                 "--unshare-net", "--unshare-pid", "--die-with-parent", "true"],
-                capture_output=True, timeout=10,
+                [
+                    path,
+                    "--ro-bind",
+                    "/",
+                    "/",
+                    "--dev",
+                    "/dev",
+                    "--proc",
+                    "/proc",
+                    "--unshare-net",
+                    "--unshare-pid",
+                    "--die-with-parent",
+                    "true",
+                ],
+                capture_output=True,
+                timeout=10,
             )
             _PROBED[path] = probe.returncode == 0
         except (OSError, subprocess.SubprocessError):

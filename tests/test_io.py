@@ -1,4 +1,5 @@
 """Tests for the terminal I/O adapter, in particular the approval prompt."""
+
 from __future__ import annotations
 
 import io as iomod
@@ -114,7 +115,9 @@ def test_render_tool_call_shows_the_tool_name_and_result():
 def test_render_tool_call_highlights_an_apply_patch_diff():
     term, buf = _make_terminal_io()
     patch = "--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n"
-    term.render_tool_call("apply_patch", {"path": "a.py", "patch": patch}, ToolResult(ok=True, content="Applied"))
+    term.render_tool_call(
+        "apply_patch", {"path": "a.py", "patch": patch}, ToolResult(ok=True, content="Applied")
+    )
     out = buf.getvalue()
     assert "apply_patch" in out
     assert "-old" in out

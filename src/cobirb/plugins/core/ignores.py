@@ -21,6 +21,7 @@ No new dependency for this. `pathspec` does it properly, but a tool with three
 carefully chosen runtime dependencies should not gain a fourth for one that
 fits in a page.
 """
+
 from __future__ import annotations
 
 import os
@@ -122,7 +123,7 @@ class IgnoreRules:
         self._rules = rules or []
 
     @classmethod
-    def for_directory(cls, root: str) -> "IgnoreRules":
+    def for_directory(cls, root: str) -> IgnoreRules:
         """Read ``root/.gitignore``, if there is one.
 
         A missing or unreadable file is not an error: the built-in list below
@@ -132,7 +133,7 @@ class IgnoreRules:
         rules: list[_Rule] = []
         path = os.path.join(root, ".gitignore")
         try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+            with open(path, encoding="utf-8", errors="ignore") as fh:
                 for line in fh:
                     rule = _compile(line)
                     if rule is not None:

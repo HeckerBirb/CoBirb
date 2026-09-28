@@ -33,6 +33,7 @@ effective strength, leaving 128 bits), and a KEM derived from the same password
 would not raise the cost of a password-guessing attack — only add ceremony
 around the same weak point.
 """
+
 from __future__ import annotations
 
 import base64
@@ -114,7 +115,7 @@ class AesGcmScryptSessionCrypto(SessionCrypto):
 
     _AUTO = object()  # sentinel: "detect the backend" vs. an explicit (possibly None) override
 
-    def __init__(self, backend: "_Backend | None | object" = _AUTO) -> None:
+    def __init__(self, backend: _Backend | object | None = _AUTO) -> None:
         # `backend` is normally left to auto-detect; tests can pass `backend=None`
         # to exercise the "cryptography isn't available" path through the public
         # constructor instead of reaching into a private attribute after the fact.
@@ -134,8 +135,7 @@ class AesGcmScryptSessionCrypto(SessionCrypto):
         backend = self._backend
         if backend is None:
             raise RuntimeError(
-                "Crypto backend unavailable. Install the 'cryptography' library "
-                "before encrypting a session."
+                "Crypto backend unavailable. Install the 'cryptography' library before encrypting a session."
             )
         salt = os.urandom(_SALT_LEN)
         key = backend.scrypt_derive(password.encode(), salt, _SCRYPT_N, _SCRYPT_R, _SCRYPT_P)
@@ -155,8 +155,7 @@ class AesGcmScryptSessionCrypto(SessionCrypto):
         backend = self._backend
         if backend is None:
             raise RuntimeError(
-                "Crypto backend unavailable. Install the 'cryptography' library "
-                "before decrypting a session."
+                "Crypto backend unavailable. Install the 'cryptography' library before decrypting a session."
             )
         params, body = _split(blob)
         # Both of these say the same thing — this is not a session file — and

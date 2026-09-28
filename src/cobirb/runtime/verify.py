@@ -14,6 +14,7 @@ which is a pattern rather than a literal command — and it is CoBirb running
 it, not the model choosing to. The model can neither pick the command nor
 change it mid-session. This is documented rather than quietly assumed.
 """
+
 from __future__ import annotations
 
 import os
@@ -94,9 +95,7 @@ def _tail(text: str, limit: int = _MAX_OUTPUT_CHARS) -> str:
     return f"[…{len(text) - limit} characters of earlier output omitted]\n" + text[-limit:]
 
 
-def run_verification(
-    command: str, cwd: str, timeout: int = DEFAULT_TIMEOUT_SECONDS
-) -> VerifyResult:
+def run_verification(command: str, cwd: str, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> VerifyResult:
     """Run ``command`` in ``cwd`` and report whether it passed."""
     if not command.strip():
         # `subprocess.run("", shell=True)` exits 0, which would report a check
@@ -133,16 +132,27 @@ def _run_windows(command: str, cwd: str, timeout: int) -> VerifyResult:
     command is started in its own process group and ``taskkill /T`` ends it.
     """
     try:
-        process = subprocess.Popen(command, shell=True, cwd=cwd, text=True, stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        process = subprocess.Popen(
+            command,
+            shell=True,
+            cwd=cwd,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        )
     except Exception as exc:  # noqa: BLE001 - a broken command is not a crash
         return VerifyResult(command, ok=False, output="", error=str(exc))
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], stdin=subprocess.DEVNULL,
-                       capture_output=True, check=False)
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=False,
+        )
         process.communicate()
         return VerifyResult(command, ok=False, output="", timed_out=True)
     return VerifyResult(command, ok=process.returncode == 0, output=_tail(f"{stdout}{stderr}"))

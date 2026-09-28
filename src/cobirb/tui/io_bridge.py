@@ -16,13 +16,15 @@ The renderables themselves are built by ``plugins.core.render`` — the same
 builders ``TerminalIO`` prints — so the transcript here is visually identical
 to the scrolling output of one-shot mode.
 """
+
 from __future__ import annotations
 
 import re
 import threading
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Callable, Iterator
+from typing import TYPE_CHECKING, Any
 
 from ..plugins.core import render
 from ..typing.spi import DECISION_DENY, DECISIONS, I_OAdapter
@@ -46,7 +48,7 @@ class TuiIO(I_OAdapter):
     # model's thread until that thread has drawn it.
     STREAM_INTERVAL = 0.1
 
-    def __init__(self, app: "CoBirbApp") -> None:
+    def __init__(self, app: CoBirbApp) -> None:
         self._app = app
         self._pending: list[str] = []
         self._pending_lock = threading.Lock()
@@ -130,7 +132,7 @@ class TuiIO(I_OAdapter):
 
     def view(self, data: bytes, mime: str | None = None) -> None:
         """No-op, matching ``TerminalIO``. Vision rendering lands in v0.2.0."""
-        return None
+        return
 
     def confirm(self, tool_name: str, arguments: dict[str, Any]) -> str:
         """Ask the user to approve a tool call, blocking until they answer.
@@ -159,9 +161,7 @@ class TuiIO(I_OAdapter):
         change — both shown in the modal, so neither is agreed to blind."""
         return self._ask(request.tool_name, request.arguments, request.scope, request.preview)
 
-    def _ask(
-        self, tool_name: str, arguments: dict[str, Any], scope: str | None, preview: str = ""
-    ) -> str:
+    def _ask(self, tool_name: str, arguments: dict[str, Any], scope: str | None, preview: str = "") -> str:
         try:
             decision = self._app.call_from_thread(
                 self._app.request_approval, tool_name, arguments, scope, preview
@@ -270,8 +270,12 @@ class TuiIO(I_OAdapter):
         # building a charter, which is exactly the stretch it exists to make
         # legible.
         subject = (
-            arguments.get("path") or arguments.get("pattern") or arguments.get("command")
-            or arguments.get("id") or arguments.get("at") or ""
+            arguments.get("path")
+            or arguments.get("pattern")
+            or arguments.get("command")
+            or arguments.get("id")
+            or arguments.get("at")
+            or ""
         )
         self._call(self._app.note_brainy_planning, f"{tool_name} {subject}".strip())
 
@@ -283,7 +287,6 @@ class TuiIO(I_OAdapter):
         stray line painted over the layout.
         """
         self._write(render.build_error_panel(label, text))
-
 
     def _write(self, renderable: Any) -> None:
         """Put a finished renderable in the transcript.

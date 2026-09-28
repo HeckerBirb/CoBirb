@@ -15,7 +15,7 @@ network unless the user explicitly asks for it.
 - Version: `pyproject.toml` only (`cobirb.__version__` reads the installed metadata). Python ≥3.11,
   MIT. Entry point `cobirb = cobirb.cli:main`.
 - Runtime deps: `rich`, `cryptography`, `textual` (imported lazily; one-shot never loads it). Dev:
-  `pytest`, `pytest-cov`, `pytest-asyncio`, `pytest-xdist`. Prefer stdlib; each dependency is a
+  `pytest`, `pytest-cov`, `pytest-asyncio`, `pytest-xdist`, `ruff`. Prefer stdlib; each dependency is a
   deliberate decision.
 - Ships **no models**. It talks to one model server the user configures — Ollama's API by default, or
   any OpenAI-compatible server (`"api": "openai"`) — and only once a model is named.
@@ -102,6 +102,7 @@ Code paths are under `src/cobirb/`; the rest are from the repository root.
 ```bash
 pip install -e ".[dev]"
 pytest                                            # parallel (-n auto); CI: 3.11 and 3.12
+ruff check && ruff format --check                 # lint and format; CI runs both
 pytest -n 0 tests/test_x.py -k name               # serial, for one test
 COBIRB_TEST_MODEL=llama3.1 pytest -m integration  # needs a real local Ollama
 python bench/cobirb_bench.py --models <m1,m2> --reps 2   # the offline benchmark
@@ -121,7 +122,9 @@ python bench/cobirb_bench.py --models <m1,m2> --reps 2   # the offline benchmark
   backend. Subprocess boundaries are usually mocked, with at least one real test.
 - **Test the contract, not the internals**: aim for 85–90 % coverage, not more. If a change preserves a
   contract, its tests should not change; over-specified tests are fixed in the test.
-- No linter, formatter or type checker — match the surrounding style.
+- **`ruff check` and `ruff format` must pass** (settings in `pyproject.toml`; CI runs both). A broad
+  `except Exception` that swallows the error carries `# noqa: BLE001 - <why>`; one that logs or
+  re-raises carries a plain `# <why>`. No type checker.
 - **cobirb-bench** (`bench/`): fixture repos, an instruction, a hidden checker; runs CoBirb headless
   from a frozen `git worktree` of one commit, seeded per repetition (not temperature 0), and classifies
   every failure by cause. `bench/selftest.py` proves each checker fails the untouched fixture and

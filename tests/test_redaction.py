@@ -4,6 +4,7 @@ The two halves of the contract are equally important: real credentials are
 caught, and ordinary content is left alone. A redactor that eats real content
 is worse than none, so the false-positive tests below are not padding.
 """
+
 from __future__ import annotations
 
 from cobirb.redaction import redact, redact_arguments

@@ -4,10 +4,11 @@ This is the application's composition root, and a module in its own right so
 that every front-end wires a run the same way rather than reaching into
 another's internals to build the same object.
 """
+
 from __future__ import annotations
 
 import os
-from typing import Callable
+from collections.abc import Callable
 
 from .. import sandbox
 from ..checkpoints import Checkpoints
@@ -16,10 +17,10 @@ from ..config import Config
 from ..mcp import connect_servers
 from ..orchestrator import DEFAULT_MAX_TURNS, Orchestrator, build_default_policy
 from ..plugins.core import LocalModelProvider, TerminalIO, ToolRegistry
+from ..plugins.core.repomap import DEFAULT_BUDGET_CHARS, render_map
 from ..policy import Policy, SessionGrants
 from ..session import SessionManager
 from ..typing import spi as cobirb_typing
-from ..plugins.core.repomap import DEFAULT_BUDGET_CHARS, render_map
 from .headless import HeadlessIO
 from .hooks import HookRunner
 from .instructions import DEFAULT_MAX_CHARS, load_instructions
@@ -28,7 +29,9 @@ from .plugins import build_crypto, discover_plugins, report_plugin_issues, resol
 from .verify import DEFAULT_MAX_FIX_ATTEMPTS, DEFAULT_TIMEOUT_SECONDS, VerifySettings
 
 
-def build_model(model_name: str | None, cwd: str | None = None, config: Config | None = None) -> LocalModelProvider:
+def build_model(
+    model_name: str | None, cwd: str | None = None, config: Config | None = None
+) -> LocalModelProvider:
     """Build the provider for the agent the user is talking to.
 
     A thin front for ``models.build_for_role(ROLE_ORCHESTRATOR, ...)``, kept
@@ -52,7 +55,7 @@ def build_model(model_name: str | None, cwd: str | None = None, config: Config |
     return build_for_role(ROLE_ORCHESTRATOR, config or Config(), override=model_name)
 
 
-def parse_allow_tools(specs: "str | list[str] | None") -> dict[str, str]:
+def parse_allow_tools(specs: str | list[str] | None) -> dict[str, str]:
     """Parse permission rules written by the user.
 
     Used for both ``--allow-tool`` (repeatable) and the ``allow_tools`` config
@@ -142,7 +145,7 @@ def _verify_settings(cwd: str, config: Config) -> VerifySettings | None:
     )
 
 
-def attach_sandbox(registry: ToolRegistry, config: Config) -> "sandbox.Sandbox":
+def attach_sandbox(registry: ToolRegistry, config: Config) -> sandbox.Sandbox:
     """Give ``registry``'s shell tool the session's sandbox, and return it."""
     box = sandbox.from_config(config.get("sandbox"), registry.cwd)
     shell = registry.tools.get("shell")
@@ -169,7 +172,7 @@ def build_orchestrator(
     password: str | None = None,
     model_name: str | None = None,
     io_factory: Callable[[], cobirb_typing.I_OAdapter] = TerminalIO,
-    grants: "SessionGrants | None" = None,
+    grants: SessionGrants | None = None,
 ) -> Orchestrator:
     """Wire the core: registry -> provider -> policy -> orchestrator.
 
@@ -217,9 +220,7 @@ def build_orchestrator(
     # Nothing is permitted until the user says so. Config's `allow_tools`
     # comes first and `--allow-tool` after it; both only ever add, so the
     # order is about readability rather than precedence.
-    policy = build_default_policy(
-        audit_log_enabled=bool(config.get("audit_log")), cwd=registry.cwd
-    )
+    policy = build_default_policy(audit_log_enabled=bool(config.get("audit_log")), cwd=registry.cwd)
     for rules in (parse_allow_tools(config.get("allow_tools")), allow_overrides):
         for name, arg in rules.items():
             policy.allow(name, arg)
@@ -293,9 +294,9 @@ def build_subagent(
     accept: str = "",
     config: Config | None = None,
     io: cobirb_typing.I_OAdapter | None = None,
-    grants: "SessionGrants | None" = None,
+    grants: SessionGrants | None = None,
     agent_id: str = "",
-    model: "cobirb_typing.ModelProvider | None" = None,
+    model: cobirb_typing.ModelProvider | None = None,
 ) -> Orchestrator:
     """Wire an agent that takes its instructions from another agent.
 
@@ -367,9 +368,7 @@ def build_subagent(
                 command=accept,
                 cwd=cwd,
                 timeout=int(config.get("verify_timeout", default=DEFAULT_TIMEOUT_SECONDS)),
-                max_fix_attempts=int(
-                    config.get("verify_fix_attempts", default=DEFAULT_MAX_FIX_ATTEMPTS)
-                ),
+                max_fix_attempts=int(config.get("verify_fix_attempts", default=DEFAULT_MAX_FIX_ATTEMPTS)),
                 # Always, even if the worker changed nothing: this is the
                 # ticket's definition of done, not a regression guard.
                 only_after_changes=False,

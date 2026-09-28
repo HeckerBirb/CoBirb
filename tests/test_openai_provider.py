@@ -1,4 +1,5 @@
 """Tests for the OpenAI-compatible provider (llama.cpp, LM Studio, vLLM)."""
+
 from __future__ import annotations
 
 import http.server
@@ -96,21 +97,50 @@ def test_a_plain_reply_goes_to_chat_completions(server_factory):
 
 
 def test_a_tool_call_comes_back_with_parsed_arguments(server_factory):
-    server = server_factory(reply={"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [
-        {"id": "x", "type": "function", "function": {"name": "read_file", "arguments": '{"path": "a.py"}'}}]}}]})
+    server = server_factory(
+        reply={
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "x",
+                                "type": "function",
+                                "function": {"name": "read_file", "arguments": '{"path": "a.py"}'},
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+    )
     provider = OpenAICompatibleProvider(model="m", base_url=server.url)
 
     reply = provider.chat("", "[]", [_Tool()])
 
     assert reply == ""
-    assert [(c.name, c.arguments) for c in provider.parse_tool_calls(reply)] == [("read_file", {"path": "a.py"})]
+    assert [(c.name, c.arguments) for c in provider.parse_tool_calls(reply)] == [
+        ("read_file", {"path": "a.py"})
+    ]
     assert server.requests[-1][1]["tools"][0]["function"]["name"] == "read_file"
 
 
 def test_streamed_tool_call_fragments_are_stitched_together(server_factory):
     events = [
         {"choices": [{"delta": {"content": "Let me look."}}]},
-        {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c", "function": {"name": "read_file", "arguments": '{"pa'}}]}}]},
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {"index": 0, "id": "c", "function": {"name": "read_file", "arguments": '{"pa'}}
+                        ]
+                    }
+                }
+            ]
+        },
         {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": 'th": "b.py"}'}}]}}]},
     ]
     server = server_factory(stream_events=events)
@@ -119,18 +149,27 @@ def test_streamed_tool_call_fragments_are_stitched_together(server_factory):
     text = "".join(provider.chat("", "[]", [_Tool()], stream=True))
 
     assert text == "Let me look."
-    assert [(c.name, c.arguments) for c in provider.parse_tool_calls(text)] == [("read_file", {"path": "b.py"})]
+    assert [(c.name, c.arguments) for c in provider.parse_tool_calls(text)] == [
+        ("read_file", {"path": "b.py"})
+    ]
 
 
 def test_history_pairs_every_call_with_its_result_by_id():
-    context = json.dumps([
-        {"role": "user", "content": "go"},
-        {"role": "assistant", "content": "", "tool_use": [
-            {"name": "read_file", "arguments": {"path": "a"}},
-            {"name": "read_file", "arguments": {"path": "b"}}]},
-        {"role": "tool", "content": "A", "tool_use": [{"name": "read_file"}]},
-        {"role": "tool", "content": "B", "tool_use": [{"name": "read_file"}]},
-    ])
+    context = json.dumps(
+        [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_use": [
+                    {"name": "read_file", "arguments": {"path": "a"}},
+                    {"name": "read_file", "arguments": {"path": "b"}},
+                ],
+            },
+            {"role": "tool", "content": "A", "tool_use": [{"name": "read_file"}]},
+            {"role": "tool", "content": "B", "tool_use": [{"name": "read_file"}]},
+        ]
+    )
     messages = build_messages("sys", context)
 
     call_ids = [c["id"] for c in messages[2]["tool_calls"]]
@@ -143,7 +182,9 @@ def test_the_window_is_read_from_the_server_and_capped(server_factory):
     server = server_factory(props={"default_generation_settings": {"n_ctx": 65536}})
 
     assert OpenAICompatibleProvider(model="m", base_url=server.url).context_window() == 65536
-    assert OpenAICompatibleProvider(model="m", base_url=server.url, max_num_ctx=32768).context_window() == 32768
+    assert (
+        OpenAICompatibleProvider(model="m", base_url=server.url, max_num_ctx=32768).context_window() == 32768
+    )
 
 
 def test_the_window_falls_back_to_what_the_model_list_reports(server_factory):
@@ -162,17 +203,24 @@ def test_no_system_message_is_invented(server_factory):
 
 def test_options_are_sent_as_request_fields(server_factory):
     server = server_factory()
-    OpenAICompatibleProvider(model="m", base_url=server.url, options={"temperature": 0.2, "seed": 3}).chat("", "[]")
+    OpenAICompatibleProvider(model="m", base_url=server.url, options={"temperature": 0.2, "seed": 3}).chat(
+        "", "[]"
+    )
 
     body = server.requests[-1][1]
     assert body["temperature"] == 0.2 and body["seed"] == 3
 
 
 def test_config_selects_the_protocol_per_role(tmp_path):
-    write_config(tmp_path, {"models": {
-        "default": {"name": "m", "base_url": "http://localhost:8080", "api": "openai"},
-        "worker": {"api": "ollama", "base_url": "http://localhost:11434"},
-    }})
+    write_config(
+        tmp_path,
+        {
+            "models": {
+                "default": {"name": "m", "base_url": "http://localhost:8080", "api": "openai"},
+                "worker": {"api": "ollama", "base_url": "http://localhost:11434"},
+            }
+        },
+    )
 
     assert isinstance(build_for_role("orchestrator", Config()), OpenAICompatibleProvider)
     assert not isinstance(build_for_role("worker", Config()), OpenAICompatibleProvider)

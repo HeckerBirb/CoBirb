@@ -22,6 +22,7 @@ instead of quietly working from a value it never received.
 credentials file cannot do it through a redacted read. `"redact_secrets":
 false` is the way out, and the README says so.
 """
+
 from __future__ import annotations
 
 import re
@@ -30,16 +31,14 @@ from dataclasses import dataclass
 # Each rule is (name, pattern). Names appear in the replacement marker, so
 # they are written for a person reading a transcript.
 _RULES: list[tuple[str, re.Pattern[str]]] = [
-    ("private key", re.compile(
-        r"-----BEGIN[ A-Z]*PRIVATE KEY-----.*?-----END[ A-Z]*PRIVATE KEY-----", re.S)),
+    ("private key", re.compile(r"-----BEGIN[ A-Z]*PRIVATE KEY-----.*?-----END[ A-Z]*PRIVATE KEY-----", re.S)),
     ("aws access key id", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("github token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
     ("slack token", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b")),
     ("stripe key", re.compile(r"\b[sr]k_(?:live|test)_[0-9A-Za-z]{16,}\b")),
     ("google api key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
     ("api key", re.compile(r"\bsk-(?:ant-)?[A-Za-z0-9_\-]{20,}\b")),
-    ("json web token", re.compile(
-        r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")),
+    ("json web token", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")),
     ("private key material", re.compile(r"\b(?:ssh-rsa|ssh-ed25519)\s+[A-Za-z0-9+/]{60,}={0,3}")),
 ]
 
@@ -56,7 +55,9 @@ class Redaction:
         return bool(self.counts)
 
     def describe(self) -> str:
-        parts = [f"{count} {name}" + ("s" if count > 1 else "") for name, count in sorted(self.counts.items())]
+        parts = [
+            f"{count} {name}" + ("s" if count > 1 else "") for name, count in sorted(self.counts.items())
+        ]
         return "redacted " + ", ".join(parts)
 
 
@@ -66,6 +67,7 @@ def redact(text: str) -> Redaction:
         return Redaction(text, {})
     counts: dict[str, int] = {}
     for name, pattern in _RULES:
+
         def _replace(match: re.Match[str], _name: str = name) -> str:
             counts[_name] = counts.get(_name, 0) + 1
             return f"[redacted: {_name}]"

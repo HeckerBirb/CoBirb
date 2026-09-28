@@ -11,6 +11,7 @@ below assert that as a property rather than an absence — a repo layer coming
 back by accident is exactly the kind of regression that would otherwise pass
 unnoticed until it granted something.
 """
+
 from __future__ import annotations
 
 import json
@@ -53,7 +54,7 @@ def test_a_cobirb_json_in_the_working_directory_is_ignored_entirely(tmp_path, mo
 
 
 def test_a_cobirb_json_is_not_even_opened(tmp_path, monkeypatch):
-    """"Ignored" is not quite the promise; "never attempted" is. A file that is
+    """ "Ignored" is not quite the promise; "never attempted" is. A file that is
     unreadable, enormous, or a named pipe must cost nothing at all, which is
     only true if CoBirb never goes near it."""
     write_config(tmp_path, {"model": "mine"})
@@ -103,7 +104,7 @@ def test_get_returns_default_for_a_path_that_does_not_exist(tmp_path):
 
 
 def test_get_stops_cleanly_when_descending_through_a_non_dict_value(tmp_path):
-    """"model" is a plain string; asking for a key underneath it must return
+    """ "model" is a plain string; asking for a key underneath it must return
     the default, not raise."""
     write_config(tmp_path, {"model": "llama3.1"})
 
@@ -208,5 +209,3 @@ def test_every_cobirb_path_sits_under_one_home(tmp_path, monkeypatch):
         paths.user_plugins_dir(),
     ):
         assert path.startswith(root + os.sep), path
-
-

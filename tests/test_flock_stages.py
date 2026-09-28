@@ -5,6 +5,7 @@ asks for, so these tests are about what the harness does with the answers —
 which stages run, what is carried between them, when a round is approved,
 and when the rounds stop.
 """
+
 from __future__ import annotations
 
 import os
@@ -12,14 +13,14 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from conftest import write_config
 
+from cobirb import sandbox
 from cobirb.flock import stages
 from cobirb.flock.run import Asker, FlockSettings, run_flock_session
-from cobirb import sandbox
 from cobirb.flock.stages import TicketSpec, _GatedHooks, check_tickets, parse_tickets
 from cobirb.flock.worker import WorkerReport
 from cobirb.runtime.hooks import EVENT_BEFORE_TOOL, HookOutcome
-from conftest import write_config
 
 _BLOCKS = """
 ### ticket: a
@@ -39,6 +40,7 @@ _BLOCKS = """
 - done when: test_b passes
 """.replace("{py}", sys.executable)
 
+
 @pytest.fixture(autouse=True)
 def _no_preflight(monkeypatch):
     """The pre-flight model check asks the endpoint; nothing here is about it."""
@@ -55,8 +57,14 @@ def _restatement(tickets=_BLOCKS, names="- none"):
     """A restated design: every section reworded, the tickets as given."""
     parts = [f"## Names\n{names}", '## The request\nDouble two numbers, restated; print "OK".']
     for heading, _ in stages.SECTIONS:
-        parts.append(f"## {heading}\n" + (tickets if heading == "Tickets" else f"The {heading} section, restated."
-                                          + (_DETAIL if heading == "Architecture" else "")))
+        parts.append(
+            f"## {heading}\n"
+            + (
+                tickets
+                if heading == "Tickets"
+                else f"The {heading} section, restated." + (_DETAIL if heading == "Architecture" else "")
+            )
+        )
     return "\n\n".join(parts)
 
 
@@ -79,11 +87,19 @@ class _StagedBrainy:
         text = str(context)
         self.prompts.append(text)
         self.systems.append(str(system))
-        last = max(("Write the next section:", "Stage: the skeleton", "Stage: the plan for ticket",
-                    "Stage: after round", "Stage: restate the design", "Stage: restate the next round"),
-                   key=text.rfind)
+        last = max(
+            (
+                "Write the next section:",
+                "Stage: the skeleton",
+                "Stage: the plan for ticket",
+                "Stage: after round",
+                "Stage: restate the design",
+                "Stage: restate the next round",
+            ),
+            key=text.rfind,
+        )
         if last == "Write the next section:":
-            heading = text[text.rfind(last) + len(last):].split("---")[0].strip()
+            heading = text[text.rfind(last) + len(last) :].split("---")[0].strip()
             if heading == "Architecture":
                 return f"The {heading} section.{_DETAIL}"
             return self.tickets if heading == "Tickets" else f"The {heading} section."
@@ -112,7 +128,8 @@ def _project(tmp_path):
     for name in ("a", "b"):
         (tmp_path / f"{name}.py").write_text(f"def {name}(n):\n    raise NotImplementedError\n")
         (tmp_path / f"test_{name}.py").write_text(
-            f"from {name} import {name}\n\ndef test_it():\n    assert {name}(2) == 4\n")
+            f"from {name} import {name}\n\ndef test_it():\n    assert {name}(2) == 4\n"
+        )
 
 
 def _workers(monkeypatch, tmp_path, fail_first=()):
@@ -125,10 +142,17 @@ def _workers(monkeypatch, tmp_path, fail_first=()):
     def run(worker, cwd, **kwargs):
         if worker.id in fail_first and worker.id not in seen:
             seen.add(worker.id)
-            return WorkerReport(worker_id=worker.id, ok=True, accepted=False,
-                                structured={"tests_pass": False, "contract_kept": True,
-                                            "missing": ["the body — ran out of ideas"],
-                                            "test_contradicts": []})
+            return WorkerReport(
+                worker_id=worker.id,
+                ok=True,
+                accepted=False,
+                structured={
+                    "tests_pass": False,
+                    "contract_kept": True,
+                    "missing": ["the body — ran out of ideas"],
+                    "test_contradicts": [],
+                },
+            )
         (tmp_path / f"{worker.id}.py").write_text(f"def {worker.id}(n):\n    return n * 2\n")
         return WorkerReport(worker_id=worker.id, ok=True, accepted=True, summary="did it")
 
@@ -148,8 +172,11 @@ def _staged(tmp_path, **flock):
 
 def _run(orchestrator, tmp_path, ask=None, request='double two numbers, printing "OK"'):
     return run_flock_session(
-        orchestrator, request, str(tmp_path),
-        ask=ask or Asker(confirm=lambda q, detail="": True), probe=False,
+        orchestrator,
+        request,
+        str(tmp_path),
+        ask=ask or Asker(confirm=lambda q, detail="": True),
+        probe=False,
     )
 
 
@@ -164,66 +191,99 @@ def test_ticket_blocks_are_read_whatever_their_formatting():
     assert tickets[0].tests == ("test_a.py",) and tickets[0].needs == ()
 
 
-@pytest.mark.parametrize("blocks, problem", [
-    ("no blocks here", "no ticket blocks"),
-    ("### ticket: a\n- writes: a.py\n- accept: x", "has no test files"),
-    ("### ticket: a\n- writes: a.py\n- tests: t.py", "no `accept`"),
-    ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: x\n"
-     "### ticket: b\n- writes: a.py\n- tests: tb.py\n- accept: x", "listed by more than one ticket"),
-    # Another ticket's test file under `tests` — "the tests I must pass".
-    ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: x\n"
-     "### ticket: b\n- writes: b.py\n- tests: tb.py, ta.py\n- accept: x", "never another ticket's"),
-    ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: true\n- needs: ghost", "ghost"),
-    # The language's name where the program goes — a real flock's `accept`.
-    ("### ticket: a\n- writes: a.c\n- tests: ta.c\n- accept: c a.c ta.c", "`c`, which is not a program"),
-    ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: true && no-such-program-here", "no-such-program-here"),
-    ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: true $(x)", "cannot be read"),
-])
+@pytest.mark.parametrize(
+    "blocks, problem",
+    [
+        ("no blocks here", "no ticket blocks"),
+        ("### ticket: a\n- writes: a.py\n- accept: x", "has no test files"),
+        ("### ticket: a\n- writes: a.py\n- tests: t.py", "no `accept`"),
+        (
+            "### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: x\n"
+            "### ticket: b\n- writes: a.py\n- tests: tb.py\n- accept: x",
+            "listed by more than one ticket",
+        ),
+        # Another ticket's test file under `tests` — "the tests I must pass".
+        (
+            "### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: x\n"
+            "### ticket: b\n- writes: b.py\n- tests: tb.py, ta.py\n- accept: x",
+            "never another ticket's",
+        ),
+        ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: true\n- needs: ghost", "ghost"),
+        # The language's name where the program goes — a real flock's `accept`.
+        ("### ticket: a\n- writes: a.c\n- tests: ta.c\n- accept: c a.c ta.c", "`c`, which is not a program"),
+        (
+            "### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: true && no-such-program-here",
+            "no-such-program-here",
+        ),
+        ("### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: true $(x)", "cannot be read"),
+    ],
+)
 def test_ticket_blocks_that_cannot_become_a_charter_say_why(blocks, problem):
     assert problem in check_tickets(parse_tickets(blocks))
 
 
-@pytest.mark.parametrize("accept", [
-    "true",
-    "cd sub && FLAG=1 true",
-    # A program given as a path may be built by the command itself.
-    "./build.sh && /tmp/test_a",
-])
+@pytest.mark.parametrize(
+    "accept",
+    [
+        "true",
+        "cd sub && FLAG=1 true",
+        # A program given as a path may be built by the command itself.
+        "./build.sh && /tmp/test_a",
+    ],
+)
 def test_an_accept_command_naming_real_programs_passes_the_check(accept):
-    assert check_tickets(parse_tickets(f"### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: {accept}")) == ""
+    assert (
+        check_tickets(parse_tickets(f"### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: {accept}"))
+        == ""
+    )
 
 
-@pytest.mark.parametrize("line", [
-    "- writes: a.py",
-    "- **writes**: a.py",
-    "- **writes:** a.py",
-    "* __writes__ : a.py",
-])
+@pytest.mark.parametrize(
+    "line",
+    [
+        "- writes: a.py",
+        "- **writes**: a.py",
+        "- **writes:** a.py",
+        "* __writes__ : a.py",
+    ],
+)
 def test_a_field_is_read_whether_or_not_its_name_is_bold(line):
     assert parse_tickets(f"### ticket: a\n{line}\n")[0].writes == ("a.py",)
 
 
-@pytest.mark.parametrize("block, tests", [
-    ("### ticket: a\n- writes: a.py, tests/test_a.py\n- tests: tests/test_a.py", ("tests/test_a.py",)),
-    # No `tests` line: the test files it writes are its tests.
-    ("### ticket: a\n- writes: a.py, tests/test_a.py", ("tests/test_a.py",)),
-    ("### ticket: a\n- writes: a.py, a_test.py", ("a_test.py",)),
-    ("### ticket: a\n- writes: a.py", ()),
-])
+@pytest.mark.parametrize(
+    "block, tests",
+    [
+        ("### ticket: a\n- writes: a.py, tests/test_a.py\n- tests: tests/test_a.py", ("tests/test_a.py",)),
+        # No `tests` line: the test files it writes are its tests.
+        ("### ticket: a\n- writes: a.py, tests/test_a.py", ("tests/test_a.py",)),
+        ("### ticket: a\n- writes: a.py, a_test.py", ("a_test.py",)),
+        ("### ticket: a\n- writes: a.py", ()),
+    ],
+)
 def test_a_tickets_tests_are_read_from_its_block(block, tests):
     assert parse_tickets(block)[0].tests == tests
 
 
-@pytest.mark.parametrize("line, expected", [
-    ("- requires: zlib headers — check: pkg-config --exists zlib",
-     ("zlib headers", "pkg-config --exists zlib", "")),
-    ("- **requires**: requests, check: `python3 -c \"import requests\"`",
-     ("requests", 'python3 -c "import requests"', "")),
-    ("- requires: zlib", ("zlib", "", "")),
-    # A check ending in `-` keeps it: only a long dash, comma or space comes before `install:`.
-    ("- requires: zlib for MinGW — check: x86_64-w64-mingw32-gcc -E -x c - — install: sudo apt install libz-mingw-w64-dev",
-     ("zlib for MinGW", "x86_64-w64-mingw32-gcc -E -x c -", "sudo apt install libz-mingw-w64-dev")),
-])
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        (
+            "- requires: zlib headers — check: pkg-config --exists zlib",
+            ("zlib headers", "pkg-config --exists zlib", ""),
+        ),
+        (
+            '- **requires**: requests, check: `python3 -c "import requests"`',
+            ("requests", 'python3 -c "import requests"', ""),
+        ),
+        ("- requires: zlib", ("zlib", "", "")),
+        # A check ending in `-` keeps it: only a long dash, comma or space comes before `install:`.
+        (
+            "- requires: zlib for MinGW — check: x86_64-w64-mingw32-gcc -E -x c - — install: sudo apt install libz-mingw-w64-dev",
+            ("zlib for MinGW", "x86_64-w64-mingw32-gcc -E -x c -", "sudo apt install libz-mingw-w64-dev"),
+        ),
+    ],
+)
 def test_a_requirement_is_read_with_its_check(line, expected):
     ticket = parse_tickets(f"### ticket: a\n- writes: a.c\n{line}\n")[0]
 
@@ -231,10 +291,13 @@ def test_a_requirement_is_read_with_its_check(line, expected):
     assert parse_tickets(ticket.block())[0].requires == (expected,)
 
 
-@pytest.mark.parametrize("line, problem", [
-    ("- requires: zlib", "has no check"),
-    ("- requires: zlib — check: no-such-probe --exists zlib", "`no-such-probe`, which is not a program"),
-])
+@pytest.mark.parametrize(
+    "line, problem",
+    [
+        ("- requires: zlib", "has no check"),
+        ("- requires: zlib — check: no-such-probe --exists zlib", "`no-such-probe`, which is not a program"),
+    ],
+)
 def test_a_requirement_needs_a_check_that_can_run(line, problem):
     blocks = f"### ticket: a\n- writes: a.py\n- tests: ta.py\n- accept: true\n{line}"
 
@@ -242,8 +305,15 @@ def test_a_requirement_needs_a_check_that_can_run(line, problem):
 
 
 def _requiring(*checks):
-    return [TicketSpec(id="a", writes=("a.c",), tests=("ta.c",), accept="true",
-                       requires=tuple((f"dep{i}", c, f"install dep{i}") for i, c in enumerate(checks)))]
+    return [
+        TicketSpec(
+            id="a",
+            writes=("a.c",),
+            tests=("ta.c",),
+            accept="true",
+            requires=tuple((f"dep{i}", c, f"install dep{i}") for i, c in enumerate(checks)),
+        )
+    ]
 
 
 def test_requirements_are_not_run_where_commands_would_be_asked_about(tmp_path):
@@ -259,8 +329,9 @@ def test_requirements_are_not_run_where_commands_would_be_asked_about(tmp_path):
 @pytest.mark.skipif(sandbox.find_bwrap() is None, reason="bubblewrap not usable here")
 def test_requirements_are_checked_inside_the_sandbox(tmp_path):
     box = sandbox.from_config("auto", str(tmp_path))
-    main = SimpleNamespace(tools={"shell": SimpleNamespace(sandbox=box)},
-                           policy=SimpleNamespace(sandbox_auto=True))
+    main = SimpleNamespace(
+        tools={"shell": SimpleNamespace(sandbox=box)}, policy=SimpleNamespace(sandbox_auto=True)
+    )
 
     results = stages.check_requirements(main, _requiring("true", "false"), str(tmp_path))
 
@@ -276,29 +347,41 @@ def test_the_charter_approval_says_what_is_not_installed(monkeypatch, tmp_path):
     blocks = _BLOCKS.replace("- needs: none", "- requires: zlib — check: false\n- needs: none", 1)
     details = []
 
-    _run(_orchestrator(monkeypatch, tmp_path, _StagedBrainy(tickets=blocks)), tmp_path,
-         ask=Asker(confirm=lambda q, detail="": details.append(detail) or False))
+    _run(
+        _orchestrator(monkeypatch, tmp_path, _StagedBrainy(tickets=blocks)),
+        tmp_path,
+        ask=Asker(confirm=lambda q, detail="": details.append(detail) or False),
+    )
 
     # Missing, or not checked where no sandbox runs commands unasked — named either way.
     assert "zlib" in details[0] and "Needed on this machine" in details[0]
 
 
 _NEEDS_ZLIB = _BLOCKS.replace(
-    "- needs: none", "- requires: zlib — check: false — install: sudo apt install zlib1g-dev\n- needs: none", 1)
+    "- needs: none",
+    "- requires: zlib — check: false — install: sudo apt install zlib1g-dev\n- needs: none",
+    1,
+)
 
 
-@pytest.mark.parametrize("picked, stopped, approval_asked", [
-    (0, "approval", True),        # continue without: the charter is still put to the user
-    (2, "requirements", False),   # stop: nothing is approved
-    (None, "requirements", False),  # cancelled
-])
-def test_missing_requirements_are_settled_before_the_charter_approval(monkeypatch, tmp_path,
-                                                                      picked, stopped, approval_asked):
+@pytest.mark.parametrize(
+    "picked, stopped, approval_asked",
+    [
+        (0, "approval", True),  # continue without: the charter is still put to the user
+        (2, "requirements", False),  # stop: nothing is approved
+        (None, "requirements", False),  # cancelled
+    ],
+)
+def test_missing_requirements_are_settled_before_the_charter_approval(
+    monkeypatch, tmp_path, picked, stopped, approval_asked
+):
     _staged(tmp_path)
     _project(tmp_path)
     asked, approvals = [], []
-    ask = Asker(confirm=lambda q, detail="": approvals.append(detail) or False,
-                choose=lambda q, detail, options: asked.append((detail, options)) or picked)
+    ask = Asker(
+        confirm=lambda q, detail="": approvals.append(detail) or False,
+        choose=lambda q, detail, options: asked.append((detail, options)) or picked,
+    )
 
     run = _run(_orchestrator(monkeypatch, tmp_path, _StagedBrainy(tickets=_NEEDS_ZLIB)), tmp_path, ask=ask)
 
@@ -317,11 +400,18 @@ def test_installed_now_checks_again_until_nothing_is_missing(monkeypatch, tmp_pa
     _project(tmp_path)
     found = iter([stages.MISSING, stages.MISSING, stages.INSTALLED])
     monkeypatch.setattr(flock_run, "requirements_checkable", lambda main: True)
-    monkeypatch.setattr(flock_run, "check_requirements", lambda main, tickets, cwd, cache=None, **_:
-                        [("a", "zlib", next(found), "sudo apt install zlib1g-dev")])
+    monkeypatch.setattr(
+        flock_run,
+        "check_requirements",
+        lambda main, tickets, cwd, cache=None, **_: [
+            ("a", "zlib", next(found), "sudo apt install zlib1g-dev")
+        ],
+    )
     picks, approvals = [], []
-    ask = Asker(confirm=lambda q, detail="": approvals.append(detail) or False,
-                choose=lambda q, detail, options: picks.append(options) or 1)
+    ask = Asker(
+        confirm=lambda q, detail="": approvals.append(detail) or False,
+        choose=lambda q, detail, options: picks.append(options) or 1,
+    )
 
     _run(_orchestrator(monkeypatch, tmp_path, _StagedBrainy(tickets=_NEEDS_ZLIB)), tmp_path, ask=ask)
 
@@ -335,27 +425,33 @@ def test_without_a_chooser_the_question_falls_back_to_confirm(monkeypatch, tmp_p
     _project(tmp_path)
     questions = []
 
-    _run(_orchestrator(monkeypatch, tmp_path, _StagedBrainy(tickets=_NEEDS_ZLIB)), tmp_path,
-         ask=Asker(confirm=lambda q, detail="": questions.append(q) or False))
+    _run(
+        _orchestrator(monkeypatch, tmp_path, _StagedBrainy(tickets=_NEEDS_ZLIB)),
+        tmp_path,
+        ask=Asker(confirm=lambda q, detail="": questions.append(q) or False),
+    )
 
     assert "not installed" in questions[0] and "Continue without them" in questions[0]
 
 
-@pytest.mark.parametrize("line, tests", [
-    ("tests/test_a.py, tests/test_b.py", ("tests/test_a.py", "tests/test_b.py")),
-    # The command that runs the tests, where the files belong.
-    ("python -m pytest tests/test_a.py -q", ("tests/test_a.py",)),
-    ("`python -m pytest tests/test_a.py`", ("tests/test_a.py",)),
-    ("cd sub && pytest tests/test_a.py tests/test_b.py", ("tests/test_a.py", "tests/test_b.py")),
-    # A command naming its build output and the code under test keeps only the test.
-    ("cc -Wall -o /tmp/t a.c tests/test_a.c && /tmp/t", ("tests/test_a.c",)),
-    ("cc -o /tmp/t latest.c tests/test_a.c && /tmp/t", ("tests/test_a.c",)),
-    ("tests/test_a.py (unit tests for a)", ("tests/test_a.py",)),
-    # Test files of any language, not only pytest's names.
-    ("src/test/java/CaptureTest.java", ("src/test/java/CaptureTest.java",)),
-    # Nothing that is a file: the test files it writes, as with no line at all.
-    ("python -m pytest", ("tests/test_a.py",)),
-])
+@pytest.mark.parametrize(
+    "line, tests",
+    [
+        ("tests/test_a.py, tests/test_b.py", ("tests/test_a.py", "tests/test_b.py")),
+        # The command that runs the tests, where the files belong.
+        ("python -m pytest tests/test_a.py -q", ("tests/test_a.py",)),
+        ("`python -m pytest tests/test_a.py`", ("tests/test_a.py",)),
+        ("cd sub && pytest tests/test_a.py tests/test_b.py", ("tests/test_a.py", "tests/test_b.py")),
+        # A command naming its build output and the code under test keeps only the test.
+        ("cc -Wall -o /tmp/t a.c tests/test_a.c && /tmp/t", ("tests/test_a.c",)),
+        ("cc -o /tmp/t latest.c tests/test_a.c && /tmp/t", ("tests/test_a.c",)),
+        ("tests/test_a.py (unit tests for a)", ("tests/test_a.py",)),
+        # Test files of any language, not only pytest's names.
+        ("src/test/java/CaptureTest.java", ("src/test/java/CaptureTest.java",)),
+        # Nothing that is a file: the test files it writes, as with no line at all.
+        ("python -m pytest", ("tests/test_a.py",)),
+    ],
+)
 def test_a_tests_line_yields_the_test_files_it_names(line, tests):
     ticket = parse_tickets(f"### ticket: a\n- writes: a.py, tests/test_a.py\n- tests: {line}\n")[0]
 
@@ -366,18 +462,25 @@ def test_two_tickets_with_the_command_on_their_tests_line_pass_the_check():
     """A user's flock stopped here: both tickets "owned" a file called `python`."""
     blocks = "".join(
         f"### ticket: {t}\n- writes: {t}.py, tests/test_{t}.py\n- tests: python -m pytest tests/test_{t}.py\n"
-        f"- accept: true\n\n" for t in ("net", "parser"))
+        f"- accept: true\n\n"
+        for t in ("net", "parser")
+    )
 
     assert check_tickets(parse_tickets(blocks)) == ""
 
 
-@pytest.mark.parametrize("writes, word", [
-    ("a.py, python -m pytest tests/test_a.py", "`python`"),
-    ("a.py (new), tests/test_a.py", "`(new)`"),
-    ("a.py && tests/test_a.py", "`&&`"),
-])
+@pytest.mark.parametrize(
+    "writes, word",
+    [
+        ("a.py, python -m pytest tests/test_a.py", "`python`"),
+        ("a.py (new), tests/test_a.py", "`(new)`"),
+        ("a.py && tests/test_a.py", "`&&`"),
+    ],
+)
 def test_a_writes_line_holding_something_other_than_files_is_refused(writes, word):
-    problem = check_tickets(parse_tickets(f"### ticket: a\n- writes: {writes}\n- tests: tests/test_a.py\n- accept: true"))
+    problem = check_tickets(
+        parse_tickets(f"### ticket: a\n- writes: {writes}\n- tests: tests/test_a.py\n- accept: true")
+    )
 
     assert word in problem and "which is not a file" in problem
 
@@ -388,31 +491,37 @@ def test_a_writes_line_of_files_without_extensions_passes():
     assert check_tickets(parse_tickets(blocks)) == ""
 
 
-@pytest.mark.parametrize("line, needs", [
-    ("a", ("a",)),
-    ("a (for the socket)", ("a",)),
-    ("ticket a", ("a",)),
-    ("`a` and b", ("a", "b")),
-    ("a — the socket it opens", ("a",)),
-    ("b, c.", ("b", "c")),
-    ("None.", ()),
-])
+@pytest.mark.parametrize(
+    "line, needs",
+    [
+        ("a", ("a",)),
+        ("a (for the socket)", ("a",)),
+        ("ticket a", ("a",)),
+        ("`a` and b", ("a", "b")),
+        ("a — the socket it opens", ("a",)),
+        ("b, c.", ("b", "c")),
+        ("None.", ()),
+    ],
+)
 def test_a_needs_line_yields_the_ticket_ids_it_names(line, needs):
     assert parse_tickets(f"### ticket: x\n- writes: x.py\n- needs: {line}\n")[0].needs == needs
 
 
-@pytest.mark.parametrize("writes, tests", [
-    ("a.py, tests/test_a.py", ("tests/test_a.py",)),
-    ("Capture.java, src/test/java/CaptureTest.java", ("src/test/java/CaptureTest.java",)),
-    ("capture.go, capture_test.go", ("capture_test.go",)),
-    ("src/Capture.hs, test/CaptureSpec.hs", ("test/CaptureSpec.hs",)),
-    # Only a directory says so: Rust's integration tests.
-    ("src/lib.rs, tests/integration.rs", ("tests/integration.rs",)),
-    # A helper beside a real test file is not taken for one.
-    ("tests/conftest.py, tests/test_a.py", ("tests/test_a.py",)),
-    # A word inside a name is not a test: latest, contest, inspect.
-    ("latest.py, contest.py, inspect.py", ()),
-])
+@pytest.mark.parametrize(
+    "writes, tests",
+    [
+        ("a.py, tests/test_a.py", ("tests/test_a.py",)),
+        ("Capture.java, src/test/java/CaptureTest.java", ("src/test/java/CaptureTest.java",)),
+        ("capture.go, capture_test.go", ("capture_test.go",)),
+        ("src/Capture.hs, test/CaptureSpec.hs", ("test/CaptureSpec.hs",)),
+        # Only a directory says so: Rust's integration tests.
+        ("src/lib.rs, tests/integration.rs", ("tests/integration.rs",)),
+        # A helper beside a real test file is not taken for one.
+        ("tests/conftest.py, tests/test_a.py", ("tests/test_a.py",)),
+        # A word inside a name is not a test: latest, contest, inspect.
+        ("latest.py, contest.py, inspect.py", ()),
+    ],
+)
 def test_without_a_tests_line_the_test_files_are_found_in_writes_in_any_language(writes, tests):
     assert parse_tickets(f"### ticket: a\n- writes: {writes}\n")[0].tests == tests
 
@@ -429,12 +538,15 @@ class _Base:
         return HookOutcome()
 
 
-@pytest.mark.parametrize("path, blocked", [
-    ("test_a.py", False),
-    ("a.py", True),
-    ("../outside.py", True),
-    ("", True),
-])
+@pytest.mark.parametrize(
+    "path, blocked",
+    [
+        ("test_a.py", False),
+        ("a.py", True),
+        ("../outside.py", True),
+        ("", True),
+    ],
+)
 def test_the_gate_refuses_writes_outside_the_stage(tmp_path, path, blocked):
     gate = _GatedHooks(_Base(), str(tmp_path), lambda p: p == "test_a.py", "tests only")
 
@@ -452,13 +564,16 @@ def test_the_gate_leaves_reads_alone(tmp_path):
 # --------------------------------------------------------------------------- #
 # Settings
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("block, expected", [
-    ({}, ("staged", "ask", 5)),
-    ({"planning": "staged", "autonomy": "auto", "max_rounds": 3}, ("staged", "auto", 3)),
-    ({"planning": "stagd", "autonomy": "yolo", "max_rounds": "lots"}, ("staged", "ask", 5)),
-    ({"max_rounds": 0}, ("staged", "ask", 5)),
-    ({"planning": "single"}, ("single", "ask", 5)),
-])
+@pytest.mark.parametrize(
+    "block, expected",
+    [
+        ({}, ("staged", "ask", 5)),
+        ({"planning": "staged", "autonomy": "auto", "max_rounds": 3}, ("staged", "auto", 3)),
+        ({"planning": "stagd", "autonomy": "yolo", "max_rounds": "lots"}, ("staged", "ask", 5)),
+        ({"max_rounds": 0}, ("staged", "ask", 5)),
+        ({"planning": "single"}, ("single", "ask", 5)),
+    ],
+)
 def test_flock_settings_fall_back_on_anything_unreadable(tmp_path, block, expected):
     from cobirb.config import Config
 
@@ -481,7 +596,9 @@ def test_a_staged_flock_runs_every_stage_and_the_workers(monkeypatch, tmp_path):
 
     assert run.ran and len(run.rounds) == 1 and run.outcome.all_done
     steps = [entry["step"] for entry in run.trace]
-    assert steps[:len(stages.SECTIONS) + 1] == [f"overview: {h}" for h, _ in stages.SECTIONS] + ["restate the design"]
+    assert steps[: len(stages.SECTIONS) + 1] == [f"overview: {h}" for h, _ in stages.SECTIONS] + [
+        "restate the design"
+    ]
     assert "skeleton" in steps and "ticket: a" in steps and "ticket: b" in steps
     # Architect Birb's ticket plan is the brief the Worker Birb gets, as written.
     assert run.charter.worker("a").brief == _PLAN.strip()
@@ -522,8 +639,11 @@ def test_the_front_end_is_told_which_agent_each_planning_stage_is(monkeypatch, t
     _staged(tmp_path)
     speakers = []
 
-    _run(_orchestrator(monkeypatch, tmp_path, _StagedBrainy()), tmp_path,
-         ask=Asker(confirm=lambda q, detail="": False, speaking=speakers.append))
+    _run(
+        _orchestrator(monkeypatch, tmp_path, _StagedBrainy()),
+        tmp_path,
+        ask=Asker(confirm=lambda q, detail="": False, speaking=speakers.append),
+    )
 
     first_architect = speakers.index("Architect Birb")
     assert set(speakers[:first_architect]) == {"Brainy Birb"}  # overview and restatement
@@ -534,13 +654,18 @@ def test_the_restatement_renames_what_the_workers_see_and_the_user_is_shown_the_
     _staged(tmp_path)
     for name in ("double_a", "b"):
         (tmp_path / f"{name}.py").write_text(f"def {name}(n):\n    raise NotImplementedError\n")
-        (tmp_path / f"test_{name}.py").write_text(f"from {name} import {name}\n\ndef test_it():\n    assert {name}(2) == 4\n")
+        (tmp_path / f"test_{name}.py").write_text(
+            f"from {name} import {name}\n\ndef test_it():\n    assert {name}(2) == 4\n"
+        )
     renamed = _BLOCKS.replace("ticket: a", "ticket: double_a").replace("a.py", "double_a.py")
     brainy = _StagedBrainy(restatements=[_restatement(renamed, "- renamed: a -> double_a\n- kept: b")])
     details = []
 
-    run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path,
-               ask=Asker(confirm=lambda q, detail="": details.append(detail) or False))
+    run = _run(
+        _orchestrator(monkeypatch, tmp_path, brainy),
+        tmp_path,
+        ask=Asker(confirm=lambda q, detail="": details.append(detail) or False),
+    )
 
     assert [w.id for w in run.charter.workers] == ["double_a", "b"]
     assert run.charter.worker("double_a").writes == ("double_a.py", "test_double_a.py")
@@ -551,22 +676,31 @@ def test_the_restatement_renames_what_the_workers_see_and_the_user_is_shown_the_
 _SURVIVOR = _BLOCKS.replace("ticket: a", "ticket: double_a")  # renamed, but a.py is still there
 
 
-@pytest.mark.parametrize("reply, problem", [
-    ("## Names\n- none", "sections are missing"),
-    (_restatement(_SURVIVOR, "- renamed: a.py -> double_a.py"), "still appear"),
-    # Renamed without saying so: the tickets no longer match Brainy Birb's.
-    (_restatement(_BLOCKS.replace("ticket: a", "ticket: double_a")), "same tickets under their new ids"),
-    (_restatement("no tickets at all"), "restated tickets cannot be used"),
-    # A section summarised rather than restated: the overview's is far longer.
-    (_restatement().replace("The Architecture section, restated." + _DETAIL, "Parts."), "much shorter than the original"),
-    # A value the request quotes ("OK"), not copied exactly.
-    (_restatement().replace('print "OK"', "print OK"), "exact values"),
-    # A literal name pytest never collects.
-    (_restatement(_BLOCKS.replace("test_a.py", "check_a.py"), "- renamed: test_a.py -> check_a.py"),
-     "lost the `test_` prefix"),
-])
+@pytest.mark.parametrize(
+    "reply, problem",
+    [
+        ("## Names\n- none", "sections are missing"),
+        (_restatement(_SURVIVOR, "- renamed: a.py -> double_a.py"), "still appear"),
+        # Renamed without saying so: the tickets no longer match Brainy Birb's.
+        (_restatement(_BLOCKS.replace("ticket: a", "ticket: double_a")), "same tickets under their new ids"),
+        (_restatement("no tickets at all"), "restated tickets cannot be used"),
+        # A section summarised rather than restated: the overview's is far longer.
+        (
+            _restatement().replace("The Architecture section, restated." + _DETAIL, "Parts."),
+            "much shorter than the original",
+        ),
+        # A value the request quotes ("OK"), not copied exactly.
+        (_restatement().replace('print "OK"', "print OK"), "exact values"),
+        # A literal name pytest never collects.
+        (
+            _restatement(_BLOCKS.replace("test_a.py", "check_a.py"), "- renamed: test_a.py -> check_a.py"),
+            "lost the `test_` prefix",
+        ),
+    ],
+)
 def test_a_restatement_that_cannot_be_used_is_asked_for_again_then_stops_the_flock(
-        monkeypatch, tmp_path, reply, problem):
+    monkeypatch, tmp_path, reply, problem
+):
     _staged(tmp_path)
     brainy = _StagedBrainy(restatements=[reply])
 
@@ -583,7 +717,9 @@ def test_a_restatement_that_loses_the_ticket_blocks_is_shown_the_blocks_expected
     broken = _restatement("the tickets, in prose", "- renamed: a -> double_a")
     brainy = _StagedBrainy(restatements=[broken, _restatement()])
 
-    _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path, ask=Asker(confirm=lambda q, detail="": False))
+    _run(
+        _orchestrator(monkeypatch, tmp_path, brainy), tmp_path, ask=Asker(confirm=lambda q, detail="": False)
+    )
 
     retry = [p for p in brainy.prompts if "Stage: restate the design" in p][-1]
     assert "### ticket: double_a" in retry and "- writes: a.py, test_a.py" in retry
@@ -602,14 +738,17 @@ def test_a_restatement_asked_again_can_succeed(monkeypatch, tmp_path):
     assert "could not be used" in retry
 
 
-@pytest.mark.parametrize("text, expected", [
-    ("## Names\n- none\n## Tickets\nx", {"Names": "- none", "Tickets": "x"}),
-    # A sub-heading of Brainy Birb's own is content, even as a section's first line.
-    ("## Names\n- none\n## Tickets\n## Parts\nx", {"Names": "- none", "Tickets": "## Parts\nx"}),
-    ("## names\n- none\n## TICKETS\nx", {"Names": "- none", "Tickets": "x"}),
-    ("## Names\na\n## Names\nb", {"Names": "a\n## Names\nb"}),   # a repeat is content
-    ("## Tickets\nx", {"Tickets": "x"}),                             # a missing one is absent
-])
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("## Names\n- none\n## Tickets\nx", {"Names": "- none", "Tickets": "x"}),
+        # A sub-heading of Brainy Birb's own is content, even as a section's first line.
+        ("## Names\n- none\n## Tickets\n## Parts\nx", {"Names": "- none", "Tickets": "## Parts\nx"}),
+        ("## names\n- none\n## TICKETS\nx", {"Names": "- none", "Tickets": "x"}),
+        ("## Names\na\n## Names\nb", {"Names": "a\n## Names\nb"}),  # a repeat is content
+        ("## Tickets\nx", {"Tickets": "x"}),  # a missing one is absent
+    ],
+)
 def test_a_restatement_splits_only_at_the_headings_asked_for(text, expected):
     assert stages.split_sections(text, ("Names", "Tickets")) == expected
 
@@ -633,39 +772,52 @@ def test_sub_headings_in_the_design_survive_the_restatement(monkeypatch, tmp_pat
 # --------------------------------------------------------------------------- #
 # The name mapping
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("section, renamed, kept", [
-    ("- none", {}, []),
-    ("- renamed: `kill` -> `send_sigterm`", {"kill": "send_sigterm"}, []),
-    ("- renamed: kill → send_sigterm\n- kept: /kill", {"kill": "send_sigterm"}, ["/kill"]),
-    ("* Renamed: a => b\n- kept: none", {"a": "b"}, []),
-    ("- renamed: same -> same\n- renamed: broken", {}, []),
-    ("- kept: `Store` class\n- renamed: `tick()` method -> `advance()` method", {"tick()": "advance()"}, ["Store"]),
-    ("- renamed: a -> `ticket: a`\n- renamed: b -> ### ticket: c", {"b": "c"}, []),
-])
+@pytest.mark.parametrize(
+    "section, renamed, kept",
+    [
+        ("- none", {}, []),
+        ("- renamed: `kill` -> `send_sigterm`", {"kill": "send_sigterm"}, []),
+        ("- renamed: kill → send_sigterm\n- kept: /kill", {"kill": "send_sigterm"}, ["/kill"]),
+        ("* Renamed: a => b\n- kept: none", {"a": "b"}, []),
+        ("- renamed: same -> same\n- renamed: broken", {}, []),
+        (
+            "- kept: `Store` class\n- renamed: `tick()` method -> `advance()` method",
+            {"tick()": "advance()"},
+            ["Store"],
+        ),
+        ("- renamed: a -> `ticket: a`\n- renamed: b -> ### ticket: c", {"b": "c"}, []),
+    ],
+)
 def test_the_names_section_is_read(section, renamed, kept):
     names = stages.parse_names(section)
 
     assert (names.renamed, names.kept) == (renamed, kept)
 
 
-@pytest.mark.parametrize("text, survivors", [
-    ("call send_sigterm on the child", []),
-    ("call kill on the child", ["kill"]),
-    ("the user's /kill command stays", []),           # kept names do not count
-    ("SIGKILL and kill_all and skill", []),           # a name only as a whole word
-    ("see kill.py", ["kill"]),
-])
+@pytest.mark.parametrize(
+    "text, survivors",
+    [
+        ("call send_sigterm on the child", []),
+        ("call kill on the child", ["kill"]),
+        ("the user's /kill command stays", []),  # kept names do not count
+        ("SIGKILL and kill_all and skill", []),  # a name only as a whole word
+        ("see kill.py", ["kill"]),
+    ],
+)
 def test_a_renamed_name_is_found_wherever_it_survives(text, survivors):
     names = stages.NameMap({"kill": "send_sigterm"}, ["/kill"])
 
     assert names.survivors(text) == survivors
 
 
-@pytest.mark.parametrize("first, second, problem", [
-    ({"a": "b"}, {"a": "c"}, "already renamed"),
-    ({"a": "c"}, {"b": "c"}, "both renamed"),
-    ({"a": "b"}, {"c": "d"}, ""),
-])
+@pytest.mark.parametrize(
+    "first, second, problem",
+    [
+        ({"a": "b"}, {"a": "c"}, "already renamed"),
+        ({"a": "c"}, {"b": "c"}, "both renamed"),
+        ({"a": "b"}, {"c": "d"}, ""),
+    ],
+)
 def test_names_merge_only_when_they_agree(first, second, problem):
     _, found = stages.NameMap(first).merged(stages.NameMap(second))
 
@@ -685,8 +837,9 @@ def test_declining_to_divide_ends_planning(monkeypatch, tmp_path):
 def test_staged_planning_is_the_default(monkeypatch, tmp_path):
     brainy = _StagedBrainy()
 
-    _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path,
-         ask=Asker(confirm=lambda q, detail="": False))
+    _run(
+        _orchestrator(monkeypatch, tmp_path, brainy), tmp_path, ask=Asker(confirm=lambda q, detail="": False)
+    )
 
     assert any("Write the next section:" in p for p in brainy.prompts)
 
@@ -695,8 +848,9 @@ def test_the_one_prompt_planner_is_one_setting_away(monkeypatch, tmp_path):
     write_config(tmp_path, {"flock": {"planning": "single"}})
     brainy = _StagedBrainy()
 
-    _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path,
-         ask=Asker(confirm=lambda q, detail="": False))
+    _run(
+        _orchestrator(monkeypatch, tmp_path, brainy), tmp_path, ask=Asker(confirm=lambda q, detail="": False)
+    )
 
     assert not any("Write the next section:" in p for p in brainy.prompts)
 
@@ -710,8 +864,9 @@ def test_ask_mode_puts_the_decisions_to_the_user_and_carries_the_answer(monkeypa
     _workers(monkeypatch, tmp_path)
     brainy = _StagedBrainy()
     asked = []
-    ask = Asker(confirm=lambda q, detail="": True,
-                decide=lambda decisions: asked.append(decisions) or "1: use curses")
+    ask = Asker(
+        confirm=lambda q, detail="": True, decide=lambda decisions: asked.append(decisions) or "1: use curses"
+    )
 
     _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path, ask=ask)
 
@@ -723,8 +878,7 @@ def test_ask_mode_puts_the_decisions_to_the_user_and_carries_the_answer(monkeypa
 def test_auto_mode_refuses_to_start_without_a_sandbox(monkeypatch, tmp_path):
     _staged(tmp_path, autonomy="auto")
     orchestrator = _orchestrator(monkeypatch, tmp_path, _StagedBrainy())
-    monkeypatch.setattr(type(orchestrator.tools["shell"].sandbox), "active",
-                        property(lambda self: False))
+    monkeypatch.setattr(type(orchestrator.tools["shell"].sandbox), "active", property(lambda self: False))
 
     run = _run(orchestrator, tmp_path)
 
@@ -779,12 +933,14 @@ def test_what_cannot_be_done_on_this_machine_reaches_the_report(monkeypatch, tmp
         def chat(self, system, context, tools=None, *, stream=False):
             text = str(context)
             marker = "Write the next section:"
-            if text[text.rfind(marker) + len(marker):].split("---")[0].strip() == stages.LIMITS_HEADING:
+            if text[text.rfind(marker) + len(marker) :].split("---")[0].strip() == stages.LIMITS_HEADING:
                 self.prompts.append(text)
                 return "- The screen capture calls the Windows API: build-only here; run it on Windows."
             return super().chat(system, context, tools, stream=stream)
 
-    brainy = _Limited(evaluations=["NO TICKETS b cannot pass here.\n- left to do: b: run its tests on Windows"])
+    brainy = _Limited(
+        evaluations=["NO TICKETS b cannot pass here.\n- left to do: b: run its tests on Windows"]
+    )
 
     run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
 
@@ -809,8 +965,7 @@ def test_auto_mode_approves_later_rounds_without_asking(monkeypatch, tmp_path):
     _project(tmp_path)
     _workers(monkeypatch, tmp_path, fail_first={"b"})
     orchestrator = _orchestrator(monkeypatch, tmp_path, _StagedBrainy(evaluations=[_REDO_B]))
-    monkeypatch.setattr(type(orchestrator.tools["shell"].sandbox), "active",
-                        property(lambda self: True))
+    monkeypatch.setattr(type(orchestrator.tools["shell"].sandbox), "active", property(lambda self: True))
     questions = []
     ask = Asker(confirm=lambda q, detail="": questions.append(q) or True)
 
@@ -825,8 +980,11 @@ def test_a_round_that_changes_nothing_stops_the_flock(monkeypatch, tmp_path):
     _project(tmp_path)
     from cobirb.flock import supervisor
 
-    monkeypatch.setattr(supervisor, "run_worker", lambda worker, cwd, **k: WorkerReport(
-        worker_id=worker.id, ok=True, accepted=False))
+    monkeypatch.setattr(
+        supervisor,
+        "run_worker",
+        lambda worker, cwd, **k: WorkerReport(worker_id=worker.id, ok=True, accepted=False),
+    )
     brainy = _StagedBrainy(evaluations=[_REDO_B, _REDO_B, _REDO_B])
 
     run = _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path)
@@ -849,10 +1007,13 @@ def test_the_rounds_stop_at_the_cap(monkeypatch, tmp_path):
 def test_approval_of_a_later_round_names_what_is_new():
     from cobirb.flock.charter import parse_charter
 
-    first = parse_charter('objective = "x"\n[[workers]]\nid = "a"\nwrites = ["a.py"]\n'
-                          'accept = "pytest"\nbrief = "go"')
-    later = parse_charter('objective = "x"\n[[workers]]\nid = "a"\nwrites = ["a.py", "extra.py"]\n'
-                          'accept = "pytest"\nbrief = "go"')
+    first = parse_charter(
+        'objective = "x"\n[[workers]]\nid = "a"\nwrites = ["a.py"]\naccept = "pytest"\nbrief = "go"'
+    )
+    later = parse_charter(
+        'objective = "x"\n[[workers]]\nid = "a"\nwrites = ["a.py", "extra.py"]\n'
+        'accept = "pytest"\nbrief = "go"'
+    )
 
     text = stages.approval_changes(later, [first])
 
@@ -860,8 +1021,15 @@ def test_approval_of_a_later_round_names_what_is_new():
 
 
 def test_ticket_blocks_round_trip_through_their_own_format():
-    ticket = TicketSpec(id="a", writes=("a.py", "t.py"), tests=("t.py",), accept="pytest t.py",
-                        needs=("b",), builds="x", done="y")
+    ticket = TicketSpec(
+        id="a",
+        writes=("a.py", "t.py"),
+        tests=("t.py",),
+        accept="pytest t.py",
+        needs=("b",),
+        builds="x",
+        done="y",
+    )
 
     assert parse_tickets(ticket.block())[0] == ticket
 
@@ -874,8 +1042,9 @@ def test_a_ticket_stage_that_writes_no_tests_is_asked_again(monkeypatch, tmp_pat
     (tmp_path / "b.py").write_text("def b(n):\n    raise NotImplementedError\n")
     brainy = _StagedBrainy()
 
-    _run(_orchestrator(monkeypatch, tmp_path, brainy), tmp_path,
-         ask=Asker(confirm=lambda q, detail="": False))
+    _run(
+        _orchestrator(monkeypatch, tmp_path, brainy), tmp_path, ask=Asker(confirm=lambda q, detail="": False)
+    )
 
     a_stages = [p for p in brainy.prompts if "Stage: the plan for ticket 'a'" in p]
     assert len(a_stages) == 2 and "test files were not written" in a_stages[-1]
@@ -944,9 +1113,17 @@ def test_a_reported_contradiction_always_gets_its_test_rewritten(monkeypatch, tm
     def run(worker, cwd, **kwargs):
         if worker.id == "b" and "b" not in seen:
             seen.add("b")
-            return WorkerReport(worker_id="b", ok=True, accepted=False, structured={
-                "tests_pass": False, "contract_kept": True, "missing": [],
-                "test_contradicts": ["test_it — expects 5 for 2, the contract says 4"]})
+            return WorkerReport(
+                worker_id="b",
+                ok=True,
+                accepted=False,
+                structured={
+                    "tests_pass": False,
+                    "contract_kept": True,
+                    "missing": [],
+                    "test_contradicts": ["test_it — expects 5 for 2, the contract says 4"],
+                },
+            )
         (tmp_path / f"{worker.id}.py").write_text(f"def {worker.id}(n):\n    return n * 2\n")
         return WorkerReport(worker_id=worker.id, ok=True, accepted=True)
 
@@ -992,8 +1169,10 @@ def test_under_autopilot_the_flock_runs_in_auto_autonomy(monkeypatch, tmp_path):
     orchestrator = _orchestrator(monkeypatch, tmp_path, _StagedBrainy(evaluations=[_REDO_B]))
     _autopilot(orchestrator, monkeypatch)
     questions, decided = [], []
-    ask = Asker(confirm=lambda q, detail="": questions.append(q) or True,
-                decide=lambda text: decided.append(text) or "")
+    ask = Asker(
+        confirm=lambda q, detail="": questions.append(q) or True,
+        decide=lambda text: decided.append(text) or "",
+    )
 
     run = _run(orchestrator, tmp_path, ask=ask)
 

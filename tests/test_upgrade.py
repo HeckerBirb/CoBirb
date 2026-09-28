@@ -8,6 +8,7 @@ against an actual remote) — the part a mock can't prove — while still mockin
 ``pip install -e`` to keep it fast and fully offline, the same split
 ``test_plugin_install.py`` uses for its own subprocess boundary.
 """
+
 from __future__ import annotations
 
 import json
@@ -37,7 +38,7 @@ def test_parse_version_rejects_garbage():
 def test_find_repo_root_walks_up_to_the_checkout(tmp_path):
     repo = tmp_path / "checkout"
     (repo / ".git").mkdir(parents=True)
-    (repo / "pyproject.toml").write_text("[project]\nname = \"fake\"\n")
+    (repo / "pyproject.toml").write_text('[project]\nname = "fake"\n')
     nested = repo / "src" / "cobirb" / "runtime"
     nested.mkdir(parents=True)
 
@@ -156,9 +157,7 @@ def _git(*args, cwd):
 
 def _git_out(*args, cwd) -> str:
     """Same, but for the answer rather than the side effect."""
-    return subprocess.run(
-        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
-    ).stdout.strip()
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
 def _real_repo(tmp_path):
@@ -237,7 +236,9 @@ def _branch_of(work) -> str:
     """The branch checked out in ``work``, or "" when HEAD is detached."""
     done = subprocess.run(
         ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
-        cwd=work, capture_output=True, text=True,
+        cwd=work,
+        capture_output=True,
+        text=True,
     )
     return done.stdout.strip() if done.returncode == 0 else ""
 
@@ -273,10 +274,12 @@ def test_the_branch_actually_moved_to_the_tagged_commit(monkeypatch, tmp_path):
 
     upgrade()
 
-    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=work,
-                          capture_output=True, text=True, check=True).stdout.strip()
-    tagged = subprocess.run(["git", "rev-parse", "v0.8.0"], cwd=work,
-                            capture_output=True, text=True, check=True).stdout.strip()
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=work, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    tagged = subprocess.run(
+        ["git", "rev-parse", "v0.8.0"], cwd=work, capture_output=True, text=True, check=True
+    ).stdout.strip()
     assert head == tagged
 
 
@@ -302,8 +305,9 @@ def test_a_branch_with_its_own_commits_detaches_rather_than_moving_them(monkeypa
     (work / "mine.txt").write_text("local work")
     _git("add", ".", cwd=work)
     _git("commit", "-q", "-m", "local work", cwd=work)
-    mine = subprocess.run(["git", "rev-parse", _BRANCH], cwd=work,
-                          capture_output=True, text=True, check=True).stdout.strip()
+    mine = subprocess.run(
+        ["git", "rev-parse", _BRANCH], cwd=work, capture_output=True, text=True, check=True
+    ).stdout.strip()
 
     monkeypatch.setattr(upgrade_module, "_find_repo_root", lambda: str(work))
     monkeypatch.setattr(upgrade_module, "_running_version", lambda: "0.7.0")
@@ -313,8 +317,9 @@ def test_a_branch_with_its_own_commits_detaches_rather_than_moving_them(monkeypa
 
     assert result.branch == ""
     assert "not on a branch" in result.describe()
-    still = subprocess.run(["git", "rev-parse", _BRANCH], cwd=work,
-                           capture_output=True, text=True, check=True).stdout.strip()
+    still = subprocess.run(
+        ["git", "rev-parse", _BRANCH], cwd=work, capture_output=True, text=True, check=True
+    ).stdout.strip()
     assert still == mine  # the local commit is still on main, untouched
 
 
@@ -376,19 +381,21 @@ def _managed_marker(tmp_path, monkeypatch, *, venv=None, version="0.13.1", raw=N
     if raw is not None:
         marker.write_text(raw)
         return marker
-    marker.write_text(json.dumps({
-        "kind": "managed",
-        "venv": venv if venv is not None else sys.prefix,
-        "version": version,
-        "tag": f"v{version}",
-        "source": "https://example.invalid/releases/tag/v" + version,
-    }))
+    marker.write_text(
+        json.dumps(
+            {
+                "kind": "managed",
+                "venv": venv if venv is not None else sys.prefix,
+                "version": version,
+                "tag": f"v{version}",
+                "source": "https://example.invalid/releases/tag/v" + version,
+            }
+        )
+    )
     return marker
 
 
-def test_detect_install_reports_managed_when_this_interpreter_is_the_managed_one(
-    tmp_path, monkeypatch
-):
+def test_detect_install_reports_managed_when_this_interpreter_is_the_managed_one(tmp_path, monkeypatch):
     _managed_marker(tmp_path, monkeypatch)
 
     install = upgrade_module.detect_install()
@@ -511,7 +518,10 @@ def _run_installer(*args, install_dir, extra_env=None):
     env.update(extra_env or {})
     return subprocess.run(
         ["sh", upgrade_module._bundled_install_script(), *args],
-        capture_output=True, text=True, env=env, timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
     )
 
 
@@ -526,7 +536,9 @@ def test_the_installer_is_valid_posix_shell():
     have not read it. A syntax error is not something to find in production."""
     checked = subprocess.run(
         ["sh", "-n", upgrade_module._bundled_install_script()],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert checked.returncode == 0, checked.stderr
 
@@ -596,7 +608,9 @@ def _post_install_report(tmp_path, *, have):
     script = upgrade_module._bundled_install_script()
     return subprocess.run(
         ["/bin/sh", "-c", f'. "{script}"; post_install_report "{fake}"; echo "exit=$?"'],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
         env={"PATH": str(bin_dir), "COBIRB_INSTALL_SOURCED": "1", "HOME": str(tmp_path)},
     )
 

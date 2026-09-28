@@ -3,13 +3,13 @@
 Two things matter and the rest is plumbing: a ``before_tool`` hook can actually
 stop a tool call, and a repository cannot install one.
 """
+
 from __future__ import annotations
 
 import json
 import os
 
 import pytest
-
 from conftest import write_config
 
 from cobirb.config import Config
@@ -144,9 +144,7 @@ def test_a_failing_observational_hook_is_reported_not_obeyed(tmp_path):
 def test_a_hook_that_cannot_be_run_at_all_counts_as_a_refusal(tmp_path):
     """Failing open here would mean a guard stops guarding at exactly the
     moment it breaks."""
-    runner = HookRunner(
-        [Hook(EVENT_BEFORE_TOOL, str(tmp_path / "does-not-exist"))], str(tmp_path)
-    )
+    runner = HookRunner([Hook(EVENT_BEFORE_TOOL, str(tmp_path / "does-not-exist"))], str(tmp_path))
 
     assert runner.fire(EVENT_BEFORE_TOOL, tool_name="shell").blocked
 
@@ -203,9 +201,7 @@ class _AlwaysRuns:
 def _orchestrator(tmp_path, hooks, tool):
     policy = build_default_policy(cwd=str(tmp_path))
     policy.allow("write_file", "")
-    orchestrator = Orchestrator(
-        model=object(), tools={"write_file": tool}, policy=policy, hooks=hooks
-    )
+    orchestrator = Orchestrator(model=object(), tools={"write_file": tool}, policy=policy, hooks=hooks)
     orchestrator._open_session("go", "", str(tmp_path), "noah", None)
     return orchestrator
 

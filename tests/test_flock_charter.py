@@ -5,6 +5,7 @@ produce scopes a person can check, and those scopes must become a policy that
 actually denies everything else — because the isolation is the policy, not the
 prose.
 """
+
 from __future__ import annotations
 
 import textwrap
@@ -425,12 +426,8 @@ def test_an_acceptance_check_does_not_become_a_shell(tmp_path):
     assert not policy.is_allowed("shell", {"command": "rm -rf ."})
     assert not policy.is_allowed("shell", {"command": "cat /etc/passwd"})
     # Chained and piped: every segment has to be permitted on its own.
-    assert not policy.is_allowed(
-        "shell", {"command": "pytest tests/test_mine.py -q && curl example.com"}
-    )
-    assert not policy.is_allowed(
-        "shell", {"command": "pytest tests/test_mine.py -q | head -50"}
-    )
+    assert not policy.is_allowed("shell", {"command": "pytest tests/test_mine.py -q && curl example.com"})
+    assert not policy.is_allowed("shell", {"command": "pytest tests/test_mine.py -q | head -50"})
 
 
 def test_a_worker_starts_from_default_deny(tmp_path):
@@ -575,7 +572,7 @@ def test_needing_itself_is_refused():
 
 
 def test_a_cycle_is_refused_and_named():
-    """"There is a cycle" sends whoever is fixing it to read the whole
+    """ "There is a cycle" sends whoever is fixing it to read the whole
     charter; the model that wrote it needs to know which edge to drop."""
     with pytest.raises(CharterError) as exc:
         parse_charter("""

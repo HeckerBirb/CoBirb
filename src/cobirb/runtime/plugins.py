@@ -4,11 +4,13 @@ Tools are additive and every discovered one is registered; model, I/O and
 crypto are singleton slots a config selection must name explicitly. Problems
 are reported and skipped — a broken plugin never brings the core down.
 """
+
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from ..config import Config
 from ..mcp import McpTool
@@ -206,9 +208,7 @@ def describe_plugins(cwd: str) -> PluginsSummary:
         ),
         key=lambda info: info.name,
     )
-    return PluginsSummary(
-        slots=slots, tools=tools, issues=issues, mcp_servers=configured_mcp_servers(config)
-    )
+    return PluginsSummary(slots=slots, tools=tools, issues=issues, mcp_servers=configured_mcp_servers(config))
 
 
 def configured_mcp_servers(config: Config) -> list[str]:
@@ -217,7 +217,8 @@ def configured_mcp_servers(config: Config) -> list[str]:
     if not isinstance(block, dict):
         return []
     return sorted(
-        str(name) for name, spec in block.items()
+        str(name)
+        for name, spec in block.items()
         if isinstance(spec, dict) and spec.get("enabled") is not False
     )
 

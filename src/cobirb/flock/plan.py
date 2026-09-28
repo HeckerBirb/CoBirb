@@ -39,6 +39,7 @@ Nothing here writes to the repository or reads a plan from it. A draft lives in
 memory for exactly as long as the session's planning does, the same as the
 charter it produces.
 """
+
 from __future__ import annotations
 
 import os
@@ -54,6 +55,7 @@ from .charter import (
     is_path,
 )
 
+
 # Normalised the same way ``charter._paths`` normalises, so a draft compares
 # like with like and "export/./types.py" cannot become a second owner of a file
 # that already has one.
@@ -61,7 +63,7 @@ def _norm(path: str) -> str:
     return os.path.normpath(path.strip()) if path.strip() else ""
 
 
-def _norm_all(paths: "list[str] | tuple[str, ...] | None", field: str) -> tuple[str, ...]:
+def _norm_all(paths: list[str] | tuple[str, ...] | None, field: str) -> tuple[str, ...]:
     if paths is None:
         return ()
     if isinstance(paths, str):  # a model that sent one path unwrapped
@@ -153,11 +155,11 @@ class PlanDraft:
         worker_id: str,
         *,
         brief: str,
-        writes: "list[str] | None" = None,
-        reads: "list[str] | None" = None,
+        writes: list[str] | None = None,
+        reads: list[str] | None = None,
         accept: str = "",
-        tests: "list[str] | None" = None,
-        needs: "list[str] | None" = None,
+        tests: list[str] | None = None,
+        needs: list[str] | None = None,
         runs_on: str = "",
         static: bool = False,
     ) -> str:
@@ -211,9 +213,15 @@ class PlanDraft:
 
         self.workers.append(
             WorkerBrief(
-                id=worker_id, brief=brief, writes=write_paths, reads=read_paths,
-                accept=(accept or "").strip(), tests=test_paths, needs=need_ids,
-                runs_on=runs_on, static=static,
+                id=worker_id,
+                brief=brief,
+                writes=write_paths,
+                reads=read_paths,
+                accept=(accept or "").strip(),
+                tests=test_paths,
+                needs=need_ids,
+                runs_on=runs_on,
+                static=static,
             )
         )
         note = f"Ticket {worker_id!r} added: writes {', '.join(write_paths)}."
@@ -321,7 +329,7 @@ class PlanDraft:
     # ------------------------------------------------------------------ #
     # The per-move checks
     # ------------------------------------------------------------------ #
-    def _needs(self, value: "list[str] | None", worker_id: str) -> tuple[str, ...]:
+    def _needs(self, value: list[str] | None, worker_id: str) -> tuple[str, ...]:
         """The ids this ticket waits for. Existence is ``seal``'s business.
 
         Deliberately not checked against the tickets added so far: a plan built
@@ -376,7 +384,7 @@ class PlanDraft:
 SNAPSHOT_MAX_FILES = 20000
 
 
-def snapshot_project(cwd: str) -> "dict[str, tuple[int, int]] | None":
+def snapshot_project(cwd: str) -> dict[str, tuple[int, int]] | None:
     """Every file under ``cwd`` with its modification time and size, or None.
 
     Taken before Brainy Birb plans, so the files it wrote into the skeleton can
@@ -395,7 +403,8 @@ def snapshot_project(cwd: str) -> "dict[str, tuple[int, int]] | None":
     files: dict[str, tuple[int, int]] = {}
     for root, dirs, names in os.walk(cwd):
         dirs[:] = [
-            d for d in dirs
+            d
+            for d in dirs
             if not rules.is_ignored(os.path.join(root, d), is_dir=True)
             and os.path.realpath(os.path.join(root, d)) != own
         ]
@@ -413,7 +422,7 @@ def snapshot_project(cwd: str) -> "dict[str, tuple[int, int]] | None":
     return files
 
 
-def written_since(before: "dict[str, tuple[int, int]] | None", cwd: str) -> list[str]:
+def written_since(before: dict[str, tuple[int, int]] | None, cwd: str) -> list[str]:
     """Files created or changed under ``cwd`` since ``before`` was taken."""
     if before is None:
         return []

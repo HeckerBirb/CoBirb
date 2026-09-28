@@ -7,15 +7,16 @@ state — the same "widget handles its own local events, then delegates" split
 ``ApprovalModal``/``TextPromptModal`` already use, just for tab content
 instead of a modal.
 """
+
 from __future__ import annotations
 
 import asyncio
 import time
 from typing import TYPE_CHECKING, cast
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Horizontal, HorizontalScroll, Vertical, VerticalScroll
-from rich.text import Text
 from textual.widgets import Button, Input, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
 
@@ -41,7 +42,7 @@ class PluginsPane(Vertical):
         with Horizontal(id="plugins-actions"):
             yield Button("Refresh", id="plugins-refresh")
 
-    def render_summary(self, summary: "cli.PluginsSummary") -> None:
+    def render_summary(self, summary: cli.PluginsSummary) -> None:
         log = self.query_one("#plugins-log", RichLog)
         log.clear()
         log.write(render.build_plugins_view(summary))
@@ -177,9 +178,7 @@ class WorkerRequest(Vertical):
         self._tool_name = tool_name
         self._detail = detail
         self._scope = scope
-        self.answered: "asyncio.Future[tuple[str, str]]" = (
-            asyncio.get_event_loop().create_future()
-        )
+        self.answered: asyncio.Future[tuple[str, str]] = asyncio.get_event_loop().create_future()
 
     def compose(self) -> ComposeResult:
         body = Text()
@@ -275,7 +274,10 @@ class WorkerPane(Vertical):
         # where its shortcoming report and its review land, and a report you
         # cannot copy out of is a report you have to retype.
         yield TranscriptLog(
-            id=f"worker-log-{self._worker_id}", markup=False, highlight=False, wrap=True,
+            id=f"worker-log-{self._worker_id}",
+            markup=False,
+            highlight=False,
+            wrap=True,
             classes="worker-log",
         )
 
@@ -293,8 +295,9 @@ class WorkerPane(Vertical):
             "failed": "bold red",
             "flagged": "bold yellow",
         }
-        label = {"held": "held — waiting for you",
-                 "waiting_remote": "Waiting for available worker"}.get(state, state)
+        label = {"held": "held — waiting for you", "waiting_remote": "Waiting for available worker"}.get(
+            state, state
+        )
         return Text(f"[{self._worker_id}] {label}", style=colours.get(state, "bold"))
 
     def set_state(self, state: str) -> None:
@@ -304,9 +307,7 @@ class WorkerPane(Vertical):
     def write(self, renderable) -> None:
         self.query_one(TranscriptLog).write(renderable)
 
-    async def ask(
-        self, tool_name: str, detail: str, scope: str | None, preview: str = ""
-    ) -> tuple[str, str]:
+    async def ask(self, tool_name: str, detail: str, scope: str | None, preview: str = "") -> tuple[str, str]:
         """Put a request in this pane and wait, here, for the answer.
 
         Awaited on the event loop on behalf of the worker's own thread, which is
@@ -445,7 +446,7 @@ class FlockPane(Vertical):
                 scope += "\nstatic — written, not built or tested"
             await row.mount(WorkerPane(worker.id, scope))
 
-    def pane(self, worker_id: str) -> "WorkerPane | None":
+    def pane(self, worker_id: str) -> WorkerPane | None:
         try:
             return self.query_one(f"#worker-{worker_id}", WorkerPane)
         except Exception:  # noqa: BLE001 - a pane that is gone is not an error
@@ -463,10 +464,16 @@ class FlockPane(Vertical):
         # "held" first: it is the only state in this list that needs a person
         # to do something, and a roll-up that buries it under four running
         # workers is a roll-up nobody acts on.
-        order = {"held": 0, "running": 1, "waiting_remote": 2, "waiting": 3, "flagged": 4, "failed": 5, "done": 6}
-        panes = sorted(
-            self.query(WorkerPane), key=lambda p: (order.get(p.state, 9), p._worker_id)
-        )
+        order = {
+            "held": 0,
+            "running": 1,
+            "waiting_remote": 2,
+            "waiting": 3,
+            "flagged": 4,
+            "failed": 5,
+            "done": 6,
+        }
+        panes = sorted(self.query(WorkerPane), key=lambda p: (order.get(p.state, 9), p._worker_id))
         return " · ".join(f"{pane._worker_id} {pane.state}" for pane in panes)
 
     def refuse_pending(self, instruction: str) -> int:

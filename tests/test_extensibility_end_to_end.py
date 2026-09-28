@@ -7,6 +7,7 @@ prompt has already gone. Everything here runs ``cli.main()`` with real config,
 a real ToolRegistry, a real Policy and a real MCP subprocess; only the model
 is scripted, because the alternative is a network call.
 """
+
 from __future__ import annotations
 
 import json
@@ -15,7 +16,6 @@ import sys
 import textwrap
 
 import pytest
-
 from conftest import write_config
 
 from cobirb import cli
@@ -23,7 +23,7 @@ from cobirb.mcp import tool_name_for
 from cobirb.runtime import wiring
 from cobirb.typing.spi import ToolCall
 
-_MCP_SERVER = '''
+_MCP_SERVER = """
 import json, sys
 
 TOOLS = [{
@@ -50,7 +50,7 @@ for line in sys.stdin:
         wanted = msg["params"].get("arguments", {}).get("name", "")
         reply(msg["id"], {"content": [{"type": "text",
                                        "text": f"{wanted} is in aisle 7"}]})
-'''
+"""
 
 
 class _ScriptedModel:
@@ -94,9 +94,7 @@ def _project(tmp_path):
 # --------------------------------------------------------------------------- #
 # MCP, all the way to the model and back
 # --------------------------------------------------------------------------- #
-def test_an_mcp_tool_reaches_the_model_and_its_answer_reaches_the_transcript(
-    monkeypatch, tmp_path, capsys
-):
+def test_an_mcp_tool_reaches_the_model_and_its_answer_reaches_the_transcript(monkeypatch, tmp_path, capsys):
     server = tmp_path / "widgets.py"
     server.write_text(textwrap.dedent(_MCP_SERVER))
     write_config(
@@ -117,9 +115,7 @@ def test_an_mcp_tool_reaches_the_model_and_its_answer_reaches_the_transcript(
     assert "sprocket is in aisle 7" in output  # and the server's answer came back
 
 
-def test_an_mcp_tool_is_refused_like_any_other_when_it_is_not_permitted(
-    monkeypatch, tmp_path, capsys
-):
+def test_an_mcp_tool_is_refused_like_any_other_when_it_is_not_permitted(monkeypatch, tmp_path, capsys):
     """MCP is a way of acquiring tools, not a second set of rules about what
     tools may do. Headless refuses anything not permitted up front."""
     server = tmp_path / "widgets.py"
@@ -133,8 +129,7 @@ def test_an_mcp_tool_is_refused_like_any_other_when_it_is_not_permitted(
     monkeypatch.setattr(wiring, "build_model", lambda *a, **k: model)
 
     status = cli.main(
-        ["-p", "where is the sprocket", "--cwd", str(_project(tmp_path)),
-         "--headless", "--output", "json"]
+        ["-p", "where is the sprocket", "--cwd", str(_project(tmp_path)), "--headless", "--output", "json"]
     )
 
     report = json.loads(capsys.readouterr().out)
@@ -157,27 +152,20 @@ def test_a_broken_mcp_server_is_reported_and_the_run_continues(monkeypatch, tmp_
 # Hooks, at the point where they matter
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shell scripts")
-def test_a_hook_refuses_a_write_the_permission_layer_had_already_allowed(
-    monkeypatch, tmp_path, capsys
-):
+def test_a_hook_refuses_a_write_the_permission_layer_had_already_allowed(monkeypatch, tmp_path, capsys):
     """The interesting case: --allow-tool says yes, the hook says no, and no
     file is written. A hook that only ran on calls the policy already refused
     would be worth nothing."""
     guard = tmp_path / "guard.sh"
     guard.write_text("#!/bin/sh\necho 'generated/ is off limits'\nexit 1\n")
     guard.chmod(0o755)
-    write_config(tmp_path, {"hooks": {"before_tool": [{"match": "write_file",
-                                                       "command": str(guard)}]}})
+    write_config(tmp_path, {"hooks": {"before_tool": [{"match": "write_file", "command": str(guard)}]}})
     project = _project(tmp_path)
     target = project / "generated" / "out.txt"
-    model = _ScriptedModel(
-        ToolCall(name="write_file", arguments={"path": str(target), "content": "x"})
-    )
+    model = _ScriptedModel(ToolCall(name="write_file", arguments={"path": str(target), "content": "x"}))
     monkeypatch.setattr(wiring, "build_model", lambda *a, **k: model)
 
-    status = cli.main(
-        ["-p", "write the file", "--cwd", str(project), "--allow-tool=write_file"]
-    )
+    status = cli.main(["-p", "write the file", "--cwd", str(project), "--allow-tool=write_file"])
 
     assert status == 0
     assert not target.exists()

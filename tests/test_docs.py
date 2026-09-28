@@ -5,6 +5,7 @@ layout table in `AGENTS.md` is how an agent finds the page to read and update.
 A link or a path that no longer resolves sends it nowhere, so these fail
 instead of rotting quietly.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -19,7 +20,8 @@ DOCS = [ROOT / "AGENTS.md", *sorted(ARCHITECTURE.glob("*.md"))]
 
 def _links(path: pathlib.Path) -> list[str]:
     return [
-        link for link in re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", path.read_text())
+        link
+        for link in re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", path.read_text())
         if not link.startswith(("http://", "https://", "mailto:"))
     ]
 
@@ -40,7 +42,7 @@ def test_every_architecture_page_is_in_the_index():
 
 def test_every_path_in_the_layout_table_exists():
     text = (ROOT / "AGENTS.md").read_text()
-    table = text[text.index("## 4. Layout"):text.index("## 5.")]
+    table = text[text.index("## 4. Layout") : text.index("## 5.")]
     missing = []
     for row in table.splitlines():
         if not row.startswith("| `"):

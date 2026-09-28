@@ -28,6 +28,7 @@ Nothing here is a performance judgement. Whether the endpoint serves one
 request or eight is an observation about somebody's setup, and the only thing
 CoBirb does with it is say so and offer to run sequentially.
 """
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -117,9 +118,7 @@ def probe_concurrency(
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             futures = [pool.submit(_timed_call, provider, prompt) for _ in range(2)]
-            (first_a, done_a), (first_b, done_b) = [
-                future.result(timeout=timeout) for future in futures
-            ]
+            (first_a, done_a), (first_b, done_b) = [future.result(timeout=timeout) for future in futures]
     except concurrent.futures.TimeoutError:
         return ProbeResult(None, f"neither request finished within {timeout}s")
     except Exception as exc:  # noqa: BLE001
@@ -133,9 +132,6 @@ def probe_concurrency(
     earlier_finished = min(done_a, done_b)
     overlapped = later_first_token < earlier_finished
 
-    detail = (
-        f"second reply began at {later_first_token:.2f}s, first finished at "
-        f"{earlier_finished:.2f}s"
-    )
+    detail = f"second reply began at {later_first_token:.2f}s, first finished at {earlier_finished:.2f}s"
     logger.info("concurrency probe: overlapped=%s (%s)", overlapped, detail)
     return ProbeResult(overlapped, detail, elapsed)

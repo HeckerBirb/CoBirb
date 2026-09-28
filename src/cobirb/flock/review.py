@@ -48,13 +48,15 @@ worker's version back leaves a broken file, which is the same situation as any
 agent being killed mid-edit and is version control's problem. A Worker Birb is
 not special, and neither is this.
 """
+
 from __future__ import annotations
 
 import logging
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from ..runtime.verify import DEFAULT_TIMEOUT_SECONDS, run_verification
 from .charter import Charter, WorkerBrief
@@ -65,9 +67,7 @@ logger = logging.getLogger("cobirb")
 # meet. Deliberately broad and deliberately not a parser: a false positive
 # costs a line in a report someone reads, a false negative costs a missed
 # weakening, and the asymmetry says to over-match.
-_ASSERTION = re.compile(
-    r"\b(assert\w*|expect|should\w*|require\w*|XCTAssert\w*|t\.(Error|Fatal)f?)\b"
-)
+_ASSERTION = re.compile(r"\b(assert\w*|expect|should\w*|require\w*|XCTAssert\w*|t\.(Error|Fatal)f?)\b")
 
 # Markers that turn a test off without deleting it — the quietest way to make
 # red go green.
@@ -120,7 +120,7 @@ class Baseline:
     files: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def capture(cls, charter: Charter, cwd: str) -> "Baseline":
+    def capture(cls, charter: Charter, cwd: str) -> Baseline:
         """Read every file any worker may change.
 
         A path that does not exist yet is recorded as empty rather than
@@ -139,7 +139,7 @@ class Baseline:
 
 def _read(path: str) -> str:
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             return fh.read()
     except (OSError, UnicodeDecodeError):
         return ""
@@ -179,14 +179,10 @@ def read_the_diff(worker: WorkerBrief, baseline: Baseline, cwd: str) -> list[Fin
         present = set(after_lines)
 
         gone_assertions = [
-            line.strip()
-            for line in before_lines
-            if _ASSERTION.search(line) and line not in present
+            line.strip() for line in before_lines if _ASSERTION.search(line) and line not in present
         ]
         for line in gone_assertions[:5]:
-            findings.append(
-                Finding(FINDING_ASSERTION_REMOVED, path, f"an assertion is gone — {line}")
-            )
+            findings.append(Finding(FINDING_ASSERTION_REMOVED, path, f"an assertion is gone — {line}"))
         if len(gone_assertions) > 5:
             findings.append(
                 Finding(
@@ -199,9 +195,7 @@ def read_the_diff(worker: WorkerBrief, baseline: Baseline, cwd: str) -> list[Fin
         was_there = set(before_lines)
         for line in after_lines:
             if _SKIP.search(line) and line not in was_there:
-                findings.append(
-                    Finding(FINDING_SKIP_ADDED, path, f"a test was turned off — {line.strip()}")
-                )
+                findings.append(Finding(FINDING_SKIP_ADDED, path, f"a test was turned off — {line.strip()}"))
 
         for line in before_lines:
             if _DEFINITION.match(line) and line not in present:
@@ -258,7 +252,7 @@ def expect_red(
     *,
     label: str,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
-    run_check: "Callable[[str, int, dict[str, str]], Any] | None" = None,
+    run_check: Callable[[str, int, dict[str, str]], Any] | None = None,
 ) -> RedCheck:
     """Swap in broken content, run the check, and put everything back.
 
@@ -354,10 +348,7 @@ def put_the_stub_back(worker: WorkerBrief, baseline: Baseline, cwd: str, **kwarg
         # subtler than it is. Empty replacements: it returns before writing.
         return expect_red({}, worker.accept, cwd, label=label, **kwargs)
 
-    changed = {
-        path for path in worker.writes
-        if _read(os.path.join(cwd, path)) != baseline.content(path)
-    }
+    changed = {path for path in worker.writes if _read(os.path.join(cwd, path)) != baseline.content(path)}
     if not changed:
         return RedCheck(
             label=label,
@@ -430,7 +421,7 @@ def review_worker(
     cwd: str,
     *,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
-    run_check: "Callable[[str, int, dict[str, str]], Any] | None" = None,
+    run_check: Callable[[str, int, dict[str, str]], Any] | None = None,
 ) -> Review:
     """Run both passes for this worker.
 
@@ -446,6 +437,7 @@ def review_worker(
     return Review(
         worker_id=worker.id,
         findings=read_the_diff(worker, baseline, cwd),
-        stub=None if worker.static else put_the_stub_back(
-            worker, baseline, cwd, timeout=timeout, run_check=run_check),
+        stub=None
+        if worker.static
+        else put_the_stub_back(worker, baseline, cwd, timeout=timeout, run_check=run_check),
     )

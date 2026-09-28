@@ -4,6 +4,7 @@ A documented subset of the format, so these pin down the subset rather than
 git's full behaviour: the cost of getting a rule wrong here is a file searched
 that needn't have been, not a file wrongly committed.
 """
+
 from __future__ import annotations
 
 from cobirb.plugins.core.ignores import IgnoreRules

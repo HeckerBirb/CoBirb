@@ -13,7 +13,13 @@ pytest                                            # CI runs this on 3.11 and 3.1
 COBIRB_TEST_MODEL=llama3.1 pytest -m integration  # optional, needs a real local Ollama
 ```
 
-No linter, formatter or type checker is configured — match the surrounding style by hand.
+Lint and format with ruff before sending a change — CI runs both:
+
+```bash
+ruff check --fix && ruff format
+```
+
+No type checker is configured.
 
 ## Making a change
 

@@ -26,6 +26,7 @@ outcomes that call for different responses:
      broken script.
 ===  ==========================================================
 """
+
 from __future__ import annotations
 
 import json

@@ -13,6 +13,7 @@ Writing the config is the one thing here that could do damage, so it is
 careful: the existing file is read and every other key kept, a file that does
 not parse is refused rather than replaced, and the write is atomic and 0600.
 """
+
 from __future__ import annotations
 
 import json
@@ -20,7 +21,8 @@ import os
 import sys
 import tempfile
 import urllib.parse
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from .. import paths
 from .bootstrap import ensure_home
@@ -45,7 +47,7 @@ def save_default_model(name: str, base_url: str | None = None, api: str | None =
     data: dict[str, Any] = {}
     if os.path.exists(path):
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, encoding="utf-8") as fh:
                 data = json.load(fh)
         except (OSError, json.JSONDecodeError) as exc:
             raise ConfigUnreadable(f"{path} could not be read ({exc}); fix or move it first") from exc
@@ -85,8 +87,9 @@ def _guess_api(address: str) -> str:
     return API_OLLAMA if urllib.parse.urlsplit(address).port in (None, 11434) else API_OPENAI
 
 
-def run(ask: Callable[[str], str] = input, say: Callable[[str], None] = print,
-        interactive: bool | None = None) -> int:
+def run(
+    ask: Callable[[str], str] = input, say: Callable[[str], None] = print, interactive: bool | None = None
+) -> int:
     """The interactive setup. Returns a process exit code."""
     from ..plugins.core.model import LocalModelProvider
     from ..plugins.core.openai import OpenAICompatibleProvider
@@ -95,8 +98,10 @@ def run(ask: Callable[[str], str] = input, say: Callable[[str], None] = print,
     if interactive is None:
         interactive = sys.stdin.isatty()
     if not interactive:
-        say("cobirb setup asks questions, so it needs a terminal. Set models.default in "
-            f"{paths.config_path()} instead (see 'cobirb help config').")
+        say(
+            "cobirb setup asks questions, so it needs a terminal. Set models.default in "
+            f"{paths.config_path()} instead (see 'cobirb help config')."
+        )
         return 1
 
     say("CoBirb talks to one model server that you run. Nothing else is contacted.")
@@ -104,8 +109,11 @@ def run(ask: Callable[[str], str] = input, say: Callable[[str], None] = print,
     if not address.startswith(("http://", "https://")):
         address = f"http://{address}"
     suggested = _guess_api(address)
-    answer = ask(f"Does it speak Ollama's API or the OpenAI one (llama.cpp, LM Studio, vLLM)? "
-                 f"[{suggested}] ").strip().lower()
+    answer = (
+        ask(f"Does it speak Ollama's API or the OpenAI one (llama.cpp, LM Studio, vLLM)? [{suggested}] ")
+        .strip()
+        .lower()
+    )
     if answer.startswith("ol"):
         api = API_OLLAMA
     elif answer.startswith(("op", "llama", "lm", "vllm")):
@@ -146,8 +154,10 @@ def run(ask: Callable[[str], str] = input, say: Callable[[str], None] = print,
 
     override = Config().get("models", "orchestrator", "name")
     if override and override != model:
-        say(f"Note: models.orchestrator.name is set to {override!r}, and that still decides the "
-            "model you talk to. Remove it to use the default.")
+        say(
+            f"Note: models.orchestrator.name is set to {override!r}, and that still decides the "
+            "model you talk to. Remove it to use the default."
+        )
     say("")
     report = doctor.run()
     say(report.describe())

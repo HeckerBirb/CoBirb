@@ -9,6 +9,7 @@ is plaintext — the whole point is to produce something shareable, and a
 the one place CoBirb writes a conversation to disk unprotected, so it says so
 when it does it, and never picks the destination itself.
 """
+
 from __future__ import annotations
 
 import os
@@ -23,7 +24,7 @@ _ROLE_HEADINGS = {
 
 
 def _tool_heading(turn) -> str:
-    """"Tool: read_file" where the call is known, plain "Tool" otherwise."""
+    """ "Tool: read_file" where the call is known, plain "Tool" otherwise."""
     if turn.tool_use:
         name = str(turn.tool_use[0].get("name", "")).strip()
         if name:

@@ -24,6 +24,7 @@ refuses anything not pre-approved and never prompts) wired by
 ``worker`` model role, and its brief as the prompt. What is genuinely new is
 the charter, the partition check, the fan-out, and the verification passes.
 """
+
 from __future__ import annotations
 
 from . import branch

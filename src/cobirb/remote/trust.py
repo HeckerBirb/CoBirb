@@ -12,8 +12,10 @@ regular use never asks again and one left idle for a month has to be paired
 anew. Both files are written ``0600`` via ``os.open`` and replaced atomically:
 they are credentials.
 """
+
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -48,10 +50,8 @@ def _write(path: str, data: dict[str, Any]) -> None:
             json.dump(data, fh, indent=2, sort_keys=True)
         os.replace(temp, path)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(temp)
-        except OSError:
-            pass
         raise
 
 

@@ -24,10 +24,12 @@ orchestrator supplies one (``Orchestrator._summarise_dropped``) that asks the
 model — cached, so it is one call when the dropped prefix grows rather than one
 per turn, and falling back to the plain note if it fails.
 """
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 # Used only when the provider cannot say what window it has. Not Ollama's own
 # 4096 default: CoBirb *states* `num_ctx` on every request (see
@@ -107,8 +109,9 @@ class CompactionReport:
         if self.elided_results:
             parts.append(f"{self.elided_results} tool result(s) elided")
         if self.dropped_turns:
-            parts.append(f"{self.dropped_turns} early turn(s) "
-                         + ("summarised" if self.summarised else "dropped"))
+            parts.append(
+                f"{self.dropped_turns} early turn(s) " + ("summarised" if self.summarised else "dropped")
+            )
         return f"{used}; {self.kept_turns} of {self.total_turns} turns kept, " + ", ".join(parts) + "."
 
 
@@ -162,8 +165,10 @@ def _elide_image(turn: dict[str, Any]) -> dict[str, Any]:
     (inside ``_KEEP_RECENT``) are never touched, so the image you are
     actually discussing stays visible.
     """
-    names = " ".join(f"[image: {img.get('filename') or 'attachment'} elided to fit the context window]"
-                     for img in turn.get("images") or [])
+    names = " ".join(
+        f"[image: {img.get('filename') or 'attachment'} elided to fit the context window]"
+        for img in turn.get("images") or []
+    )
     content = str(turn.get("content") or "")
     return {**turn, "content": f"{content}\n{names}".strip() if content else names, "images": None}
 
@@ -191,7 +196,7 @@ def _truncate(turn: dict[str, Any], keep_chars: int) -> dict[str, Any]:
 def compact(
     turns: list[dict[str, Any]],
     budget_tokens: int,
-    summarise: "Callable[[list[dict[str, Any]]], str] | None" = None,
+    summarise: Callable[[list[dict[str, Any]]], str] | None = None,
 ) -> tuple[list[dict[str, Any]], CompactionReport]:
     """Return ``turns`` trimmed to fit ``budget_tokens``, and what that cost.
 
@@ -269,8 +274,8 @@ def compact(
             text = (
                 f"[{dropped} earlier turn(s) from this session were dropped to fit the context "
                 f"window. A summary of them:]\n{summary}\n[The original request above still stands.]"
-                if summary else
-                f"[{dropped} earlier turn(s) from this session were dropped to fit the "
+                if summary
+                else f"[{dropped} earlier turn(s) from this session were dropped to fit the "
                 "context window. The original request above still stands.]"
             )
             note = {"role": "user", "content": text, "tool_use": None}
@@ -292,9 +297,7 @@ def compact(
     for _ in range(64):
         if fits():
             break
-        index = max(
-            range(len(working)), key=lambda i: len(str(working[i].get("content") or ""))
-        )
+        index = max(range(len(working)), key=lambda i: len(str(working[i].get("content") or "")))
         body = str(working[index].get("content") or "").partition(_TRIM_MARK)[0]
         if len(body) <= _MIN_BODY_CHARS:
             break  # every body is already at the floor; the rest is structure

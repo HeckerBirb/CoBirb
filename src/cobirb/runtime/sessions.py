@@ -4,6 +4,7 @@ Also the small pieces of text a session run produces on the way in and out:
 the prompt for a password, the reason a file could not be opened, and the
 command that reopens it.
 """
+
 from __future__ import annotations
 
 import os
@@ -17,7 +18,7 @@ def abbreviate_home(path: str) -> str:
     """``/home/you/.cobirb/x`` as ``~/.cobirb/x``, for text a user might type
     back. Paths outside the home directory are returned unchanged."""
     home = os.path.expanduser("~")
-    return "~" + path[len(home):] if path.startswith(home) else path
+    return "~" + path[len(home) :] if path.startswith(home) else path
 
 
 def read_password() -> str:
@@ -79,8 +80,7 @@ def resolve_session(
         path = most_recent_session()
         if path is None:
             raise NoSessionToContinue(
-                f"there are no sessions in {sessions_dir_display()} to continue — "
-                "start one with 'cobirb -w'."
+                f"there are no sessions in {sessions_dir_display()} to continue — start one with 'cobirb -w'."
             )
         password = str(password_arg) if password_arg not in (None, True, False) else read_password()
         return path, password
@@ -119,7 +119,4 @@ def resume_hint(session_path: str) -> str:
     would otherwise be printed to the terminal and into whatever scrollback
     or log is capturing it.
     """
-    return (
-        "Session saved. Resume it with:\n"
-        f"  cobirb --session {abbreviate_home(session_path)} -w"
-    )
+    return f"Session saved. Resume it with:\n  cobirb --session {abbreviate_home(session_path)} -w"

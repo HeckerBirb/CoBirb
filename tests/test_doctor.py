@@ -4,10 +4,10 @@ The environment and install checks are kept off by default here and exercised
 with stubs: this suite must not depend on a running model server, and must not
 report on whatever state CoBirb's own checkout happens to be in.
 """
+
 from __future__ import annotations
 
 import pytest
-
 from conftest import write_config
 
 from cobirb.config import Config
@@ -56,7 +56,7 @@ def test_several_unknown_keys_are_all_named(tmp_path):
 
 
 def test_a_retired_key_says_what_happened_rather_than_suggesting_a_typo(tmp_path):
-    """"persona" was spelled right; it just stopped meaning anything. Calling it
+    """ "persona" was spelled right; it just stopped meaning anything. Calling it
     a key CoBirb does not read sends someone looking for a typo that isn't there."""
     report = _run(tmp_path, {"persona": "noah"})
 
@@ -66,7 +66,7 @@ def test_a_retired_key_says_what_happened_rather_than_suggesting_a_typo(tmp_path
 
 
 def test_a_value_of_the_wrong_type_is_reported(tmp_path):
-    report = _run(tmp_path, {"allow_tools": "read_file"})   # should be a list
+    report = _run(tmp_path, {"allow_tools": "read_file"})  # should be a list
 
     assert not report.ok
     assert "allow_tools" in _check(report, "config value types").detail
@@ -87,7 +87,7 @@ def test_allow_tools_naming_a_tool_that_does_not_exist_is_a_warning(tmp_path):
     check = _check(report, "config references")
     assert check.status == doctor.WARN
     assert "reed_file" in check.detail
-    assert report.ok        # worth knowing, but it does not stop a turn working
+    assert report.ok  # worth knowing, but it does not stop a turn working
 
 
 def test_a_scoped_shell_rule_is_understood(tmp_path):
@@ -126,12 +126,15 @@ def test_both_spellings_of_max_num_ctx_pass(tmp_path):
         assert _check(report, "config references").status == doctor.OK
 
 
-@pytest.mark.parametrize("flock, named", [
-    ({"planning": "stagd"}, "stagd"),
-    ({"autonomy": "yolo"}, "yolo"),
-    ({"max_rounds": 0}, "max_rounds"),
-    ({"rounds": 3}, "rounds"),
-])
+@pytest.mark.parametrize(
+    "flock, named",
+    [
+        ({"planning": "stagd"}, "stagd"),
+        ({"autonomy": "yolo"}, "yolo"),
+        ({"max_rounds": 0}, "max_rounds"),
+        ({"rounds": 3}, "rounds"),
+    ],
+)
 def test_an_unreadable_flock_setting_is_a_warning(tmp_path, flock, named):
     """The flock block falls back to its defaults in silence, so doctor says so."""
     check = _check(_run(tmp_path, {"flock": flock}), "config references")
@@ -345,9 +348,16 @@ def test_a_managed_install_is_fine_rather_than_a_missing_checkout(tmp_path, monk
     something is wrong with a perfectly good install."""
     from cobirb.runtime import upgrade as upgrade_module
 
-    report = _install_report(tmp_path, monkeypatch, upgrade_module.Install(
-        kind=upgrade_module.MANAGED, root="/x", venv="/x/venv", version="0.13.1",
-    ))
+    report = _install_report(
+        tmp_path,
+        monkeypatch,
+        upgrade_module.Install(
+            kind=upgrade_module.MANAGED,
+            root="/x",
+            venv="/x/venv",
+            version="0.13.1",
+        ),
+    )
 
     assert _check(report, "install").status == doctor.OK
     assert "/x/venv" in _check(report, "install").detail
@@ -364,9 +374,16 @@ def test_a_managed_install_is_not_checked_against_the_latest_release(tmp_path, m
         raise AssertionError("doctor reached for a release listing")
 
     monkeypatch.setattr(upgrade_module, "_latest_tag", _boom)
-    report = _install_report(tmp_path, monkeypatch, upgrade_module.Install(
-        kind=upgrade_module.MANAGED, root="/x", venv="/x/venv", version="0.13.1",
-    ))
+    report = _install_report(
+        tmp_path,
+        monkeypatch,
+        upgrade_module.Install(
+            kind=upgrade_module.MANAGED,
+            root="/x",
+            venv="/x/venv",
+            version="0.13.1",
+        ),
+    )
 
     assert _check(report, "version").status == doctor.OK
 
@@ -374,9 +391,7 @@ def test_a_managed_install_is_not_checked_against_the_latest_release(tmp_path, m
 def test_an_unmanaged_install_warns_and_names_the_installer(tmp_path, monkeypatch):
     from cobirb.runtime import upgrade as upgrade_module
 
-    report = _install_report(
-        tmp_path, monkeypatch, upgrade_module.Install(kind=upgrade_module.UNMANAGED)
-    )
+    report = _install_report(tmp_path, monkeypatch, upgrade_module.Install(kind=upgrade_module.UNMANAGED))
 
     check = _check(report, "install")
     assert check.status == doctor.WARN
@@ -403,11 +418,16 @@ def test_remote_workers_are_checked_without_connecting(tmp_path, monkeypatch):
     from cobirb.remote import settings
 
     monkeypatch.setattr(settings, "local_os", lambda: "Linux")
-    report = _run(tmp_path, {"remote_workers": [
-        {"remote_os": "wINdOwS", "remote_url": "https://10.0.0.5:8443/api"},
-        {"remote_os": "linux", "remote_url": "https://10.0.0.6:8443/api"},
-        {"remote_os": "plan9", "remote_url": "https://10.0.0.7:8443/api"},
-    ]})
+    report = _run(
+        tmp_path,
+        {
+            "remote_workers": [
+                {"remote_os": "wINdOwS", "remote_url": "https://10.0.0.5:8443/api"},
+                {"remote_os": "linux", "remote_url": "https://10.0.0.6:8443/api"},
+                {"remote_os": "plan9", "remote_url": "https://10.0.0.7:8443/api"},
+            ]
+        },
+    )
 
     details = [c.detail for c in report.checks if c.name == "remote worker"]
     assert any("Windows" in d and "not paired" in d for d in details)

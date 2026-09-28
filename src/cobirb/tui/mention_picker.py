@@ -9,10 +9,11 @@ the matching lives in ``runtime.mentions`` (which knows nothing about
 terminals) and the file list comes from whoever constructs it. That split is
 what lets the ranking be tested without a running app.
 """
+
 from __future__ import annotations
 
 import os
-from typing import Callable
+from collections.abc import Callable
 
 from rich.text import Text
 from textual.widgets import Static

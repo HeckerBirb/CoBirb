@@ -13,9 +13,11 @@ name, the attachments on a prompt — as arguments. A view that reads the app's
 fields would have to change whenever they do; this one changes when the
 *transcript* changes.
 """
+
 from __future__ import annotations
 
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from rich.text import Text
 

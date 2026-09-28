@@ -15,8 +15,10 @@ does have something to add — the harness block, plan-mode phase instructions �
 model's own prompt is read back via ``/api/show`` and placed first, so the
 addition supplements it instead of discarding it. See ``compose_system``.
 """
+
 from __future__ import annotations
 
+import contextlib
 import http.client
 import io
 import json
@@ -28,10 +30,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
-from . import toolcalls
 from ...typing.spi import ModelProvider, SteeringInterrupted, Tool, ToolCall
+from . import toolcalls
 
 logger = logging.getLogger(__name__)
 
@@ -136,8 +139,12 @@ def _call_signature(calls: Any) -> str:
     """A key for a set of tool calls, the same whether they come from the
     server's reply or from a turn replayed out of history."""
     return json.dumps(
-        [[c["name"], c.get("arguments", {})] if isinstance(c, dict) else [c.name, c.arguments] for c in calls],
-        sort_keys=True, default=str,
+        [
+            [c["name"], c.get("arguments", {})] if isinstance(c, dict) else [c.name, c.arguments]
+            for c in calls
+        ],
+        sort_keys=True,
+        default=str,
     )
 
 
@@ -146,13 +153,13 @@ def _build_messages(
     context: str,
     *,
     include_images: bool = False,
-    thinking: "dict[str, str] | None" = None,
+    thinking: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Turn the orchestrator's JSON-encoded turn history into a proper
     multi-turn Ollama ``messages`` array, instead of flattening the whole
     conversation into a single opaque "user" message.
 
-Flattening is what stops a tool-calling loop converging: a "tool" result
+    Flattening is what stops a tool-calling loop converging: a "tool" result
     arrives out of nowhere, with no preceding assistant message announcing the
     call it answers, so the model has no signal a prior call was satisfied and
     simply repeats it. The SPI leaves ``context`` as a compact string and makes
@@ -256,12 +263,10 @@ def _unreachable(base_url: str, exc: Exception, model: str = "", server: str = "
             f"The model provider at {base_url} refused the request for{named}: "
             f"{exc.code} {exc.reason}{f' — {detail}' if detail else ''}"
         )
-    return RuntimeError(
-        f"Could not reach the model provider at {base_url}: {exc}. Is {server} running?"
-    )
+    return RuntimeError(f"Could not reach the model provider at {base_url}: {exc}. Is {server} running?")
 
 
-def _error_body(exc: "urllib.error.HTTPError") -> str:
+def _error_body(exc: urllib.error.HTTPError) -> str:
     """Whatever the server said about the failure, if it said anything.
 
     Ollama puts a plain message under ``error``; other OpenAI-compatible
@@ -285,7 +290,7 @@ def _error_body(exc: "urllib.error.HTTPError") -> str:
     return str(error or raw)[:300]
 
 
-def _drop(connections: "list[http.client.HTTPConnection]") -> None:
+def _drop(connections: list[http.client.HTTPConnection]) -> None:
     """Tear down in-flight connections hard enough to wake whoever is reading.
 
     The mechanism both ``cancel()`` (force-stop) and ``interrupt_current_reply()``
@@ -310,14 +315,10 @@ def _drop(connections: "list[http.client.HTTPConnection]") -> None:
     for conn in connections:
         sock = getattr(conn, "sock", None)
         if sock is not None:
-            try:
+            with contextlib.suppress(OSError):
                 sock.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-        try:
+        with contextlib.suppress(Exception):  # already going; nothing to do
             conn.close()
-        except Exception:  # noqa: BLE001 - already going; nothing to do
-            pass
 
 
 class LocalModelProvider(ModelProvider):
@@ -421,8 +422,7 @@ class LocalModelProvider(ModelProvider):
         """
         split = urllib.parse.urlsplit(self._base_url)
         connection_class = (
-            http.client.HTTPSConnection if split.scheme == "https"
-            else http.client.HTTPConnection
+            http.client.HTTPSConnection if split.scheme == "https" else http.client.HTTPConnection
         )
         # Built with the *connect* timeout; ``_stream_chat`` swaps the socket
         # onto the request timeout once it is connected (see ``_open``). Opening
@@ -646,21 +646,23 @@ class LocalModelProvider(ModelProvider):
         self,
         system: str,
         context: str,
-        tools: Optional[list[Tool]] = None,
+        tools: list[Tool] | None = None,
         *,
         stream: bool = False,
-    ) -> "Iterable[str] | str":
+    ) -> Iterable[str] | str:
         if not self._model:
             raise RuntimeError(
                 "No model configured. Set --model, COBIRB_MODEL_NAME, or "
-                "\"default_model\"/models.default.name in your CoBirb config — "
+                '"default_model"/models.default.name in your CoBirb config — '
                 "or, in interactive mode, pick one with /model. No models are "
                 "embedded by default."
             )
         payload: dict[str, Any] = {
             "model": self._model,
             "messages": _build_messages(
-                self.compose_system(system), context, include_images=self.supports_vision(),
+                self.compose_system(system),
+                context,
+                include_images=self.supports_vision(),
                 thinking=self._thinking_by_call,
             ),
             "stream": stream,
@@ -727,13 +729,12 @@ class LocalModelProvider(ModelProvider):
             if not line:
                 continue
             chunk = json.loads(line)
-            if chunk.get("error"):
-                # Ollama reports a failure part-way through a stream as an
-                # `error` line. Its own tool-call parser failing is the model
-                # getting the format wrong, which it can correct; anything
-                # else is a real failure and is raised as one.
-                if self._stream_error(str(chunk["error"])):
-                    break
+            # Ollama reports a failure part-way through a stream as an `error`
+            # line. Its own tool-call parser failing is the model getting the
+            # format wrong, which it can correct; anything else is a real
+            # failure and is raised as one.
+            if chunk.get("error") and self._stream_error(str(chunk["error"])):
+                break
             message = chunk.get("message", {})
             if message.get("thinking"):
                 thinking.append(str(message["thinking"]))
@@ -783,7 +784,9 @@ class LocalModelProvider(ModelProvider):
                 try:
                     self._open(conn)
                     conn.request(
-                        "POST", f"{prefix}{path}", body=body,
+                        "POST",
+                        f"{prefix}{path}",
+                        body=body,
                         headers={"Content-Type": "application/json"},
                     )
                     response = conn.getresponse()
@@ -818,15 +821,17 @@ class LocalModelProvider(ModelProvider):
                 raise _unreachable(
                     self._base_url,
                     urllib.error.HTTPError(
-                        self._base_url, response.status, response.reason, response.headers,
+                        self._base_url,
+                        response.status,
+                        response.reason,
+                        response.headers,
                         io.BytesIO(body),
                     ),
                     self._model,
                     self._server,
                 )
-            for raw_line in response:
-                yield raw_line
-        except Exception as exc:  # noqa: BLE001 - see _as_control_exception
+            yield from response
+        except Exception as exc:  # see _as_control_exception
             control = self._as_control_exception(exc)
             if control is exc and isinstance(exc, OSError):
                 # **The server answered and then went away.** A reset while the

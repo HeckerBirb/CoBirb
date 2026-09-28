@@ -1,4 +1,5 @@
 """Tests for unattended runs: no prompts, machine-readable output, exit codes."""
+
 from __future__ import annotations
 
 import json
@@ -47,7 +48,8 @@ def test_headless_refuses_rather_than_prompting(tmp_path, monkeypatch, capsys):
     (tmp_path / "a.py").write_text("x = 1\n")
 
     code = _run(
-        monkeypatch, tmp_path,
+        monkeypatch,
+        tmp_path,
         ["-p", "read it", "--headless", "--output", "json"],
         [ToolCall("read_file", {"path": "a.py"})],
     )
@@ -61,7 +63,8 @@ def test_a_permitted_tool_runs_unattended_and_exits_clean(tmp_path, monkeypatch,
     (tmp_path / "a.py").write_text("x = 1\n")
 
     code = _run(
-        monkeypatch, tmp_path,
+        monkeypatch,
+        tmp_path,
         ["-p", "read it", "--headless", "--output", "json", "--allow-tool", "read_file"],
         [ToolCall("read_file", {"path": "a.py"})],
     )
@@ -105,7 +108,8 @@ def test_running_out_of_turns_is_a_failure_with_its_reason(tmp_path, monkeypatch
     write_config(tmp_path, {"max_turns": 3})
     monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
     code = _run(
-        monkeypatch, tmp_path,
+        monkeypatch,
+        tmp_path,
         ["-p", "loop", "--headless", "--output", "json", "--allow-tool", "list_dir"],
         [ToolCall("list_dir", {"path": f"p{i}"}) for i in range(50)],
     )
@@ -119,7 +123,8 @@ def test_running_out_of_turns_is_a_failure_with_its_reason(tmp_path, monkeypatch
 
 def test_a_model_repeating_itself_is_stopped_and_says_why(tmp_path, monkeypatch, capsys):
     code = _run(
-        monkeypatch, tmp_path,
+        monkeypatch,
+        tmp_path,
         ["-p", "loop", "--headless", "--output", "json", "--allow-tool", "list_dir"],
         [ToolCall("list_dir", {}) for _ in range(50)],
     )

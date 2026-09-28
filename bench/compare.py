@@ -17,6 +17,7 @@ by hand:
   Each change in pass count carries a two-sided Fisher exact p-value, so "6/6 →
   2/6" (p ≈ 0.06) and "2/6 → 3/6" (p = 1.0) do not read alike.
 """
+
 from __future__ import annotations
 
 import json
@@ -113,8 +114,11 @@ def compare(paths: list[Path]) -> str:
         out += ["", "**Not like for like:**", ""] + [f"- {w}" for w in warnings]
     reclassified = [(name, sum(1 for r in rows if r.get("reclassified"))) for name, _, rows in runs]
     if any(n for _, n in reclassified):
-        out += ["", "**Reclassified as `no_flock`** (passed, but no Worker Birb ran): " + ", ".join(
-            f"`{name}` {n}" for name, n in reclassified if n)]
+        out += [
+            "",
+            "**Reclassified as `no_flock`** (passed, but no Worker Birb ran): "
+            + ", ".join(f"`{name}` {n}" for name, n in reclassified if n),
+        ]
 
     models = sorted({r["model"] for _, _, rows in runs for r in rows})
     tasks = sorted({r["task"] for _, _, rows in runs for r in rows})
@@ -136,8 +140,13 @@ def compare(paths: list[Path]) -> str:
             cells.append(text)
         out.append(f"| {model} | " + " | ".join(cells) + " |")
 
-    out += ["", "## Per task and model", "", "| Task | Model | " +
-            " | ".join(f"`{name}`" for name, _, _ in runs) + " |", "|---|---|" + "---|" * len(runs)]
+    out += [
+        "",
+        "## Per task and model",
+        "",
+        "| Task | Model | " + " | ".join(f"`{name}`" for name, _, _ in runs) + " |",
+        "|---|---|" + "---|" * len(runs),
+    ]
     for task in tasks:
         for model in models:
             cells = [by(rows, task=task, model=model) for _, _, rows in runs]
@@ -149,21 +158,34 @@ def compare(paths: list[Path]) -> str:
                 failures = Counter(r["outcome"] for r in rows if not r["passed"])
                 why = ", ".join(f"{n}× {k}" for k, n in failures.most_common())
                 texts.append(f"{passed}/{total}" + (f" ({why})" if why else "") if total else "—")
-            if len({t.split(' ')[0] for t in texts}) > 1:  # only rows that changed
+            if len({t.split(" ")[0] for t in texts}) > 1:  # only rows that changed
                 out.append(f"| {task} | {model} | " + " | ".join(texts) + " |")
 
-    out += ["", "## Failures by cause", "", "| Cause | " +
-            " | ".join(f"`{name}`" for name, _, _ in runs) + " |", rule]
+    out += [
+        "",
+        "## Failures by cause",
+        "",
+        "| Cause | " + " | ".join(f"`{name}`" for name, _, _ in runs) + " |",
+        rule,
+    ]
     causes = sorted({r["outcome"] for _, _, rows in runs for r in rows if not r["passed"]})
     for cause in causes:
-        out.append(f"| {cause} | " + " | ".join(
-            str(sum(1 for r in rows if not r["passed"] and r["outcome"] == cause)) for _, _, rows in runs
-        ) + " |")
+        out.append(
+            f"| {cause} | "
+            + " | ".join(
+                str(sum(1 for r in rows if not r["passed"] and r["outcome"] == cause)) for _, _, rows in runs
+            )
+            + " |"
+        )
 
     out += ["", "## Time", "", "| | " + " | ".join(f"`{name}`" for name, _, _ in runs) + " |", rule]
-    out.append("| median seconds per run | " + " | ".join(
-        f"{statistics.median(r['elapsed'] for r in rows):.0f}" if rows else "—" for _, _, rows in runs
-    ) + " |")
+    out.append(
+        "| median seconds per run | "
+        + " | ".join(
+            f"{statistics.median(r['elapsed'] for r in rows):.0f}" if rows else "—" for _, _, rows in runs
+        )
+        + " |"
+    )
 
     if any(meta.get("flock") for _, meta, _ in runs):
         out += ["", "## Flock", "", "| | " + " | ".join(f"`{name}`" for name, _, _ in runs) + " |", rule]
@@ -172,27 +194,47 @@ def compare(paths: list[Path]) -> str:
             out.append(f"| {label} | " + " | ".join(str(value(rows)) for _, _, rows in runs) + " |")
 
         workers = lambda rows: [w for r in rows for w in r.get("workers") or []]  # noqa: E731
-        row("rounds with no charter", lambda rows: sum(1 for r in rows if not r.get("charter")
-                                                       and r.get("stop_reason") != "answered"))
+        row(
+            "rounds with no charter",
+            lambda rows: sum(1 for r in rows if not r.get("charter") and r.get("stop_reason") != "answered"),
+        )
         row("workers that did not run", lambda rows: sum(1 for w in workers(rows) if not w.get("ok")))
-        row("workers whose own check failed",
-            lambda rows: sum(1 for w in workers(rows) if w.get("ok") and w.get("accepted") is False))
+        row(
+            "workers whose own check failed",
+            lambda rows: sum(1 for w in workers(rows) if w.get("ok") and w.get("accepted") is False),
+        )
         row("refused calls", lambda rows: sum(len(w.get("denied") or []) for w in workers(rows)))
-        row("rounds per run (mean)", lambda rows: f"{statistics.mean(r.get('rounds') or 1 for r in rows):.1f}"
-            if rows else "—")
+        row(
+            "rounds per run (mean)",
+            lambda rows: f"{statistics.mean(r.get('rounds') or 1 for r in rows):.1f}" if rows else "—",
+        )
 
-        refusals = [Counter(_refused_program(d.get("target", ""), d.get("tool", ""))
-                            for w in workers(rows) for d in w.get("denied") or [])
-                    for _, _, rows in runs]
+        refusals = [
+            Counter(
+                _refused_program(d.get("target", ""), d.get("tool", ""))
+                for w in workers(rows)
+                for d in w.get("denied") or []
+            )
+            for _, _, rows in runs
+        ]
         kinds = sorted(set().union(*refusals), key=lambda k: -sum(c[k] for c in refusals))
         if kinds:
-            out += ["", "Refused calls, by what they wanted:", "", "| Wanted | " +
-                    " | ".join(f"`{name}`" for name, _, _ in runs) + " |", rule]
+            out += [
+                "",
+                "Refused calls, by what they wanted:",
+                "",
+                "| Wanted | " + " | ".join(f"`{name}`" for name, _, _ in runs) + " |",
+                rule,
+            ]
             for kind in kinds[:12]:
                 out.append(f"| {kind} | " + " | ".join(str(c[kind]) for c in refusals) + " |")
 
-    out += ["", "p is a two-sided Fisher exact test on the pass counts; below 0.05 is a difference "
-            "worth believing, and anything near 1 is the same result twice.", ""]
+    out += [
+        "",
+        "p is a two-sided Fisher exact test on the pass counts; below 0.05 is a difference "
+        "worth believing, and anything near 1 is the same result twice.",
+        "",
+    ]
     return "\n".join(out)
 
 

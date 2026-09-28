@@ -24,6 +24,7 @@ Something that clearly *is* a call but cannot be read — unknown tool, broken
 JSON, a parser error the server returned as the answer — is reported back as
 a problem for the model to correct, rather than run or silently dropped.
 """
+
 from __future__ import annotations
 
 import json
@@ -37,7 +38,9 @@ _FUNCTION_BLOCK = re.compile(r"<function=([^>\s]+)>(.*?)(?:</function>|(?=<funct
 _PARAMETER = re.compile(
     r"<parameter=([^>\s]+)>\n?(.*?)\n?(?:</parameter>|(?=<parameter=)|(?=</function>)|\Z)", re.S
 )
-_HARMONY = re.compile(r"to=functions\.([\w.-]+)[^<]*(?:<\|constrain\|>\w+)?<\|message\|>(.*?)(?:<\|call\|>|\Z)", re.S)
+_HARMONY = re.compile(
+    r"to=functions\.([\w.-]+)[^<]*(?:<\|constrain\|>\w+)?<\|message\|>(.*?)(?:<\|call\|>|\Z)", re.S
+)
 _FENCE = re.compile(r"```(?:json|tool_call|tool)?\s*\n(.*?)```", re.S)
 _MARKUP = re.compile(r"<tool_call>.*?(?:</tool_call>|\Z)|<function=.*?(?:</function>|\Z)", re.S)
 
@@ -120,8 +123,14 @@ def extract(text: str, schemas: dict[str, dict[str, Any]]) -> tuple[list[ToolCal
     return calls, "; ".join(dict.fromkeys(problems))
 
 
-def _from_json(source: str, schemas: dict[str, dict[str, Any]], calls: list[ToolCall],
-               problems: list[str], *, quiet: bool = False) -> None:
+def _from_json(
+    source: str,
+    schemas: dict[str, dict[str, Any]],
+    calls: list[ToolCall],
+    problems: list[str],
+    *,
+    quiet: bool = False,
+) -> None:
     value = _loads(source)
     if value is None:
         if not quiet:
@@ -149,8 +158,9 @@ def _shape(item: Any) -> tuple[str | None, Any]:
     return (str(name) if name else None), arguments
 
 
-def _accept(name: str, arguments: Any, schemas: dict[str, dict[str, Any]],
-            calls: list[ToolCall], problems: list[str]) -> None:
+def _accept(
+    name: str, arguments: Any, schemas: dict[str, dict[str, Any]], calls: list[ToolCall], problems: list[str]
+) -> None:
     if name not in schemas:
         problems.append(f"a call to '{name}', which is not one of the available tools")
         return

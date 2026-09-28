@@ -36,6 +36,7 @@ every ``HEARTBEAT_SECONDS``. A remote that hears nothing for
 ``HALT_AFTER_SECONDS`` halts its job hard — the worker is killed mid-call and
 its workspace discarded — rather than working for a main machine that is gone.
 """
+
 from __future__ import annotations
 
 import base64
@@ -73,12 +74,12 @@ def decode(text: str | bytes) -> dict[str, Any]:
     return message
 
 
-def pack_files(files: "dict[str, bytes]") -> dict[str, str]:
+def pack_files(files: dict[str, bytes]) -> dict[str, str]:
     """Files as base64, so any content survives JSON."""
     return {path: base64.b64encode(data).decode("ascii") for path, data in files.items()}
 
 
-def unpack_files(files: object) -> "dict[str, bytes]":
+def unpack_files(files: object) -> dict[str, bytes]:
     if not isinstance(files, dict):
         raise ProtocolError("files must be an object of path → base64")
     try:

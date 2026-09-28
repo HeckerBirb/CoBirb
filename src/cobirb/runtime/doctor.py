@@ -19,12 +19,14 @@ likely to be wrong:
 Nothing here changes anything. A check that repaired what it found would be a
 different command with a different name, and a much larger promise.
 """
+
 from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from .. import paths
 from ..config import Config
@@ -40,25 +42,56 @@ FAIL = "fail"
 # the alternative is that it silently does nothing (`Config.get` is a plain
 # lookup with no validation, so `redact_secret` for `redact_secrets` reads as
 # "off" while redaction stays on).
-KNOWN_KEYS = frozenset({
-    "models", "system_prompt", "plan_mode",
-    "allow_tools", "allow_read_dirs", "allow_write_dirs",
-    "checkpoints", "redact_secrets", "audit_log",
-    "instructions", "instructions_max_chars",
-    "repo_map", "repo_map_max_chars", "context_tokens", "max_num_ctx",
-    "verify_command", "verify_timeout", "verify_fix_attempts",
-    "hooks", "mcp_servers", "plugins", "max_turns", "sandbox",
-    "connect_timeout", "request_timeout", "flock", "remote_workers",
-})
+KNOWN_KEYS = frozenset(
+    {
+        "models",
+        "system_prompt",
+        "plan_mode",
+        "allow_tools",
+        "allow_read_dirs",
+        "allow_write_dirs",
+        "checkpoints",
+        "redact_secrets",
+        "audit_log",
+        "instructions",
+        "instructions_max_chars",
+        "repo_map",
+        "repo_map_max_chars",
+        "context_tokens",
+        "max_num_ctx",
+        "verify_command",
+        "verify_timeout",
+        "verify_fix_attempts",
+        "hooks",
+        "mcp_servers",
+        "plugins",
+        "max_turns",
+        "sandbox",
+        "connect_timeout",
+        "request_timeout",
+        "flock",
+        "remote_workers",
+    }
+)
 
 # What each key should look like, for the shape check. Only the keys whose
 # type being wrong would misbehave quietly rather than raise.
 _EXPECTED_TYPES: dict[str, tuple[type, ...]] = {
-    "models": (dict,), "plugins": (dict,), "hooks": (dict,), "mcp_servers": (dict,),
-    "allow_tools": (list,), "allow_read_dirs": (list,), "allow_write_dirs": (list,),
-    "checkpoints": (bool,), "redact_secrets": (bool,), "audit_log": (bool,),
-    "instructions": (bool,), "repo_map": (bool,), "plan_mode": (bool,),
-    "instructions_max_chars": (int,), "repo_map_max_chars": (int,),
+    "models": (dict,),
+    "plugins": (dict,),
+    "hooks": (dict,),
+    "mcp_servers": (dict,),
+    "allow_tools": (list,),
+    "allow_read_dirs": (list,),
+    "allow_write_dirs": (list,),
+    "checkpoints": (bool,),
+    "redact_secrets": (bool,),
+    "audit_log": (bool,),
+    "instructions": (bool,),
+    "repo_map": (bool,),
+    "plan_mode": (bool,),
+    "instructions_max_chars": (int,),
+    "repo_map_max_chars": (int,),
     "context_tokens": (int,),
     # Also a string, for the "64k" spelling — see models.parse_context_size.
     # Whether that string *says* anything is checked below, since a type is
@@ -67,8 +100,11 @@ _EXPECTED_TYPES: dict[str, tuple[type, ...]] = {
     "sandbox": (str, dict),
     "flock": (dict,),
     "remote_workers": (list,),
-    "verify_timeout": (int,), "verify_fix_attempts": (int,), "max_turns": (int,),
-    "system_prompt": (str,), "verify_command": (str,),
+    "verify_timeout": (int,),
+    "verify_fix_attempts": (int,),
+    "max_turns": (int,),
+    "system_prompt": (str,),
+    "verify_command": (str,),
 }
 
 # Settings CoBirb used to read and no longer does, with what happened to each.
@@ -118,8 +154,7 @@ class Report:
     def describe(self) -> str:
         marks = {OK: "✓", WARN: "!", FAIL: "✗"}
         lines = [
-            f"  {marks.get(check.status, '?')} {check.name}"
-            + (f" — {check.detail}" if check.detail else "")
+            f"  {marks.get(check.status, '?')} {check.name}" + (f" — {check.detail}" if check.detail else "")
             for check in self.checks
         ]
         failures = sum(1 for check in self.checks if check.failed)
@@ -136,7 +171,7 @@ class Report:
 # --------------------------------------------------------------------------- #
 # 1. Config
 # --------------------------------------------------------------------------- #
-def _check_config(report: Report, config: Config, raw: "dict[str, Any] | None") -> None:
+def _check_config(report: Report, config: Config, raw: dict[str, Any] | None) -> None:
     path = paths.config_path()
     if raw is None:
         report.add("config file", WARN, f"none at {path} — defaults apply")
@@ -171,7 +206,7 @@ def _check_config(report: Report, config: Config, raw: "dict[str, Any] | None") 
     wrong = [
         f"{key} should be {' or '.join(t.__name__ for t in expected)}"
         for key, expected in _EXPECTED_TYPES.items()
-        if key in raw and not isinstance(raw[key], expected)
+        if (key in raw and not isinstance(raw[key], expected))
         # bool is an int in Python; an int key given True is still wrong.
         or (key in raw and expected == (int,) and isinstance(raw[key], bool))
     ]
@@ -221,7 +256,9 @@ def _check_referenced_things(report: Report, raw: dict[str, Any]) -> None:
                 )
         rounds = flock.get("max_rounds")
         if rounds is not None and (isinstance(rounds, bool) or not isinstance(rounds, int) or rounds < 1):
-            problems.append(f"flock.max_rounds is '{rounds}', not a positive number — the default is being used")
+            problems.append(
+                f"flock.max_rounds is '{rounds}', not a positive number — the default is being used"
+            )
         unknown_flock = sorted(set(flock) - {"planning", "autonomy", "max_rounds"})
         if unknown_flock:
             problems.append(f"flock has keys CoBirb does not read: {', '.join(unknown_flock)}")
@@ -284,7 +321,8 @@ def _check_models(report: Report, config: Config, build_provider: Callable[[str]
             continue
         if available and canonical_model(name) not in {canonical_model(m) for m in available}:
             report.add(
-                f"model ({role})", FAIL,
+                f"model ({role})",
+                FAIL,
                 f"'{name}' is configured but not on the endpoint — 'ollama pull {name}'",
             )
             continue
@@ -335,7 +373,8 @@ def _check_install(report: Report) -> None:
         report.add("checkout", OK, f"on {branch}")
     else:
         report.add(
-            "checkout", WARN,
+            "checkout",
+            WARN,
             "not on a branch (detached HEAD) — a commit made here belongs to no branch "
             "and 'git push' will not send it. 'git checkout <branch>' fixes it",
         )
@@ -368,14 +407,25 @@ def _check_remotes(report: Report, config: Config) -> None:
     store = TrustStore()
     for spec in specs:
         days = store.days_left(spec.url)
-        model = (f"its own model at {spec.openai_endpoint}" if spec.run_llms_locally
-                 else "your session's model, relayed")
+        model = (
+            f"its own model at {spec.openai_endpoint}"
+            if spec.run_llms_locally
+            else "your session's model, relayed"
+        )
         if days is None:
-            report.add("remote worker", WARN, f"{spec.label()}: not paired — CoBirb pairs it when it "
-                                              f"starts in interactive mode; thinks with {model}")
+            report.add(
+                "remote worker",
+                WARN,
+                f"{spec.label()}: not paired — CoBirb pairs it when it "
+                f"starts in interactive mode; thinks with {model}",
+            )
         else:
-            report.add("remote worker", OK, f"{spec.label()}: paired, {days} day(s) before the pairing "
-                                            f"lapses unless used; thinks with {model}")
+            report.add(
+                "remote worker",
+                OK,
+                f"{spec.label()}: paired, {days} day(s) before the pairing "
+                f"lapses unless used; thinks with {model}",
+            )
 
 
 def _check_sandbox(report: Report, config: Config) -> None:
@@ -387,14 +437,21 @@ def _check_sandbox(report: Report, config: Config) -> None:
         report.add("sandbox", WARN, "off — approved shell commands run with your full access")
     elif not box.active:
         installed = shutil.which("bwrap")
-        why = ("bubblewrap is installed but cannot create namespaces here (unprivileged user "
-               "namespaces may be disabled)" if installed else
-               "bubblewrap is not installed — e.g. 'sudo apt install bubblewrap', "
-               "'sudo dnf install bubblewrap' or 'sudo pacman -S bubblewrap'")
+        why = (
+            "bubblewrap is installed but cannot create namespaces here (unprivileged user "
+            "namespaces may be disabled)"
+            if installed
+            else "bubblewrap is not installed — e.g. 'sudo apt install bubblewrap', "
+            "'sudo dnf install bubblewrap' or 'sudo pacman -S bubblewrap'"
+        )
         report.add("sandbox", WARN, f"{why}; shell commands run unsandboxed and are always asked about")
     elif box.mode == sandbox.MODE_AUTO and not box.explicit and not shutil.which("git"):
-        report.add("sandbox", OK, "bubblewrap: shell commands run contained, but each is asked "
-                   "about first: git is missing, so what they change could not be undone")
+        report.add(
+            "sandbox",
+            OK,
+            "bubblewrap: shell commands run contained, but each is asked "
+            "about first: git is missing, so what they change could not be undone",
+        )
     else:
         detail = box.describe()
         if os.path.isdir(sandbox.WSL_INTEROP_DIR):
@@ -419,7 +476,7 @@ def run(
         import json
 
         try:
-            with open(path, "r", encoding="utf-8") as handle:
+            with open(path, encoding="utf-8") as handle:
                 loaded = json.load(handle)
             raw = loaded if isinstance(loaded, dict) else {}
             if not isinstance(loaded, dict):
@@ -433,8 +490,10 @@ def run(
 
     if check_environment:
         if build_provider is None:
-            def build_provider(role: str) -> Any:  # noqa: F811 - the default, resolved late
+
+            def build_provider(role: str) -> Any:  # the default, resolved late
                 return model_roles.build_for_role(role, config)
+
         _check_models(report, config, build_provider)
         _check_sandbox(report, config)
 

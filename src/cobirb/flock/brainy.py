@@ -26,6 +26,7 @@ preference in a Flock — it is what decides whether a partition can be parallel
 at all, and a lead that gets it wrong produces a charter whose workers cannot
 actually run independently no matter how carefully their files are separated.
 """
+
 from __future__ import annotations
 
 import logging
@@ -281,7 +282,7 @@ class CharterDesk:
     next attempt, which is the entire mechanism by which a loop is noticed.
     """
 
-    def __init__(self, cwd: str | None = None, on_proposed: "Any | None" = None) -> None:
+    def __init__(self, cwd: str | None = None, on_proposed: Any | None = None) -> None:
         self.cwd = cwd
         # Called with a charter the moment one is accepted. This is what lets a
         # charter proposed outside a flock run reach the user: the front-end
@@ -316,7 +317,7 @@ class CharterDesk:
         self._repeats: int = 0
         # The project as it stood before planning, and the unowned files the
         # last ownership question named (see `ownership_question`).
-        self._before: "dict[str, tuple[int, int]] | None" = None
+        self._before: dict[str, tuple[int, int]] | None = None
         self._asked_unowned: tuple[str, ...] = ()
 
     def reset(self) -> None:
@@ -383,7 +384,7 @@ class CharterDesk:
     # ------------------------------------------------------------------ #
     # Accepting one
     # ------------------------------------------------------------------ #
-    def accept(self, charter: Charter, raw: str = "") -> "tuple[str, bool]":
+    def accept(self, charter: Charter, raw: str = "") -> tuple[str, bool]:
         """Keep a charter and say what happens to it next, and whether it is disjoint.
 
         The single tail both routes run through. ``on_proposed`` is fired here
@@ -398,7 +399,7 @@ class CharterDesk:
         if self.on_proposed is not None:
             try:
                 self.on_proposed(charter)
-            except Exception:  # noqa: BLE001 - a front-end that cannot display it
+            except Exception:  # a front-end that cannot display it
                 # must not turn an accepted charter into a failed tool call.
                 logger.debug("a charter handler raised", exc_info=True)
         disjoint, partition = check_partition(charter)
@@ -486,11 +487,9 @@ class CharterDesk:
             return held + (
                 "STOP calling propose_charter. "
                 + (
-                    "That is the same overlap you proposed last time, so another attempt "
-                    "will not clear it. "
+                    "That is the same overlap you proposed last time, so another attempt will not clear it. "
                     if unchanged
-                    else f"You have proposed {self.overlaps} charters with overlapping "
-                    "partitions. "
+                    else f"You have proposed {self.overlaps} charters with overlapping partitions. "
                 )
                 + "This charter is kept and the user will be asked whether to run it one "
                 "worker at a time. Say plainly in your reply, for the person deciding: "
@@ -563,9 +562,7 @@ class _DeskTool(Tool):
         # ``retry`` is this tool's own name: a refused move is corrected by
         # making the same move again, and naming it is what turns the
         # diagnosis into something to do.
-        return ToolResult(
-            ok=False, content=self.desk.refuse(str(exc), retry=self.NAME), error="bad_move"
-        )
+        return ToolResult(ok=False, content=self.desk.refuse(str(exc), retry=self.NAME), error="bad_move")
 
 
 class DeclareSeamTool(_DeskTool):
@@ -592,8 +589,7 @@ class DeclareSeamTool(_DeskTool):
                 "kind": {
                     "type": "string",
                     "enum": list(SEAM_KINDS),
-                    "description": "'formal' if the type system holds it up, 'loose' if "
-                    "only a test does.",
+                    "description": "'formal' if the type system holds it up, 'loose' if only a test does.",
                 },
                 "what": {
                     "type": "string",
@@ -795,8 +791,8 @@ class ProposeCharterTool(_DeskTool):
     def __init__(
         self,
         cwd: str | None = None,
-        on_proposed: "Any | None" = None,
-        desk: "CharterDesk | None" = None,
+        on_proposed: Any | None = None,
+        desk: CharterDesk | None = None,
     ) -> None:
         super().__init__(desk or CharterDesk(cwd, on_proposed=on_proposed))
 
@@ -806,7 +802,7 @@ class ProposeCharterTool(_DeskTool):
         return self.desk.charter
 
     @charter.setter
-    def charter(self, value: "Charter | None") -> None:
+    def charter(self, value: Charter | None) -> None:
         self.desk.charter = value
 
     @property
@@ -830,11 +826,11 @@ class ProposeCharterTool(_DeskTool):
         return self.desk.exhausted
 
     @property
-    def on_proposed(self) -> "Any | None":
+    def on_proposed(self) -> Any | None:
         return self.desk.on_proposed
 
     @on_proposed.setter
-    def on_proposed(self, value: "Any | None") -> None:
+    def on_proposed(self, value: Any | None) -> None:
         self.desk.on_proposed = value
 
     def reset(self) -> None:
@@ -873,9 +869,7 @@ class ProposeCharterTool(_DeskTool):
             charter = parse_charter(text)
         except CharterError as exc:
             self.desk.last_error = str(exc)
-            return ToolResult(
-                ok=False, content=self.desk.rejection(exc), error="bad_charter"
-            )
+            return ToolResult(ok=False, content=self.desk.rejection(exc), error="bad_charter")
 
         question = self.desk.ownership_question(charter, retry=PROPOSE_CHARTER)
         if question:
@@ -961,7 +955,7 @@ def seal_reminder_prompt(draft: PlanDraft) -> str:
     )
 
 
-def no_tickets_prompt(desk: "CharterDesk") -> str:
+def no_tickets_prompt(desk: CharterDesk) -> str:
     """The nudge for a plan with no tickets in it yet.
 
     The state the old recovery branches had no answer for. ``_plan`` retried a
@@ -977,9 +971,7 @@ def no_tickets_prompt(desk: "CharterDesk") -> str:
     """
     draft = desk.draft
     if draft.seams:
-        state = (
-            f"The plan holds {draft.describe()}. The seams are recorded; not one ticket is."
-        )
+        state = f"The plan holds {draft.describe()}. The seams are recorded; not one ticket is."
         move = (
             "Call `add_worker` now — once for each ticket, with its id, its brief and every "
             "file it may write. The seams you declared stay as they are; do not declare them "
@@ -1017,7 +1009,7 @@ def no_tickets_prompt(desk: "CharterDesk") -> str:
     return "\n".join(lines)
 
 
-def next_move_prompt(desk: "CharterDesk") -> str:
+def next_move_prompt(desk: CharterDesk) -> str:
     """The one move to make next, read off the draft.
 
     **The planner's completion test is objective** — there is a sealed charter

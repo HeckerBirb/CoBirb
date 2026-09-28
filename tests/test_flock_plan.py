@@ -5,6 +5,7 @@ unbuildable**. Everything else here is about whether a refusal tells the model
 enough to fix the move it just made, since that is the whole reason for
 accumulating a plan rather than validating a document.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -45,8 +46,10 @@ def test_claiming_a_file_another_ticket_owns_is_refused_with_the_owner_named():
 def test_one_ticket_may_build_against_a_stub_another_implements():
     """The ordinary plan: `store` fills in Store's bodies while `cli` builds
     against its signatures. In either order."""
-    for first, second in ((("store", ["store.py"], []), ("cli", ["cli.py"], ["store.py"])),
-                          (("cli", ["cli.py"], ["store.py"]), ("store", ["store.py"], []))):
+    for first, second in (
+        (("store", ["store.py"], []), ("cli", ["cli.py"], ["store.py"])),
+        (("cli", ["cli.py"], ["store.py"]), ("store", ["store.py"], [])),
+    ):
         draft = PlanDraft()
         for ticket, writes, reads in (first, second):
             draft.add_worker(ticket, brief="go", writes=writes, reads=reads)
@@ -187,8 +190,12 @@ def test_the_seams_and_concurrency_reach_the_charter():
     draft = PlanDraft()
     draft.declare_seam("types.py", "formal", "the shared vocabulary")
     draft.add_worker(
-        "a", brief="go", writes=["a.py", "test_a.py"], tests=["test_a.py"],
-        reads=["types.py"], accept="pytest test_a.py",
+        "a",
+        brief="go",
+        writes=["a.py", "test_a.py"],
+        tests=["test_a.py"],
+        reads=["types.py"],
+        accept="pytest test_a.py",
     )
 
     charter = draft.seal("add the thing", concurrency=4)
