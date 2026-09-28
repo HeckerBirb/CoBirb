@@ -284,38 +284,111 @@ def run_flock(
     re-check and review run on its remote too — a Windows test is judged on
     Windows. Kind ``"waiting_remote"`` says a ticket is waiting for one.
     """
-    config = config or Config()
-    stop = stop or threading.Event()
-    workers = list(charter.workers)
-    limit = max(1, concurrency or charter.concurrency)
-    started_at = time.monotonic()
+    return _Round(
+        charter,
+        cwd,
+        config=config or Config(),
+        limit=max(1, concurrency or charter.concurrency),
+        stop=stop or threading.Event(),
+        on_event=on_event,
+        io_for=io_for,
+        canceller=canceller,
+        grants=grants,
+        refuse=refuse,
+        remotes=remotes,
+    ).run()
 
-    def announce(kind: str, payload) -> None:
-        if on_event is None:
+
+class _Round:
+    """One round of a charter: fan out, join, re-check, review.
+
+    The workers run on a pool's threads and meet here — each finished worker's
+    report, the events its dependents wait on, the remote runs kept for review
+    — so that shared state lives on this object, behind ``_lock``.
+    """
+
+    def __init__(
+        self,
+        charter: Charter,
+        cwd: str,
+        *,
+        config: Config,
+        limit: int,
+        stop: threading.Event,
+        on_event,
+        io_for,
+        canceller: Canceller | None,
+        grants,
+        refuse: bool | Callable[[], bool],
+        remotes,
+    ) -> None:
+        self.charter = charter
+        self.cwd = cwd
+        self.config = config
+        self.limit = limit
+        self.stop = stop
+        self.on_event = on_event
+        self.io_for = io_for
+        self.canceller = canceller
+        self.grants = grants
+        self.refuse = refuse
+        self.refusing = refuse if callable(refuse) else (lambda: bool(refuse))
+        self.remotes = remotes
+        self.slots = Slots(limit)
+        # One per worker, set when it stops running however it ended. Dependents
+        # wait on these rather than polling, and the `finally` that sets them is
+        # what keeps a failed or skipped worker from hanging everything behind it.
+        self.finished = {worker.id: threading.Event() for worker in charter.workers}
+        self.reports: dict[str, WorkerReport] = {}
+        # Remote tickets' runs, kept until after review: their workspaces are
+        # where their checks run.
+        self.remote_runs: dict = {}
+        self._lock = threading.Lock()
+
+    def run(self) -> FlockOutcome:
+        started_at = time.monotonic()
+        workers = list(self.charter.workers)
+        # Captured before anything runs: this *is* the skeleton, and without it
+        # there is nothing to diff against and no stub to put back.
+        baseline = Baseline.capture(self.charter, self.cwd)
+        outcome = FlockOutcome(charter=self.charter)
+
+        logger.info("flock: %d worker(s), %d at a time", len(workers), self.limit)
+        # Sized to the workers, with `slots` holding the real limit — a worker
+        # parked on a question needs its thread kept alive while costing nothing
+        # against the concurrency budget. `pool.map` still does the dispatching,
+        # so `reports` stays in charter order, which `complete`, `outstanding`
+        # and the review loop all rely on.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(workers))) as pool:
+            outcome.reports = list(pool.map(self._record, workers))
+
+        outcome.stopped = self.stop.is_set()
+        if not outcome.stopped:
+            recheck(
+                self.charter,
+                outcome.reports,
+                self.cwd,
+                stop=self.stop,
+                config=self.config,
+                run_check_for=self._remote_check,
+            )
+        self._review(outcome, baseline)
+
+        for run in self.remote_runs.values():
+            run.end()
+            self.remotes.release(run.client)
+        outcome.elapsed = time.monotonic() - started_at
+        return outcome
+
+    def _announce(self, kind: str, payload) -> None:
+        if self.on_event is None:
             return
         try:
-            on_event(kind, payload)
+            self.on_event(kind, payload)
         except Exception:  # a broken display must not fail the run
             logger.debug("a flock event handler raised", exc_info=True)
 
-    # Captured before anything runs: this *is* the skeleton, and without it
-    # there is nothing to diff against and no stub to put back.
-    baseline = Baseline.capture(charter, cwd)
-    outcome = FlockOutcome(charter=charter)
-
-    slots = Slots(limit)
-    # One per worker, set when it stops running however it ended. Dependents
-    # wait on these rather than polling, and the `finally` that sets them is
-    # what keeps a failed or skipped worker from hanging everything behind it.
-    finished = {worker.id: threading.Event() for worker in workers}
-    reports: dict[str, WorkerReport] = {}
-    reports_lock = threading.Lock()
-    # Remote tickets' runs, kept until after review: their workspaces are where
-    # their checks run.
-    remote_runs: dict = {}
-    refusing = refuse if callable(refuse) else (lambda: bool(refuse))
-
-    def wait_for_dependencies(worker: WorkerBrief) -> str:
+    def _wait_for_dependencies(self, worker: WorkerBrief) -> str:
         """Block until this worker may start; return why it may not, if so.
 
         Waited out **before** taking a slot, never while holding one — a
@@ -325,14 +398,14 @@ def run_flock(
         costs a parked thread and nothing else.
         """
         for need in worker.needs:
-            event = finished.get(need)
+            event = self.finished.get(need)
             if event is None:  # pragma: no cover - parse_charter refuses these
                 continue
             while not event.wait(timeout=0.2):
-                if stop.is_set():
+                if self.stop.is_set():
                     return "stopped while waiting for " + need
-            with reports_lock:
-                upstream = reports.get(need)
+            with self._lock:
+                upstream = self.reports.get(need)
             # Gated on whether it *ran*, not on whether its acceptance check
             # passed. A failing check is common and often unrelated to what
             # the dependent needs; a worker that never ran leaves nothing to
@@ -341,86 +414,88 @@ def run_flock(
                 return f"did not run — its dependency '{need}' failed"
         return ""
 
-    def run_remote(worker: WorkerBrief) -> WorkerReport:
+    def _run_remote(self, worker: WorkerBrief) -> WorkerReport:
         from ..remote.runner import RemoteRun
 
-        client = remotes.acquire(worker.runs_on, stop, on_wait=lambda: announce("waiting_remote", worker))
+        client = self.remotes.acquire(
+            worker.runs_on, self.stop, on_wait=lambda: self._announce("waiting_remote", worker)
+        )
         if client is None:
             return WorkerReport(
                 worker_id=worker.id,
                 ok=False,
                 error=(
                     "stopped while waiting for a remote"
-                    if stop.is_set()
+                    if self.stop.is_set()
                     else f"no {worker.runs_on} remote is available"
                 ),
             )
-        announce("started", worker)
+        self._announce("started", worker)
         run = RemoteRun(
             client,
             worker,
-            cwd,
-            config=config,
-            io=io_for(worker, None) if io_for else None,
-            grants=grants,
-            refuse=refusing,
+            self.cwd,
+            config=self.config,
+            io=self.io_for(worker, None) if self.io_for else None,
+            grants=self.grants,
+            refuse=self.refusing,
         )
-        with reports_lock:
-            remote_runs[worker.id] = run
-        report = run.execute(stop)
-        announce("finished", report)
+        with self._lock:
+            self.remote_runs[worker.id] = run
+        report = run.execute(self.stop)
+        self._announce("finished", report)
         return report
 
-    def run_one(worker: WorkerBrief) -> WorkerReport:
+    def _run_one(self, worker: WorkerBrief) -> WorkerReport:
         # Checked before waiting and before taking a slot: a stopped flock
         # should not queue up behind the workers still finishing just to
         # decline to run.
-        if stop.is_set():
+        if self.stop.is_set():
             return WorkerReport(worker_id=worker.id, ok=False, error="stopped before it started")
-        blocked = wait_for_dependencies(worker)
+        blocked = self._wait_for_dependencies(worker)
         if blocked:
             return WorkerReport(worker_id=worker.id, ok=False, error=blocked)
-        if worker.runs_on and not worker.static and remotes is not None:
-            return run_remote(worker)
-        with slots:
-            if stop.is_set():
+        if worker.runs_on and not worker.static and self.remotes is not None:
+            return self._run_remote(worker)
+        with self.slots:
+            if self.stop.is_set():
                 return WorkerReport(worker_id=worker.id, ok=False, error="stopped before it started")
-            announce("started", worker)
+            self._announce("started", worker)
             report = run_worker(
                 worker,
-                cwd,
-                config=config,
-                io=io_for(worker, slots) if io_for else None,
-                canceller=canceller,
-                grants=grants,
-                refuse=refuse,
+                self.cwd,
+                config=self.config,
+                io=self.io_for(worker, self.slots) if self.io_for else None,
+                canceller=self.canceller,
+                grants=self.grants,
+                refuse=self.refuse,
             )
-        announce("finished", report)
+        self._announce("finished", report)
         return report
 
-    def record(worker: WorkerBrief) -> WorkerReport:
-        """``run_one``, published to this worker's dependents when it ends.
+    def _record(self, worker: WorkerBrief) -> WorkerReport:
+        """``_run_one``, published to this worker's dependents when it ends.
 
         **The order of the two statements in the ``finally`` is the whole
         point.** The report is stored and only then is the event set, because
         a dependent released first would look up a result that is not there
         yet and read a perfectly good worker as a failed one. The placeholder
-        covers the path where ``run_one`` raises — it never does today, since
+        covers the path where ``_run_one`` raises — it never does today, since
         ``run_worker`` reports rather than throws, but a dependent left
         waiting forever is not the way to find out that changed.
         """
         report = WorkerReport(worker_id=worker.id, ok=False, error="did not finish and said nothing")
         try:
-            report = run_one(worker)
+            report = self._run_one(worker)
             report.static = worker.static
             return report
         finally:
-            with reports_lock:
-                reports[worker.id] = report
+            with self._lock:
+                self.reports[worker.id] = report
                 running_remotes = [
-                    r for wid, r in remote_runs.items() if wid != worker.id and wid not in reports
+                    r for wid, r in self.remote_runs.items() if wid != worker.id and wid not in self.reports
                 ]
-            finished[worker.id].set()
+            self.finished[worker.id].set()
             # A remote worker reading this one's files gets them now, as a
             # local one would on its next read of the shared tree.
             if report.ok:
@@ -429,60 +504,44 @@ def run_flock(
                     if shared:
                         run.push(shared)
 
-    logger.info("flock: %d worker(s), %d at a time", len(workers), limit)
-    # Sized to the workers, with `slots` holding the real limit — a worker
-    # parked on a question needs its thread kept alive while costing nothing
-    # against the concurrency budget. `pool.map` still does the dispatching,
-    # so `reports` stays in charter order, which `complete`, `outstanding`
-    # and the review loop all rely on.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(workers))) as pool:
-        outcome.reports = list(pool.map(record, workers))
+    def _remote_check(self, worker_id: str):
+        """How to run a check for this worker on its remote, or ``None`` for here."""
+        run = self.remote_runs.get(worker_id)
+        if run is None:
+            return None
+        return lambda command, seconds, overrides=None: run.check(command, seconds, overrides)
 
-    def remote_check(worker_id: str):
-        run = remote_runs.get(worker_id)
-        return (
-            None
-            if run is None
-            else (lambda command, seconds, overrides=None: run.check(command, seconds, overrides))
-        )
+    def _review(self, outcome: FlockOutcome, baseline: Baseline) -> None:
+        """Review every worker, after the join and never during it.
 
-    outcome.stopped = stop.is_set()
-    if not outcome.stopped:
-        recheck(charter, outcome.reports, cwd, stop=stop, config=config, run_check_for=remote_check)
+        Review puts an implementation back to its stub for a moment, and a
+        colleague still running could import it.
 
-    # After the join, never during it. Review puts an implementation back to
-    # its stub for a moment, and a colleague still running could import it.
-    #
-    # **Checked between reviews, for the same reason it is checked between
-    # workers, and it was missing here.** A review is not cheap and it is not
-    # read-only: each one writes over the worker's files, runs the acceptance
-    # command with its own timeout, and puts the files back in a `finally`. So a
-    # stopped round went on rewriting the user's tree and spawning test runs for
-    # minutes after they asked it not to — and `Canceller` cannot reach any of
-    # it, because reviews run subprocesses rather than orchestrators. Worse, the
-    # window between mutating and restoring is one `review.py` documents as
-    # survivable only for an outright kill; a stop followed by quitting the app
-    # landed squarely in it.
-    #
-    # Never mid-review: the restore is part of the operation, so a review that
-    # has started finishes and puts its files back.
-    for report in outcome.reports:
-        if stop.is_set():
-            outcome.stopped = True
-            logger.info("flock: stopping before reviewing %s", report.worker_id)
-            break
-        worker = charter.worker(report.worker_id)
-        if worker is None:  # pragma: no cover - reports are built from workers
-            continue
-        review = review_worker(worker, baseline, cwd, run_check=remote_check(worker.id))
-        outcome.reviews.append(review)
-        announce("reviewed", review)
+        **Checked between reviews, for the same reason it is checked between
+        workers.** A review is not cheap and it is not read-only: each one
+        writes over the worker's files, runs the acceptance command with its
+        own timeout, and puts the files back in a `finally`. So a stopped round
+        went on rewriting the user's tree and spawning test runs for minutes
+        after they asked it not to — and `Canceller` cannot reach any of it,
+        because reviews run subprocesses rather than orchestrators. Worse, the
+        window between mutating and restoring is one `review.py` documents as
+        survivable only for an outright kill; a stop followed by quitting the
+        app landed squarely in it.
 
-    for run in remote_runs.values():
-        run.end()
-        remotes.release(run.client)
-    outcome.elapsed = time.monotonic() - started_at
-    return outcome
+        Never mid-review: the restore is part of the operation, so a review
+        that has started finishes and puts its files back.
+        """
+        for report in outcome.reports:
+            if self.stop.is_set():
+                outcome.stopped = True
+                logger.info("flock: stopping before reviewing %s", report.worker_id)
+                break
+            worker = self.charter.worker(report.worker_id)
+            if worker is None:  # pragma: no cover - reports are built from workers
+                continue
+            review = review_worker(worker, baseline, self.cwd, run_check=self._remote_check(worker.id))
+            outcome.reviews.append(review)
+            self._announce("reviewed", review)
 
 
 def recheck(
