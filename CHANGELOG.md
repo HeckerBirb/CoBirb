@@ -3,7 +3,7 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
-## [Unreleased]
+## [0.46.6]
 
 - **A ticket for a Windows remote is built there with its own compiler**, not with the MinGW
   cross-compiler, which the planning prompt prescribed for every Windows binary built from Linux —
