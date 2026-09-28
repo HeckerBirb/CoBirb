@@ -3,7 +3,7 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
-## [Unreleased]
+## [0.46.5]
 
 - **A Remote Worker Birb is told where it is**: its OS, its shell (`cmd.exe` on Windows), and that
   only its ticket's files are on that machine. It used to be told it could read the whole project,
