@@ -411,6 +411,71 @@ def test_the_restatement_renames_what_the_workers_see_and_the_user_is_shown_the_
     assert details[0].names.renamed == {"a": "double_a"}
 
 
+@pytest.mark.parametrize(
+    "renamed, text, still_renamed, kept, restored",
+    [
+        # Defined in the project's code: the rename is undone everywhere.
+        (
+            {"to_roman": "integer_to_roman"},
+            "call `integer_to_roman(4)`",
+            {},
+            ["to_roman"],
+            "call `to_roman(4)`",
+        ),
+        ({"to_roman()": "integer_to_roman()"}, "integer_to_roman()", {}, ["to_roman()"], "to_roman()"),
+        # A path the project has.
+        ({"roman.py": "numerals.py"}, "writes numerals.py", {}, ["roman.py"], "writes roman.py"),
+        # Invented by the planner: renamed as asked.
+        (
+            {"helper_x": "parse_numeral"},
+            "use parse_numeral",
+            {"helper_x": "parse_numeral"},
+            [],
+            "use parse_numeral",
+        ),
+        # A longer name containing the new one is left alone.
+        ({"to_roman": "roman"}, "roman and roman_table", {}, ["to_roman"], "to_roman and roman_table"),
+    ],
+)
+def test_a_name_the_project_already_uses_is_never_renamed(
+    tmp_path, renamed, text, still_renamed, kept, restored
+):
+    (tmp_path / "roman.py").write_text("def to_roman(number):\n    raise NotImplementedError\n")
+    (tmp_path / "README.md").write_text("helper_x is mentioned only in prose\n")
+
+    names, sections = stages.keep_existing_names(
+        stages.NameMap(dict(renamed)), {"Architecture": text}, stages.project_names(str(tmp_path))
+    )
+
+    assert names.renamed == still_renamed
+    assert names.kept == kept
+    assert sections["Architecture"] == restored
+
+
+def test_a_restatement_that_renames_the_projects_own_function_keeps_it(monkeypatch, tmp_path):
+    """The benchmark failure: the stubs define `a`, the restatement renamed it,
+    and the workers were told to implement a name nothing imports."""
+    _staged(tmp_path)
+    _project(tmp_path)
+    renamed = _BLOCKS.replace("ticket: a", "ticket: double_a").replace("a.py", "double_a.py")
+    brainy = _StagedBrainy(
+        restatements=[
+            _restatement(renamed, "- renamed: a -> double_a\n- renamed: test_a.py -> test_double_a.py")
+        ]
+    )
+    details = []
+
+    run = _run(
+        _orchestrator(monkeypatch, tmp_path, brainy),
+        tmp_path,
+        ask=Asker(confirm=lambda q, detail="": details.append(detail) or False),
+    )
+
+    assert [w.id for w in run.charter.workers] == ["a", "b"]
+    assert run.charter.worker("a").writes == ("a.py", "test_a.py")
+    assert details[0].names.renamed == {} and "a" in details[0].names.kept
+
+
 _SURVIVOR = _BLOCKS.replace("ticket: a", "ticket: double_a")  # renamed, but a.py is still there
 
 

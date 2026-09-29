@@ -86,7 +86,10 @@ design (`Design.cleared`). Names too: one the user's request states is a require
 mapping is `stages.NameMap` (`Design.names`), Brainy Birb's and the user's only. `parse_names` cuts
 each renamed name at its end — a backticked span, else the text before a space, comma or bracket — and
 reads `a -> b, c -> d` as two renames and a comma list after `kept:` as several names, because models
-explain renames on the same line. A restatement is
+explain renames on the same line. **A name the project already uses is never renamed**
+(`keep_existing_names`): an identifier in the project's code (prose files aside) or an existing path
+is moved to `kept` and the restated text given the original back — code and tests depend on it, and
+renaming `to_roman` left the workers implementing a function nothing imported. A restatement is
 refused, and asked again up to `SECTION_ATTEMPTS` times (then `stopped_at="restatement"`), for:
 
 - a missing section, unusable tickets, or tickets that are not the overview's under their mapped ids;

@@ -63,7 +63,7 @@ from ..remote.osnames import local_os
 from ..runtime.hooks import EVENT_BEFORE_TOOL, HookOutcome
 from .brainy import NEED_TO_KNOW_DIRECTIVE
 from .charter import Charter
-from .plan import PlanDraft
+from .plan import PlanDraft, snapshot_project
 from .tickets import (
     TOOLCHAINS,
     UNCHECKABLE,
@@ -321,6 +321,73 @@ def _invented_name(text: str) -> str:
     if re.search(r"`[^`]+`", text):
         return _bare(text)
     return re.split(r"[\s,;(]", _bare(text), maxsplit=1)[0].rstrip(":.")
+
+
+# Files read for the names a project already uses: code, not prose, and none so
+# large that reading it would cost more than the rename it guards.
+_PROSE_SUFFIXES = (".md", ".txt", ".rst")
+_MAX_NAME_SOURCE_BYTES = 1024 * 1024
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def project_names(cwd: str) -> tuple[set[str], set[str]] | None:
+    """The identifiers the project's code uses, and its file paths; ``None``
+    when the project is too large to read (see ``plan.snapshot_project``)."""
+    files = snapshot_project(cwd)
+    if files is None:
+        return None
+    identifiers: set[str] = set()
+    for path in files:
+        full = os.path.join(cwd, path)
+        if path.lower().endswith(_PROSE_SUFFIXES) or os.path.getsize(full) > _MAX_NAME_SOURCE_BYTES:
+            continue
+        try:
+            with open(full, encoding="utf-8") as fh:
+                identifiers.update(_IDENTIFIER.findall(fh.read()))
+        except (OSError, UnicodeDecodeError):
+            continue
+    paths = set(files)
+    paths.update(os.path.dirname(p) for p in files if os.path.dirname(p))
+    return identifiers, paths
+
+
+def _already_in(name: str, project: tuple[set[str], set[str]]) -> bool:
+    """Whether the project already uses ``name``: as a path, or as an
+    identifier (each part of a dotted one; a trailing ``()`` ignored)."""
+    identifiers, paths = project
+    bare = name.removesuffix("()").strip()
+    if os.path.normpath(bare) in paths:
+        return True
+    parts = bare.split(".")
+    return all(_IDENTIFIER.fullmatch(part) for part in parts) and all(part in identifiers for part in parts)
+
+
+def keep_existing_names(
+    names: NameMap, sections: dict[str, str], project: tuple[set[str], set[str]] | None
+) -> tuple[NameMap, dict[str, str]]:
+    """Undo every rename of a name the project already uses, and keep it.
+
+    **Code and tests already depend on those names.** A restatement renamed
+    `to_roman` to `integer_to_roman` in a project whose stubs and tests
+    define `to_roman`; the Worker Birbs implemented the new name, and the
+    user's own tests failed on import — in every benchmark run where that
+    model's restatement got through. Refused here rather than sent back for
+    another attempt: the fix is mechanical, and another attempt costs a
+    model call and can end the flock. The restated text is given the
+    original name back wherever it wrote the new one.
+    """
+    if project is None:
+        return names, sections
+    undone = {old: new for old, new in names.renamed.items() if _already_in(old, project)}
+    if not undone:
+        return names, sections
+    restored = dict(sections)
+    for old, new in sorted(undone.items(), key=lambda item: len(item[1]), reverse=True):
+        pattern = re.compile(rf"(?<![{_NAME_EDGE}]){re.escape(new)}(?![{_NAME_EDGE}])")
+        restored = {heading: pattern.sub(lambda _m, old=old: old, text) for heading, text in restored.items()}
+    kept = list(dict.fromkeys([*names.kept, *undone]))
+    renamed = {old: new for old, new in names.renamed.items() if old not in undone}
+    return NameMap(renamed, kept), restored
 
 
 def _kept_names(text: str) -> list[str]:
@@ -1114,7 +1181,10 @@ class Stager:
         names, problem = self.design.names.merged(parse_names(sections["Names"]))
         if problem:
             return {}, self.design.names, problem
-        cleared = {h: sections[h] for h in headings}
+        # A name the project's code already uses is never renamed.
+        names, cleared = keep_existing_names(
+            names, {h: sections[h] for h in headings}, project_names(self.cwd)
+        )
         # Restating only adds, so a section much shorter than its original has
         # left things out. On the golden task one model cut the request to a
         # fifth — the whole API spec gone — and every stage after it built

@@ -22,6 +22,10 @@ All notable changes to CoBirb are recorded here, newest first. See
   wrote `- renamed: a -> b (because …)`, or several renames on one line, the whole remark became
   the new name, the ticket ids no longer matched, and the restatement was refused until the flock
   stopped. The name is now cut where it ends.
+- **The Flock no longer renames what your project already defines.** Restating the design could
+  rename functions and files your code and tests already use — `to_roman` became
+  `integer_to_roman` — and the Worker Birbs then implemented a name nothing imported. Such a rename
+  is now undone and the name kept.
 - For contributors: **`ruff check` and `ruff format` are the project's linter and formatter**, run by
   CI (settings in `pyproject.toml`; `.git-blame-ignore-revs` skips the reformatting commit). Large
   modules were split where it made them easier to find your way around — `plugins/core/tools/` is a
