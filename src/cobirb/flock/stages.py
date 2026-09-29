@@ -308,6 +308,33 @@ def _bare(name: str) -> str:
     return re.sub(r"^#*\s*ticket\s*[:：]\s*", "", name.strip(), flags=re.I).strip()
 
 
+def _invented_name(text: str) -> str:
+    """One side of a ``renamed:`` line: the name, and nothing written after it.
+
+    **Cut at the name, because models add to it.** A model asked to explain a
+    rename writes ``kill_children -> terminate_child_processes (a flat list
+    now)``, and without backticks the whole remark became the new name — so a
+    renamed ticket id never matched its restated block, and the restatement
+    was refused until the flock stopped. An invented name is an identifier, a
+    path or a ticket id, none of which holds a space, a comma or a bracket.
+    """
+    if re.search(r"`[^`]+`", text):
+        return _bare(text)
+    return re.split(r"[\s,;(]", _bare(text), maxsplit=1)[0].rstrip(":.")
+
+
+def _kept_names(text: str) -> list[str]:
+    """The names on a ``kept:`` line — several, when the model listed them there.
+
+    Kept names are the user's own and may be phrases (``/kill all``), so they
+    are split only between entries: every backticked span, or else each
+    comma-separated item.
+    """
+    quoted = re.findall(r"`([^`]+)`", text)
+    names = quoted if quoted else [_bare(item) for item in re.split(r"[,;]", text)]
+    return [name.strip() for name in names if name.strip()]
+
+
 @dataclass
 class NameMap:
     """The names Brainy Birb restated, and the user's names it kept.
@@ -383,13 +410,19 @@ def parse_names(text: str) -> NameMap:
             continue
         kind, value = match.group(1).lower(), match.group(2)
         if kind == "kept":
-            name = _bare(value)
-            if name and name.lower() != "none" and name not in names.kept:
-                names.kept.append(name)
+            for name in _kept_names(value):
+                if name.lower() != "none" and name not in names.kept:
+                    names.kept.append(name)
             continue
-        parts = _ARROW.split(value, maxsplit=1)
-        if len(parts) == 2 and _bare(parts[0]) and _bare(parts[1]) and _bare(parts[0]) != _bare(parts[1]):
-            names.renamed[_bare(parts[0])] = _bare(parts[1])
+        # Several renames on one line — `a -> b, c -> d` — are several renames.
+        pieces = re.split(r"[,;]", value) if len(_ARROW.findall(value)) > 1 else [value]
+        for piece in pieces:
+            parts = _ARROW.split(piece, maxsplit=1)
+            if len(parts) != 2:
+                continue
+            old, new = _invented_name(parts[0]), _invented_name(parts[1])
+            if old and new and old != new:
+                names.renamed[old] = new
     return names
 
 

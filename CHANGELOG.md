@@ -18,6 +18,10 @@ All notable changes to CoBirb are recorded here, newest first. See
   comments, as the starter config and `config.json.example` use them, and are no longer reported
   as unknown. A `null` value now means "not set" everywhere — `"verify_timeout": null` used to stop
   CoBirb starting — and `doctor` no longer calls it the wrong type.
+- **A flock no longer stops because a rename was explained on its own line.** When the restatement
+  wrote `- renamed: a -> b (because …)`, or several renames on one line, the whole remark became
+  the new name, the ticket ids no longer matched, and the restatement was refused until the flock
+  stopped. The name is now cut where it ends.
 - For contributors: **`ruff check` and `ruff format` are the project's linter and formatter**, run by
   CI (settings in `pyproject.toml`; `.git-blame-ignore-revs` skips the reformatting commit). Large
   modules were split where it made them easier to find your way around — `plugins/core/tools/` is a

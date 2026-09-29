@@ -524,6 +524,35 @@ def test_sub_headings_in_the_design_survive_the_restatement(monkeypatch, tmp_pat
             ["Store"],
         ),
         ("- renamed: a -> `ticket: a`\n- renamed: b -> ### ticket: c", {"b": "c"}, []),
+        # What models actually write, taken from benchmark runs.
+        (
+            "- renamed: kill_children -> terminate_child_processes (shift: a flat list now)",
+            {"kill_children": "terminate_child_processes"},
+            [],
+        ),
+        (
+            "- renamed: kill_children -> terminate_child_processes: the structure moves to a list",
+            {"kill_children": "terminate_child_processes"},
+            [],
+        ),
+        (
+            "- renamed: module_units -> impl_temp_conversion, module_roman -> impl_roman_numeric, "
+            "module_wordfreq -> impl_text_analysis",
+            {
+                "module_units": "impl_temp_conversion",
+                "module_roman": "impl_roman_numeric",
+                "module_wordfreq": "impl_text_analysis",
+            },
+            [],
+        ),
+        (
+            "- kept: units.py, roman.py, tests/test_units.py",
+            {},
+            ["units.py", "roman.py", "tests/test_units.py"],
+        ),
+        ("- kept: `to_celsius`, `to_roman`", {}, ["to_celsius", "to_roman"]),
+        ("- kept: /kill all", {}, ["/kill all"]),
+        ("- renamed: store.py -> key_value_store.py.", {"store.py": "key_value_store.py"}, []),
     ],
 )
 def test_the_names_section_is_read(section, renamed, kept):

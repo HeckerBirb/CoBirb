@@ -83,7 +83,10 @@ to `SECTION_ATTEMPTS = 3` times with every rejected attempt kept in the trace.
 design (`Design.cleared`). Names too: one the user's request states is a requirement, kept
 (`- kept:`); one Brainy Birb invented is renamed to say literally what it does
 (`- renamed: old -> new`), and the code behind a kept name gets an invented internal name. The
-mapping is `stages.NameMap` (`Design.names`), Brainy Birb's and the user's only. A restatement is
+mapping is `stages.NameMap` (`Design.names`), Brainy Birb's and the user's only. `parse_names` cuts
+each renamed name at its end — a backticked span, else the text before a space, comma or bracket — and
+reads `a -> b, c -> d` as two renames and a comma list after `kept:` as several names, because models
+explain renames on the same line. A restatement is
 refused, and asked again up to `SECTION_ATTEMPTS` times (then `stopped_at="restatement"`), for:
 
 - a missing section, unusable tickets, or tickets that are not the overview's under their mapped ids;
