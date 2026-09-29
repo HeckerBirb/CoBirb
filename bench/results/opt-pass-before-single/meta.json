@@ -1,0 +1,13 @@
+{
+  "label": "opt-pass-before-single",
+  "sha": "aef147c4723cd880a10c24e8ea0552c9fd7d0cde",
+  "tasks": 24,
+  "reps": 2,
+  "flock": false,
+  "models": [
+    "qwen3-coder:30b",
+    "qwen3.5:35b-a3b"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {}
+}
