@@ -78,10 +78,16 @@ class Config:
         return self._data
 
     def get(self, *keys: str, default: Any = None) -> Any:
-        """Return a nested value, e.g. ``config.get("models", "default", "name")``."""
+        """Return a nested value, e.g. ``config.get("models", "default", "name")``.
+
+        A ``null`` is the same as leaving the key out: ``default`` comes back.
+        JSON has no other way to write "not set", and returning ``None`` in
+        its place handed every caller a value it had not planned for —
+        ``"verify_timeout": null`` stopped CoBirb starting at all.
+        """
         value: Any = self._data
         for key in keys:
-            if isinstance(value, dict) and key in value:
+            if isinstance(value, dict) and value.get(key) is not None:
                 value = value[key]
             else:
                 return default

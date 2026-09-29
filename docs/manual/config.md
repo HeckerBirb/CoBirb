@@ -11,6 +11,10 @@ read, as content for the model rather than capability granted to it.
 
 Start from [`config.json.example`](../../config.json.example), or run `cobirb setup`.
 
+JSON has no comments, so a key starting with `//` is one: CoBirb and `cobirb doctor` skip it, and
+the starter config and the example use them to explain themselves. A key set to `null` is the same
+as leaving it out — the default applies.
+
 ## Models
 
 ```json

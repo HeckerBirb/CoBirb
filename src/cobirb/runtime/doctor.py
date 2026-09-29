@@ -178,6 +178,10 @@ def _check_config(report: Report, config: Config, raw: dict[str, Any] | None) ->
         report.add("config file", WARN, f"none at {path} — defaults apply")
         return
     report.add("config file", OK, path)
+    # A key starting with "//" is a comment — the starter config and
+    # config.json.example annotate themselves that way — and a null is a key
+    # left unset (Config.get). Neither is a setting to check.
+    raw = {key: value for key, value in raw.items() if not key.startswith("//")}
 
     retired = sorted(set(raw) & set(RETIRED_KEYS))
     if retired:
@@ -207,7 +211,7 @@ def _check_config(report: Report, config: Config, raw: dict[str, Any] | None) ->
     wrong = [
         f"{key} should be {' or '.join(t.__name__ for t in expected)}"
         for key, expected in _EXPECTED_TYPES.items()
-        if (key in raw and not isinstance(raw[key], expected))
+        if (raw.get(key) is not None and not isinstance(raw[key], expected))
         # bool is an int in Python; an int key given True is still wrong.
         or (key in raw and expected == (int,) and isinstance(raw[key], bool))
     ]
@@ -237,7 +241,7 @@ def _check_referenced_things(report: Report, raw: dict[str, Any]) -> None:
     # string that isn't a size is the one way this key can be well-typed and
     # still say nothing. Uncapped-in-silence is exactly the outcome someone
     # setting it was trying to avoid.
-    if "max_num_ctx" in raw and model_roles.parse_context_size(raw["max_num_ctx"]) is None:
+    if raw.get("max_num_ctx") is not None and model_roles.parse_context_size(raw["max_num_ctx"]) is None:
         problems.append(
             f"max_num_ctx is '{raw['max_num_ctx']}', which is not a size — "
             "write 65536 or 64k. No cap is being applied"

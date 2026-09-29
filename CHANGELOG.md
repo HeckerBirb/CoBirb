@@ -14,6 +14,10 @@ All notable changes to CoBirb are recorded here, newest first. See
   "could not open None".
 - **The config written on first run no longer uses `default_model`**, a deprecated key `cobirb
   doctor` warned about on every new install; the model goes under `models.default.name`.
+- **`cobirb doctor` passes on the config CoBirb writes for you.** Keys starting with `//` are
+  comments, as the starter config and `config.json.example` use them, and are no longer reported
+  as unknown. A `null` value now means "not set" everywhere — `"verify_timeout": null` used to stop
+  CoBirb starting — and `doctor` no longer calls it the wrong type.
 - For contributors: **`ruff check` and `ruff format` are the project's linter and formatter**, run by
   CI (settings in `pyproject.toml`; `.git-blame-ignore-revs` skips the reformatting commit). Large
   modules were split where it made them easier to find your way around — `plugins/core/tools/` is a

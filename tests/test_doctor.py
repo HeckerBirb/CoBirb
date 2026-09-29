@@ -434,3 +434,41 @@ def test_remote_workers_are_checked_without_connecting(tmp_path, monkeypatch):
     assert any("ignored" in d for d in details)
     assert any("not an OS name" in d for d in details)
     assert not report.ok  # the unknown OS is a failure
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"// models": "a comment, the way the starter config writes them", "system_prompt": "off"},
+        {"//note": "no space after the slashes", "system_prompt": "off"},
+        {"context_tokens": None, "max_num_ctx": None, "verify_timeout": None},
+    ],
+)
+def test_comments_and_null_values_are_not_problems(tmp_path, data):
+    report = _run(tmp_path, data)
+
+    assert report.ok
+    assert all(check.status == doctor.OK for check in report.checks if check.name.startswith("config"))
+
+
+def test_the_starter_config_passes(tmp_path, monkeypatch):
+    monkeypatch.setenv("COBIRB_HOME", str(tmp_path))
+    from cobirb.runtime.bootstrap import ensure_home
+
+    ensure_home()
+    report = _run(tmp_path)
+
+    assert report.ok
+    assert all(check.status == doctor.OK for check in report.checks if check.name.startswith("config"))
+
+
+def test_the_bundled_example_config_passes_the_config_checks(tmp_path):
+    import json
+    from pathlib import Path
+
+    example = json.loads((Path(__file__).resolve().parents[1] / "config.json.example").read_text())
+    report = _run(tmp_path, example)
+
+    checks = {check.name: check.status for check in report.checks}
+    assert checks["config keys"] == doctor.OK
+    assert checks["config value types"] == doctor.OK

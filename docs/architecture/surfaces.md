@@ -64,7 +64,8 @@ or `{"mode", "hide"}`), `max_turns`, `verify_command`, `verify_timeout`, `verify
 `repo_map_max_chars`, `context_tokens`, `max_num_ctx`, `connect_timeout`, `request_timeout`,
 `plan_mode`, `audit_log`, `hooks`, `mcp_servers`, `flock` (`planning`, `autonomy`, `max_rounds`),
 `remote_workers` (see [remote](remote.md)).
-`doctor.KNOWN_KEYS` is the list `doctor` checks against. Deprecated: `model`, `default_model`.
+`doctor.KNOWN_KEYS` is the list `doctor` checks against; `//` keys are comments it skips, and a `null`
+is unset (`Config.get` returns the default for it). Deprecated: `model`, `default_model`.
 Retired: `persona`. `ensure_home()` seeds a starter config on first run; `config.json.example` in the
 repository is the annotated example.
 

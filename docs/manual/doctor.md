@@ -35,7 +35,8 @@ type, and that what it points at exists (tools in `allow_tools`, directories in
 
 That second one matters most. CoBirb ignores keys it doesn't know, in silence — so
 `redact_secret` instead of `redact_secrets` leaves you believing redaction is **off** when it is
-still **on**. `doctor` is what catches that.
+still **on**. `doctor` is what catches that. Keys starting with `//` are comments and a `null` value
+means "not set", so neither is reported.
 
 **Endpoint and models** — that the server answers, that every model you named is actually
 pulled, and whether it supports vision. These are the ones that otherwise fail mid-turn.

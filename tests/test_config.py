@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 
+import pytest
 from conftest import write_config
 
 from cobirb.config import Config
@@ -209,3 +210,18 @@ def test_every_cobirb_path_sits_under_one_home(tmp_path, monkeypatch):
         paths.user_plugins_dir(),
     ):
         assert path.startswith(root + os.sep), path
+
+
+@pytest.mark.parametrize(
+    "data, keys, expected",
+    [
+        ({"verify_timeout": None}, ("verify_timeout",), 120),
+        ({"models": {"default": {"name": None}}}, ("models", "default", "name"), 120),
+        ({"models": None}, ("models", "default", "name"), 120),
+        ({"verify_timeout": 30}, ("verify_timeout",), 30),
+        ({"checkpoints": False}, ("checkpoints",), False),
+    ],
+)
+def test_a_null_value_reads_as_not_set(tmp_path, data, keys, expected):
+    write_config(tmp_path, data)
+    assert Config().get(*keys, default=120) == expected
