@@ -3,7 +3,7 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
-## [Unreleased]
+## [0.47.0]
 
 - **`cobirb --help` describes every subcommand.** The line for `doctor` ran into the one for
   `flock`, and `remote-worker` was missing.
