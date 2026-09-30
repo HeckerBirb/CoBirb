@@ -3,6 +3,22 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
+## [Unreleased]
+
+- **The Flock's overview asks for concrete meanings.** Brainy Birb is told to keep every sentence of
+  the request and its quoted phrases, to turn a vague word ("round", "automatically") into one
+  testable meaning with a number, to choose the simplest answer itself, and to keep the rules of the
+  work apart from its I/O. Not yet measured on cobirb-bench.
+- **The restatement rules are plain instructions.** They ask for slang and ambiguous words to become
+  the literal technical term, for every detail and quoted value to stay, and for names to be
+  listed in backticks, one `- renamed: old -> new` per line, only for code names and never for
+  names the project already has. Not yet measured on cobirb-bench.
+- **Architect Birb keeps the contract in the code only.** Stub docstrings now state what each
+  function returns, raises and changes, every exact value is a named constant, and the skeleton is
+  re-read against the design before it stops. The ticket plan points at the stubs instead of
+  retyping them, so the two cannot drift apart. Tests cover every stated behaviour and boundary and
+  import only names the skeleton defines. Not yet measured on cobirb-bench.
+
 ## [0.47.0]
 
 - **`cobirb --help` describes every subcommand.** The line for `doctor` ran into the one for

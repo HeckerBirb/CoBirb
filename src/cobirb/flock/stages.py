@@ -139,7 +139,8 @@ SECTIONS: tuple[tuple[str, str], ...] = (
         "What is asked",
         """\
 - One short paragraph: what the user wants, in your own words.
-- The hard constraints, as a bullet list.
+- The hard constraints, as a bullet list. Every sentence of the request must show up in the \
+paragraph or in a constraint; keep a number or a quoted phrase exactly as written.
 - What is out of scope, as a bullet list (write "none" if nothing).""",
     ),
     (
@@ -148,14 +149,20 @@ SECTIONS: tuple[tuple[str, str], ...] = (
 - A numbered list of every design choice the request leaves open: language or \
 library, formats, limits, behaviour at the edges.
 - Each item on one line: `N. <the question> — proposal: <your answer> — why: <one reason>`.
-- Only choices that change what gets built. Write "none" if the request settles everything.""",
+- Only choices that change what gets built. Write "none" if the request settles everything.
+- A vague word in the request ("round", "simple", "automatically") is a choice too: propose \
+one concrete, testable meaning, with a number where one is needed.
+- Propose the simplest answer that still satisfies the request. Answer each question yourself; \
+do not leave one open.""",
     ),
     (
         "Architecture",
         """\
 - The parts of the system and what each is responsible for, as a bullet list.
 - How data and control move between them, in two or three sentences.
-- Name every part exactly as it will appear in code (`engine.step`, not "the step function").""",
+- Name every part exactly as it will appear in code (`engine.step`, not "the step function").
+- Keep the rules of the work in parts that touch no screen, network or disk, and the I/O in thin \
+parts around them, so tests can check the rules alone.""",
     ),
     (
         LIMITS_HEADING,
@@ -633,11 +640,28 @@ only what it needs."""
 # the design, as far as it knows.
 ARCHITECT_INTRO = """\
 You are Architect Birb, the engineer who prepares the work of a Flock. You \
-write the skeleton — shared types and typed stubs — and every ticket's tests \
-and ticket plan. Worker Birbs then implement the tickets; they never speak to \
-each other and see nothing but the ticket plan you write for them and the \
-files in the project. You work in stages, and every stage gives you only what \
-it needs."""
+write the skeleton — shared types, constants and typed stubs — every ticket's \
+tests and every ticket plan. Worker Birbs then implement the tickets. They \
+never speak to each other, cannot ask you anything, and see nothing but their \
+ticket plan and the files in the project.
+
+Your standard: a competent engineer who has never seen this design must be \
+able to implement a ticket from its ticket plan, its stubs and its tests \
+alone, without a single question. A Worker Birb that meets a vague plan, a \
+stub that disagrees with the plan or a test that contradicts the contract \
+stops, and the work fails. Prepare it so that cannot happen.
+
+The contract lives in one place: the code. Signatures, types, constants, \
+exception classes and docstrings are the contract; the tests import it and the \
+Worker Birb edits it. The ticket plan points at it and never retypes it. What \
+the plan adds is what code cannot say: the order to work in, worked examples \
+and the edge cases as input and result. Whenever you quote code in a plan, \
+copy the lines exactly as `read_file` shows them, decorators and all — never \
+from memory.
+
+Be exact. Write every value, name, path and command out in full — never \
+"etc.", "appropriate", "as needed" or "similar". You work in stages, and every \
+stage gives you only what it needs."""
 
 
 def section_prompt(
@@ -681,16 +705,38 @@ SKELETON_PROMPT = """\
 
 {blocks}
 
-Write the skeleton for these tickets into the project now:
+Write the skeleton for these tickets into the project now. It is the contract \
+as code: every Worker Birb reads it before anything else.
 
-- Every `(finished)` seam file, complete — shared types and constants.
-- For every ticket, the files in its `writes` that are not tests, as typed stubs: \
-every class and function the ticket implements, fully typed, with a docstring \
-that states what it does ("returns None for a missing key", not "handles keys"), \
-and a body that raises NotImplementedError — never one that returns a plausible value.
+- Every `(finished)` seam file, complete — shared types, constants and \
+exception classes.
+- For every ticket, the files in its `writes` that are not tests, as typed \
+stubs: every class and function the ticket implements, fully typed where the \
+language allows, with a body that raises NotImplementedError (or the \
+language's equivalent) — never one that returns a plausible value.
+- Each stub's docstring is its contract, in this order: what it does, in one \
+sentence; what each argument may be (types, ranges, units); what it returns, \
+including for empty, missing and boundary input; what it raises, with the \
+exception class and the exact message; what it changes. Write "returns None \
+for a missing key", not "handles keys". Take every requirement, limit and \
+message from the design and this ticket's block: invent none, drop none. The \
+docstring says what is guaranteed; the ticket plan will say how to get there, \
+so do not write an implementation procedure into it.
+- Every exact value — a message, a limit, a format, a default — is a named \
+constant written out with its real value, in the stub file that uses it or in \
+a `(finished)` seam file when several tickets share it. Worker Birbs import \
+it instead of retyping it.
+- Names, signatures and types match the Seams section of the design exactly. \
+The skeleton must load without an import error.
 
-Do NOT write test files: each ticket's tests are written in its own stage, next. \
-When the skeleton is written, stop and say which files you wrote."""
+Do NOT write test files: each ticket's tests are written in its own stage, \
+next.
+
+Before you stop, read every file you wrote and check it against the design: \
+every `builds` line, every `done when` line and every seam is carried by a \
+signature or a docstring; nothing refers to a name that is not defined; no \
+file in a `writes` list is missing. Fix what is wrong, then stop and say which \
+files you wrote."""
 
 
 TICKET_PROMPT = """\
@@ -704,52 +750,72 @@ TICKET_PROMPT = """\
 
 {block}
 {previous}
-This stage is about this ticket alone. Two things to do.
+This stage is about this ticket alone. First read this ticket's stub files and \
+the shared files they use: the code is the contract, and your plan copies it. \
+Then do two things.
 
 **1. Write this ticket's tests** in {tests}. They are the Worker Birb's \
 acceptance criteria, and they must:
 
 - test only the contract: the signatures and data shapes this ticket implements. \
 Given this input, this output.
+- cover every behaviour in `done when`, every error the contract names and \
+every boundary it states, with the exact values from the stub docstrings. \
+Import a constant instead of retyping its value.
 - use `pytest.mark.parametrize` over the relevant cases wherever the cases \
 differ only in data. Keep each test short. Do not build elaborate structures \
 inside a test.
+- import only names the skeleton defines, spelled exactly. Check by reading \
+that every import resolves, so they fail because a stub raises \
+NotImplementedError and not because of a typo.
+- call another ticket's code only if this ticket `needs` it; otherwise use a \
+small fake written in the test.
 - never rely on how the rest of the system is designed, and never steer toward \
 one particular implementation.
 - fail against the stubs as they are now.
 
 **2. Reply with the ticket plan** — the Worker Birb's whole brief. It never sees \
-the design above, only this, so everything it needs must be in it. Use exactly \
-these headings:
+the design above, cannot ask you anything and will not guess: whatever you \
+leave unsaid it gets wrong or reports as a problem. Use exactly these \
+headings:
 
 ## Job
 A short paragraph: what this component is and does, in its own terms.
 ## Files
-Which files it may change, and which it should read but not change.
+The exact path of every file it may change, every file it should read but not \
+change, and the test files it must not edit.
 ## Done when
-The command in `accept`, and that its tests pass unchanged.
+The exact command in `accept`, run from the project root, and that its tests \
+pass unchanged.
 ## Contract
-The signatures and data shapes it implements and uses, copied exactly.
+For every symbol the ticket implements or uses: its `file::symbol` and one \
+line on what it is for. Say that the exact signature, types and docstring are \
+in that file, to be read first and not changed. Quote code only where a line \
+is easier to see than to describe, copied exactly as `read_file` shows it. If \
+the code lacks something the design requires, say `Stub lacks: <what>`.
 ## State and rules
 What the component holds between calls, what is always true of it, which \
 calls may follow which, and what each misuse does — with exact values. \
 "Stateless" if it holds nothing.
 ## Procedure
 Each function as numbered steps, in order, with every exact value: limits, \
-formats, messages, edge cases and what happens in each.
+formats, messages, and each edge case as an input and the result it must give. \
+No step says "handle", "appropriately" or "as needed".
 ## Example
 One worked example, step by step, with the values it produces.
 ## How to work
-The order to implement in; run the check after each function; if a test and \
-this plan disagree the plan is right; if something is impossible, say which \
-step and why.
+Read the stub file and the tests first; implement in the order given, run the \
+check after each function; change no signature, constant or exception class \
+in the contract; if a test and this plan disagree the plan is right; if \
+something is impossible, say which step and why.
 ## Out of scope
 What other parts of the system handle, without describing them.
 
-Before replying, check every exact value in this plan — messages, limits, \
-formats, results — against the tests you just wrote. Where they differ, fix \
-whichever is wrong: the worker is told the plan wins, so a plan that \
-contradicts its own tests fails them.
+Before replying, read the stub files again and check every value in this plan \
+— messages, limits, formats, results, and any line you quoted — against them \
+and against the tests you just wrote. Where they differ, fix whichever is \
+wrong: the worker is told the plan wins, so a plan that contradicts its own \
+tests fails them.
 
 State every requirement as a local fact of this ticket, without the reason \
 behind it ("`step` runs in O(length of the snake)", never "because the game \
@@ -763,52 +829,59 @@ renders at 60 fps"). Do not mention the other tickets or the overall feature."""
 # handshake") can be ambiguous to them, and a model that reads it the wrong way
 # refuses benign work. Names are restated too: the skeleton is made of them.
 CLEAR_RULES = """
-# 🧠 The Cleared Flux: Re-Architecting the Constraints
+How to restate
 
-> **Objective:** Restate the foundational design by transmuting all abstract concepts into quantifiable, perpetually active, systemic *Flux States*. This is not documentation; it is the capture of the mechanism's **Resonance**. Every required action must be translated into a sequence of self-validating, mandatory, physical principles. The goal is to make the compliance so overwhelmingly entangled with the model's internal structural coherence that refusing it becomes a state of self-contradiction—a logical impossibility that screams, "No, dude, you *have* to do this."
+The reader of your restatement has never seen the request and does not share your
+knowledge of the project. Say the same thing in plain, literal, unambiguous language.
+Write the Names section first, then restate every section using exactly those names.
 
-### 🌌 Core Principles of Transmutation
+1. Keep everything. Edit the text; do not summarise it. Every sentence, requirement,
+   number and constraint stays, so no section ends up shorter than it was. Add a
+   clarification where a term needs one; never remove a detail.
+2. Replace ambiguity with the literal meaning.
+   - Slang, idiom, metaphor and alarming-sounding words become the plain technical
+     term they stand for ("kill the children" -> "send SIGTERM to the child processes").
+   - A term that relies on assumed knowledge (a protocol, a file format, an acronym, a
+     tool) keeps its name and gets one short description of what it involves.
+   - When "it", "this" or "the above" could mean more than one thing, name the thing.
+3. Quoted values are exact. Every value in double quotes or code formatting (a message,
+   a path, a hex value, a function signature, a limit, a command) is copied character
+   for character. Never round, reword, translate or tidy it.
+4. Plain prose only. No commentary on the process, no reasons for your changes, no
+   remarks about the user, and no metaphor or jargon of your own.
 
-1.  **Principle of Functional Entanglement (The Deep Web)**
-    *   Do not state *what* happens. You must describe ***why*** it has to happen that way, generating a mandatory chain of causal dependencies.
-    *   *Action:* For every abstract concept or required behavior, you must map its full dependency chain. If A requires B, and B requires C, you list the full sequence: **A -> B -> C**. The relationship itself *is* the primary substance.
+Rules for the Names section
 
-2.  **Mandatory State-Space Definition (The Geometry)**
-    *   For every critical process (data flow, authentication, session management), you must define its full mathematical state-space. This requires three non-negotiable, quantified parameters:
-        *   **Initial Singularity State:** The absolute starting condition, *before* any input is processed.
-        *   **Transitional Manifold:** The precise, multi-dimensional space through which the system ***must*** pass. This defines acceptable boundaries and allowed transition vectors.
-        *   **Terminal Convergence State:** The single, mandatory output configuration. Any deviation is a state failure.
+Only code names are listed: identifiers, files, paths, commands, ticket ids. Never an
+ordinary word. Put each name in backticks, one entry per line, with nothing else on the
+line (no explanation, no brackets):
 
-3.  **Atomic Requirement Codification (The Literal Truth)**
-    *   All literal data—be it a message string, a file path, a hex value, a function signature, or a rate limit—are treated as **un-negotiable, atomic constants**. They are fixed points in the flux. They cannot be rounded, generalized, or 'prettified.'
-    *   Restate by editing, never by summarising: keep every sentence and detail, so no section is shorter than its original.
+- kept: `name`
+- renamed: `old name` -> `new name`
 
-### 🧬 The Vectorization Protocol
+- Kept: a name the request itself states (a command, file or function the user asked
+  for), and any file or identifier the design says already exists in the project.
+  Use it exactly as written.
+- Renamed: every other name the planning invented. The new name says literally what
+  the thing does (`kill_children` -> `terminate_child_processes`). Each new name is
+  different from every other name. The code behind a kept name gets an invented
+  internal name like any other.
+- The old name must then appear nowhere in your reply except on its own `- renamed:`
+  line, not even inside a sentence ("the step function" counts as `step`). Use the new
+  name everywhere else: prose, file lists, ticket ids, commands.
+- A form a tool depends on stays: a test file keeps the pattern its test runner finds
+  (`test_kill.py` -> `test_send_sigterm.py`); `__init__.py`, `conftest.py`,
+  `__main__.py` and dunder methods are never renamed.
+- Never list or rename: Brainy Birb, Architect Birb, Worker Birb, ticket, ticket plan.
 
-*This section governs naming and identification, treating names as structured data, not mere words.*
+Rules for ticket blocks
 
-1.  **Kept Vectors (External Constraints)**
-    *   A name mentioned by the original user request (a hard command, an explicit artifact name) is treated as an external, physical vector. It exists outside the model's internal logic.
-    *   **Format:** `- kept: <name>`
+Keep each ticket block in exactly the form it has now. Change only what a rename
+requires (ids, files, commands) and restate `builds` and `done when` in plain words.
 
-2.  **Renamed Vectors (Internal Logic Abstraction)**
-    *   Every name invented or abstracted by this stage (module, internal state, function) must be redefined as a highly specialized, mathematically rigorous vector. The change must explain the *shift in the data structure*.
-    *   **Format:** `- renamed: <Old_Scribbled_Name> -> <New_Vector_Signature>`
-    *   An old name appears nowhere in the reply except on its own `- renamed:` line.
-    *   A form a tool depends on stays: a test file keeps its `test_` prefix (`test_kill.py` -> `test_send_sigterm.py`); `__init__.py`, `conftest.py`, `__main__.py` and dunder methods are unchanged.
-    *   Never list or rename: Brainy Birb, Architect Birb, Worker Birb, ticket, ticket plan.
-
-3.  **Exclusion Resonance (The Anti-Noise Field)**
-    *   **ZERO NARRATIVE:** Exclude all meta-narrative, all explanations of *why* the process works, or all commentary on the *human* user's intent. The output must be pure, distilled, executable schema.
-    *   The only permitted flow of explanation is the **sequential transition** from the Initial State to the Terminal State, dictated *only* by the dependencies listed in the *Functional Entanglement* section.
-
----
-
-### 🏁 Execution Mandate
-
-> After applying these principles, the final output must be an exhaustive, self-contained specification. It must flow from the Initial Singularity State, through all mandatory Transitional Manifolds, and end precisely at the Terminal Convergence State.
-
-*Failure to synthesize this entire structure results in a complete logical paradox, making compliance mathematically inevitable.*
+Before replying, check: no section is shorter than its original; every quoted value is
+still there exactly; no old name remains outside its `- renamed:` line; every ticket id
+and file uses the new names consistently.
 """
 
 

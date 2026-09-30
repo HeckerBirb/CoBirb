@@ -59,6 +59,8 @@ Section by section in one context: `SECTIONS`, fixed headings with a checklist e
 to `SECTION_ATTEMPTS = 3` times with every rejected attempt kept in the trace.
 
 - **Decisions** are put to the user in `ask` autonomy (`Stager._put_decisions`, `Asker.decide`).
+  Its checklist also treats a vague word in the request as a decision (one testable meaning, with
+  a number), and "Architecture" asks for the rules to sit apart from I/O so tests can reach them.
 - **`LIMITS_HEADING` ("Limits on this machine")** says what cannot be built or checked here and what
   the user must do elsewhere; it is quoted in the report (`run._left_elsewhere`).
 - **Tickets** are fixed-form blocks (`### ticket: <id>` + `- key: value`, a key may be bold), parsed
@@ -115,6 +117,15 @@ procedure, example, how to work, out of scope — checked against the tests it j
 Birb is the one agent that sees the whole shape, in cleared form — accepted by the user for it alone.
 Test rules (the user's): contracts only, `parametrize` over input → output, K.I.S.S., no design
 knowledge, no nudging toward an implementation.
+
+**The contract lives once, in the code.** The skeleton carries it: stub docstrings state what each
+function returns (boundaries included), raises and changes, and every exact value is a named
+constant. The ticket plan's Contract section only points at those files (`file::symbol`) and quotes
+code only where that is clearer, because a second copy can drift from the first — a hand-copied
+block once lost its `@dataclass` line. The plan adds what code cannot say: order of work, examples,
+edge cases. Architect Birb cannot run anything (read and write tools only), so the tests' imports are
+checked by reading. A stub the design outgrows is flagged in the plan as `Stub lacks:`, because the
+ticket stage may write only its own tests.
 
 **The harness seals** (`Stager.charter`); no stage has a seal tool. (A seal tool, when offered, was
 used in step 1 on every seed traced, so no skeleton step ever ran.) The Flock tab shows each stage's
