@@ -1,0 +1,17 @@
+{
+  "label": "names-after-flock",
+  "sha": "981951868cf2c78ac4c1a39edb47cf37e14cddd6",
+  "tasks": 2,
+  "reps": 3,
+  "flock": true,
+  "models": [
+    "qwen3.6:35b",
+    "ornith-1.5:35b"
+  ],
+  "max_num_ctx": "32k",
+  "extra": {
+    "flock": {
+      "planning": "staged"
+    }
+  }
+}
