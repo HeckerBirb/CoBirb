@@ -3,7 +3,7 @@
 All notable changes to CoBirb are recorded here, newest first. See
 [`docs/architecture/`](./docs/architecture/README.md) for how each part works.
 
-## [Unreleased]
+## [0.47.1]
 
 - **The Flock's overview asks for concrete meanings.** Brainy Birb is told to keep every sentence of
   the request and its quoted phrases, to turn a vague word ("round", "automatically") into one
